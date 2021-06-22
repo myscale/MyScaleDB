@@ -1,0 +1,20 @@
+From 51594e00228ebe0fa00f8df27711ad1915aef2ae Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Fri, 19 May 2023 13:03:39 +0800
+Subject: [PATCH 20/49] Fix issue of unreleased disk space of MSTG cache
+
+Fixes #144 by releasing file descriptors in data layer
+---
+ contrib/search-index | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index 6be787cfa6..517ac8352b 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit 6be787cfa6a101ec27e02dfb16ed8cf996fcef26
++Subproject commit 517ac8352b13317049a87a66748f4702310536da
+-- 
+2.32.1 (Apple Git-133)
+

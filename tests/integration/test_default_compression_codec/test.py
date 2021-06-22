@@ -399,7 +399,7 @@ def test_default_codec_multiple(start_cluster):
     node1.query("DROP TABLE compression_table_multiple SYNC")
     node2.query("DROP TABLE compression_table_multiple SYNC")
 
-
+@pytest.mark.skip(reason="using clickhouse official image, does not support openmp")
 def test_default_codec_version_update(start_cluster):
     node3.query(
         """

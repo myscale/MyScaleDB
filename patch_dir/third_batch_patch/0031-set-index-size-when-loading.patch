@@ -1,0 +1,38 @@
+From b25b4e5374b32a65cc8e8d131b04f0c62fe9be4c Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 17 Apr 2023 12:21:12 +0800
+Subject: [PATCH 31/51] set index size when loading
+
+---
+ src/VectorIndex/VectorIndex.h             | 2 ++
+ src/VectorIndex/VectorSegmentExecutor.cpp | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/src/VectorIndex/VectorIndex.h b/src/VectorIndex/VectorIndex.h
+index 03aaa1559c..4c6274294c 100644
+--- a/src/VectorIndex/VectorIndex.h
++++ b/src/VectorIndex/VectorIndex.h
+@@ -85,6 +85,8 @@ public:
+ 
+     bool trainStatus() { return trained; }
+ 
++    void setIndexSize(size_t index_size_) { index_size = index_size_; }
++
+     size_t sizeInBytes() const { return index_size; }
+ 
+     /// If possible, get uncompressed vectors stored in memory
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 6dc746a2b7..491168d0a5 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -466,6 +466,7 @@ Status VectorSegmentExecutor::load()
+             }
+             Parameters place_holder;
+             index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
++            index->setIndexSize(original_binary_size);
+             LOG_DEBUG(log, "Start loading index: total_vec: {}", total_vec);
+             CompositeIndexReader index_reader(segment_id, original_binary_size);
+             try
+-- 
+2.32.1 (Apple Git-133)
+

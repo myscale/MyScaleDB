@@ -1,0 +1,207 @@
+image: harbor.internal.moqi.ai/mqdb/builder:2.9.1
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+before_script:
+  - if [[ -f previous_pipeline_status.txt ]]; then
+    exit 0;
+    fi
+
+variables:
+  CI_TEST_IN_K8S: "false"
+
+include:
+  - "/.gitlab-ci-build.yml"
+  - "/.gitlab-ci-functional-test.yml"
+  - "/.gitlab-ci-integration-test.yml"
+  - "/.gitlab-ci-sanitizer-test.yml"
+  - "/.gitlab-ci-performance-test.yml"
+  - "/.gitlab-ci-stability-test.yml"
+  - "/.gitlab-ci-chaos-test.yml"
+
+stages:
+  - check-pipeline
+  - build
+  - functional-test
+  - performance-test
+  - failover-test
+  - sanitizer-test
+  - update-pipeline-status
+  - package
+  - image
+  - deploy
+  - benchmark
+  - stability
+  - chaos-test
+
+check_pipeline_already_running:
+  stage: check-pipeline
+  image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
+  tags:
+    - task
+  artifacts:
+    paths:
+      - previous_pipeline_status.txt
+  script:
+    - if [ "$CI_PIPELINE_SOURCE" != "schedule" ] || [ "$CI_TEST_IN_K8S" != "false" ]; then
+      echo "skip";
+      exit 0;
+      fi
+    - if [ ! -n "$REDIS_HOST" ]; then echo "redis host unknown, Run the pipeline by default."; exit 0; fi
+    - KEY_TIMEOUT=${EXPIRE_TIME:-604800}
+    - PIPELINE_UNIQUE_KEY=$CI_PIPELINE_SOURCE-$CI_COMMIT_BRANCH-$CI_COMMIT_SHA
+    - RES=$(redis-cli -h ${REDIS_HOST} get ${PIPELINE_UNIQUE_KEY})
+    - if [[ -n "$RES" ]]; then
+      if [[ "$RES" == "success" ]]; then
+      echo "The previous pipeline run successfully";
+      touch previous_pipeline_status.txt;
+      echo "$RES" > previous_pipeline_status.txt;
+      exit 0;
+      else
+      echo "The previous pipeline failed to run, please check soon!";
+      exit 1;
+      fi;
+      fi
+    - redis-cli -h ${REDIS_HOST} set ${PIPELINE_UNIQUE_KEY} "worked but failed"
+    - redis-cli -h ${REDIS_HOST} EXPIRE ${PIPELINE_UNIQUE_KEY} ${KEY_TIMEOUT}
+
+# style_check:
+#   stage: build
+#   image: harbor.internal.moqi.ai/mqdb/style-check
+#   artifacts:
+#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+#     paths:
+#       - test_output/*
+#   script:
+#     - docker/builder/tools/run-style-check.sh
+
+build_package:
+  stage: package
+  dependencies: ["check_pipeline_already_running"]
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package --compiler "clang-15"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_TAG
+    - when: manual
+      allow_failure: true
+
+build_package_with_license:
+  stage: package
+  when: manual
+  dependencies: ["check_pipeline_already_running"]
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-license"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
+
+build_image:
+  stage: image
+  tags:
+    - task
+  dependencies: ["build_package", "check_pipeline_already_running"]
+  before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/image.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+build_image_with_license:
+  stage: image
+  tags:
+    - task
+  when: manual
+  dependencies: ["build_package_with_license", "check_pipeline_already_running"]
+  before_script:
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/image-with-license.sh
+
+build_saas_image:
+  stage: image
+  tags:
+    - task
+  dependencies: ["build_package", "check_pipeline_already_running"]
+  before_script:
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/saas-image.sh
+  rules:
+    - if: $CI_COMMIT_TAG
+    - when: manual
+      allow_failure: true
+
+upload_performance_file_to_s3:
+  stage: deploy
+  dependencies: ["build_binary", "check_pipeline_already_running"]
+  image:
+    name: minio/mc
+    entrypoint: [""]
+  tags:
+    - task
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"
+  before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
+    - mkdir -pv ~/.mc
+    - cp -fv $mc_config ~/.mc/config.json
+  script:
+    # - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
+    - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
+
+flag_pipeline_status:
+  stage: update-pipeline-status
+  image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
+  tags:
+    - task
+  # rules:
+  #   - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"'
+  # - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'
+  script:
+    - if [ ! -n "$REDIS_HOST" ]; then echo "redis host unknown, Run the pipeline by default."; exit 0; fi
+    - KEY_TIMEOUT=${EXPIRE_TIME:-604800}
+    - PIPELINE_UNIQUE_KEY=$CI_PIPELINE_SOURCE-$CI_COMMIT_BRANCH-$CI_COMMIT_SHA
+    - redis-cli -h ${REDIS_HOST} set ${PIPELINE_UNIQUE_KEY} "success"
+    - redis-cli -h ${REDIS_HOST} EXPIRE ${PIPELINE_UNIQUE_KEY} ${KEY_TIMEOUT}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'

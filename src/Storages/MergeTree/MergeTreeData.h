@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <base/defines.h>
@@ -32,6 +36,7 @@
 #include <Storages/extractKeyExpressionList.h>
 #include <Storages/PartitionCommands.h>
 #include <Interpreters/PartLog.h>
+#include <VectorIndex/SegmentId.h>
 
 
 #include <boost/multi_index_container.hpp>
@@ -221,6 +226,7 @@ public:
 
     using DataPartsLock = std::unique_lock<std::mutex>;
     DataPartsLock lockParts() const { return DataPartsLock(data_parts_mutex); }
+    DataPartsLock tryLockParts() const { return DataPartsLock(data_parts_mutex, std::try_to_lock); }
 
     using OperationDataPartsLock = std::unique_lock<std::mutex>;
     OperationDataPartsLock lockOperationsWithParts() const { return OperationDataPartsLock(operation_with_data_parts_mutex); }
@@ -659,6 +665,14 @@ public:
     size_t clearOldPartsFromFilesystem(bool force = false);
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
+    void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
+    void clearPrimaryKeyCache(const DataPartsVector & parts);
+    /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
+    std::pair<bool, bool> needClearVectorIndexCacheAndFile(
+        const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
+
+    ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
+    void regularClearCachedIndex(const DataPartsVector & parts);
 
     /// Delete WAL files containing parts, that all already stored on disk.
     size_t clearOldWriteAheadLogs();
@@ -670,6 +684,10 @@ public:
     size_t clearOldTemporaryDirectories(size_t custom_directories_lifetime_seconds, const NameSet & valid_prefixes = {"tmp_", "tmp-fetch_"});
 
     size_t clearEmptyParts();
+
+    /// Delete all directories which names begin with "vector_tmp", used for vecor index build.
+    /// Do this when shut down and start up.
+    void clearTemporaryIndexBuildDirectories();
 
     /// After the call to dropAllData() no method can be called.
     /// Deletes the data directory and flushes the uncompressed blocks cache and the marks cache.
@@ -840,6 +858,13 @@ public:
         const auto settings = getSettings();
         return settings->index_granularity_bytes != 0 &&
             (settings->enable_mixed_granularity_parts || !has_non_adaptive_index_granularity_parts);
+    }
+
+    // Returns true if primary key cache is enabled when cache size > 0.
+    bool canUsePrimaryKeyCache() const
+    {
+        const auto settings = getSettings();
+        return settings->enable_primary_key_cache.value && getContext()->getPrimaryKeyCacheSize()>0;
     }
 
     /// Get constant pointer to storage settings.
@@ -1037,6 +1062,31 @@ public:
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
 
+    /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
+    struct MergeTreeVectorIndexStatus
+    {
+        String latest_failed_part;
+        MergeTreePartInfo latest_failed_part_info;
+        String latest_fail_reason;
+
+        void clear()
+        {
+            latest_failed_part.clear();
+            latest_failed_part_info = MergeTreePartInfo();
+            latest_fail_reason.clear();
+        }
+    };
+
+    /// Return introspection information about currently processing or recently processed vector index build jobs.
+    MergeTreeVectorIndexStatus getVectorIndexBuildStatus() const;
+
+    /// Update vector index status after buildVectorIndexForOnePart() is called for this part. May reset old
+    /// error if built was successful. Otherwise update latested failed status.
+    void updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message);
+
+    /// Reset vector index status when new vector index is added
+    void resetVectorIndexBuildStatus();
+
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
     /// with `currently_submerging_emerging_mutex`.
@@ -1044,6 +1094,14 @@ public:
     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
     /// Mutex for currently_submerging_parts and currently_emerging_parts
     mutable std::mutex currently_submerging_emerging_mutex;
+
+    /// Mutex for currently_vector_indexing_parts
+    mutable std::mutex currently_vector_indexing_parts_mutex;
+    std::set<String> currently_vector_indexing_parts;
+
+    /// Mutex for parts currently processing in background
+    /// merging (also with TTL), mutating or moving.
+    mutable std::mutex currently_processing_in_background_mutex;
 
     /// Used for freezePartitionsByMatcher and unfreezePartitionsByMatcher
     using MatcherFn = std::function<bool(const String &)>;
@@ -1054,6 +1112,14 @@ public:
     void waitForOutdatedPartsToBeLoaded() const;
     bool canUsePolymorphicParts() const;
 
+    virtual bool isShutdown() const { return false; }
+
+    /// Load vector indices to memory, map key is part_name, value are vector indices in this part to load
+    void loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices);
+
+    /// Remove loaded vector indices from memory
+    static void abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys);
+
 protected:
     friend class IMergeTreeDataPart;
     friend class MergeTreeDataMergerMutator;
@@ -1063,6 +1129,7 @@ protected:
     friend class MergeTask;
     friend class IPartMetadataManager;
     friend class IMergedBlockOutputStream; // for access to log
+    friend class MergeTreeVectorIndexBuilderUpdater;
 
     bool require_part_metadata;
 
@@ -1521,6 +1588,9 @@ private:
     static MutableDataPartPtr asMutableDeletingPart(const DataPartPtr & part);
 
     mutable TemporaryParts temporary_parts;
+
+    mutable std::mutex currently_vector_index_status_mutex;
+    MergeTreeVectorIndexStatus vector_index_status;
 };
 
 /// RAII struct to record big parts that are submerging or emerging.

@@ -1,0 +1,415 @@
+From d1e609ff0c551fda38eeafa1c04722195fa4730c Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Tue, 6 Dec 2022 04:59:32 +0000
+Subject: [PATCH 010/150] Fix issue of dropping vector index
+
+---
+ src/Storages/AlterCommands.cpp                | 38 ++++++++++--------
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp | 27 +++++++++++++
+ src/Storages/MergeTree/IMergeTreeDataPart.h   |  3 +-
+ .../MergeTree/MergePlainMergeTreeTask.cpp     | 16 +++++---
+ src/Storages/MergeTree/MergeTreeData.cpp      |  4 +-
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 22 +++++++++-
+ src/Storages/StorageInMemoryMetadata.cpp      |  2 -
+ src/Storages/StorageInMemoryMetadata.h        |  2 -
+ src/Storages/StorageMergeTree.cpp             | 40 +++++++++----------
+ src/Storages/StorageMergeTree.h               |  2 +-
+ .../00018_mqvs_drop_index_mergetree.reference |  6 +++
+ .../00018_mqvs_drop_index_mergetree.sql       | 21 ++++++++++
+ 12 files changed, 131 insertions(+), 52 deletions(-)
+ create mode 100644 tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.reference
+ create mode 100644 tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+
+diff --git a/src/Storages/AlterCommands.cpp b/src/Storages/AlterCommands.cpp
+index 8cb2feee9e..f82c58ac06 100644
+--- a/src/Storages/AlterCommands.cpp
++++ b/src/Storages/AlterCommands.cpp
+@@ -732,9 +732,10 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
+             [this](const auto & vec_index)
+             {
+                 return vec_index.name == vec_index_name;
+-            })){
+-            throw Exception("Cannot add vector index " + vec_index_name + ": this name is used", ErrorCodes::BAD_ARGUMENTS);
+-        }
++            }))
++            {
++                throw Exception("Cannot add vector index " + vec_index_name + ": this name is used", ErrorCodes::BAD_ARGUMENTS);
++            }
+         if (std::any_of(
+                 metadata.vec_indices.cbegin(),
+                 metadata.vec_indices.cend(),
+@@ -774,23 +775,21 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
+     {
+         if (!partition && !clear)
+         {
+-            Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+-            for (auto & vec_index : metadata.vec_indices)
+-            {
+-                LOG_DEBUG(log, "vec_index: {}", vec_index.name);
+-            }
+-            auto erase_it = std::find_if(metadata.vec_indices.begin(), metadata.vec_indices.end(), [this](const auto & vec_index) {
+-                return vec_index.name == vec_index_name;
+-            });
++            auto erase_it = std::find_if(
++                    metadata.vec_indices.begin(),
++                    metadata.vec_indices.end(),
++                    [this](const auto & vec_index)
++                    {
++                        return vec_index.name == vec_index_name;
++                    });
+ 
+             if (erase_it == metadata.vec_indices.end())
+             {
+                 if (if_exists)
+                     return;
+-                throw Exception("Wrong vector index name. Cannot find vector index " + backQuote(vec_index_name) + " to drop.", ErrorCodes::BAD_ARGUMENTS);
++                throw Exception("Wrong vector index name. Cannot find vector index " + backQuote(vec_index_name) + " to drop", ErrorCodes::BAD_ARGUMENTS);
+             }
+-            metadata.vec_indices_drop_queue.emplace_back(*erase_it);
+-            LOG_DEBUG(log, "vec_indices_drop_queue: {}", metadata.vec_indices_drop_queue.size());
++
+             metadata.vec_indices.erase(erase_it);
+         }
+     }
+@@ -1011,7 +1010,7 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
+         result.index_name = vec_index_name;
+         result.index_type = Poco::toUpper(vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
+         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+-        LOG_DEBUG(log, "index_name: {}, index_type: {}", result.index_name, result.index_type);
++        LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
+     } 
+     else if (type == DROP_VECTOR_INDEX) 
+     {
+@@ -1019,7 +1018,14 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
+         LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
+         result.drop_command = true;
+         result.index_name = vec_index_name;
+-    } 
++
++        /// Get column name of the dropped vector index from metadata
++        for (auto & vec_index : metadata.vec_indices)
++        {
++            if (vec_index_name == vec_index.name)
++                result.column_name = vec_index.column;
++        }
++    }
+     else 
+     {
+         return {};
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index d6072a9b6a..883b88f556 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -1109,6 +1109,33 @@ void IMergeTreeDataPart::loadColumns(bool require)
+     setSerializationInfos(infos);
+ }
+ 
++void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
++{
++    /// No need to check metadata of table, because for drop index, the metadata has erased it.
++    /// Remove all the files which end with .vidx
++    auto disk = volume->getDisk();
++
++    for (auto it = disk->iterateDirectory(getFullRelativePath()); it->isValid(); it->next())
++    {
++        String file_name = it->name();
++
++        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
++            continue;
++
++        disk->removeFileIfExists(fs::path(getFullRelativePath()) / file_name);
++    }
++
++    /// Clear from metadata
++    if (containVectorIndex(index_name, col_name))
++        vector_indexed.erase(index_name + "_" + col_name);
++    else if (index_name.empty()) /// Empty index name will clear all vector indices.
++        vector_indexed.clear();
++
++    /// Clear vector index build flags
++    vector_index_build_error = false;
++    vector_index_build_cancelled = false;
++}
++
+ void IMergeTreeDataPart::loadVectorIndexMetadata() const
+ {
+     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.h b/src/Storages/MergeTree/IMergeTreeDataPart.h
+index 1e93ce64f3..e00f9d7b13 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.h
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.h
+@@ -344,7 +344,8 @@ public:
+ 
+     void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
+ 
+-    void removeVectorIndex(String index_name, String col_name) const { vector_indexed.erase(index_name + "_" + col_name); }
++    /// remove specified vector index from part, both disk and metadata.
++    void removeVectorIndex(const String & index_name, const String & col_name) const;
+ 
+     void setBuildError() const { vector_index_build_error = true; }
+ 
+diff --git a/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp b/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
+index 4564a4c89b..578cdbeab3 100644
+--- a/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
++++ b/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
+@@ -126,15 +126,19 @@ void MergePlainMergeTreeTask::prepare()
+ 
+ void MergePlainMergeTreeTask::finish()
+ {
+-    /* auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
+-
+-    auto table_name = storage.getStorageID().getTableName();
+-    if (table_name != "asynchronous_metric_log" && table_name != "trace_log" && table_name != "metric_log")
+-        LOG_INFO(logger, "{} Merge Finish here", storage.getStorageID().getTableName());
+-    */
+     new_part = merge_task->getFuture().get();
+     storage.merger_mutator.renameMergedTemporaryPart(new_part, future_part->parts, nullptr);
+ 
++    /// Check latest metadata if vector index has been dropped.
++    if (new_part->storage.getInMemoryMetadataPtr()->vec_indices.empty() && (new_part->containAnyVectorIndex() || VectorIndex::containRowIdsMaps(new_part)))
++    {
++        /// Pass empty string for index_name and column name, all vector index will be removed from this part.
++        String dummy_name;
++        new_part->removeVectorIndex(dummy_name, dummy_name);
++
++        /// Unable to get vector index name so wait to clear by backgound removeDroppedVectorIndices()
++    }
++
+     write_part_log({});
+ }
+ 
+diff --git a/src/Storages/MergeTree/MergeTreeData.cpp b/src/Storages/MergeTree/MergeTreeData.cpp
+index 83d1507753..c11497ca4f 100644
+--- a/src/Storages/MergeTree/MergeTreeData.cpp
++++ b/src/Storages/MergeTree/MergeTreeData.cpp
+@@ -1675,10 +1675,10 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
+ /// TODO: how to remove old parts' caches
+     for (const auto & part : parts)
+     {
+-        for(const auto& vec_index_desc : meta_snapshot->vec_indices)
++        for(const auto & vec_index_desc : meta_snapshot->vec_indices)
+         {
+             auto segment_ids = VectorIndex::getAllSegmentIds(part->getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+-            for (auto& segment_id : segment_ids)
++            for (auto & segment_id : segment_ids)
+             {
+                 VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+             }
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 9b571ba262..5836e23edc 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -71,10 +71,13 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
+         {
+             LOG_DEBUG(log, "Find not existed cache, remove it: {}", cache_item.first.toString());
+             VectorIndex::VectorSegmentExecutor::removeFromCache(cache_item.first);
+-            for (const auto& part : data.getDataParts())
++
++            /// Clear vector files in active part
++            MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_item.first.part_name);
++            if (part && part.unique())
+             {
++                LOG_DEBUG(log, "Remove files of dropped vector index {} for part {}", cache_item.first.vector_index_name, part->name);
+                 part->removeVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name);
+-                part->vector_index_build_error = false;
+             }
+         }
+     }
+@@ -197,6 +200,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+             continue;
+         }
+ 
++        /// Check latest metadata
++        if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
++        {
++            LOG_INFO(log, "Vector index has been dropped, no need to build it.");
++            return BuildVectorIndexStatus::SUCCESS;
++        }
++
+         String vector_tmp_full_path = data.getFullPathOnDisk(part->volume->getDisk()) + "vector_tmp_" + part->info.getPartNameWithoutMutation() + "/";
+         constexpr int maxBuildRetryCount = 3;
+         int failed_count = counter.get(vector_tmp_full_path);
+@@ -622,6 +632,14 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+ 
+             if (future_part)
+             {
++                /// Check the latest metadata before move files, in case drop index submitted during index building.
++                if (future_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
++                {
++                    LOG_INFO(log, "Vector index has been dropped, no need to build it.");
++                    disk->removeRecursive(vector_tmp_relative_path);
++                    return BuildVectorIndexStatus::SUCCESS;
++                }
++
+                 moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
+ 
+                 /// Update segment id with correct part name and path.
+diff --git a/src/Storages/StorageInMemoryMetadata.cpp b/src/Storages/StorageInMemoryMetadata.cpp
+index 3b5cca9737..59f35c9b64 100644
+--- a/src/Storages/StorageInMemoryMetadata.cpp
++++ b/src/Storages/StorageInMemoryMetadata.cpp
+@@ -37,7 +37,6 @@ StorageInMemoryMetadata::StorageInMemoryMetadata(const StorageInMemoryMetadata &
+     : columns(other.columns)
+     , secondary_indices(other.secondary_indices)
+     , vec_indices(other.vec_indices)
+-    , vec_indices_drop_queue(other.vec_indices_drop_queue)
+     , constraints(other.constraints)
+     , projections(other.projections.clone())
+     , minmax_count_projection(
+@@ -62,7 +61,6 @@ StorageInMemoryMetadata & StorageInMemoryMetadata::operator=(const StorageInMemo
+     columns = other.columns;
+     secondary_indices = other.secondary_indices;
+     vec_indices = other.vec_indices;
+-    vec_indices_drop_queue = other.vec_indices_drop_queue;
+     constraints = other.constraints;
+     projections = other.projections.clone();
+     if (other.minmax_count_projection)
+diff --git a/src/Storages/StorageInMemoryMetadata.h b/src/Storages/StorageInMemoryMetadata.h
+index 66f98c7285..f9d62d2169 100644
+--- a/src/Storages/StorageInMemoryMetadata.h
++++ b/src/Storages/StorageInMemoryMetadata.h
+@@ -31,8 +31,6 @@ struct StorageInMemoryMetadata
+     IndicesDescription secondary_indices;
+     /// Vector indices.
+     VectorIndicesDescription vec_indices;
+-    /// to_be dropped vector indices.
+-    VectorIndicesDescription vec_indices_drop_queue;
+     /// Table constraints. Currently supported for MergeTree only.
+     ConstraintsDescription constraints;
+     /// Table projections. Currently supported for MergeTree only.
+diff --git a/src/Storages/StorageMergeTree.cpp b/src/Storages/StorageMergeTree.cpp
+index 0a9e61a59e..f417601d3b 100644
+--- a/src/Storages/StorageMergeTree.cpp
++++ b/src/Storages/StorageMergeTree.cpp
+@@ -312,10 +312,10 @@ void StorageMergeTree::alter(
+     auto maybe_mutation_commands = commands.getMutationCommands(new_metadata, local_context->getSettingsRef().materialize_ttl_after_modify, local_context);
+     String mutation_file_name;
+     Int64 mutation_version = -1;
+-
++    /// get vector index commands
+     auto maybe_vec_index_commands = commands.getVectorIndexCommands(new_metadata, local_context);
++    /// Apply alter commands and update new_metadata
+     commands.apply(new_metadata, local_context);
+-    LOG_DEBUG(log, "[alter] get vec index commands: {}", maybe_vec_index_commands.size());
+ 
+     /// This alter can be performed at new_metadata level only
+     if (commands.isSettingsAlter())
+@@ -329,18 +329,15 @@ void StorageMergeTree::alter(
+             changeSettings(new_metadata.settings_changes, table_lock_holder);
+             checkTTLExpressions(new_metadata, old_metadata);
+             /// Reinitialize primary key because primary key column types might have changed.
+-            if (!maybe_vec_index_commands.empty())
+-            {
+-                LOG_DEBUG(log, "[alter] start vector index job");
+-                startVectorIndexJob(maybe_vec_index_commands,new_metadata);
+-            }
+-
+             setProperties(new_metadata, old_metadata);
++
+             DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
+ 
++            if (!maybe_vec_index_commands.empty())
++                startVectorIndexJob(maybe_vec_index_commands);
++
+             if (!maybe_mutation_commands.empty())
+                 mutation_version = startMutation(maybe_mutation_commands, mutation_file_name);
+-
+         }
+ 
+         /// Always execute required mutations synchronously, because alters
+@@ -460,26 +457,29 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, String
+     return version;
+ }
+ 
+-void StorageMergeTree::startVectorIndexJob(VectorIndexCommands vector_index_commands,StorageInMemoryMetadata& metadata)
++void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_index_commands)
+ {
+     if (vector_index_commands.size() == 1 && vector_index_commands.back().drop_command)
+     {
+-        ///nothing to do
+-        for(auto& part:getDataParts())
++        auto drop_vector_index = vector_index_commands[0];
++
++        /// Delete vector index files.
++        for (const auto & part : getDataParts())
+         {
+-            LOG_INFO(log,"supposed to erase:{}",vector_index_commands.back().index_name);
+-            LOG_INFO(log,"queue length {},",metadata.vec_indices_drop_queue.size());
+-            for(const auto& vec_index_desc :metadata.vec_indices_drop_queue)
++            if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+             {
+-                if(vec_index_desc.name==vector_index_commands.back().index_name)
++                /// Clear cache first, now getAllSegementIds() is based on vector index files
++                auto segment_ids = VectorIndex::getAllSegmentIds(part->getFullPath(), part, drop_vector_index.index_name, drop_vector_index.column_name);
++                for (auto & segment_id : segment_ids)
+                 {
+-                    size_t erased = part->vector_indexed.erase(vec_index_desc.name+"_"+vec_index_desc.column);
+-                    part->vector_index_build_error = false;
+-                    LOG_INFO(log,"erased number:{}",erased);
++                    VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+                 }
++
++                /// Delete files in part directory if exists and metadata
++                part->removeVectorIndex(drop_vector_index.index_name, drop_vector_index.column_name);
++
+             }
+         }
+-        metadata.vec_indices_drop_queue.clear();
+     }
+     else
+     {
+diff --git a/src/Storages/StorageMergeTree.h b/src/Storages/StorageMergeTree.h
+index 4137daa5f2..8485e046c2 100644
+--- a/src/Storages/StorageMergeTree.h
++++ b/src/Storages/StorageMergeTree.h
+@@ -207,7 +207,7 @@ private:
+         const DataPartPtr & part,
+         std::unique_lock<std::mutex> & /* currently_processing_in_background_mutex_lock */) const;
+ 
+-    void startVectorIndexJob(VectorIndexCommands vector_index_commands,StorageInMemoryMetadata& metadata);
++    void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
+ 
+     std::shared_ptr<VectorIndexEntry> selectPartsToBuildVectorIndex(const StorageMetadataPtr & metadata_snapshot);
+ 
+diff --git a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.reference b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.reference
+new file mode 100644
+index 0000000000..91d6f14d1f
+--- /dev/null
++++ b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.reference
+@@ -0,0 +1,6 @@
++0
++test_drop_index	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	Built
++-- Empty result, no vector index
++-- Create a new vector index with same name but different type
++0
++test_drop_index	v1	IVFFLAT	v1 vector TYPE IVFFlat	Built
+diff --git a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+new file mode 100644
+index 0000000000..833f4d7ee4
+--- /dev/null
++++ b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+@@ -0,0 +1,21 @@
++DROP TABLE IF EXISTS test_drop_index;
++CREATE TABLE test_drop_index(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
++INSERT INTO test_drop_index SELECT number, [number, number, number] FROM numbers(2100);
++ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++
++select sleep(3);
++
++select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_index';
++
++ALTER TABLE test_drop_index DROP VECTOR INDEX v1;
++
++select '-- Empty result, no vector index';
++select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_index';
++
++select '-- Create a new vector index with same name but different type';
++ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE IVFFlat;
++
++select sleep(3);
++select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_index';
++
++drop table test_drop_index;
+-- 
+2.32.1 (Apple Git-133)
+

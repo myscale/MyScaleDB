@@ -1,0 +1,22 @@
+30	[30,30,30]	300
+9	[9,9,9]	363
+31	[31,31,31]	363
+8	[8,8,8]	432
+32	[32,32,32]	432
+7	[7,7,7]	507
+33	[33,33,33]	507
+6	[6,6,6]	588
+34	[34,34,34]	588
+5	[5,5,5]	675
+30	[30,30,30]	300
+9	[9,9,9]	363
+31	[31,31,31]	363
+8	[8,8,8]	432
+32	[32,32,32]	432
+7	[7,7,7]	507
+33	[33,33,33]	507
+6	[6,6,6]	588
+34	[34,34,34]	588
+5	[5,5,5]	675
+test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Vector column data length does not meet constraint in part all_1_3_1. (INCORRECT_DATA) (version 23.3.2.1)
+test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Vector column data length does not meet constraint in part all_1_3_1. (INCORRECT_DATA) (version 23.3.2.1)

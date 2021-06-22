@@ -41,7 +41,7 @@ struct Settings;
     \
     /** Merge settings. */ \
     M(UInt64, merge_max_block_size, DEFAULT_MERGE_BLOCK_SIZE, "How many rows in blocks should be formed for merge operations.", 0) \
-    M(UInt64, max_bytes_to_merge_at_max_space_in_pool, 150ULL * 1024 * 1024 * 1024, "Maximum in total size of parts to merge, when there are maximum free threads in background pool (or entries in replication queue).", 0) \
+    M(UInt64, max_bytes_to_merge_at_max_space_in_pool, 32ULL * 1024 * 1024 * 1024, "Maximum in total size of parts to merge, when there are maximum free threads in background pool (or entries in replication queue).", 0) \
     M(UInt64, max_bytes_to_merge_at_min_space_in_pool, 1024 * 1024, "Maximum in total size of parts to merge, when there are minimum free threads in background pool (or entries in replication queue).", 0) \
     M(UInt64, max_replicated_merges_in_queue, 1000, "How many tasks of merging and mutating parts are allowed simultaneously in ReplicatedMergeTree queue.", 0) \
     M(UInt64, max_replicated_mutations_in_queue, 8, "How many tasks of mutating parts are allowed simultaneously in ReplicatedMergeTree queue.", 0) \
@@ -63,6 +63,7 @@ struct Settings;
     M(Bool, in_memory_parts_insert_sync, false, "If true insert of part with in-memory format will wait for fsync of WAL", 0) \
     M(UInt64, non_replicated_deduplication_window, 0, "How many last blocks of hashes should be kept on disk (0 - disabled).", 0) \
     M(UInt64, max_parts_to_merge_at_once, 100, "Max amount of parts which can be merged at once (0 - disabled). Doesn't affect OPTIMIZE FINAL query.", 0) \
+    M(Float, simple_merge_selector_base, 5, "Minimum ratio of size of one part to all parts in set of parts to merge (for usual cases).", 0) \
     M(UInt64, merge_selecting_sleep_ms, 5000, "Sleep time for merge selecting when no part selected, a lower setting will trigger selecting tasks in background_schedule_pool frequently which result in large amount of requests to zookeeper in large-scale clusters", 0) \
     M(UInt64, merge_tree_clear_old_temporary_directories_interval_seconds, 60, "The period of executing the clear old temporary directories operation in background.", 0) \
     M(UInt64, merge_tree_clear_old_parts_interval_seconds, 1, "The period of executing the clear old parts operation in background.", 0) \
@@ -170,6 +171,20 @@ struct Settings;
     M(String, primary_key_compression_codec, "ZSTD(3)", "Compression encoding used by primary, primary key is small enough and cached, so the default compression is ZSTD(3).", 0) \
     M(UInt64, marks_compress_block_size, 65536, "Mark compress block size, the actual size of the block to compress.", 0) \
     M(UInt64, primary_key_compress_block_size, 65536, "Primary compress block size, the actual size of the block to compress.", 0) \
+    \
+    /** Vector Search */ \
+    M(Bool, enable_primary_key_cache, false, "Enable primary key cache when do vector search.", 0) \
+    M(Bool, enable_decouple_vector_index, true, "Enable use old vector indices during merge and vector search on decoupled data part.", 0) \
+    M(Bool, disable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
+    M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
+    M(UInt64, min_bytes_to_build_vector_index, 0, "The minimum byte size of data part to build vector index", 0) \
+    M(String, vector_search_metric_type, "L2", "Default metric type for brute force search", 0) \
+    M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
+    M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
+    M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
+    M(Bool, vector_index_parameter_check, true, "Enable checking for vector index parameters and vector search parameters.", 0) \
+    M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
+    M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
     \
     /** Obsolete settings. Kept for backward compatibility only. */ \
     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \

@@ -9,6 +9,10 @@
 #include <unordered_set>
 #include <Common/logger_useful.h>
 
+namespace VectorIndex
+{
+class VectorIndexCache;
+}
 namespace DB
 {
 template <typename T>
@@ -74,9 +78,9 @@ public:
     }
 
     template <typename LoadFunc>
-    MappedHolderPtr getOrSet(const Key & key, LoadFunc && load_func)
+    MappedHolderPtr getOrSet(const Key & key, LoadFunc && load_func, std::function<void()> release_callback = {})
     {
-        auto mapped_ptr = getImpl(key, load_func);
+        auto mapped_ptr = getImpl(key, load_func, release_callback);
         if (!mapped_ptr)
             return nullptr;
         return std::make_unique<MappedHolder>(this, key, mapped_ptr);
@@ -134,6 +138,12 @@ private:
         LRUQueueIterator queue_iterator;
         size_t reference_count = 0;
         bool expired = false;
+        std::function<void()> release_callback;
+        ~Cell()
+        {
+            if (release_callback)
+                release_callback();
+        }
     };
 
     using Cells = std::unordered_map<Key, Cell, HashFunction>;
@@ -206,6 +216,7 @@ private:
     };
 
     friend struct InsertTokenHolder;
+    friend class VectorIndex::VectorIndexCache;
     InsertTokenById insert_tokens;
     WeightFunction weight_function;
     ReleaseFunction release_function;
@@ -215,7 +226,7 @@ private:
 
     /// Returns nullptr when there is no more space for the new value or the old value is in used.
     template <typename LoadFunc>
-    MappedPtr getImpl(const Key & key, LoadFunc && load_func)
+    MappedPtr getImpl(const Key & key, LoadFunc && load_func, std::function<void()> release_callback = {})
     {
         InsertTokenHolder token_holder;
         {
@@ -258,7 +269,7 @@ private:
         Cell * cell_ptr = nullptr;
         if (token_it != insert_tokens.end() && token_it->second.get() == token)
         {
-            cell_ptr = set(key, token->value);
+            cell_ptr = set(key, token->value, release_callback);
         }
         else
         {
@@ -340,7 +351,7 @@ private:
     }
 
     // key mustn't be in the cache
-    Cell * set(const Key & insert_key, MappedPtr value)
+    Cell * set(const Key & insert_key, MappedPtr value, std::function<void()> release_callback = {})
     {
         size_t weight = value ? weight_function(*value) : 0;
         size_t queue_size = cells.size() + 1;
@@ -398,6 +409,7 @@ private:
         new_cell.value = value;
         new_cell.weight = weight;
         new_cell.queue_iterator = queue.insert(queue.end(), insert_key);
+        new_cell.release_callback = release_callback;
         return &new_cell;
     }
 };

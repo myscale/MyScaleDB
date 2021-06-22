@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <optional>
@@ -6,6 +10,7 @@
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/ColumnsDescription.h>
+#include <Storages/VectorIndexCommands.h>
 #include <Common/SettingsChanges.h>
 
 
@@ -47,6 +52,9 @@ struct AlterCommand
         MODIFY_DATABASE_SETTING,
         COMMENT_TABLE,
         REMOVE_SAMPLE_BY,
+        // vector index related
+        ADD_VECTOR_INDEX,
+        DROP_VECTOR_INDEX,
     };
 
     /// Which property user wants to remove from column
@@ -121,6 +129,13 @@ struct AlterCommand
     /// For MODIFY TTL
     ASTPtr ttl = nullptr;
 
+    /// For ADD VECTOR INDEX
+    ASTPtr vec_index_decl = nullptr;
+    String after_vec_index_name;
+
+    /// For ADD/DROP VECTOR INDEX
+    String vec_index_name;
+
     /// indicates that this command should not be applied, for example in case of if_exists=true and column doesn't exist.
     bool ignore = false;
 
@@ -144,6 +159,9 @@ struct AlterCommand
 
     /// What to remove from column (or TTL)
     RemoveProperty to_remove = RemoveProperty::NO_PROPERTY;
+
+    /// For DROP CONSTRAINT on vector index column
+    bool empty_table = false;
 
     static std::optional<AlterCommand> parse(const ASTAlterCommand * command);
 
@@ -171,6 +189,8 @@ struct AlterCommand
     /// return empty optional. Some storages may execute mutations after
     /// metadata changes.
     std::optional<MutationCommand> tryConvertToMutationCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
+
+    std::optional<VectorIndexCommand> tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
 };
 
 class Context;
@@ -205,14 +225,19 @@ public:
     /// All commands modify comments only.
     bool isCommentAlter() const;
 
+    /// Used to determine whether the constraint on the vector index column can be dropped.
+    void setTableEmptyFlag(bool is_empty);
+
     /// Return mutation commands which some storages may execute as part of
-    /// alter. If alter can be performed as pure metadata update, than result is
+    /// alter. If alter can be performed as pure metadata update, then result is
     /// empty. If some TTL changes happened than, depending on materialize_ttl
     /// additional mutation command (MATERIALIZE_TTL) will be returned.
     MutationCommands getMutationCommands(StorageInMemoryMetadata metadata, bool materialize_ttl, ContextPtr context, bool with_alters=false) const;
 
     /// Check if commands have any inverted index
     static bool hasInvertedIndex(const StorageInMemoryMetadata & metadata);
+
+    VectorIndexCommands getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
 };
 
 }

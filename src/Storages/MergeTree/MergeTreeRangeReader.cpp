@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Columns/FilterDescription.h>
 #include <Columns/ColumnConst.h>
@@ -798,6 +802,27 @@ size_t MergeTreeRangeReader::ReadResult::numZerosInTail(const UInt8 * begin, con
     return count;
 }
 
+void MergeTreeRangeReader::ReadResult::addReadRangeInfo(size_t start_row_, size_t row_num_, size_t start_mark_, size_t end_mark_)
+{
+    if (read_ranges.empty()) 
+    {
+        read_ranges.push_back({start_row_, row_num_, start_mark_, end_mark_});
+    }
+    else 
+    {
+        auto & last_range = read_ranges.back();
+        /// merge read range info in the same mark range
+        if (end_mark_ == last_range.end_mark)
+        {
+            last_range.row_num += row_num_;
+        }
+        else
+        {
+            read_ranges.push_back({start_row_, row_num_, start_mark_, end_mark_});
+        }
+    }
+}
+
 MergeTreeRangeReader::MergeTreeRangeReader(
     IMergeTreeReader * merge_tree_reader_,
     MergeTreeRangeReader * prev_reader_,
@@ -1121,11 +1146,15 @@ MergeTreeRangeReader::ReadResult MergeTreeRangeReader::startReadingChain(size_t 
         size_t space_left = max_rows;
         while (space_left && (!stream.isFinished() || !ranges.empty()))
         {
+            size_t current_start_mark = stream.currentMark();
+            size_t current_row_offset = stream.numReadRowsInCurrentGranule() + index_granularity->getMarkStartingRow(current_start_mark);
             if (stream.isFinished())
             {
                 result.addRows(stream.finalize(result.columns));
                 stream = Stream(ranges.front().begin, ranges.front().end, current_task_last_mark, merge_tree_reader);
                 result.addRange(ranges.front());
+                current_start_mark = ranges.front().begin;
+                current_row_offset = index_granularity->getMarkStartingRow(current_start_mark);
                 ranges.pop_front();
             }
 
@@ -1141,6 +1170,7 @@ MergeTreeRangeReader::ReadResult MergeTreeRangeReader::startReadingChain(size_t 
             bool last = rows_to_read == space_left;
             result.addRows(stream.read(result.columns, rows_to_read, !last));
             result.addGranule(rows_to_read);
+            result.addReadRangeInfo(current_row_offset, rows_to_read, current_start_mark, stream.last_mark);
             space_left = (rows_to_read > space_left ? 0 : space_left - rows_to_read);
         }
     }

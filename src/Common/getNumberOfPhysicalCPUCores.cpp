@@ -27,6 +27,24 @@ int32_t readFrom(const char * filename, int default_value)
         return default_value;
 }
 
+unsigned getCGroupV2LimitedCPUCores(unsigned default_cpu_count)
+{
+    unsigned quota_count = default_cpu_count;
+    int cgroup_quota = -1;
+    int cgroup_period = -1;
+    std::ifstream infile("/sys/fs/cgroup/cpu.max");
+    if (!infile.is_open())
+        return default_cpu_count;
+    // Read the number of milliseconds per period process is guaranteed to run.
+    infile >> cgroup_quota >> cgroup_period;
+    if (cgroup_quota > -1 && cgroup_period > 0)
+    {
+        quota_count = static_cast<unsigned>(ceil(static_cast<float>(cgroup_quota) / static_cast<float>(cgroup_period)));
+    }
+
+    return std::min(default_cpu_count, quota_count);
+}
+
 /// Try to look at cgroups limit if it is available.
 uint32_t getCGroupLimitedCPUCores(unsigned default_cpu_count)
 {
@@ -112,6 +130,7 @@ unsigned getNumberOfPhysicalCPUCoresImpl()
 #endif
 
 #if defined(OS_LINUX)
+    cpu_count = getCGroupV2LimitedCPUCores(cpu_count);
     cpu_count = getCGroupLimitedCPUCores(cpu_count);
 #endif
 

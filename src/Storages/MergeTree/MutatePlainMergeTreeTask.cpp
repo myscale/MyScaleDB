@@ -71,7 +71,6 @@ bool MutatePlainMergeTreeTask::executeStep()
     MemoryTrackerThreadSwitcherPtr switcher;
     if (merge_list_entry)
         switcher = std::make_unique<MemoryTrackerThreadSwitcher>(*merge_list_entry);
-
     switch (state)
     {
         case State::NEED_PREPARE:
@@ -92,6 +91,9 @@ bool MutatePlainMergeTreeTask::executeStep()
                 if (data_part_storage.hasActiveTransaction())
                     data_part_storage.precommitTransaction();
 
+                /// Data part lock used for vector index move and mutating conflict
+                auto move_mutate_lock = future_part->parts[0]->lockPartForIndexMoveAndMutate();
+
                 MergeTreeData::Transaction transaction(storage, merge_mutate_entry->txn.get());
                 /// FIXME Transactions: it's too optimistic, better to lock parts before starting transaction
                 storage.renameTempPartAndReplace(new_part, transaction);
@@ -99,6 +101,18 @@ bool MutatePlainMergeTreeTask::executeStep()
 
                 storage.updateMutationEntriesErrors(future_part, true, "");
                 write_part_log({});
+
+                /// Update vector index bitmap after mutations with lightweight delete.
+                /// There will be insufficient topk problems, Update the content related to the bitmap in the cache.
+                /// If the cache is being loaded, the delete bitmap in the cache will not be updated normally,
+                /// resulting in insufficient topk returned during subsequent searches.
+                if (new_part->lightweight_delete_mask_updated)
+                {
+                   if (new_part->containAnyVectorIndex())
+                       new_part->onLightweightDelete();
+                   else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
+                       new_part->onDecoupledLightWeightDelete();
+                }
 
                 state = State::NEED_FINISH;
                 return true;

@@ -1,0 +1,122 @@
+From 4beca430fcece3a375c51a25bdf7067b15a302d8 Mon Sep 17 00:00:00 2001
+From: Qin Liu <qliu@moqi.ai>
+Date: Fri, 30 Jun 2023 02:12:03 +0000
+Subject: [PATCH 4/7] Manage vector index cache on disk inside search-index
+
+---
+ contrib/search-index                      |  2 +-
+ src/VectorIndex/VectorSegmentExecutor.cpp | 17 ++++++++---------
+ src/VectorIndex/VectorSegmentExecutor.h   | 13 +------------
+ 3 files changed, 10 insertions(+), 22 deletions(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index a08f7085f1..0673de049f 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit a08f7085f14590b11baaa6256f6a4f7c47312224
++Subproject commit 0673de049f95b2a20c86ac0bff019c0c8d87fe30
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 1d763ff4ce..8669405cc2 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -193,10 +193,11 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size
+                 dimension,
+                 total_vec,
+                 des,
+-                true,
++                false /* load_diskann_after_build */,
+                 vector_index_cache_prefix,
+                 getDiskIOManager(),
+-                true);
++                true /* use_file_checksum */,
++                true /* manage_cache_folder */);
+         index->setTrainDataChunkSize(train_block_size);
+         index->setAddDataChunkSize(add_block_size);
+         printMemoryInfo(log, "Before build");
+@@ -266,8 +267,7 @@ Status VectorSegmentExecutor::cache()
+         inverted_row_ids_map,
+         inverted_row_sources_map,
+         disk_mode,
+-        fallback_to_flat,
+-        vector_index_cache_prefix);
++        fallback_to_flat);
+ 
+     LOG_DEBUG(log, "Cache key: {}", segment_id.getCacheKey().toString());
+     mgr->put(segment_id.getCacheKey(), cache_item);
+@@ -427,10 +427,11 @@ Status VectorSegmentExecutor::load()
+                         dimension,
+                         total_vec,
+                         des,
+-                        true,
++                        false /* load_diskann_after_build */,
+                         vector_index_cache_prefix,
+                         getDiskIOManager(),
+-                        true);
++                        true /* use_file_checksum */,
++                        true /* manage_cache_folder */);
+ 
+                 LOG_INFO(log, "loading vector index from {}", segment_id.getFullPath());
+                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
+@@ -457,8 +458,7 @@ Status VectorSegmentExecutor::load()
+                     inverted_row_ids_map,
+                     inverted_row_sources_map,
+                     disk_mode,
+-                    fallback_to_flat,
+-                    vector_index_cache_prefix);
++                    fallback_to_flat);
+             }
+             catch (const SearchIndexException & e)
+             {
+@@ -895,7 +895,6 @@ void VectorSegmentExecutor::configureDiskMode()
+         {
+             vector_index_cache_prefix = segment_id.getVectorIndexCachePrefix();
+             LOG_INFO(log, "vector_index_cache_prefix: {}", vector_index_cache_prefix);
+-            fs::create_directories(vector_index_cache_prefix);
+         }
+     }
+ }
+diff --git a/src/VectorIndex/VectorSegmentExecutor.h b/src/VectorIndex/VectorSegmentExecutor.h
+index 6b1899ebe2..510e509e62 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.h
++++ b/src/VectorIndex/VectorSegmentExecutor.h
+@@ -27,8 +27,7 @@ struct IndexWithMeta
+         std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
+         std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_,
+         bool disk_mode_,
+-        bool fallback_to_flat_,
+-        std::string vector_index_cache_prefix_)
++        bool fallback_to_flat_)
+         : index(index_)
+         , total_vec(total_vec_)
+         , delete_bitmap(delete_bitmap_)
+@@ -38,18 +37,9 @@ struct IndexWithMeta
+         , inverted_row_sources_map(inverted_row_sources_map_)
+         , disk_mode(disk_mode_)
+         , fallback_to_flat(fallback_to_flat_)
+-        , vector_index_cache_prefix(vector_index_cache_prefix_)
+     {
+     }
+ 
+-    ~IndexWithMeta()
+-    {
+-        if (disk_mode)
+-        {
+-            fs::remove_all(vector_index_cache_prefix);
+-        }
+-    }
+-
+     VectorIndexPtr index;
+     size_t total_vec;
+ 
+@@ -64,7 +54,6 @@ public:
+     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
+     bool disk_mode;
+     bool fallback_to_flat;
+-    std::string vector_index_cache_prefix;
+ 
+     void setDeleteBitmap(Search::DenseBitmapPtr delete_bitmap_)
+     {
+-- 
+2.32.1 (Apple Git-133)
+

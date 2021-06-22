@@ -1,0 +1,106 @@
+general:
+  remote_storage: none
+  backups_to_keep_local: 3
+  backups_to_keep_remote: 0
+  log_level: warn
+  allow_empty_backups: false
+  download_concurrency: 4
+  upload_concurrency: 4
+  upload_by_part: true
+  download_by_part: true
+
+clickhouse:
+  username: default
+  password: ""
+  host: 127.0.0.1
+  port: 9000
+  skip_tables:
+    - system.*
+    - INFORMATION_SCHEMA.*
+    - information_schema.*
+  timeout: 5m
+  secure: false
+  sync_replicated_tables: true
+  config_dir: "/etc/clickhouse-server"
+  restart_command: true
+  debug: false
+#
+# s3:
+#   access_key: ""
+#   secret_key: ""
+#   bucket: ""
+#   endpoint: ""
+#   region: us-east-1
+#   acl: private
+#   assume_role_arn: ""
+#   force_path_style: false
+#   path: ""
+#   disable_ssl: false
+#   compression_level: 1
+#   compression_format: tar
+#   sse: ""
+#   disable_cert_verification: false
+#   storage_class: STANDARD
+#   concurrency: 1
+#   part_size: 0
+#   max_parts_count: 10000
+#   allow_multipart_download: false
+#   debug: false
+
+# gcs:
+#   credentials_file: ""
+#   credentials_json: ""
+#   bucket: ""
+#   path: ""
+#   compression_level: 1
+#   compression_format: tar
+#   debug: false
+#   endpoint: ""
+
+# cos:
+#   url: ""
+#   timeout: 2m
+#   secret_id: ""
+#   secret_key: ""
+#   path: ""
+#   compression_format: tar
+#   compression_level: 1
+#   debug: false
+
+# ftp:
+#   address: ""
+#   timeout: 2m
+#   username: ""
+#   password: ""
+#   tls: false
+#   path: ""
+#   compression_format: tar
+#   compression_level: 1
+#   concurrency: 4
+#   debug: false
+# sftp:
+#   address: ""
+#   port: 22
+#   username: ""
+#   password: ""
+#   key: ""
+#   path: ""
+#   compression_format: tar
+#   compression_level: 1
+#   concurrency: 1
+#   debug: false
+
+# azblob:
+#   endpoint_suffix: core.windows.net
+#   account_name: ""
+#   account_key: ""
+#   sas: ""
+#   use_managed_identity: false
+#   container: ""
+#   path: ""
+#   compression_level: 1
+#   compression_format: tar
+#   sse_key: ""
+#   buffer_size: 0
+#   buffer_count: 3
+#   max_parts_count: 10000

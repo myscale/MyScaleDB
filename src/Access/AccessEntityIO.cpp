@@ -6,6 +6,7 @@
 #include <Access/RowPolicy.h>
 #include <Access/SettingsProfile.h>
 #include <Access/User.h>
+#include <Access/AWSConnection.h>
 #include <Core/Defines.h>
 #include <IO/WriteHelpers.h>
 #include <Interpreters/Access/InterpreterCreateQuotaQuery.h>
@@ -14,6 +15,7 @@
 #include <Interpreters/Access/InterpreterCreateSettingsProfileQuery.h>
 #include <Interpreters/Access/InterpreterCreateUserQuery.h>
 #include <Interpreters/Access/InterpreterGrantQuery.h>
+#include <Interpreters/InterpreterCreateConnectionQuery.h>
 #include <Interpreters/Access/InterpreterShowCreateAccessEntityQuery.h>
 #include <Interpreters/Access/InterpreterShowGrantsQuery.h>
 #include <Parsers/Access/ASTCreateQuotaQuery.h>
@@ -24,6 +26,8 @@
 #include <Parsers/Access/ASTGrantQuery.h>
 #include <Parsers/ParserAttachAccessEntity.h>
 #include <Parsers/formatAST.h>
+#include <Parsers/ParserCreateConnectionQuery.h>
+#include <Parsers/ASTCreateConnectionQuery.h>
 #include <Parsers/parseQuery.h>
 #include <boost/range/algorithm/copy.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
@@ -73,6 +77,7 @@ AccessEntityPtr deserializeAccessEntityImpl(const String & definition)
     std::shared_ptr<RowPolicy> policy;
     std::shared_ptr<Quota> quota;
     std::shared_ptr<SettingsProfile> profile;
+    std::shared_ptr<AWSConnection> connection;
     AccessEntityPtr res;
 
     for (const auto & query : queries)
@@ -111,6 +116,13 @@ AccessEntityPtr deserializeAccessEntityImpl(const String & definition)
                 throw Exception(ErrorCodes::INCORRECT_ACCESS_ENTITY_DEFINITION, "Two access entities attached in the same file");
             res = profile = std::make_unique<SettingsProfile>();
             InterpreterCreateSettingsProfileQuery::updateSettingsProfileFromQuery(*profile, *create_profile_query);
+        }
+        else if (auto * create_connection_query = query->as<ASTCreateConnectionQuery>())
+        {
+            if (res)
+                throw Exception(ErrorCodes::INCORRECT_ACCESS_ENTITY_DEFINITION, "Two access entities attached");
+            res = connection = std::make_unique<AWSConnection>();
+            InterpreterCreateConnectionQuery::updateConnectionFromQuery(*connection, *create_connection_query);
         }
         else if (auto * grant_query = query->as<ASTGrantQuery>())
         {

@@ -1,0 +1,25 @@
+From a659859d815a8687c87b01ee24afe96254b4e29e Mon Sep 17 00:00:00 2001
+From: shanfengp <shanfengp@moqi.ai>
+Date: Fri, 30 Jun 2023 11:54:52 +0800
+Subject: [PATCH 5/7] skip 02161_addressToLineWithInlines test case
+
+---
+ docker/test/mqdb_run_stateless/run.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docker/test/mqdb_run_stateless/run.sh b/docker/test/mqdb_run_stateless/run.sh
+index f584c2a4a5..d6909f0dfe 100644
+--- a/docker/test/mqdb_run_stateless/run.sh
++++ b/docker/test/mqdb_run_stateless/run.sh
+@@ -137,7 +137,7 @@ function run_tests() {
+         01154_move_partition_long 01076_parallel_alter_replicated_zookeeper 01172_transaction_counters \
+         01079_parallel_alter_detach_table_zookeeper 01193_metadata_loading \
+         01103_check_cpu_instructions_at_startup \
+-        02125_many_mutations \
++        02125_many_mutations 02161_addressToLineWithInlines \
+         2>&1 |
+         ts '%Y-%m-%d %H:%M:%S' |
+         tee -a test_output/test_result.txt
+-- 
+2.32.1 (Apple Git-133)
+

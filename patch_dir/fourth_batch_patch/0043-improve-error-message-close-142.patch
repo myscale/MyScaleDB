@@ -1,0 +1,63 @@
+From 7e4d4b34b4197e25ddc1b3161cee49b4f6470232 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Wed, 7 Jun 2023 20:59:46 +0800
+Subject: [PATCH 43/49] improve error message (close #142)
+
+---
+ src/Interpreters/TreeRewriter.cpp                      | 10 +++++-----
+ .../MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp   |  2 +-
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/Interpreters/TreeRewriter.cpp b/src/Interpreters/TreeRewriter.cpp
+index 6b5fd2ff05..3855a561db 100644
+--- a/src/Interpreters/TreeRewriter.cpp
++++ b/src/Interpreters/TreeRewriter.cpp
+@@ -1359,9 +1359,8 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+                     }
+                 }
+             }
+-
+-            /// Get metric_type in index definition
+-            String metric_type;
++            /// The default value is vector_search_metric_type in MergeTree, but we cannot get it here.
++            String metric_type = "L2";
+             for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
+             {
+                 if (vector_index_desc.column == vec_col_name)
+@@ -1369,6 +1368,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+                     const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
+                     if(index_parameter.contains("metric_type"))
+                     {
++                        /// Get metric_type in index definition
+                         metric_type = index_parameter.at("metric_type");
+                         break;
+                     }
+@@ -1379,10 +1379,10 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+             if (metric_type == "IP")
+             {
+                 if (direction == 1)
+-                    throw Exception("ORDER BY on distance function column should be DESC when metric type is IP", ErrorCodes::SYNTAX_ERROR);
++                    throw Exception("Use 'ORDER BY distance DESC' when the metric type is IP", ErrorCodes::SYNTAX_ERROR);
+             }
+             else if (direction == -1)
+-                throw Exception("ORDER BY on distance function column should be ASC when metric type is not IP", ErrorCodes::SYNTAX_ERROR);
++                throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance ASC' when the metric type is {}", metric_type);
+         }
+     }
+     /// Interpreter select on the right joined table where vector column exists, insert distance func column name.
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index bcd16703ed..0c185409e3 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -530,7 +530,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+         VectorIndex::PartReader part_reader(
+             builds_blocker, part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), dim, enforce_fixed_array);
+         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
+-        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string("L2")));
++        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
+         VectorIndex::VectorSegmentExecutorPtr vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+             segment_id,
+             index_type,
+-- 
+2.32.1 (Apple Git-133)
+

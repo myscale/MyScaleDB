@@ -564,6 +564,14 @@ void HTTPHandler::processQuery(
         session->makeSessionContext();
     }
 
+    /// Set session context for transaction in atomic insert
+    bool atomic_insert_enabled = params.getParsed<bool>("atomic_insert", false);
+    if (atomic_insert_enabled)
+    {
+        if (!session->sessionContext())
+            session->makeSessionContext();
+    }
+
     auto client_info = session->getClientInfo();
     auto context = session->makeQueryContext(std::move(client_info));
 

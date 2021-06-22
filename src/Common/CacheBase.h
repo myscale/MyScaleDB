@@ -15,6 +15,10 @@
 #include <Common/logger_useful.h>
 #include <base/defines.h>
 
+namespace VectorIndex
+{
+class VectorIndexCache;
+}
 
 namespace DB
 {
@@ -22,6 +26,7 @@ namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
 }
+
 
 /// Thread-safe cache that evicts entries using special cache policy
 /// (default policy evicts entries which are not used for a long time).
@@ -34,6 +39,7 @@ class CacheBase
 {
 private:
     using CachePolicy = ICachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
+    using LRUPolicy = LRUCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
 
 public:
     using Key = typename CachePolicy::Key;
@@ -59,7 +65,6 @@ public:
 
         if (cache_policy_name == "LRU")
         {
-            using LRUPolicy = LRUCachePolicy<TKey, TMapped, HashFunction, WeightFunction>;
             cache_policy = std::make_unique<LRUPolicy>(max_size_in_bytes, max_count, on_weight_loss_function);
         }
         else if (cache_policy_name == "SLRU")
@@ -299,6 +304,7 @@ private:
     };
 
     friend struct InsertTokenHolder;
+    friend class VectorIndex::VectorIndexCache;
 
     InsertTokenById insert_tokens TSA_GUARDED_BY(mutex);
 

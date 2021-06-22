@@ -14,7 +14,7 @@ enum class AccessEntityType
     SETTINGS_PROFILE,
     ROW_POLICY,
     QUOTA,
-
+    CONNECTION,
     MAX,
 };
 

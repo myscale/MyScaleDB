@@ -201,6 +201,9 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     if (data_part_storage.hasActiveTransaction())
         data_part_storage.precommitTransaction();
 
+    /// Used for vector index move and mutating conflict
+    auto move_mutate_lock = future_mutated_part->parts[0]->lockPartForIndexMoveAndMutate();
+
     storage.renameTempPartAndReplace(new_part, *transaction_ptr);
 
     try
@@ -246,6 +249,17 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     storage.merge_selecting_task->schedule();
     ProfileEvents::increment(ProfileEvents::ReplicatedPartMutations);
     write_part_log({});
+
+    /// Update vector index bitmap after mutations with lightweight delete.
+    if (new_part->lightweight_delete_mask_updated)
+    {
+        if (new_part->containAnyVectorIndex())
+            new_part->onLightweightDelete();
+        else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
+            new_part->onDecoupledLightWeightDelete();
+    }
+
+    storage.vidx_info_updating_task->schedule();
 
     return true;
 }

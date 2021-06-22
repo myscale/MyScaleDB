@@ -1,0 +1,733 @@
+From 7508f3d5addfa832f8c524254efa0c31dee8d845 Mon Sep 17 00:00:00 2001
+From: Zhuo Qiu <qiu_z@moqi.ai>
+Date: Thu, 8 Jun 2023 05:41:59 +0000
+Subject: [PATCH 44/49] Autoload vector index for ReplicatedMergeTree
+
+---
+ .../MergeTree/MergeFromLogEntryTask.cpp       |   2 +
+ src/Storages/MergeTree/MergeTreeData.cpp      | 126 +++++++++++
+ src/Storages/MergeTree/MergeTreeData.h        |   6 +
+ src/Storages/MergeTree/MergeTreeSettings.h    |   2 +
+ .../MergeTree/MutateFromLogEntryTask.cpp      |   2 +
+ .../ReplicatedMergeTreeRestartingThread.cpp   |  20 +-
+ .../MergeTree/ReplicatedVectorIndexTask.cpp   |   3 +
+ src/Storages/StorageReplicatedMergeTree.cpp   | 196 ++++++++++++++++++
+ src/Storages/StorageReplicatedMergeTree.h     |  19 ++
+ src/Storages/System/StorageSystemReplicas.cpp |   2 +
+ ...00032_mqvs_vector_index_autoload.reference |  35 ++++
+ .../00032_mqvs_vector_index_autoload.sql      | 116 +++++++++++
+ 12 files changed, 514 insertions(+), 15 deletions(-)
+ create mode 100644 tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.reference
+ create mode 100644 tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.sql
+
+diff --git a/src/Storages/MergeTree/MergeFromLogEntryTask.cpp b/src/Storages/MergeTree/MergeFromLogEntryTask.cpp
+index 25c451dc66..ddcf271661 100644
+--- a/src/Storages/MergeTree/MergeFromLogEntryTask.cpp
++++ b/src/Storages/MergeTree/MergeFromLogEntryTask.cpp
+@@ -282,6 +282,8 @@ bool MergeFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrite
+ 
+     write_part_log({});
+ 
++    storage.vidx_info_updating_task->schedule();
++
+     return true;
+ }
+ 
+diff --git a/src/Storages/MergeTree/MergeTreeData.cpp b/src/Storages/MergeTree/MergeTreeData.cpp
+index 55c4082154..85f5d9d46e 100644
+--- a/src/Storages/MergeTree/MergeTreeData.cpp
++++ b/src/Storages/MergeTree/MergeTreeData.cpp
+@@ -6744,6 +6744,132 @@ void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool
+     }
+ }
+ 
++void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)
++{
++    auto metadata = getInMemoryMetadata();
++
++    std::unordered_map<String, VectorIndexDescription> v_index_map;
++    for (const auto & v_index : metadata.getVectorIndices())
++    {
++        v_index_map.try_emplace(v_index.name, v_index);
++    }
++
++    std::unordered_set<String> valid_vidx;
++    std::unordered_set<String> invalid_vidx;
++    std::vector<VectorIndex::CacheKey> loaded_keys;
++
++    Search::IndexType index_type;
++    Search::Metric metric;
++    Search::Parameters index_params;
++    size_t dim;
++
++    String metric_str = getSettings()->vector_search_metric_type;
++    size_t min_bytes_to_build_vector_index = getSettings()->min_bytes_to_build_vector_index;
++    bool default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
++
++    for (const auto & data_part : getDataPartsVectorForInternalUsage())
++    {
++        String part_name = data_part->info.getPartNameWithoutMutation();
++
++        if (!vector_indices.contains(part_name))
++            continue;
++
++        for (const auto & vidx_name : vector_indices[part_name])
++        {
++            if (invalid_vidx.contains(vidx_name) || !v_index_map.contains(vidx_name))
++                continue;
++
++            auto v_index = v_index_map[vidx_name];
++            dim = metadata.getConstraints().getArrayLengthByColumnName(v_index.column).first;
++
++            if (!valid_vidx.contains(vidx_name))
++            {
++                /// check vector index metadata
++                auto col_and_type = metadata.getColumns().getAllPhysical().tryGetByName(v_index.column);
++                if (!col_and_type)
++                {
++                    invalid_vidx.insert(vidx_name);
++                    LOG_ERROR(log, "Vector index column {} not found in metadata", v_index.column);
++                    continue;
++                }
++
++                const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
++                if (!array_type)
++                {
++                    invalid_vidx.insert(vidx_name);
++                    LOG_ERROR(log, "Vector index column {} type is not array", v_index.column);
++                    continue;
++                }
++
++                if (dim == 0)
++                {
++                    invalid_vidx.insert(vidx_name);
++                    LOG_ERROR(log, "Wrong dimension: 0 for column {}, please check length constraint on the column.", v_index.column);
++                    continue;
++                }
++
++                valid_vidx.insert(vidx_name);
++            }
++
++            if (isShutdown())
++                abortLoadVectorIndex(loaded_keys);
++
++            index_type = VectorIndex::getIndexType(v_index.type);
++
++            if (v_index.parameters && v_index.parameters->has("metric_type"))
++            {
++                metric_str = v_index.parameters->getValue<String>("metric_type");
++            }
++            metric = VectorIndex::getMetric(metric_str);
++
++            index_params = VectorIndex::convertPocoJsonToMap(v_index.parameters);
++            index_params.erase("metric_type");
++
++            /// load vector index into cache
++            for (const auto & segment_id : VectorIndex::getAllSegmentIds(data_part->getFullPath(), data_part, v_index.name, v_index.column))
++            {
++                auto vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
++                    segment_id,
++                    index_type,
++                    metric,
++                    dim,
++                    data_part->rows_count,
++                    index_params,
++                    min_bytes_to_build_vector_index,
++                    default_mstg_disk_mode);
++
++                LOG_INFO(log, "Start loading vector index {} in {}", v_index.name, data_part->name);
++                VectorIndex::Status status = vec_executor->load();
++
++                if (status.fine())
++                {
++                    LOG_DEBUG(log, "Loaded vector index {} in {}", v_index.name, data_part->name);
++                    loaded_keys.emplace_back(segment_id.getCacheKey());
++                }
++                else
++                {
++                    LOG_ERROR(
++                        log,
++                        "Failed to load vector index {} in part {}: [{}] {}",
++                        v_index.name,
++                        data_part->name,
++                        status.getCode(),
++                        status.getMessage());
++                }
++            }
++        }
++    }
++
++    if (isShutdown())
++        abortLoadVectorIndex(loaded_keys);
++}
++
++void MergeTreeData::abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys)
++{
++    for (const auto & key : loaded_keys)
++        VectorIndex::VectorSegmentExecutor::removeFromCache(key);
++}
++
+ CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()
+ {
+     std::lock_guard lock(storage.currently_submerging_emerging_mutex);
+diff --git a/src/Storages/MergeTree/MergeTreeData.h b/src/Storages/MergeTree/MergeTreeData.h
+index bfa342947b..7a9817d91d 100644
+--- a/src/Storages/MergeTree/MergeTreeData.h
++++ b/src/Storages/MergeTree/MergeTreeData.h
+@@ -1012,6 +1012,12 @@ public:
+ 
+     virtual bool isShutdown() const { return false; }
+ 
++    /// Load vector indices to memory, map key is part_name, value are vector indices in this part to load
++    void loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices);
++
++    /// Remove loaded vector indices from memory
++    static void abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys);
++
+ protected:
+     friend class IMergeTreeDataPart;
+     friend class MergeTreeDataMergerMutator;
+diff --git a/src/Storages/MergeTree/MergeTreeSettings.h b/src/Storages/MergeTree/MergeTreeSettings.h
+index 0b954f9fd9..bdedd3b13e 100644
+--- a/src/Storages/MergeTree/MergeTreeSettings.h
++++ b/src/Storages/MergeTree/MergeTreeSettings.h
+@@ -152,6 +152,8 @@ struct Settings;
+     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
+     M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
+     M(Bool, default_mstg_disk_mode, false, "Default disk mode value for MSTG.", 0) \
++    M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
++    M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
+     \
+     /** Obsolete settings. Kept for backward compatibility only. */ \
+     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \
+diff --git a/src/Storages/MergeTree/MutateFromLogEntryTask.cpp b/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
+index 00185b4e6e..ab4bebb7a4 100644
+--- a/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
++++ b/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
+@@ -202,6 +202,8 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
+             new_part->onDecoupledLightWeightDelete();
+     }
+ 
++    storage.vidx_info_updating_task->schedule();
++
+     return true;
+ }
+ 
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp b/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
+index 598d498752..31bd2041c6 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
+@@ -156,6 +156,7 @@ bool ReplicatedMergeTreeRestartingThread::runImpl()
+     storage.mutations_updating_task->activateAndSchedule();
+     storage.mutations_finalizing_task->activateAndSchedule();
+     storage.merge_selecting_task->activateAndSchedule();
++    storage.vidx_info_updating_task->activateAndSchedule();
+     storage.cleanup_thread.start();
+     storage.part_check_thread.start();
+ 
+@@ -306,22 +307,11 @@ void ReplicatedMergeTreeRestartingThread::activateReplica()
+ 
+     /** If the node is marked as active, but the mark is made in the same instance, delete it.
+       * This is possible only when session in ZooKeeper expires.
++      *
++      * If the mark is made in another instance, wait for it to be disappeared.
++      * This usually happens when server crashes and restarts.
+       */
+-    String data;
+-    Coordination::Stat stat;
+-    bool has_is_active = zookeeper->tryGet(is_active_path, data, &stat);
+-    if (has_is_active && data == active_node_identifier)
+-    {
+-        auto code = zookeeper->tryRemove(is_active_path, stat.version);
+-
+-        if (code == Coordination::Error::ZBADVERSION)
+-            throw Exception("Another instance of replica " + storage.replica_path + " was created just now."
+-                " You shouldn't run multiple instances of same replica. You need to check configuration files.",
+-                ErrorCodes::REPLICA_IS_ALREADY_ACTIVE);
+-
+-        if (code != Coordination::Error::ZOK && code != Coordination::Error::ZNONODE)
+-            throw Coordination::Exception(code, is_active_path);
+-    }
++    zookeeper->handleEphemeralNodeExistence(is_active_path, active_node_identifier);
+ 
+     /// Simultaneously declare that this replica is active, and update the host.
+     Coordination::Requests ops;
+diff --git a/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp b/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
+index 07263811df..4238edca5d 100644
+--- a/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
++++ b/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
+@@ -28,6 +28,9 @@ bool ReplicatedVectorIndexTask::executeStep()
+ 
+             std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
+             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
++
++            /// write latest cached vector index info to zookeeper
++            storage.vidx_info_updating_task->schedule();
+         }
+         catch (...)
+         {
+diff --git a/src/Storages/StorageReplicatedMergeTree.cpp b/src/Storages/StorageReplicatedMergeTree.cpp
+index a24eff7308..6dd7c99376 100644
+--- a/src/Storages/StorageReplicatedMergeTree.cpp
++++ b/src/Storages/StorageReplicatedMergeTree.cpp
+@@ -284,6 +284,10 @@ StorageReplicatedMergeTree::StorageReplicatedMergeTree(
+     mutations_finalizing_task = getContext()->getSchedulePool().createTask(
+         getStorageID().getFullTableName() + " (StorageReplicatedMergeTree::mutationsFinalizingTask)", [this] { mutationsFinalizingTask(); });
+ 
++    vidx_info_updating_task = getContext()->getSchedulePool().createTask(
++        getStorageID().getFullTableName() + " (StorageReplicatedMergeTree::vidxInfoUpdatingTask)",
++        [this] { updateVectorIndexInfoZookeeper(); });
++
+     if (getContext()->hasZooKeeper() || getContext()->hasAuxiliaryZooKeeper(zookeeper_name))
+     {
+         /// It's possible for getZooKeeper() to timeout if  zookeeper host(s) can't
+@@ -4233,6 +4237,10 @@ void StorageReplicatedMergeTree::shutdown()
+     if (shutdown_called.exchange(true))
+         return;
+ 
++    /// Save cached vector index info before shutdown
++    if (vidx_init_loaded)
++        writeVectorIndexInfoToZookeeper();
++
+     /// Cancel fetches, merges and mutations to force the queue_task to finish ASAP.
+     fetcher.blocker.cancelForever();
+     merger_mutator.merges_blocker.cancelForever();
+@@ -4678,6 +4686,9 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
+                         part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column);
+                     }
+                 }
++
++                /// update vector index info on zookeeper
++                writeVectorIndexInfoToZookeeper(true);
+             }
+ 
+         }
+@@ -5556,6 +5567,7 @@ void StorageReplicatedMergeTree::getStatus(Status & res, bool with_zk_fields)
+     res.can_become_leader = storage_settings_ptr->replicated_can_become_leader;
+     res.is_readonly = is_readonly;
+     res.is_session_expired = !zookeeper || zookeeper->expired();
++    res.is_data_synced = vidx_init_loaded;
+ 
+     res.queue = queue.getStatus();
+     res.absolute_delay = getAbsoluteDelay(); /// NOTE: may be slightly inconsistent with queue status.
+@@ -8118,5 +8130,189 @@ void StorageReplicatedMergeTree::createAndStoreFreezeMetadata(DiskPtr disk, Data
+     }
+ }
+ 
++void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
++{
++    auto zookeeper = getZooKeeper();
++
++    String vector_index_info;
++    bool success = zookeeper->tryGet(fs::path(replica_path) / "vidx_info", vector_index_info);
++
++    if (!success || vector_index_info.empty())
++    {
++        /// try other replicas
++        Strings replicas = zookeeper->getChildren(fs::path(zookeeper_path) / "replicas");
++
++        /// Select replicas in uniformly random order.
++        std::shuffle(replicas.begin(), replicas.end(), thread_local_rng);
++
++        for (const String & replica : replicas)
++        {
++            if (replica == replica_name)
++                continue;
++
++            if (!zookeeper->exists(fs::path(zookeeper_path) / "replicas" / replica / "is_active"))
++                continue;
++
++            String replica_vidx_info;
++            success = zookeeper->tryGet(fs::path(zookeeper_path) / "replicas" / replica / "vidx_info", replica_vidx_info);
++
++            if (success && !replica_vidx_info.empty())
++                vector_index_info += replica_vidx_info;
++        }
++    }
++
++    if (vector_index_info.empty())
++    {
++        LOG_INFO(log, "No vector index info found on zookeeper for table {}", getStorageID().getFullTableName());
++        return;
++    }
++
++    ReadBufferFromString in(vector_index_info);
++    std::unordered_map<String, std::unordered_set<String>> vector_indices;
++
++    while (!in.eof())
++    {
++        String part_name, vector_index_name;
++        in >> part_name >> "\t" >> vector_index_name >> "\n";
++
++        if (vector_indices.contains(part_name))
++        {
++            vector_indices.at(part_name).emplace(vector_index_name);
++        }
++        else
++        {
++            std::unordered_set<String> set{vector_index_name};
++            vector_indices.try_emplace(part_name, set);
++        }
++    }
++
++    LOG_INFO(log, "Load {} vector indices from keeper", vector_indices.size());
++
++    Stopwatch watch;
++    loadVectorIndices(vector_indices);
++
++    LOG_INFO(log, "Loaded vector indices from keeper in {} seconds", watch.elapsedSeconds());
++}
++
++void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
++{
++    if (!vidx_init_loaded)
++    {
++        bool synced = false;
++        Stopwatch watch;
++
++        try
++        {
++            UInt32 queue_size = getSettings()->max_queue_size_to_consider_replica_as_synced;
++            LOG_INFO(log, "Wait for replica syncing, target queue size: {}", queue_size);
++
++            watch.start();
++            synced = waitForShrinkingQueueSize(queue_size, getContext()->getSettingsRef().receive_timeout.totalMilliseconds());
++            watch.stop();
++        }
++        catch (Exception & e)
++        {
++            LOG_WARNING(log, "Failed to wait for replica syncing: {}", e.displayText());
++            return;
++        }
+ 
++        if (synced)
++            LOG_INFO(log, "Replica synced in {} seconds", watch.elapsedSeconds());
++        else
++            LOG_WARNING(log, "Failed to shrink queue size in {} seconds", watch.elapsedSeconds());
++
++        LOG_INFO(log, "Start loading vector indices from zookeeper");
++
++        watch.restart();
++        loadVectorIndexFromZookeeper();
++        watch.stop();
++
++        LOG_INFO(log, "Loading vector indices from zookeeper done in {} seconds", watch.elapsedSeconds());
++
++        vidx_init_loaded = true;
++    }
++
++    writeVectorIndexInfoToZookeeper();
++
++    vidx_info_updating_task->scheduleAfter(getSettings()->vidx_zk_update_period.totalMilliseconds());
++}
++
++void StorageReplicatedMergeTree::writeVectorIndexInfoToZookeeper(bool force)
++{
++    std::lock_guard lock{vidx_info_mutex};
++
++    if (force || getInMemoryMetadata().hasVectorIndices())
++    {
++        /// get cached vector index info
++        auto cache_list = VectorIndex::VectorSegmentExecutor::getAllCacheNames();
++        auto table_id = toString(getStorageID().uuid);
++
++        std::unordered_map<String, std::unordered_set<String>> cached_index_parts;
++        std::unordered_map<String, String> index_column_map;
++
++        /// get cached vector index & parts for current table
++        for (const auto & cache_item : cache_list)
++        {
++            auto cache_key = cache_item.first;
++            if (cache_key.getTableUUID() == table_id)
++            {
++                if (cached_index_parts.contains(cache_key.vector_index_name))
++                {
++                    cached_index_parts.at(cache_key.vector_index_name).emplace(cache_key.getPartName());
++                }
++                else
++                {
++                    std::unordered_set<String> part_set{cache_key.getPartName()};
++                    cached_index_parts.try_emplace(cache_key.vector_index_name, part_set);
++                }
++
++                index_column_map.try_emplace(cache_key.vector_index_name, cache_key.column_name);
++            }
++        }
++
++        WriteBufferFromOwnString out;
++        int count = 0;
++
++        /// get active part name (without mutation) for cached vector index
++        for (const auto & index_parts : cached_index_parts)
++        {
++            auto index_name = index_parts.first;
++            auto cached_parts = index_parts.second;
++            auto column_name = index_column_map.at(index_name);
++
++            for (const auto & part : getDataPartsVectorForInternalUsage())
++            {
++                auto part_name = part->info.getPartNameWithoutMutation();
++
++                if (cached_parts.contains(part_name))
++                {
++                    out << part_name << "\t" << index_name << "\n";
++                    count++;
++                    continue;
++                }
++
++                for (const auto & segment_id : VectorIndex::getAllSegmentIds(part->getFullPath(), part, index_name, column_name))
++                {
++                    if (cached_parts.contains(segment_id.getCacheKey().getPartName()))
++                    {
++                        out << part_name << "\t" << index_name << "\n";
++                        count++;
++                        break;
++                    }
++                }
++            }
++        }
++
++        try
++        {
++            LOG_DEBUG(log, "Writing {} vector index info to zookeeper", count);
++            getZooKeeper()->createOrUpdate(fs::path(replica_path) / "vidx_info", out.str(), zkutil::CreateMode::Persistent);
++            LOG_DEBUG(log, "Wrote {} vector index info to zookeeper", count);
++        }
++        catch (zkutil::KeeperException & e)
++        {
++            LOG_ERROR(log, "Failed to write vector index info to zookeeper: {}", e.what());
++        }
++    }
++}
+ }
+diff --git a/src/Storages/StorageReplicatedMergeTree.h b/src/Storages/StorageReplicatedMergeTree.h
+index 6cfcbb7963..db17c5d4ec 100644
+--- a/src/Storages/StorageReplicatedMergeTree.h
++++ b/src/Storages/StorageReplicatedMergeTree.h
+@@ -171,6 +171,7 @@ public:
+         bool can_become_leader;
+         bool is_readonly;
+         bool is_session_expired;
++        bool is_data_synced;
+         ReplicatedMergeTreeQueue::Status queue;
+         UInt32 parts_to_check;
+         String zookeeper_path;
+@@ -418,6 +419,15 @@ private:
+ 
+     PartMovesBetweenShardsOrchestrator part_moves_between_shards_orchestrator;
+ 
++    /// A task that update cached vector index info to zookeeper.
++    BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
++
++    /// Whether vector indices were initially loaded on table start-up
++    volatile bool vidx_init_loaded = false;
++
++    /// It is acquired when writing vector index info to zookeeper
++    std::mutex vidx_info_mutex;
++
+     /// True if replica was created for existing table with fixed granularity
+     bool other_replicas_fixed_granularity = false;
+ 
+@@ -811,6 +821,15 @@ private:
+       int32_t log_version,
+       bool slow_mode = false);
+ 
++    /// Get cached vector index info from zookeeper and load into cache.
++    void loadVectorIndexFromZookeeper();
++
++    /// Update cached vector index info to zookeeper periodically.
++    void updateVectorIndexInfoZookeeper();
++
++    /// Write vector index info to zookeeper.
++    void writeVectorIndexInfoToZookeeper(bool force = false);
++
+ protected:
+     /** If not 'attach', either creates a new table in ZK, or adds a replica to an existing table.
+       */
+diff --git a/src/Storages/System/StorageSystemReplicas.cpp b/src/Storages/System/StorageSystemReplicas.cpp
+index e018ccc073..301bbc6bbf 100644
+--- a/src/Storages/System/StorageSystemReplicas.cpp
++++ b/src/Storages/System/StorageSystemReplicas.cpp
+@@ -53,6 +53,7 @@ StorageSystemReplicas::StorageSystemReplicas(const StorageID & table_id_)
+         { "active_replicas",                      std::make_shared<DataTypeUInt8>()    },
+         { "last_queue_update_exception",          std::make_shared<DataTypeString>()   },
+         { "zookeeper_exception",                  std::make_shared<DataTypeString>()   },
++        { "is_data_synced",                       std::make_shared<DataTypeUInt8>()    },
+         { "replica_is_active",                    std::make_shared<DataTypeMap>(std::make_shared<DataTypeString>(), std::make_shared<DataTypeUInt8>()) }
+     }));
+     setInMemoryMetadata(storage_metadata);
+@@ -189,6 +190,7 @@ Pipe StorageSystemReplicas::read(
+         res_columns[col_num++]->insert(status.active_replicas);
+         res_columns[col_num++]->insert(status.last_queue_update_exception);
+         res_columns[col_num++]->insert(status.zookeeper_exception);
++        res_columns[col_num++]->insert(status.is_data_synced);
+ 
+         Map replica_is_active_values;
+         for (const auto & [name, is_active] : status.replica_is_active)
+diff --git a/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.reference b/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.reference
+new file mode 100644
+index 0000000000..59ed72db7d
+--- /dev/null
++++ b/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.reference
+@@ -0,0 +1,35 @@
++--- init
++0
++0
++all_0_0_0	all_0_0_0	0	vec_ind	LOADED
++all_0_0_0\tvec_ind\n
++--- drop vector index
++0
++
++--- add vector index
++0
++all_0_0_0\tvec_ind\n
++--- insert again
++0
++all_0_0_0\tvec_ind\nall_1_1_0\tvec_ind\n
++--- merge
++0
++all_0_1_1\tvec_ind\n
++--- drop table
++--- init (disable_rebuild_for_decouple)
++0
++0
++all_0_0_0	all_0_0_0	0	vec_ind	LOADED
++all_0_0_0\tvec_ind\n
++--- lightweight delete
++0
++all_0_0_0\tvec_ind\n
++--- insert again
++0
++all_0_0_0_1	all_0_0_0_1	0	vec_ind	LOADED
++all_2_2_0	all_2_2_0	0	vec_ind	LOADED
++all_0_0_0\tvec_ind\nall_2_2_0\tvec_ind\n
++--- merge
++all_0_2_1_1	all_0_0_0_1	0	vec_ind	LOADED
++all_0_2_1_1	all_2_2_0	1	vec_ind	LOADED
++all_0_2_1\tvec_ind\n
+diff --git a/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.sql b/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.sql
+new file mode 100644
+index 0000000000..6678f69227
+--- /dev/null
++++ b/tests/queries/2_vector_search/00032_mqvs_vector_index_autoload.sql
+@@ -0,0 +1,116 @@
++-- Tags: zookeeper
++
++DROP TABLE IF EXISTS test_vector_index_autoload SYNC;
++CREATE TABLE test_vector_index_autoload
++(
++    id    UInt32,
++    vector  Array(Float32),
++    CONSTRAINT check_length CHECK length(vector) = 3
++)
++ENGINE = ReplicatedMergeTree('/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1', 'r1')
++ORDER BY id
++SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, max_rows_for_slow_mode_single_vector_index_build=10;
++
++SELECT '--- init';
++
++INSERT INTO test_vector_index_autoload SELECT number, [number,number,number] FROM numbers(100);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT sleep(3);
++SELECT sleep(3);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload';
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- drop vector index';
++
++ALTER TABLE test_vector_index_autoload DROP VECTOR INDEX vec_ind;
++
++SELECT sleep(2);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- add vector index';
++
++ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT sleep(3);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- insert again';
++
++INSERT INTO test_vector_index_autoload SELECT number+100, [number+100,number+100,number+100] FROM numbers(100);
++
++SELECT sleep(3);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- merge';
++
++OPTIMIZE TABLE test_vector_index_autoload FINAL;
++
++SELECT sleep(3);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- drop table';
++
++DROP TABLE test_vector_index_autoload SYNC;
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++CREATE TABLE test_vector_index_autoload
++(
++    id    UInt32,
++    vector  Array(Float32),
++    CONSTRAINT check_length CHECK length(vector) = 3
++)
++ENGINE = ReplicatedMergeTree('/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1', 'r1')
++ORDER BY id
++SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true, max_rows_for_slow_mode_single_vector_index_build=10;
++
++SELECT '--- init (disable_rebuild_for_decouple)';
++
++INSERT INTO test_vector_index_autoload SELECT number, [number,number,number] FROM numbers(100);
++
++ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT sleep(3);
++SELECT sleep(3);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload';
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- lightweight delete';
++
++DELETE FROM test_vector_index_autoload WHERE id = 3;
++
++SELECT sleep(1);
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- insert again';
++
++INSERT INTO test_vector_index_autoload SELECT number+100, [number+100,number+100,number+100] FROM numbers(100);
++
++SELECT sleep(3);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload' ORDER BY part, owner_part;
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++SELECT '--- merge';
++
++OPTIMIZE TABLE test_vector_index_autoload FINAL;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload' ORDER BY part, owner_part;
++
++SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
++
++DROP TABLE test_vector_index_autoload SYNC;
+\ No newline at end of file
+-- 
+2.32.1 (Apple Git-133)
+

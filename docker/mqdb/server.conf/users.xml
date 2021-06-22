@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<clickhouse>
+
+    <profiles>
+        <default>
+            <max_memory_usage>8000000000</max_memory_usage>
+            <load_balancing>random</load_balancing>
+            <log_queries>1</log_queries>
+            <optimize_move_to_prewhere>1</optimize_move_to_prewhere>
+            <max_query_size>262144000</max_query_size>
+            <connect_timeout_with_failover_ms>5000</connect_timeout_with_failover_ms>
+            <distributed_directory_monitor_batch_inserts>1</distributed_directory_monitor_batch_inserts>
+            <distributed_product_mode>global</distributed_product_mode>
+            <join_use_nulls>1</join_use_nulls>
+            <prefer_global_in_and_join>1</prefer_global_in_and_join>
+            <readonly>0</readonly>
+            <distributed_aggregation_memory_efficient>1</distributed_aggregation_memory_efficient>
+            <parallel_view_processing>1</parallel_view_processing>
+            <use_uncompressed_cache>1</use_uncompressed_cache>
+        </default>
+        <readonly>
+            <profile>default</profile>
+            <readonly>1</readonly>
+        </readonly>
+        <readwrite>
+            <profile>default</profile>
+        </readwrite>
+    </profiles>
+
+    <users>
+        <default>
+            <password></password>
+            <networks>
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+</clickhouse>

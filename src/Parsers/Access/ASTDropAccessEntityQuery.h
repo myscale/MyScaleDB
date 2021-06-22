@@ -14,6 +14,7 @@ class ASTRowPolicyNames;
   * DROP QUOTA [IF EXISTS] name [,...]
   * DROP [ROW] POLICY [IF EXISTS] name [,...] ON [database.]table [,...]
   * DROP [SETTINGS] PROFILE [IF EXISTS] name [,...]
+  * DROP CONNECTION [IF EXISTS] name [,...]
   */
 class ASTDropAccessEntityQuery : public IAST, public ASTQueryWithOnCluster
 {

@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+* Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+* Co., Ltd. */
+
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 
 #include <IO/Operators.h>
@@ -84,6 +88,8 @@ size_t countPartitions(const MergeTreeData::DataPartsVector & prepared_parts)
 }
 
 }
+
+#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 
 namespace ProfileEvents
 {
@@ -316,6 +322,14 @@ Pipe ReadFromMergeTree::readFromPoolParallelReplicas(
     const auto & settings = context->getSettingsRef();
     size_t total_rows = parts_with_range.getRowsCountAllParts();
 
+    auto * logger = &Poco::Logger::get(data.getLogName() + " (SelectExecutor)");
+    LOG_DEBUG(logger, "Reading approx. {} rows with {} streams", total_rows, max_streams);
+
+    for (auto col : required_columns)
+    {
+        LOG_DEBUG(logger, "required_column: {}", col);
+    }
+
     for (size_t i = 0; i < max_streams; ++i)
     {
         auto algorithm = std::make_unique<MergeTreeThreadSelectAlgorithm>(
@@ -463,6 +477,16 @@ ProcessorPtr ReadFromMergeTree::createSource(
     if (query_info.limit > 0 && query_info.limit < total_rows)
         total_rows = query_info.limit;
 
+    for (auto & col : required_columns)
+    {
+        LOG_DEBUG(log, "[createSource] required_column: {}", col);
+    }
+
+    for (auto & col : virt_column_names)
+    {
+        LOG_DEBUG(log, "[createSource] virt_column: {}", col);
+    }
+
     /// Actually it means that parallel reading from replicas enabled
     /// and we have to collaborate with initiator.
     /// In this case we won't set approximate rows, because it will be accounted multiple times.
@@ -471,9 +495,23 @@ ProcessorPtr ReadFromMergeTree::createSource(
     bool set_rows_approx = !is_parallel_reading_from_replicas && !reader_settings.read_in_order;
 
     auto algorithm = std::make_unique<Algorithm>(
-            data, storage_snapshot, part.data_part, max_block_size, preferred_block_size_bytes,
-            preferred_max_column_in_block_size_bytes, required_columns, part.ranges, use_uncompressed_cache, prewhere_info,
-            actions_settings, reader_settings, pool, virt_column_names, part.part_index_in_query, has_limit_below_one_block);
+        data,
+        storage_snapshot,
+        part.data_part,
+        max_block_size,
+        preferred_block_size_bytes,
+        preferred_max_column_in_block_size_bytes,
+        required_columns,
+        part.ranges,
+        use_uncompressed_cache,
+        prewhere_info,
+        actions_settings,
+        reader_settings,
+        pool,
+        virt_column_names,
+        part.part_index_in_query,
+        has_limit_below_one_block,
+        part.vector_scan_manager);
 
     auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
 
@@ -529,6 +567,8 @@ Pipe ReadFromMergeTree::read(
         return readFromPool(parts_with_range, required_columns, max_streams, min_marks_for_concurrent_read, use_uncompressed_cache);
 
     auto pipe = readInOrder(parts_with_range, required_columns, read_type, use_uncompressed_cache, /*limit  */0, /*pool*/nullptr);
+
+    LOG_DEBUG(log, "[read] pipe header: {}", pipe.getHeader().dumpStructure());
 
     /// Use ConcatProcessor to concat sources together.
     /// It is needed to read in parts order (and so in PK order) if single thread is used.
@@ -626,6 +666,8 @@ Pipe ReadFromMergeTree::spreadMarkRangesAmongStreams(RangesInDataParts && parts_
         if (info.sum_marks < num_streams * info.min_marks_for_concurrent_read && parts_with_ranges.size() < num_streams)
             num_streams = std::max((info.sum_marks + info.min_marks_for_concurrent_read - 1) / info.min_marks_for_concurrent_read, parts_with_ranges.size());
     }
+    LOG_DEBUG(log, "parts_with_ranges marks: {}, rows: {}, num_streams: {}, info.sum_marks: {}, nfo.min_marks_for_concurrent_read: {}",
+        parts_with_ranges[0].getMarksCount(), parts_with_ranges[0].getRowsCount(), num_streams, info.sum_marks, info.min_marks_for_concurrent_read);
 
     auto read_type = is_parallel_reading_from_replicas ? ReadType::ParallelReplicas : ReadType::Default;
 
@@ -1657,6 +1699,48 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     selected_marks = result.selected_marks;
     selected_rows = result.selected_rows;
     selected_parts = result.selected_parts;
+
+    auto vector_scan_info_ptr = query_info.vector_scan_info;
+
+    if (vector_scan_info_ptr)
+    {
+        LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
+        for (auto & part : result.parts_with_ranges)
+        {
+            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
+            /// no prewhere info, first perform vector scan
+            if (!prewhere_info)
+            {
+                /// TODO: we can use vector scan result to further decrease mark range size
+                part.vector_scan_manager->executeBeforeRead(part.data_part->getDataPartStorage().getFullPath(), part.data_part);
+            }
+        }
+
+        if (!prewhere_info)
+        {
+            LOG_DEBUG(log, "[initializePipeline] try to filter mark ranges by vector scan result");
+            filterPartsMarkRangesByVectorScanResult(result.parts_with_ranges, vector_scan_info_ptr->vector_scan_descs);
+
+            size_t sum_marks = 0;
+            size_t sum_ranges = 0;
+            size_t sum_rows = 0;
+
+            for (const auto & part : result.parts_with_ranges)
+            {
+                sum_ranges += part.ranges.size();
+                sum_marks += part.getMarksCount();
+                sum_rows += part.getRowsCount();
+            }
+            LOG_DEBUG(
+                log,
+                "After filterByVectorScan: {} parts, {} marks to read from {} ranges, read {} rows",
+                result.parts_with_ranges.size(),
+                sum_marks,
+                sum_ranges,
+                sum_rows);
+        }
+    }
+
     /// Projection, that needed to drop columns, which have appeared by execution
     /// of some extra expressions, and to allow execute the same expressions later.
     /// NOTE: It may lead to double computation of expressions.
@@ -1735,7 +1819,10 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     }
 
     for (const auto & processor : pipe.getProcessors())
+    {
+        LOG_DEBUG(log, "[initializePipeline] add processor: {}", processor->getName());
         processors.emplace_back(processor);
+    }
 
 
     pipeline.init(std::move(pipe));

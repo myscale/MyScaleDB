@@ -1,0 +1,1295 @@
+From f265e3ef33ee0d9b6ca535342b5bf2d2ed7add34 Mon Sep 17 00:00:00 2001
+From: Zhenjia Li <zhenjial@moqi.ai>
+Date: Wed, 15 Feb 2023 10:49:05 +0000
+Subject: [PATCH 26/85] Remove FixedArray type
+
+---
+ src/Columns/ColumnArray.cpp                   |  5 --
+ src/Columns/ColumnArray.h                     |  5 --
+ src/DataTypes/DataTypeArray.cpp               | 48 +-------------
+ src/DataTypes/DataTypeArray.h                 | 14 +----
+ src/DataTypes/DataTypeFactory.cpp             |  1 -
+ src/DataTypes/DataTypeFactory.h               |  1 -
+ .../Serializations/SerializationArray.cpp     |  3 -
+ src/Interpreters/ExpressionAnalyzer.cpp       | 13 ++--
+ src/Interpreters/InterpreterAlterQuery.cpp    |  3 +
+ src/Interpreters/InterpreterInsertQuery.cpp   |  9 +++
+ src/Storages/AlterCommands.cpp                | 62 +++++++++++++++++++
+ src/Storages/AlterCommands.h                  |  6 ++
+ src/Storages/ConstraintsDescription.cpp       | 43 +++++++++++++
+ src/Storages/ConstraintsDescription.h         |  2 +
+ src/Storages/MergeTree/MergeTreeSettings.h    |  1 +
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 27 ++++++--
+ .../MergeTree/MergeTreeVectorScanManager.cpp  |  2 +-
+ src/Storages/VectorIndicesDescription.cpp     |  2 +-
+ .../test.py                                   |  6 +-
+ .../test_mqvs_primary_key_cache/test.py       |  4 +-
+ .../00005_mqvs_build_ivfflat_index.sh         |  2 +-
+ .../00006_mqvs_build_hnswflat_index.sh        |  2 +-
+ .../00007_mqvs_wrong_search_col.sh            |  2 +-
+ .../00008_mqvs_empty_vector.reference         |  2 +
+ .../00008_mqvs_empty_vector.sh                |  4 ++
+ .../00015_mqvs_create_vector_index.reference  |  2 +-
+ .../00015_mqvs_create_vector_index.sql        |  5 +-
+ ...s_index_build_after_lightweight_delete.sql |  2 +-
+ ...16_mqvs_lightweight_delete_with_vector.sql |  2 +-
+ ..._mqvs_lightweight_delete_with_decouple.sql |  2 +-
+ .../00018_mqvs_drop_index_mergetree.sql       |  2 +-
+ ...mqvs_add_fail_status_in_vector_indices.sql |  6 +-
+ ...0_mqvs_drop_vector_index_and_drop_table.sh |  4 +-
+ ...0_mqvs_refactor_support_prewhere_where.sql |  5 +-
+ .../00021_mqvs_support_primary_key_cache.sql  |  2 +-
+ .../00000_prepare_data_with_empty_vectors.sh  | 25 +++++++-
+ .../helpers/00000_prepare_index.sh            |  2 +-
+ .../helpers/00000_prepare_index_2.sh          |  3 +-
+ .../helpers/00000_prepare_index_3.sh          |  2 +-
+ .../helpers/00000_prepare_index_4.sh          |  2 +-
+ .../helpers/00000_prepare_index_5.sh          |  2 +-
+ .../helpers/00000_prepare_index_6.sh          |  2 +-
+ .../helpers/00000_prepare_index_cosine.sh     |  2 +-
+ .../00000_prepare_index_cosine_ivfpq.sh       |  2 +-
+ .../00017_mqvs_distance_ip_hnsw.sh            |  2 +-
+ .../00017_mqvs_distance_ip_ivfflat.sh         |  2 +-
+ .../vector_search/aio_test_batch_distance.py  |  2 +-
+ tests/vector_search/benchmark.py              |  2 +-
+ tests/vector_search/distributed/prepare.sql   |  4 +-
+ .../vector_search/k8s/create_distributed.sql  |  2 +-
+ tests/vector_search/k8s/create_gist1M.sql     |  4 +-
+ tests/vector_search/k8s/create_replicated.sql |  2 +-
+ tests/vector_search/k8s/create_sift10M.sql    |  4 +-
+ tests/vector_search/k8s/create_sift1M.sql     |  4 +-
+ tests/vector_search/test_batch_distance.py    |  2 +-
+ .../test_create_replicated_table.sql          |  2 +-
+ tests/vector_search/test_sift.py              |  2 +-
+ tests/vector_search/test_vector_search.py     |  2 +-
+ tests/vector_search/vector/create_table.sql   |  2 +-
+ .../vector_search/vector/create_table_xhs.sql |  2 +-
+ 60 files changed, 246 insertions(+), 137 deletions(-)
+
+diff --git a/src/Columns/ColumnArray.cpp b/src/Columns/ColumnArray.cpp
+index 0ea1eedcab..24da964433 100644
+--- a/src/Columns/ColumnArray.cpp
++++ b/src/Columns/ColumnArray.cpp
+@@ -31,7 +31,6 @@ namespace ErrorCodes
+     extern const int SIZES_OF_COLUMNS_DOESNT_MATCH;
+     extern const int LOGICAL_ERROR;
+     extern const int TOO_LARGE_ARRAY_SIZE;
+-    extern const int INCORRECT_DATA;
+ }
+ 
+ /** Obtaining array as Field can be slow for large arrays and consume vast amount of memory.
+@@ -82,7 +81,6 @@ std::string ColumnArray::getName() const { return "Array(" + getData().getName()
+ MutableColumnPtr ColumnArray::cloneResized(size_t to_size) const
+ {
+     auto res = ColumnArray::create(getData().cloneEmpty());
+-    res->setDim(this->dim);
+ 
+     if (to_size == 0)
+         return res;
+@@ -298,9 +296,6 @@ void ColumnArray::insert(const Field & x)
+ {
+     const Array & array = DB::get<const Array &>(x);
+     size_t size = array.size();
+-    if (dim > 0 && dim != size)
+-        throw Exception(ErrorCodes::INCORRECT_DATA, "Array size does not equal to dim: ({} vs {})", size, dim);
+-
+     for (size_t i = 0; i < size; ++i)
+         getData().insert(array[i]);
+     getOffsets().push_back(getOffsets().back() + size);
+diff --git a/src/Columns/ColumnArray.h b/src/Columns/ColumnArray.h
+index b3e7969d0a..3f41ae9cd8 100644
+--- a/src/Columns/ColumnArray.h
++++ b/src/Columns/ColumnArray.h
+@@ -171,14 +171,9 @@ public:
+ 
+     size_t getNumberOfDimensions() const;
+ 
+-    void setDim(uint64_t dim_) { this->dim = dim_; }
+-
+-    uint64_t getDim() { return this->dim; }
+-
+ private:
+     WrappedPtr data;
+     WrappedPtr offsets;
+-    uint64_t dim{0};
+ 
+     size_t ALWAYS_INLINE offsetAt(ssize_t i) const { return getOffsets()[i - 1]; }
+     size_t ALWAYS_INLINE sizeAt(ssize_t i) const { return getOffsets()[i] - getOffsets()[i - 1]; }
+diff --git a/src/DataTypes/DataTypeArray.cpp b/src/DataTypes/DataTypeArray.cpp
+index 61be58bcb4..f78aebd2d9 100644
+--- a/src/DataTypes/DataTypeArray.cpp
++++ b/src/DataTypes/DataTypeArray.cpp
+@@ -6,7 +6,6 @@
+ #include <DataTypes/Serializations/SerializationArray.h>
+ 
+ #include <Parsers/IAST.h>
+-#include <Parsers/ASTLiteral.h>
+ 
+ #include <Common/typeid_cast.h>
+ #include <Common/assert_cast.h>
+@@ -28,24 +27,10 @@ DataTypeArray::DataTypeArray(const DataTypePtr & nested_)
+ {
+ }
+ 
+-DataTypeArray::DataTypeArray(const DataTypePtr & nested_, const uint64_t dim_)
+-    : nested{nested_}, dim{dim_}
+-{
+-}
+-
+ 
+ MutableColumnPtr DataTypeArray::createColumn() const
+ {
+-    if (dim > 0)
+-    {
+-        auto column = ColumnArray::create(nested->createColumn(), ColumnArray::ColumnOffsets::create());
+-        column->setDim(dim);
+-        return column;
+-    }
+-    else
+-    {
+-        return ColumnArray::create(nested->createColumn(), ColumnArray::ColumnOffsets::create());
+-    }
++    return ColumnArray::create(nested->createColumn(), ColumnArray::ColumnOffsets::create());
+ }
+ 
+ 
+@@ -57,15 +42,7 @@ Field DataTypeArray::getDefault() const
+ 
+ bool DataTypeArray::equals(const IDataType & rhs) const
+ {
+-    if(typeid(rhs) != typeid(*this)){
+-        return false;
+-    }
+-    const DataTypeArray* other = dynamic_cast<const DataTypeArray*>(&rhs);
+-    if(other!= nullptr){
+-        return other->dim == dim && nested->equals(*static_cast<const DataTypeArray &>(rhs).nested);
+-    } else{
+-        return false;
+-    }
++    return typeid(rhs) == typeid(*this) && nested->equals(*static_cast<const DataTypeArray &>(rhs).nested);
+ }
+ 
+ SerializationPtr DataTypeArray::doGetDefaultSerialization() const
+@@ -90,31 +67,10 @@ static DataTypePtr create(const ASTPtr & arguments)
+     return std::make_shared<DataTypeArray>(DataTypeFactory::instance().get(arguments->children[0]));
+ }
+ 
+-static DataTypePtr createFixed(const ASTPtr & arguments)
+-{
+-    if (!arguments || arguments->children.size() != 2)
+-        throw Exception("Array data type family must have exactly tow argument - dimension and type of elements", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+-
+-    if (const auto * ast_literal = typeid_cast<const ASTLiteral *>(arguments->children[1].get()))
+-    {
+-        uint64_t dim = ast_literal->value.get<UInt64>();
+-        return std::make_shared<DataTypeArray>(DataTypeFactory::instance().get(arguments->children[0]), dim);
+-    }
+-    else
+-    {
+-        throw Exception("Fixed array data type family must have exactly two argument - type of elements and dimension", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+-    }
+-}
+-
+ 
+ void registerDataTypeArray(DataTypeFactory & factory)
+ {
+     factory.registerDataType("Array", create);
+ }
+ 
+-void registerDataTypeFixedArray(DataTypeFactory & factory)
+-{
+-    factory.registerDataType("FixedArray", createFixed);
+-}
+-
+ }
+diff --git a/src/DataTypes/DataTypeArray.h b/src/DataTypes/DataTypeArray.h
+index daf2f72446..122ac8e03a 100644
+--- a/src/DataTypes/DataTypeArray.h
++++ b/src/DataTypes/DataTypeArray.h
+@@ -13,27 +13,17 @@ class DataTypeArray final : public IDataType
+ private:
+     /// The type of array elements.
+     DataTypePtr nested;
+-    uint64_t dim{0};
+ 
+ public:
+     static constexpr bool is_parametric = true;
+ 
+     explicit DataTypeArray(const DataTypePtr & nested_);
+ 
+-    DataTypeArray(const DataTypePtr & nested_, const uint64_t dim_);
+-
+     TypeIndex getTypeId() const override { return TypeIndex::Array; }
+ 
+     std::string doGetName() const override
+     {
+-        if (dim > 0)
+-        {
+-            return "FixedArray(" + nested->getName() + ", " + std::to_string(dim) + ")";
+-        }
+-        else
+-        {
+-            return "Array(" + nested->getName() + ")";
+-        }
++        return "Array(" + nested->getName() + ")";
+     }
+ 
+     const char * getFamilyName() const override
+@@ -70,8 +60,6 @@ public:
+ 
+     /// 1 for plain array, 2 for array of arrays and so on.
+     size_t getNumberOfDimensions() const;
+-
+-    uint64_t getDim() const { return dim; }
+ };
+ 
+ }
+diff --git a/src/DataTypes/DataTypeFactory.cpp b/src/DataTypes/DataTypeFactory.cpp
+index d330d2e8c0..7539f2e652 100644
+--- a/src/DataTypes/DataTypeFactory.cpp
++++ b/src/DataTypes/DataTypeFactory.cpp
+@@ -214,7 +214,6 @@ DataTypeFactory::DataTypeFactory()
+     registerDataTypeDomainGeo(*this);
+     registerDataTypeMap(*this);
+     registerDataTypeObject(*this);
+-    registerDataTypeFixedArray(*this);
+     registerDataTypeObjectToFetch(*this);
+ }
+ 
+diff --git a/src/DataTypes/DataTypeFactory.h b/src/DataTypes/DataTypeFactory.h
+index 0a6e7836ab..5166df8a39 100644
+--- a/src/DataTypes/DataTypeFactory.h
++++ b/src/DataTypes/DataTypeFactory.h
+@@ -88,7 +88,6 @@ void registerDataTypeDomainBool(DataTypeFactory & factory);
+ void registerDataTypeDomainSimpleAggregateFunction(DataTypeFactory & factory);
+ void registerDataTypeDomainGeo(DataTypeFactory & factory);
+ void registerDataTypeObject(DataTypeFactory & factory);
+-void registerDataTypeFixedArray(DataTypeFactory & factory);
+ void registerDataTypeObjectURL(DataTypeFactory & factory);
+ void registerDataTypeObjectToFetch(DataTypeFactory & factory);
+ 
+diff --git a/src/DataTypes/Serializations/SerializationArray.cpp b/src/DataTypes/Serializations/SerializationArray.cpp
+index c9226a295f..30ee5e98b7 100644
+--- a/src/DataTypes/Serializations/SerializationArray.cpp
++++ b/src/DataTypes/Serializations/SerializationArray.cpp
+@@ -442,9 +442,6 @@ static void deserializeTextImpl(IColumn & column, ReadBuffer & istr, Reader && r
+         throw;
+     }
+ 
+-    if (size != 0 && column_array.getDim() != 0 && size != column_array.getDim())
+-        throw Exception(ErrorCodes::INCORRECT_DATA, "Array size does not equal to dim: ({} vs {})", size, column_array.getDim());
+-
+     offsets.push_back(offsets.back() + size);
+ }
+ 
+diff --git a/src/Interpreters/ExpressionAnalyzer.cpp b/src/Interpreters/ExpressionAnalyzer.cpp
+index 1b24ee8e94..0307ec7f81 100644
+--- a/src/Interpreters/ExpressionAnalyzer.cpp
++++ b/src/Interpreters/ExpressionAnalyzer.cpp
+@@ -642,11 +642,16 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
+ 
+         if (!array_type)
+             throw Exception(ErrorCodes::BAD_ARGUMENTS,
+-                "Search column {} should be FixedArray type", vector_scan_desc.search_column_name);
++                "Search column {} should be Array type", vector_scan_desc.search_column_name);
+ 
+-        LOG_DEBUG(log, "type dim: {}", array_type->getDim());
+-
+-        vector_scan_desc.search_column_dim = array_type->getDim();
++        vector_scan_desc.search_column_dim
++            = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
++        if (vector_scan_desc.search_column_dim == 0)
++        {
++            LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
++            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
++        }
++        LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
+ 
+         const auto * dag_node = actions->tryFindInIndex(arguments[1]->getColumnName());
+         if (!dag_node)
+diff --git a/src/Interpreters/InterpreterAlterQuery.cpp b/src/Interpreters/InterpreterAlterQuery.cpp
+index b8e4a105cb..efe91d384c 100644
+--- a/src/Interpreters/InterpreterAlterQuery.cpp
++++ b/src/Interpreters/InterpreterAlterQuery.cpp
+@@ -203,6 +203,9 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
+         StorageInMemoryMetadata metadata = table->getInMemoryMetadata();
+         alter_commands.validate(metadata, getContext());
+         alter_commands.prepare(metadata);
++        auto total_rows = table->totalRows(getContext()->getSettingsRef());
++        if (!total_rows.has_value() || total_rows.value() == 0)
++            alter_commands.setTableEmptyFlag(true);
+         table->checkAlterIsPossible(alter_commands, getContext());
+         table->alter(alter_commands, getContext(), alter_lock);
+     }
+diff --git a/src/Interpreters/InterpreterInsertQuery.cpp b/src/Interpreters/InterpreterInsertQuery.cpp
+index df44814a96..5d4b8e01dc 100644
+--- a/src/Interpreters/InterpreterInsertQuery.cpp
++++ b/src/Interpreters/InterpreterInsertQuery.cpp
+@@ -294,6 +294,15 @@ BlockIO InterpreterInsertQuery::execute()
+     auto table_lock = table->lockForShare(getContext()->getInitialQueryId(), settings.lock_acquire_timeout);
+     auto metadata_snapshot = table->getInMemoryMetadataPtr();
+ 
++    for (const auto & vec_index : metadata_snapshot->vec_indices)
++    {
++        auto col_name = vec_index.column;
++        if (metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
++        {
++            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot insert data: column with vector index need correct length constraint");
++        }
++    }
++
+     auto query_sample_block = getSampleBlock(query, table, metadata_snapshot);
+ 
+     /// For table functions we check access while executing
+diff --git a/src/Storages/AlterCommands.cpp b/src/Storages/AlterCommands.cpp
+index f82c58ac06..b35364e537 100644
+--- a/src/Storages/AlterCommands.cpp
++++ b/src/Storages/AlterCommands.cpp
+@@ -72,6 +72,35 @@ AlterCommand::RemoveProperty removePropertyFromString(const String & property)
+     throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot remove unknown property '{}'", property);
+ }
+ 
++/// Get column name if constraint is used to check column length
++String getColumnNameFromLengthCheck(const ASTPtr & constraint_decl)
++{
++    String res = "";
++    auto * constraint_ptr = constraint_decl->as<ASTConstraintDeclaration>();
++    if (constraint_ptr && constraint_ptr->type == ASTConstraintDeclaration::Type::CHECK)
++    {
++        auto * func_equal = constraint_ptr->expr->as<ASTFunction>();
++        if (func_equal && func_equal->name == "equals")
++        {
++            auto * expr_list = func_equal->arguments->as<ASTExpressionList>();
++            if (expr_list && expr_list->children.size() == 2)
++            {
++                auto * func_len = expr_list->children[0]->as<ASTFunction>();
++                auto * literal = expr_list->children[1]->as<ASTLiteral>();
++                if (func_len && literal && func_len->name == "length")
++                {
++                    auto * expr_list_ = func_len->arguments->as<ASTExpressionList>();
++                    if (expr_list_ && expr_list_->children.size() == 1 && expr_list_->children[0]->as<ASTIdentifier>())
++                    {
++                        res = expr_list_->children[0]->as<ASTIdentifier>()->name();
++                    }
++                }
++            }
++        }
++    }
++    return res;
++}
++
+ }
+ 
+ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_ast)
+@@ -611,6 +640,15 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
+                         ErrorCodes::ILLEGAL_COLUMN);
+         }
+ 
++        auto col_name = getColumnNameFromLengthCheck(constraint_decl);
++        if (!col_name.empty())
++        {
++            if (metadata.constraints.getArrayLengthByColumnName(col_name).second)
++                throw Exception(
++                    "Cannot add constraint " + constraint_name + ": length check constraint for this column already exists",
++                    ErrorCodes::ILLEGAL_COLUMN);
++        }
++
+         auto insert_it = constraints.end();
+         constraints.emplace(insert_it, constraint_decl);
+         metadata.constraints = ConstraintsDescription(constraints);
+@@ -633,6 +671,20 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
+             throw Exception("Wrong constraint name. Cannot find constraint `" + constraint_name + "` to drop",
+                     ErrorCodes::BAD_ARGUMENTS);
+         }
++
++        auto col_name = getColumnNameFromLengthCheck(*erase_it);
++        if (!col_name.empty())
++        {
++            if (!empty_table)
++                throw Exception("Cannot drop constraint " + constraint_name + ": the table is not empty", ErrorCodes::ILLEGAL_COLUMN);
++            if (std::any_of(
++                    metadata.vec_indices.cbegin(),
++                    metadata.vec_indices.cend(),
++                    [col_name](const auto & vec_index) { return vec_index.column == col_name; }))
++                throw Exception(
++                    "Cannot drop constraint " + constraint_name + ": vector index exists on the column", ErrorCodes::ILLEGAL_COLUMN);
++        }
++
+         constraints.erase(erase_it);
+         metadata.constraints = ConstraintsDescription(constraints);
+     }
+@@ -767,6 +819,9 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
+                 throw Exception("Cannot add vector index " + vec_index_name + ": column type is not float array", ErrorCodes::ILLEGAL_COLUMN);
+         }
+ 
++        if (metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
++            throw Exception("Cannot add vector index " + vec_index_name + ": column has no length constraint", ErrorCodes::ILLEGAL_COLUMN);
++
+         auto insert_it = metadata.vec_indices.end();
+ 
+         metadata.vec_indices.emplace(insert_it, VectorIndexDescription::getVectorIndexFromAST(vec_index_decl, metadata.columns));
+@@ -1460,6 +1515,13 @@ bool AlterCommands::isCommentAlter() const
+     return std::all_of(begin(), end(), [](const AlterCommand & c) { return c.isCommentAlter(); });
+ }
+ 
++void AlterCommands::setTableEmptyFlag(bool is_empty)
++{
++    if (is_empty)
++        for (auto & alter_cmd : *this)
++            alter_cmd.empty_table = is_empty;
++}
++
+ static MutationCommand createMaterializeTTLCommand()
+ {
+     MutationCommand command;
+diff --git a/src/Storages/AlterCommands.h b/src/Storages/AlterCommands.h
+index 7a7f115337..31470824ac 100644
+--- a/src/Storages/AlterCommands.h
++++ b/src/Storages/AlterCommands.h
+@@ -160,6 +160,9 @@ struct AlterCommand
+     /// What to remove from column (or TTL)
+     RemoveProperty to_remove = RemoveProperty::NO_PROPERTY;
+ 
++    /// For DROP CONSTRAINT on vector index column
++    bool empty_table = false;
++
+     static std::optional<AlterCommand> parse(const ASTAlterCommand * command);
+ 
+     void apply(StorageInMemoryMetadata & metadata, ContextPtr context) const;
+@@ -222,6 +225,9 @@ public:
+     /// All commands modify comments only.
+     bool isCommentAlter() const;
+ 
++    /// Used to determine whether the constraint on the vector index column can be dropped.
++    void setTableEmptyFlag(bool is_empty);
++
+     /// Return mutation commands which some storages may execute as part of
+     /// alter. If alter can be performed as pure metadata update, then result is
+     /// empty. If some TTL changes happened than, depending on materialize_ttl
+diff --git a/src/Storages/ConstraintsDescription.cpp b/src/Storages/ConstraintsDescription.cpp
+index 7085c6e14c..6d1e8bd1d7 100644
+--- a/src/Storages/ConstraintsDescription.cpp
++++ b/src/Storages/ConstraintsDescription.cpp
+@@ -8,6 +8,7 @@
+ #include <Parsers/parseQuery.h>
+ #include <Parsers/ASTExpressionList.h>
+ #include <Parsers/ASTFunction.h>
++#include <Parsers/ASTIdentifier.h>
+ 
+ #include <Core/Defines.h>
+ 
+@@ -143,6 +144,48 @@ ConstraintsExpressions ConstraintsDescription::getExpressions(const DB::ContextP
+     return res;
+ }
+ 
++std::pair<UInt64, bool> ConstraintsDescription::getArrayLengthByColumnName(const String & column_name) const
++{
++    UInt64 len = 0;
++    bool has_len_constraint = false;
++    for (const auto & constraint : constraints)
++    {
++        auto * constraint_ptr = constraint->as<ASTConstraintDeclaration>();
++        if (constraint_ptr->type == ASTConstraintDeclaration::Type::CHECK)
++        {
++            auto * func_equal = constraint_ptr->expr->as<ASTFunction>();
++            if (func_equal && func_equal->name == "equals")
++            {
++                auto * expr_list = func_equal->arguments->as<ASTExpressionList>();
++                if (expr_list && expr_list->children.size() == 2)
++                {
++                    auto * func_len = expr_list->children[0]->as<ASTFunction>();
++                    auto * literal = expr_list->children[1]->as<ASTLiteral>();
++                    if (func_len && literal && func_len->name == "length")
++                    {
++                        auto * expr_list_ = func_len->arguments->as<ASTExpressionList>();
++                        if (expr_list_ && expr_list_->children.size() == 1 && expr_list_->children[0]->as<ASTIdentifier>()
++                            && expr_list_->children[0]->as<ASTIdentifier>()->name() == column_name)
++                        {
++                            has_len_constraint = true;
++                            try
++                            {
++                                len = literal->value.safeGet<UInt64>();
++                                break;
++                            }
++                            catch (...)
++                            {
++                                /// Ignore
++                            }
++                        }
++                    }
++                }
++            }
++        }
++    }
++    return std::make_pair(len, has_len_constraint);
++}
++
+ const ComparisonGraph & ConstraintsDescription::getGraph() const
+ {
+     return *graph;
+diff --git a/src/Storages/ConstraintsDescription.h b/src/Storages/ConstraintsDescription.h
+index eb1eb95d33..d6e67cca3d 100644
+--- a/src/Storages/ConstraintsDescription.h
++++ b/src/Storages/ConstraintsDescription.h
+@@ -45,6 +45,8 @@ public:
+ 
+     ConstraintsExpressions getExpressions(ContextPtr context, const NamesAndTypesList & source_columns_) const;
+ 
++    std::pair<UInt64, bool> getArrayLengthByColumnName(const String & column_name) const;
++
+     struct AtomId
+     {
+         size_t group_id;
+diff --git a/src/Storages/MergeTree/MergeTreeSettings.h b/src/Storages/MergeTree/MergeTreeSettings.h
+index 41ad1e0aab..e4c413863d 100644
+--- a/src/Storages/MergeTree/MergeTreeSettings.h
++++ b/src/Storages/MergeTree/MergeTreeSettings.h
+@@ -147,6 +147,7 @@ struct Settings;
+     M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
+     M(String, vector_search_metric_type, "L2", "default metric type for brute force search", 0) \
+     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
++    M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
+     \
+     /** Obsolete settings. Kept for backward compatibility only. */ \
+     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 19195f51f1..a894fc38fa 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -22,6 +22,8 @@ namespace ErrorCodes
+     extern const int MEMORY_LIMIT_EXCEEDED;
+     extern const int LOGICAL_ERROR;
+     extern const int ABORTED;
++    extern const int BAD_ARGUMENTS;
++    extern const int INCORRECT_DATA;
+ }
+ 
+ /// minimum interval (seconds) between check if need to remove dropped vector index cache.
+@@ -343,6 +345,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+     const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
+ {
+     LOG_INFO(log, "[buildVectorIndex] part:{}, start checking for build index", part->name);
++
++    bool enforce_fixed_array = data.getSettings()->enforce_fixed_vector_length_constraint;
++
+     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
+     {
+         LOG_INFO(log, "[buildVectorIndex] vec_index_desc data column: {}", vec_index_desc.column);
+@@ -370,13 +375,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                     const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
+                     if (array_type)
+                     {
+-                        LOG_INFO(log, "[buildVectorIndex] dim: {}", array_type->getDim());
+-                        dim = array_type->getDim();
++                        dim = metadata_snapshot->getConstraints().getArrayLengthByColumnName(col).first;
+                         if (dim == 0)
+                         {
+-                            LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0");
+-                            throw Exception(ErrorCodes::LOGICAL_ERROR, "wrong dimension: 0");
++                            LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0, please check length constraint on the column.");
++                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
+                         }
++                        LOG_INFO(log, "[buildVectorIndex] dim: {}", dim);
+                     }
+                     ///only reading one column
+                     break;
+@@ -606,6 +611,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             }
+ 
+             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
++            if (enforce_fixed_array && src_vec.size() != dim * offsets.size())
++            {
++                throw Exception(
++                    ErrorCodes::INCORRECT_DATA,
++                    "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
++                    part->name);
++            }
+             if (src_vec.empty())
+             {
+                 LOG_WARNING(log, "[buildVectorIndex] part:{}, no data read for column {}", part->name, cols.back().name);
+@@ -632,9 +644,14 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             {
+                 size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
+                 size_t vec_end_offset = offsets[row];
++                if (enforce_fixed_array && vec_end_offset - vec_start_offset != dim)
++                    throw Exception(
++                        ErrorCodes::INCORRECT_DATA,
++                        "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
++                        part->name);
+                 if (vec_start_offset != vec_end_offset)
+                 {
+-                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
++                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
+                     {
+                         vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                     }
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+index 614c104049..3f273575d3 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+@@ -1114,7 +1114,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+                 size_t vec_end_offset = offsets[row];
+                 if (vec_start_offset != vec_end_offset)
+                 {
+-                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
++                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
+                     {
+                         vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                     }
+diff --git a/src/Storages/VectorIndicesDescription.cpp b/src/Storages/VectorIndicesDescription.cpp
+index 2adef6dc20..fe6c11b76b 100644
+--- a/src/Storages/VectorIndicesDescription.cpp
++++ b/src/Storages/VectorIndicesDescription.cpp
+@@ -119,7 +119,7 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(const ASTPt
+ 
+     /// validate for vector index params
+     if (result.data_type->getTypeId() != TypeIndex::Array)
+-        throw Exception("Vector index can be used only with `FixedArray` column.", ErrorCodes::INCORRECT_QUERY);
++        throw Exception("Vector index can be used only with `Array` column.", ErrorCodes::INCORRECT_QUERY);
+ 
+     /*
+     const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(result.data_type.get());
+diff --git a/tests/integration/test_mqvs_cancel_building_vector_index/test.py b/tests/integration/test_mqvs_cancel_building_vector_index/test.py
+index 1dc1809a7f..4f06566bbd 100644
+--- a/tests/integration/test_mqvs_cancel_building_vector_index/test.py
++++ b/tests/integration/test_mqvs_cancel_building_vector_index/test.py
+@@ -19,7 +19,7 @@ def started_cluster():
+ def test_drop_index_cancel_building_index(started_cluster):
+     instance.query(
+         """
+-    CREATE TABLE test_drop_index(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;
++    CREATE TABLE test_drop_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
+     INSERT INTO test_drop_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(50000);
+     optimize table test_drop_index final;
+     ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE HNSWSQ;
+@@ -39,7 +39,7 @@ def test_drop_index_cancel_building_index(started_cluster):
+ def test_drop_table_cancel_building_index(started_cluster):
+     instance.query(
+         """
+-    CREATE TABLE test_drop_table(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;
++    CREATE TABLE test_drop_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
+     INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(50000);
+     optimize table test_drop_table final;
+     ALTER TABLE test_drop_table ADD VECTOR INDEX v1 vector TYPE HNSWSQ;
+@@ -56,7 +56,7 @@ def test_drop_table_cancel_building_index(started_cluster):
+ def test_drop_table_release_index_cache(started_cluster):
+     instance.query(
+         """
+-    CREATE TABLE test_drop_table_release_cache(id UInt32, text String, vector FixedArray(Float32, 3)) Engine MergeTree ORDER BY id;
++    CREATE TABLE test_drop_table_release_cache(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) Engine MergeTree ORDER BY id;
+     INSERT INTO test_drop_table_release_cache SELECT number, randomPrintableASCII(80), range(3) FROM numbers(1000);
+     ALTER TABLE test_drop_table_release_cache ADD VECTOR INDEX v1 vector TYPE HNSWSQ;
+     """
+diff --git a/tests/integration/test_mqvs_primary_key_cache/test.py b/tests/integration/test_mqvs_primary_key_cache/test.py
+index ae67880b40..5d637feac7 100644
+--- a/tests/integration/test_mqvs_primary_key_cache/test.py
++++ b/tests/integration/test_mqvs_primary_key_cache/test.py
+@@ -19,7 +19,7 @@ def started_cluster():
+ def test_primary_key_cache_enabled(started_cluster):
+     instance.query(
+         """
+-        CREATE TABLE test_pk_cache(id UInt32, vector FixedArray(Float32, 3))
++        CREATE TABLE test_pk_cache(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
+         engine MergeTree primary key id
+         SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
+         INSERT INTO test_pk_cache SELECT number, [number, number, number] FROM numbers(2100);
+@@ -40,7 +40,7 @@ def test_primary_key_cache_enabled(started_cluster):
+ def test_primary_key_cache_disabled(started_cluster):
+     instance.query(
+         """
+-        CREATE TABLE test_pk_cache_disable(id UInt32, vector FixedArray(Float32, 3))
++        CREATE TABLE test_pk_cache_disable(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
+         engine MergeTree primary key id
+         SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=false;
+         INSERT INTO test_pk_cache_disable SELECT number, [number, number, number] FROM numbers(2100);
+diff --git a/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.sh b/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.sh
+index 35d86d295c..f3c213d08d 100755
+--- a/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.sh
++++ b/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.sh
+@@ -2,6 +2,6 @@
+ # Tags: no-parallel
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_ivfflat"
+-clickhouse-client -q "CREATE TABLE test_ivfflat(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024;"
++clickhouse-client -q "CREATE TABLE test_ivfflat(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024;"
+ clickhouse-client -q "ALTER TABLE test_ivfflat ADD VECTOR INDEX v1 vector TYPE IVFFLAT('ncentroids = 1');"
+ clickhouse-client -q "SELECT table,name,type,expr,status from system.vector_indices where table = 'test_ivfflat'"
+diff --git a/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.sh b/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.sh
+index ec923453ab..fc05c0e3d3 100755
+--- a/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.sh
++++ b/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.sh
+@@ -2,6 +2,6 @@
+ # Tags: no-parallel
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_hnsw"
+-clickhouse-client -q "CREATE TABLE test_hnsw(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024;"
++clickhouse-client -q "CREATE TABLE test_hnsw(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024;"
+ clickhouse-client -q "ALTER TABLE test_hnsw ADD VECTOR INDEX v1 vector TYPE HNSWFLAT('m = 10');"
+ clickhouse-client -q "SELECT table,name,type,expr,status from system.vector_indices where table = 'test_hnsw'"
+diff --git a/tests/queries/2_vector_search/00007_mqvs_wrong_search_col.sh b/tests/queries/2_vector_search/00007_mqvs_wrong_search_col.sh
+index 9bf863e2f6..7b24ecad05 100755
+--- a/tests/queries/2_vector_search/00007_mqvs_wrong_search_col.sh
++++ b/tests/queries/2_vector_search/00007_mqvs_wrong_search_col.sh
+@@ -2,6 +2,6 @@
+ # Tags: no-parallel
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id"
+ clickhouse-client -q "SELECT id, distance('topK=10')(vectore, [0.1, 0.1, 0.1]) FROM test_vector;" 2>&1 | grep -q "DB::Exception: wrong search column name 'vectore'." && echo 'OK' || echo 'FAIL' || :
+ clickhouse-client -q "SELECT [1.0, 1.1, 2.0], distance('topK=10')(vector, [0.1, 0.1, 0.1]), number FROM ( SELECT number FROM system.numbers LIMIT 100)" 2>&1 | grep -q "DB::Exception: wrong search column name 'vector'." && echo 'OK' || echo 'FAIL' || :
+diff --git a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+index dd3ad1d340..091bb2feb8 100644
+--- a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
++++ b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+@@ -18,3 +18,5 @@
+ 6	[6,6,6]	588
+ 34	[34,34,34]	588
+ 5	[5,5,5]	675
++test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 [buildVectorIndex] part:all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
++test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 [buildVectorIndex] part:all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
+diff --git a/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh b/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
+index 9d3c789017..724e72ce8d 100755
+--- a/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
++++ b/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
+@@ -4,6 +4,7 @@
+ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ . "$CURDIR"/helpers/00000_prepare_data_with_empty_vectors.sh
+ 
++# no enforce_fixed_vector_length_constraint
+ # test empty vector with IVFFLAT
+ clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
+ 
+@@ -12,3 +13,6 @@ clickhouse-client -q "ALTER TABLE test_vector DROP VECTOR INDEX v1;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE FLAT;"
+ sleep 1
+ clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
++
++# default enforce_fixed_vector_length_constraint
++clickhouse-client -q "select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() and table != 'test_vector' order by table;"
+diff --git a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
+index 71ded6d40b..017ad6e94b 100644
+--- a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
++++ b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
+@@ -5,7 +5,7 @@ name:   i_h
+ type:   FLAT
+ expr:   i_h vector TYPE FLAT
+ status: Built
+-CREATE TABLE default.test_vector\n(\n    `id` UInt64,\n    `vector` FixedArray(Float32, 3),\n    `label` String,\n    INDEX i_a id TYPE minmax GRANULARITY 4,\n    INDEX i_label label TYPE bloom_filter GRANULARITY 2\n)\nENGINE = MergeTree\nPRIMARY KEY id\nORDER BY id\nSETTINGS index_granularity = 8192
++CREATE TABLE default.test_vector\n(\n    `id` UInt64,\n    `vector` Array(Float32),\n    `label` String,\n    INDEX i_a id TYPE minmax GRANULARITY 4,\n    INDEX i_label label TYPE bloom_filter GRANULARITY 2,\n    CONSTRAINT vector_len CHECK length(vector) = 3\n)\nENGINE = MergeTree\nPRIMARY KEY id\nORDER BY id\nSETTINGS index_granularity = 8192
+ test_vector	i_a	minmax	id	4
+ test_vector	i_label	bloom_filter	label	2
+ test_vector	i_label	bloom_filter	label	2
+diff --git a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.sql b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.sql
+index 768db2a1b1..f752e902eb 100644
+--- a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.sql
++++ b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.sql
+@@ -4,8 +4,9 @@ drop table if exists test_vector;
+ CREATE TABLE test_vector
+ (
+    id UInt64,
+-   vector FixedArray(Float32, 3),
+-   label String
++   vector Array(Float32),
++   label String,
++   CONSTRAINT vector_len CHECK length(vector) = 3
+ )
+ ENGINE = MergeTree PRIMARY KEY id;
+ 
+diff --git a/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql b/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
+index c07943141a..b7a13d6ef7 100644
+--- a/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
++++ b/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
+@@ -1,7 +1,7 @@
+ -- Tags: no-parallel
+ 
+ DROP TABLE IF EXISTS test_vector;
+-CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
++CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
+ INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(2100);
+ 
+ set allow_experimental_lightweight_delete=1;
+diff --git a/tests/queries/2_vector_search/00016_mqvs_lightweight_delete_with_vector.sql b/tests/queries/2_vector_search/00016_mqvs_lightweight_delete_with_vector.sql
+index e5bcf21149..f248ea230d 100644
+--- a/tests/queries/2_vector_search/00016_mqvs_lightweight_delete_with_vector.sql
++++ b/tests/queries/2_vector_search/00016_mqvs_lightweight_delete_with_vector.sql
+@@ -1,7 +1,7 @@
+ -- Tags: no-parallel
+ 
+ DROP TABLE IF EXISTS test_vector;
+-CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
++CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
+ INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(2100);
+ ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
+ 
+diff --git a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
+index 7eff31284d..f5ff0a4f31 100644
+--- a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
++++ b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
+@@ -1,7 +1,7 @@
+ -- Tags: no-parallel
+ 
+ DROP TABLE IF EXISTS test_vector;
+-CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
++CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+ INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
+ ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
+ 
+diff --git a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+index 7b7da30167..d689efd104 100644
+--- a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
++++ b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+@@ -1,7 +1,7 @@
+ -- Tags: no-parallel
+ 
+ DROP TABLE IF EXISTS test_drop_index;
+-CREATE TABLE test_drop_index(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
++CREATE TABLE test_drop_index(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
+ INSERT INTO test_drop_index SELECT number, [number, number, number] FROM numbers(2100);
+ ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
+ 
+diff --git a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
+index 5fb86add2d..bdefe2799b 100644
+--- a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
++++ b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
+@@ -1,18 +1,18 @@
+ -- Tags: no-parallel
+ 
+ DROP TABLE IF EXISTS test_success_vector;
+-CREATE TABLE test_success_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++CREATE TABLE test_success_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
+ INSERT INTO test_success_vector SELECT number, [number, number, number] FROM numbers(2100);
+ ALTER TABLE test_success_vector ADD VECTOR INDEX v1_success vector TYPE HNSWFLAT;
+ 
+ DROP TABLE IF EXISTS test_fail_vector;
+-CREATE TABLE test_fail_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++CREATE TABLE test_fail_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
+ INSERT INTO test_fail_vector SELECT number, [number, number, number] FROM numbers(2100);
+ -- Unsupported parameter: metric_type = cosine
+ ALTER TABLE test_fail_vector ADD VECTOR INDEX v1_fail vector TYPE HNSWSQ('metric_type = cosine', 'ef_c=256');
+ 
+ DROP TABLE IF EXISTS test_fail_vector_2;
+-CREATE TABLE test_fail_vector_2(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++CREATE TABLE test_fail_vector_2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
+ INSERT INTO test_fail_vector_2 SELECT number, [number, number, number] FROM numbers(2100);
+ -- Unsupported parameter: meric=IP
+ ALTER TABLE test_fail_vector_2 ADD VECTOR INDEX vindex vector TYPE IVFFLAT('metric=IP', 'ncentroids=5000');
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+index 073ceed269..7cacf7003b 100755
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+@@ -6,7 +6,7 @@ max_response_time_drop_table=10
+ 
+ # create table & insert data
+ clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
+-clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
++clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;"
+ clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);"
+ clickhouse-client -q "optimize table test_drop_table final;"
+ 
+@@ -33,7 +33,7 @@ fi
+ 
+ # add a new vector index with different name after drop index to confirm sucessully build.
+ clickhouse-client -q "DROP TABLE IF EXISTS test_build_index;"
+-clickhouse-client -q "CREATE TABLE test_build_index(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
++clickhouse-client -q "CREATE TABLE test_build_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;"
+ clickhouse-client -q "INSERT INTO test_build_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(10000);"
+ clickhouse-client -q "ALTER TABLE test_build_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;"
+ sleep 1
+diff --git a/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql b/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
+index b2dc3c4993..1989d58dce 100644
+--- a/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
++++ b/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
+@@ -4,9 +4,10 @@ drop table if exists test_vector;
+ create table test_vector
+ (
+     id    UInt32,
+-    data  FixedArray(Float32, 3),
++    data  Array(Float32),
+     date  Date,
+-    label Enum8('person' = 1, 'building' = 2, 'animal' = 3)
++    label Enum8('person' = 1, 'building' = 2, 'animal' = 3),
++    CONSTRAINT data_len CHECK length(data) = 3
+ )
+ engine = MergeTree PRIMARY KEY id;
+ 
+diff --git a/tests/queries/2_vector_search/00021_mqvs_support_primary_key_cache.sql b/tests/queries/2_vector_search/00021_mqvs_support_primary_key_cache.sql
+index 3c142d5ce6..087271be61 100644
+--- a/tests/queries/2_vector_search/00021_mqvs_support_primary_key_cache.sql
++++ b/tests/queries/2_vector_search/00021_mqvs_support_primary_key_cache.sql
+@@ -1,5 +1,5 @@
+ DROP TABLE IF EXISTS test_pk_cache;
+-CREATE TABLE test_pk_cache(id UInt32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
++CREATE TABLE test_pk_cache(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
+ INSERT INTO test_pk_cache SELECT number, [number, number, number] FROM numbers(2100);
+ 
+ ALTER TABLE test_pk_cache ADD VECTOR INDEX v1 vector TYPE IVFFLAT;
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_data_with_empty_vectors.sh b/tests/queries/2_vector_search/helpers/00000_prepare_data_with_empty_vectors.sh
+index b6d124d0c4..cf4342c90c 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_data_with_empty_vectors.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_data_with_empty_vectors.sh
+@@ -1,11 +1,13 @@
+ #!/usr/bin/env bash
+ 
++# no enforce_fixed_vector_length_constraint
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0, enforce_fixed_vector_length_constraint=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(10);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 10, [] FROM numbers(20);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 30, [number + 30, number + 30, number + 30] FROM numbers(400);"
+ clickhouse-client -q "OPTIMIZE TABLE test_vector;"
++clickhouse-client -q "ALTER TABLE test_vector ADD CONSTRAINT vector_len CHECK length(vector) = 3;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE IVFFLAT('ncentroids = 10');"
+ status="NotBuilt"
+ time=0
+@@ -17,3 +19,24 @@ done
+ if [ $time -eq 5 ]; then
+         echo "fail to build index"
+ fi
++
++# default enforce_fixed_vector_length_constraint
++# empty array
++clickhouse-client -q "DROP TABLE IF EXISTS test_fail_vector"
++clickhouse-client -q "CREATE TABLE test_fail_vector(id Float32, vector Array(Float32)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "INSERT INTO test_fail_vector SELECT number, [number, number, number] FROM numbers(10);"
++clickhouse-client -q "INSERT INTO test_fail_vector SELECT number + 10, [] FROM numbers(20);"
++clickhouse-client -q "INSERT INTO test_fail_vector SELECT number + 30, [number + 30, number + 30, number + 30] FROM numbers(400);"
++clickhouse-client -q "OPTIMIZE TABLE test_fail_vector;"
++clickhouse-client -q "ALTER TABLE test_fail_vector ADD CONSTRAINT vector_len CHECK length(vector) = 3;"
++clickhouse-client -q "ALTER TABLE test_fail_vector ADD VECTOR INDEX v1_fail vector TYPE IVFFLAT('ncentroids = 10');"
++
++# special case
++clickhouse-client -q "DROP TABLE IF EXISTS test_fail_vector_2"
++clickhouse-client -q "CREATE TABLE test_fail_vector_2(id Float32, vector Array(Float32)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "INSERT INTO test_fail_vector_2 SELECT number, [number, number, number] FROM numbers(10);"
++clickhouse-client -q "INSERT INTO test_fail_vector_2 SELECT number + 10, [number + 10, number + 10] FROM numbers(210);"
++clickhouse-client -q "INSERT INTO test_fail_vector_2 SELECT number + 220, [number + 220, number + 220, number + 220, number + 220] FROM numbers(210);"
++clickhouse-client -q "OPTIMIZE TABLE test_fail_vector_2;"
++clickhouse-client -q "ALTER TABLE test_fail_vector_2 ADD CONSTRAINT vector_len CHECK length(vector) = 3;"
++clickhouse-client -q "ALTER TABLE test_fail_vector_2 ADD VECTOR INDEX v1_fail_2 vector TYPE IVFFLAT('ncentroids = 10');"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index.sh
+index 6e2375220a..8e271811ea 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE FLAT;"
+ status="NotBuilt"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_2.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_2.sh
+index 6b38d29b31..1b0b611f65 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_2.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_2.sh
+@@ -1,7 +1,8 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=128, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32)) engine MergeTree primary key id SETTINGS index_granularity=128, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(10);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 10, [] FROM numbers(20);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 30, [number + 30, number + 30, number + 30] FROM numbers(10000);"
++clickhouse-client -q "ALTER TABLE test_vector ADD CONSTRAINT vector_len CHECK length(vector) = 3;"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_3.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_3.sh
+index 7dd27f76c8..36d67a6f71 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_3.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_3.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(10000);"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE IVFSQ;"
+ status="NotBuilt"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_4.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_4.sh
+index d4b2a4dfee..5d9a364021 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_4.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_4.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(2000);"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE IVFFLAT('metric_type=cosine');"
+ status="NotBuilt"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_5.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_5.sh
+index dab33d8bfb..bf17c52a6d 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_5.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_5.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(10000);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 10000, [number + 10000, number + 10000, number + 10000] FROM numbers(10000);"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number + 20000, [number + 20000, number + 20000, number + 20000] FROM numbers(10000);"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_6.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_6.sh
+index 1053af8964..ebbb26a205 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_6.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_6.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(5000);"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;"
+ status="NotBuilt"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine.sh
+index a727a410a6..cb2013d046 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine.sh
+@@ -2,7 +2,7 @@
+ 
+ INDEX_TYPE=$1
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE $INDEX_TYPE('metric_type=cosine');"
+ status="NotBuilt"
+diff --git a/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine_ivfpq.sh b/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine_ivfpq.sh
+index b4020a6fad..6369789d82 100755
+--- a/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine_ivfpq.sh
++++ b/tests/queries/2_vector_search/helpers/00000_prepare_index_cosine_ivfpq.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+ clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE IVFPQ('M = 4', 'metric_type=cosine');"
+ status="NotBuilt"
+diff --git a/tests/vector_search/00017_mqvs_distance_ip_hnsw.sh b/tests/vector_search/00017_mqvs_distance_ip_hnsw.sh
+index 94d9c20a49..342f1a7d8c 100644
+--- a/tests/vector_search/00017_mqvs_distance_ip_hnsw.sh
++++ b/tests/vector_search/00017_mqvs_distance_ip_hnsw.sh
+@@ -2,7 +2,7 @@
+ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector;"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT('metric_type=IP');"
+ clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
+ 
+diff --git a/tests/vector_search/00017_mqvs_distance_ip_ivfflat.sh b/tests/vector_search/00017_mqvs_distance_ip_ivfflat.sh
+index 8c884490f4..f8d1e677a1 100644
+--- a/tests/vector_search/00017_mqvs_distance_ip_ivfflat.sh
++++ b/tests/vector_search/00017_mqvs_distance_ip_ivfflat.sh
+@@ -2,7 +2,7 @@
+ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ 
+ clickhouse-client -q "DROP TABLE IF EXISTS test_vector;"
+-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id;"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE IVFFLAT('metric_type=IP', 'ncentroids=32');"
+ clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
+ 
+diff --git a/tests/vector_search/aio_test_batch_distance.py b/tests/vector_search/aio_test_batch_distance.py
+index 95c255a382..1e6d2da28f 100755
+--- a/tests/vector_search/aio_test_batch_distance.py
++++ b/tests/vector_search/aio_test_batch_distance.py
+@@ -92,7 +92,7 @@ def evaluate(id, result_id, query_data, truth, top_k):
+ def createTable(tableName, metrics, indexType):
+     client = "clickhouse-client --port 10000"
+     if (tableName,) not in table:
+-        os.system('{} -q \"CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id\"'.format(client,tableName))
++        os.system('{} -q \"CREATE TABLE {} (id UInt32, data Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id\"'.format(client,tableName))
+         os.system('{} -q \"Alter TABLE {} add vector index v1 data TYPE {}({})\"'.format(client,tableName,indexType,metrics))
+ 
+ async def importSIFT(id, insert_csv, search_data, tableName, query_num=10, k=50,  build=True, search=True,stress_test_time=0,aio_query=1):
+diff --git a/tests/vector_search/benchmark.py b/tests/vector_search/benchmark.py
+index 7fd72c9bc3..9a94260fff 100755
+--- a/tests/vector_search/benchmark.py
++++ b/tests/vector_search/benchmark.py
+@@ -210,7 +210,7 @@ def evaluate(id, result_id, truth, top_k, nq):
+ def createTable(tableName):
+     client.execute('drop table if exists {}'.format(tableName))
+     client.execute(
+-        'CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id'.format(
++        'CREATE TABLE {} (id UInt32, data Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id'.format(
+             tableName))
+ 
+ 
+diff --git a/tests/vector_search/distributed/prepare.sql b/tests/vector_search/distributed/prepare.sql
+index 9dfebc38a5..40cf70a837 100644
+--- a/tests/vector_search/distributed/prepare.sql
++++ b/tests/vector_search/distributed/prepare.sql
+@@ -1,12 +1,12 @@
+ CREATE TABLE test_vector_local ON CLUSTER test_cluster_two_shards(
+-    id UInt64, vector FixedArray(Float32, 3)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3
+ ) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_vector_local', '{replica}')
+ ORDER BY id;
+ 
+ CREATE TABLE distributed_test_vector ON CLUSTER
+ test_cluster_two_shards
+ (
+-    id UInt64, vector FixedArray(Float32, 3)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3
+ ) ENGINE = Distributed(test_cluster_two_shards, default, test_vector_local, rand());
+ 
+ INSERT INTO distributed_test_vector SELECT number, [number, number, number] FROM numbers(100000);
+diff --git a/tests/vector_search/k8s/create_distributed.sql b/tests/vector_search/k8s/create_distributed.sql
+index 3e3e4d5ee1..100d24acfb 100644
+--- a/tests/vector_search/k8s/create_distributed.sql
++++ b/tests/vector_search/k8s/create_distributed.sql
+@@ -1,5 +1,5 @@
+ CREATE TABLE distributed_test_vector ON CLUSTER
+ {cluster}
+ (
+-    id UInt64, vector FixedArray(Float32, 3)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3
+ ) ENGINE = Distributed({cluster}, default, test_vector_local, rand());
+\ No newline at end of file
+diff --git a/tests/vector_search/k8s/create_gist1M.sql b/tests/vector_search/k8s/create_gist1M.sql
+index 1e391cec8e..48ddb62ab0 100644
+--- a/tests/vector_search/k8s/create_gist1M.sql
++++ b/tests/vector_search/k8s/create_gist1M.sql
+@@ -1,10 +1,10 @@
+ CREATE TABLE test_gist1M_local ON CLUSTER '{cluster}'
+ (
+-    id UInt64, vector FixedArray(Float32, 960)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 960
+ ) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_gist1M_local', '{replica}')
+ ORDER BY id;
+ 
+ CREATE TABLE distributed_test_gist1M ON CLUSTER '{cluster}'
+ (
+-    id UInt64, vector FixedArray(Float32, 960)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 960
+ ) ENGINE = Distributed('{cluster}', default, test_gist1M_local, rand());
+\ No newline at end of file
+diff --git a/tests/vector_search/k8s/create_replicated.sql b/tests/vector_search/k8s/create_replicated.sql
+index bd86a28404..fc13191913 100644
+--- a/tests/vector_search/k8s/create_replicated.sql
++++ b/tests/vector_search/k8s/create_replicated.sql
+@@ -1,4 +1,4 @@
+ CREATE TABLE test_vector_local ON CLUSTER {cluster}(
+-    id UInt64, vector FixedArray(Float32, 3)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3
+ ) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_vector_local', '{replica}')
+ ORDER BY id;
+\ No newline at end of file
+diff --git a/tests/vector_search/k8s/create_sift10M.sql b/tests/vector_search/k8s/create_sift10M.sql
+index 5acf492a1d..97b0f370cc 100644
+--- a/tests/vector_search/k8s/create_sift10M.sql
++++ b/tests/vector_search/k8s/create_sift10M.sql
+@@ -1,10 +1,10 @@
+ CREATE TABLE test_sift10M_local ON CLUSTER testing
+ (
+-    id UInt64, vector FixedArray(Float32, 128)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 128
+ ) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_sift10M_local', '{replica}')
+ ORDER BY id;
+ 
+ CREATE TABLE distributed_test_sift10M ON CLUSTER testing
+ (
+-    id UInt64, vector FixedArray(Float32, 128)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 128
+ ) ENGINE = Distributed(testing, default, test_sift10M_local, rand());
+\ No newline at end of file
+diff --git a/tests/vector_search/k8s/create_sift1M.sql b/tests/vector_search/k8s/create_sift1M.sql
+index a8e03d76c0..51dbf768a2 100644
+--- a/tests/vector_search/k8s/create_sift1M.sql
++++ b/tests/vector_search/k8s/create_sift1M.sql
+@@ -1,10 +1,10 @@
+ CREATE TABLE test_sift1M_local ON CLUSTER '{cluster}'
+ (
+-    id UInt64, vector FixedArray(Float32, 128)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 128
+ ) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_sift1M_local', '{replica}')
+ ORDER BY id;
+ 
+ CREATE TABLE distributed_test_sift1M ON CLUSTER '{cluster}'
+ (
+-    id UInt64, vector FixedArray(Float32, 128)
++    id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 128
+ ) ENGINE = Distributed('{cluster}', default, test_sift1M_local, rand());
+\ No newline at end of file
+diff --git a/tests/vector_search/test_batch_distance.py b/tests/vector_search/test_batch_distance.py
+index aa6e542a39..4055590a62 100755
+--- a/tests/vector_search/test_batch_distance.py
++++ b/tests/vector_search/test_batch_distance.py
+@@ -95,7 +95,7 @@ def evaluate(id, result_id, query_data, truth, top_k):
+ def createTable(tableName, metrics, indexType):
+     client = "clickhouse-client --port 10000"
+     if (tableName,) not in table:
+-        os.system('{} -q \"CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id\"'.format(client,tableName))
++        os.system('{} -q \"CREATE TABLE {} (id UInt32, data Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id\"'.format(client,tableName))
+         os.system('{} -q \"Alter TABLE {} add vector index v1 data TYPE {}({})\"'.format(client,tableName,indexType,metrics))
+ 
+ def importSIFT(id, insert_csv, search_data, tableName, query_num=10, k=50,  build=True, search=True,stress_test_time=0):
+diff --git a/tests/vector_search/test_create_replicated_table.sql b/tests/vector_search/test_create_replicated_table.sql
+index 81d44a500f..54b1bf80f5 100644
+--- a/tests/vector_search/test_create_replicated_table.sql
++++ b/tests/vector_search/test_create_replicated_table.sql
+@@ -1,5 +1,5 @@
+ DROP TABLE IF EXISTS test_vector_local;
+ 
+-CREATE TABLE test_vector_local(id UInt64, vector FixedArray(Float32, 3))
++CREATE TABLE test_vector_local(id UInt64, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
+ ENGINE=ReplicatedMergeTree('/clickhouse/databases/default/tables/test_vector', 'replica1')
+ ORDER BY id;
+\ No newline at end of file
+diff --git a/tests/vector_search/test_sift.py b/tests/vector_search/test_sift.py
+index 846c6786f7..212895eb14 100644
+--- a/tests/vector_search/test_sift.py
++++ b/tests/vector_search/test_sift.py
+@@ -45,7 +45,7 @@ def create_table():
+     os.system('{} -q "DROP TABLE IF EXISTS {}"'.format(client, table_name))
+ 
+     print("create table {}".format(table_name))
+-    os.system('{} -q "CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id"'.format(client, table_name))
++    os.system('{} -q "CREATE TABLE {} (id UInt32, Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id"'.format(client, table_name))
+ 
+ def insert_data():
+    #base, query, train, truth = load_sift10M()
+diff --git a/tests/vector_search/test_vector_search.py b/tests/vector_search/test_vector_search.py
+index 757468c8fe..2dfc5d9862 100755
+--- a/tests/vector_search/test_vector_search.py
++++ b/tests/vector_search/test_vector_search.py
+@@ -2,7 +2,7 @@ import os
+ 
+ clickhouse_client = "clickhouse-client"
+ 
+-schema_template = "CREATE TABLE {}(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector FixedArray(Float32, 1280)) engine MergeTree primary key docId"
++schema_template = "CREATE TABLE {}(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 1280) engine MergeTree primary key docId"
+ 
+ select_1_template = "SELECT docId, headLine, distance('topK = 10')(vector, {}) as d FROM {} ORDER BY d ASC"
+ 
+diff --git a/tests/vector_search/vector/create_table.sql b/tests/vector_search/vector/create_table.sql
+index 099fd60ac7..f8e2966179 100644
+--- a/tests/vector_search/vector/create_table.sql
++++ b/tests/vector_search/vector/create_table.sql
+@@ -1 +1 @@
+-create table test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024
+\ No newline at end of file
++create table test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024
+\ No newline at end of file
+diff --git a/tests/vector_search/vector/create_table_xhs.sql b/tests/vector_search/vector/create_table_xhs.sql
+index 7f9d7278b1..e0d704f207 100644
+--- a/tests/vector_search/vector/create_table_xhs.sql
++++ b/tests/vector_search/vector/create_table_xhs.sql
+@@ -1 +1 @@
+-CREATE TABLE test_xhs(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector FixedArray(Float32, 1280)) engine MergeTree primary key docId
+\ No newline at end of file
++CREATE TABLE test_xhs(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 1280) engine MergeTree primary key docId
+\ No newline at end of file
+-- 
+2.32.1 (Apple Git-133)
+

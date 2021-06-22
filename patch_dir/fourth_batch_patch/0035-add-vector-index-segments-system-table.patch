@@ -1,0 +1,1426 @@
+From f33771a8603698329925ac9943bfaf80446d1cfe Mon Sep 17 00:00:00 2001
+From: Zhuo Qiu <qiu_z@moqi.ai>
+Date: Wed, 31 May 2023 09:46:35 +0000
+Subject: [PATCH 35/49] add vector index segments system table
+
+---
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp |  96 ++++-
+ src/Storages/MergeTree/IMergeTreeDataPart.h   |  64 +++-
+ .../MergeTree/MergePlainMergeTreeTask.cpp     |   1 +
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    |  43 ++-
+ .../StorageSystemVectorIndexSegments.cpp      | 350 ++++++++++++++++++
+ .../System/StorageSystemVectorIndexSegments.h |  32 ++
+ src/Storages/System/attachSystemTables.cpp    |  70 ++--
+ src/Storages/VectorIndexInfo.cpp              |  39 ++
+ src/Storages/VectorIndexInfo.h                | 171 +++++++++
+ src/VectorIndex/VectorIndexCommon.h           |   2 +-
+ ...00031_mqvs_vector_index_segments.reference |  68 ++++
+ .../00031_mqvs_vector_index_segments.sql      | 154 ++++++++
+ 12 files changed, 1036 insertions(+), 54 deletions(-)
+ create mode 100644 src/Storages/System/StorageSystemVectorIndexSegments.cpp
+ create mode 100644 src/Storages/System/StorageSystemVectorIndexSegments.h
+ create mode 100644 src/Storages/VectorIndexInfo.cpp
+ create mode 100644 src/Storages/VectorIndexInfo.h
+ create mode 100644 tests/queries/2_vector_search/00031_mqvs_vector_index_segments.reference
+ create mode 100644 tests/queries/2_vector_search/00031_mqvs_vector_index_segments.sql
+
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index f5f5e0cac6..70a6e7fd7c 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -21,16 +21,15 @@
+ #include <Storages/MergeTree/checkDataPart.h>
+ #include <Storages/MergeTree/localBackup.h>
+ #include <Storages/StorageReplicatedMergeTree.h>
+-#include <VectorIndex/CacheManager.h>
+ #include <VectorIndex/DiskIOReader.h>
++#include <VectorIndex/Metadata.h>
++#include <VectorIndex/SegmentId.h>
+ #include <VectorIndex/VectorSegmentExecutor.h>
+ #include <base/JSON.h>
+-#include <base/logger_useful.h>
+ #include <Common/CurrentMetrics.h>
+ #include <Common/FieldVisitorsAccurateComparison.h>
+ #include <Common/MemoryTrackerBlockerInThread.h>
+ #include <Common/StringUtils/StringUtils.h>
+-#include <Common/ZooKeeper/ZooKeeper.h>
+ #include <Common/escapeForFileName.h>
+ 
+ 
+@@ -1127,6 +1126,82 @@ void IMergeTreeDataPart::loadColumns(bool require)
+     setSerializationInfos(infos);
+ }
+ 
++void IMergeTreeDataPart::addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const
++{
++    std::lock_guard lock(vector_indices_mutex);
++
++    String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
++        / info.getPartNameWithoutMutation() / "";
++
++    VectorIndex::SegmentId segment_id(volume, getFullPath(), name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
++
++    VectorIndex::Metadata metadata(segment_id);
++    auto buf = volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
++    metadata.readText(*buf);
++
++    auto vector_index_info
++        = std::make_shared<VectorIndexInfo>(storage.getStorageID().getDatabaseName(), storage.getStorageID().getTableName(), metadata);
++
++    vector_indices.insert_or_assign(vec_index_desc.name, std::move(vector_index_info));
++}
++
++void IMergeTreeDataPart::addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const
++{
++    std::lock_guard lock(vector_indices_mutex);
++
++    auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
++
++    String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
++        / info.getPartNameWithoutMutation() / "";
++
++    for (const auto & old_part : old_parts)
++    {
++        for (const auto & vec_index_desc : vec_indices)
++        {
++            VectorIndex::SegmentId segment_id(
++                volume,
++                getFullPath(),
++                name,
++                old_part.name,
++                vec_index_desc.name,
++                vec_index_desc.column,
++                vector_index_cache_prefix,
++                old_part.id);
++
++            VectorIndex::Metadata metadata(segment_id);
++            auto buf = volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
++            metadata.readText(*buf);
++
++            auto vector_index_info = std::make_shared<VectorIndexInfo>(
++                storage.getStorageID().getDatabaseName(), storage.getStorageID().getTableName(), metadata);
++
++            if (vector_indices_decoupled.contains(vec_index_desc.name))
++                vector_indices_decoupled[vec_index_desc.name].emplace_back(std::move(vector_index_info));
++            else
++                vector_indices_decoupled.insert_or_assign(vec_index_desc.name, VectorIndexInfoPtrList{std::move(vector_index_info)});
++        }
++    }
++}
++
++void IMergeTreeDataPart::addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part) const
++{
++    std::lock_guard lock(vector_indices_mutex);
++
++    if (vector_indices.contains(vec_index_desc.name))
++        return;
++
++    auto vector_index_info = std::make_shared<VectorIndexInfo>(
++        storage.getStorageID().getDatabaseName(),
++        storage.getStorageID().getTableName(),
++        name,
++        vec_index_desc.name,
++        vec_index_desc.type,
++        rows_count,
++        is_small_part ? SMALL_PART : PENDING);
++
++    vector_indices.insert_or_assign(vec_index_desc.name, std::move(vector_index_info));
++}
++
+ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple) const
+ {
+     /// No need to check metadata of table, because for drop index, the metadata has erased it.
+@@ -1171,6 +1246,8 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
+     /// Clear vector index build flags
+     vector_index_build_error = false;
+     vector_index_build_cancelled = false;
++
++    removeVectorIndexInfo(index_name);
+ }
+ 
+ void IMergeTreeDataPart::loadVectorIndexMetadata() const
+@@ -1193,16 +1270,12 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
+ {
+     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+ 
+-    /// first loop through metadata, this loop we find all vector index needed to verify, and read them in one disk IO
+-    std::vector<String> index_name_to_verify;
+-    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+-        index_name_to_verify.emplace_back(vec_index_desc.name + "_" + vec_index_desc.column);
+-
+     for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+     {
+         String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+         LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
+         addVectorIndex(index_name);
++        addBuiltVectorIndex(vec_index_desc);
+     }
+ }
+ 
+@@ -1240,11 +1313,13 @@ void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
+         old_part_names.emplace_back(tokens[2], std::stoi(tokens[1]));
+     }
+ 
+-    /// Initilize the decoupled metadata
++    /// Initialize the decoupled metadata
+     if (!old_part_names.empty())
+     {
+         std::lock_guard lock(decouple_mutex);
+         merged_source_parts = old_part_names;
++
++        addDecoupledVectorIndices(old_part_names);
+     }
+ }
+ 
+@@ -1268,6 +1343,9 @@ void IMergeTreeDataPart::removeAllRowIdsMaps(const bool force) const
+ 
+     std::lock_guard lock(decouple_mutex);
+     merged_source_parts.clear();
++
++    std::lock_guard info_lock(vector_indices_mutex);
++    vector_indices_decoupled.clear();
+ }
+ 
+ /// Project part / part with project parts / compact part doesn't support LWD.
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.h b/src/Storages/MergeTree/IMergeTreeDataPart.h
+index e608856fe6..b0933d5ace 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.h
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.h
+@@ -5,21 +5,22 @@
+ #pragma once
+ 
+ #include <Core/Block.h>
+-#include <base/types.h>
+ #include <Core/NamesAndTypes.h>
++#include <DataTypes/Serializations/SerializationInfo.h>
++#include <Interpreters/TransactionVersionMetadata.h>
+ #include <Storages/IStorage.h>
+ #include <Storages/LightweightDeleteDescription.h>
++#include <Storages/MergeTree/KeyCondition.h>
++#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
++#include <Storages/MergeTree/MergeTreeDataPartTTLInfo.h>
++#include <Storages/MergeTree/MergeTreeIOSettings.h>
+ #include <Storages/MergeTree/MergeTreeIndexGranularity.h>
+ #include <Storages/MergeTree/MergeTreeIndexGranularityInfo.h>
+ #include <Storages/MergeTree/MergeTreeIndices.h>
+ #include <Storages/MergeTree/MergeTreePartInfo.h>
+ #include <Storages/MergeTree/MergeTreePartition.h>
+-#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
+-#include <Storages/MergeTree/MergeTreeDataPartTTLInfo.h>
+-#include <Storages/MergeTree/MergeTreeIOSettings.h>
+-#include <Storages/MergeTree/KeyCondition.h>
+-#include <Interpreters/TransactionVersionMetadata.h>
+-#include <DataTypes/Serializations/SerializationInfo.h>
++#include <Storages/VectorIndexInfo.h>
++#include <base/types.h>
+ 
+ #include <shared_mutex>
+ 
+@@ -329,6 +330,53 @@ public:
+     mutable std::mutex vector_indexed_mutex;
+     mutable std::set<String> vector_indexed;
+ 
++    mutable std::mutex vector_indices_mutex;
++    mutable std::unordered_map<String, VectorIndexInfoPtr> vector_indices;
++    mutable std::unordered_map<String, VectorIndexInfoPtrList> vector_indices_decoupled;
++
++    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const;
++
++    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part = false) const;
++
++    void onVectorIndexBuildStart(const String & index_name) const
++    {
++        std::lock_guard lock(vector_indices_mutex);
++        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
++            it->second->onBuildStart();
++    }
++
++    void onVectorIndexBuildFinish(const String & index_name, const VectorIndex::Metadata * metadata = nullptr) const
++    {
++        std::lock_guard lock(vector_indices_mutex);
++        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
++        {
++            it->second->onBuildFinish(true);
++            if (metadata)
++                it->second->setIndexSize(*metadata);
++        }
++    }
++
++    void onVectorIndexBuildError(const String & index_name, const String & err_msg) const
++    {
++        std::lock_guard lock(vector_indices_mutex);
++        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
++            it->second->onError(err_msg);
++    }
++
++    void removeVectorIndexInfo(const String & index_name) const
++    {
++        std::lock_guard lock(vector_indices_mutex);
++        vector_indices.erase(index_name);
++        vector_indices_decoupled.erase(index_name);
++    }
++
++    void removeAllVectorIndexInfo() const
++    {
++        std::lock_guard lock(vector_indices_mutex);
++        vector_indices.clear();
++        vector_indices_decoupled.clear();
++    }
++
+     /// Used for decouple part
+     mutable std::mutex decouple_mutex;
+ 
+@@ -378,6 +426,8 @@ public:
+         vector_indexed.insert(index_name);
+     }
+ 
++    void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
++
+     /// Remove specified vector index from part, both disk and metadata.
+     /// If skip_decouple, skip the vector index of old part in decouple part.
+     void removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple = false) const;
+diff --git a/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp b/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
+index 75bda6d845..c9a5f9b133 100644
+--- a/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
++++ b/src/Storages/MergeTree/MergePlainMergeTreeTask.cpp
+@@ -138,6 +138,7 @@ void MergePlainMergeTreeTask::finish()
+             /// Pass empty string for index_name and column name, all vector index will be removed from this part.
+             String dummy_name;
+             new_part->removeVectorIndex(dummy_name, dummy_name);
++            new_part->removeAllVectorIndexInfo();
+ 
+             LOG_DEBUG(storage.log, "Remove vector index from part {} due to dropped in metadata", new_part->name);
+         }
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 334ecf1178..bcd16703ed 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -1,15 +1,16 @@
+ #include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+ 
+ #include <DataTypes/DataTypeArray.h>
++#include <Interpreters/VectorIndexEventLog.h>
+ #include <Storages/MergeTree/MergeTreeData.h>
+ #include <VectorIndex/DiskIOReader.h>
+-#include <Interpreters/VectorIndexEventLog.h>
++#include <VectorIndex/Metadata.h>
+ #include <VectorIndex/PartReader.h>
+ #include <VectorIndex/VectorIndexCommon.h>
+ #include <VectorIndex/VectorSegmentExecutor.h>
++#include <Common/ActionBlocker.h>
+ #include <Common/ProfileEvents.h>
+ #include <Common/Stopwatch.h>
+-#include <Common/ActionBlocker.h>
+ #include <Common/StringUtils/StringUtils.h>
+ 
+ namespace ProfileEvents
+@@ -210,6 +211,8 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
+         {
+             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
+             {
++                part->addNewVectorIndex(vec_index);
++
+                 if (select_slow_mode_part)
+                 {
+                     if (!isSlowModePart(part))
+@@ -227,6 +230,10 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
+                     return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
+                 }
+             }
++            else if (part->isSmallPart(min_rows_to_build_vector_index))
++            {
++                part->addNewVectorIndex(vec_index, true);
++            }
+         }
+     }
+ 
+@@ -384,7 +391,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                         if (dim == 0)
+                         {
+                             LOG_ERROR(log, "Wrong dimension: 0, please check length constraint on the column.");
+-                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
++
++                            String err = "wrong dimension: 0, please check length constraint on the column.";
++                            part->onVectorIndexBuildError(vec_index_desc.name, err);
++
++                            throw Exception(ErrorCodes::BAD_ARGUMENTS, err);
+                         }
+                     }
+                     ///only reading one column
+@@ -393,7 +404,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 else
+                 {
+                     LOG_WARNING(log, "Found column {} in part and VectorIndexDescription, but not in metadata snapshot.", col);
++
++                    part->onVectorIndexBuildError(
++                        vec_index_desc.name, "found column in part and VectorIndexDescription, but not in metadata snapshot.");
+                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus(ErrorCodes::ABORTED, "Found column " + col + " in part and VectorIndexDescription, but not in metadata snapshot"));
++
+                     return BuildVectorIndexStatus::META_ERROR;
+                 }
+             }
+@@ -406,6 +421,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 vec_index_desc.name,
+                 part->name);
+             part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
++            part->onVectorIndexBuildFinish(vec_index_desc.name);
+             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
+             return BuildVectorIndexStatus::SUCCESS;
+         }
+@@ -486,7 +502,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 /// else future part will pick up later at the next time when index built for it.
+             }
+ 
++            part->onVectorIndexBuildFinish(vec_index_desc.name);
+             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
++
+             return BuildVectorIndexStatus::SUCCESS;
+         }
+ 
+@@ -500,6 +518,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+ 
+         disk->createDirectories(vector_tmp_relative_path);
+ 
++        part->onVectorIndexBuildStart(vec_index_desc.name);
++
+         VectorIndex::SegmentId segment_id(
+             part->volume,
+             vector_tmp_full_path,
+@@ -540,9 +560,18 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             {
+                 /// Remove temporay directory
+                 disk->removeRecursive(vector_tmp_relative_path);
++
++                part->onVectorIndexBuildError(vec_index_desc.name, seri_status.getMessage());
++
+                 throw Exception(seri_status.getCode(), seri_status.getMessage());
+             }
+ 
++            VectorIndex::Metadata metadata(segment_id);
++            auto buf = part->volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
++            metadata.readText(*buf);
++
++            part->onVectorIndexBuildFinish(vec_index_desc.name, &metadata);
++
+             /// Done with writing vector index files to temporary directory.
+             /// Decide to move index files to which part direcory.
+             MergeTreeDataPartPtr future_part = nullptr;
+@@ -557,7 +586,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 if (!future_part)
+                 {
+                     LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
++
++                    part->onVectorIndexBuildError(vec_index_desc.name, "failed to find future part");
+                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
++
+                     return BuildVectorIndexStatus::SUCCESS;
+                 }
+             }
+@@ -570,6 +602,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 {
+                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+                     disk->removeRecursive(vector_tmp_relative_path);
++                    part->removeVectorIndexInfo(vec_index_desc.name);
+                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
+                     return BuildVectorIndexStatus::SUCCESS;
+                 }
+@@ -603,6 +636,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 }
+             }
+         }
++        else
++        {
++            part->onVectorIndexBuildError(vec_index_desc.name, "build has been cancelled.");
++        }
+     }
+ 
+     LOG_DEBUG(log, "Vector index build complete");
+diff --git a/src/Storages/System/StorageSystemVectorIndexSegments.cpp b/src/Storages/System/StorageSystemVectorIndexSegments.cpp
+new file mode 100644
+index 0000000000..83395e529b
+--- /dev/null
++++ b/src/Storages/System/StorageSystemVectorIndexSegments.cpp
+@@ -0,0 +1,350 @@
++#include "StorageSystemVectorIndexSegments.h"
++#include <mutex>
++#include <set>
++
++#include <Access/ContextAccess.h>
++#include <Columns/ColumnString.h>
++#include <DataTypes/DataTypeString.h>
++#include <DataTypes/DataTypesNumber.h>
++#include <Interpreters/Context.h>
++#include <Processors/Sources/SourceWithProgress.h>
++#include <Storages/MergeTree/MergeTreeData.h>
++#include <Storages/VectorIndexInfo.h>
++#include <Storages/VirtualColumnUtils.h>
++#include <VectorIndex/SegmentId.h>
++#include <VectorIndex/VectorSegmentExecutor.h>
++
++namespace DB
++{
++
++StorageSystemVectorIndexSegments::StorageSystemVectorIndexSegments(const StorageID & table_id_) : IStorage(table_id_)
++{
++    StorageInMemoryMetadata storage_metadata;
++    storage_metadata.setColumns(ColumnsDescription({
++        {"database", std::make_shared<DataTypeString>()},
++        {"table", std::make_shared<DataTypeString>()},
++        {"part", std::make_shared<DataTypeString>()},
++        {"owner_part", std::make_shared<DataTypeString>()},
++        {"owner_part_id", std::make_shared<DataTypeInt32>()},
++        {"name", std::make_shared<DataTypeString>()},
++        {"type", std::make_shared<DataTypeString>()},
++        {"status", std::make_shared<DataTypeString>()},
++        {"total_vectors", std::make_shared<DataTypeUInt64>()},
++        {"memory_usage_bytes", std::make_shared<DataTypeUInt64>()},
++        {"disk_usage_bytes", std::make_shared<DataTypeUInt64>()},
++        {"progress", std::make_shared<DataTypeUInt8>()},
++        {"elapsed", std::make_shared<DataTypeUInt64>()},
++        {"error", std::make_shared<DataTypeString>()},
++    }));
++    setInMemoryMetadata(storage_metadata);
++}
++
++class DataVectorIndexSegmentsSource : public SourceWithProgress
++{
++public:
++    DataVectorIndexSegmentsSource(
++        std::vector<UInt8> columns_mask_, Block header, UInt64 max_block_size_, ColumnPtr databases_, ContextPtr context_)
++        : SourceWithProgress(header)
++        , column_mask(std::move(columns_mask_))
++        , max_block_size(max_block_size_)
++        , databases(std::move(databases_))
++        , context(Context::createCopy(context_))
++        , database_idx(0)
++    {
++    }
++
++    String getName() const override { return "DataVectorIndexSegments"; }
++
++protected:
++    void getVectorIndexInfo(
++        const VectorIndexDescription & index,
++        const VectorIndexInfoPtr & vec_info,
++        const std::string & table_name,
++        const MergeTreeData::DataPartPtr & part,
++        const std::set<std::string> & cached_indices,
++        MutableColumns & res_columns)
++    {
++        size_t src_index = 0;
++        size_t res_index = 0;
++
++        /// 'database' column
++        if (column_mask[src_index++])
++        {
++            res_columns[res_index++]->insert(database_name);
++        }
++        /// 'table' column
++        if (column_mask[src_index++])
++            res_columns[res_index++]->insert(table_name);
++        /// 'part' column
++        if (column_mask[src_index++])
++            res_columns[res_index++]->insert(part->name);
++        /// 'owner_part' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->owner_part);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'owner_part_id' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->owner_part_id);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'name' column
++        if (column_mask[src_index++])
++        {
++            res_columns[res_index++]->insert(index.name);
++        }
++        /// 'type' column
++        if (column_mask[src_index++])
++            res_columns[res_index++]->insert(index.type);
++        /// 'status' column
++        if (column_mask[src_index++])
++        {
++            std::string owner_part;
++            int owner_part_id;
++            if (vec_info == nullptr || vec_info->owner_part.empty())
++            {
++                owner_part = part->name;
++                owner_part_id = 0;
++            }
++            else
++            {
++                owner_part = vec_info->owner_part;
++                owner_part_id = vec_info->owner_part_id;
++            }
++
++            String vector_index_cache_prefix = fs::path(part->storage.getContext()->getVectorIndexCachePath())
++                / part->storage.getRelativeDataPath() / part->info.getPartNameWithoutMutation() / "";
++
++            VectorIndex::SegmentId segment_id(
++                part->volume,
++                part->getFullPath(),
++                part->name,
++                owner_part,
++                index.name,
++                index.column,
++                vector_index_cache_prefix,
++                owner_part_id);
++
++            if (cached_indices.contains(segment_id.getCacheKey().toString()))
++                res_columns[res_index++]->insert("LOADED");
++            else if (vec_info)
++                res_columns[res_index++]->insert(vec_info->statusString());
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'total_vectors' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->total_vec);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'memory_usage_bytes' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->memory_usage_bytes);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'disk_usage_bytes' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->disk_usage_bytes);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'progress' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->progress());
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'elapsed' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(static_cast<UInt64>(vec_info->elapsed()));
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++        /// 'error' column
++        if (column_mask[src_index++])
++        {
++            if (vec_info)
++                res_columns[res_index++]->insert(vec_info->err_msg);
++            else
++                res_columns[res_index++]->insertDefault();
++        }
++    }
++
++    Chunk generate() override
++    {
++        if (database_idx >= databases->size())
++            return {};
++
++        MutableColumns res_columns = getPort().getHeader().cloneEmptyColumns();
++
++        const auto access = context->getAccess();
++        const bool check_access_for_databases = !access->isGranted(AccessType::SHOW_TABLES);
++
++        size_t rows_count = 0;
++        while (rows_count < max_block_size)
++        {
++            if (tables_it && !tables_it->isValid())
++                ++database_idx;
++
++            while (database_idx < databases->size() && (!tables_it || !tables_it->isValid()))
++            {
++                database_name = databases->getDataAt(database_idx).toString();
++                database = DatabaseCatalog::instance().tryGetDatabase(database_name);
++
++                if (database)
++                    break;
++                ++database_idx;
++            }
++
++            if (database_idx >= databases->size())
++                break;
++
++            if (!tables_it || !tables_it->isValid())
++                tables_it = database->getTablesIterator(context);
++
++            const bool check_access_for_tables = check_access_for_databases && !access->isGranted(AccessType::SHOW_TABLES, database_name);
++
++            std::set<std::string> cached_indices;
++            for (const auto & it : VectorIndex::VectorSegmentExecutor::getAllCacheNames())
++                cached_indices.emplace(it.first.toString());
++
++            for (; rows_count < max_block_size && tables_it->isValid(); tables_it->next())
++            {
++                auto table_name = tables_it->name();
++                if (check_access_for_tables && !access->isGranted(AccessType::SHOW_TABLES, database_name, table_name))
++                    continue;
++
++                const auto table = tables_it->table();
++                if (!table)
++                    continue;
++
++                StorageMetadataPtr metadata_snapshot = table->getInMemoryMetadataPtr();
++                if (!metadata_snapshot)
++                    continue;
++
++                MergeTreeData * data = dynamic_cast<MergeTreeData *>(table.get());
++                if (!data)
++                    continue;
++
++                auto data_parts = data->getDataPartsVectorForInternalUsage();
++
++                const auto indices = metadata_snapshot->getVectorIndices();
++
++                for (const auto & part : data_parts)
++                {
++                    std::lock_guard lock(part->vector_indices_mutex);
++
++                    for (const auto & index : indices)
++                    {
++                        bool found = false;
++                        if (part->containRowIdsMaps())
++                        {
++                            if (auto it = part->vector_indices_decoupled.find(index.name); it != part->vector_indices_decoupled.end())
++                            {
++                                found = true;
++
++                                for (const auto & info : it->second)
++                                {
++                                    ++rows_count;
++                                    getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
++                                }
++                            }
++                        }
++
++                        if (!found)
++                        {
++                            ++rows_count;
++
++                            VectorIndexInfoPtr info{nullptr};
++                            if (auto it = part->vector_indices.find(index.name); it != part->vector_indices.end())
++                                info = it->second;
++
++                            getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
++                        }
++                    }
++                }
++            }
++        }
++        return Chunk(std::move(res_columns), rows_count);
++    }
++
++private:
++    std::vector<UInt8> column_mask;
++    UInt64 max_block_size;
++    ColumnPtr databases;
++    ContextPtr context;
++    size_t database_idx;
++    DatabasePtr database;
++    std::string database_name;
++    DatabaseTablesIteratorPtr tables_it;
++};
++
++Pipe StorageSystemVectorIndexSegments::read(
++    const Names & column_names,
++    const StorageSnapshotPtr & storage_snapshot,
++    SelectQueryInfo & query_info,
++    ContextPtr context,
++    QueryProcessingStage::Enum /* processed_stage */,
++    size_t max_block_size,
++    unsigned int /* num_streams */)
++{
++    auto metadata_snapshot = storage_snapshot->metadata;
++
++    NameSet names_set(column_names.begin(), column_names.end());
++
++    Block sample_block = metadata_snapshot->getSampleBlock();
++    Block header;
++
++    std::vector<UInt8> columns_mask(sample_block.columns());
++    for (size_t i = 0, size = columns_mask.size(); i < size; ++i)
++    {
++        if (names_set.count(sample_block.getByPosition(i).name))
++        {
++            columns_mask[i] = 1;
++            header.insert(sample_block.getByPosition(i));
++        }
++    }
++
++    MutableColumnPtr column = ColumnString::create();
++
++    const auto databases = DatabaseCatalog::instance().getDatabases();
++    for (const auto & [database_name, database] : databases)
++    {
++        if (database_name == DatabaseCatalog::TEMPORARY_DATABASE)
++            continue;
++
++        /// Lazy database can contain only very primitive tables,
++        /// it cannot contain tables with data skipping indices.
++        /// Skip it to avoid unnecessary tables loading in the Lazy database.
++        if (database->getEngineName() != "Lazy")
++            column->insert(database_name);
++    }
++
++    /// Condition on "database" in a query acts like an index.
++    Block block{ColumnWithTypeAndName(std::move(column), std::make_shared<DataTypeString>(), "database")};
++    VirtualColumnUtils::filterBlockWithQuery(query_info.query, block, context);
++
++    ColumnPtr & filtered_databases = block.getByPosition(0).column;
++    return Pipe(std::make_shared<DataVectorIndexSegmentsSource>(
++        std::move(columns_mask), std::move(header), max_block_size, std::move(filtered_databases), context));
++}
++
++}
+diff --git a/src/Storages/System/StorageSystemVectorIndexSegments.h b/src/Storages/System/StorageSystemVectorIndexSegments.h
+new file mode 100644
+index 0000000000..5e61243f53
+--- /dev/null
++++ b/src/Storages/System/StorageSystemVectorIndexSegments.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++
++#include <Storages/IStorage.h>
++#include <base/shared_ptr_helper.h>
++
++
++namespace DB
++{
++
++/// Implement system.vector_index_segments table that contains information of vector indices in each data part
++class StorageSystemVectorIndexSegments : public shared_ptr_helper<StorageSystemVectorIndexSegments>, public IStorage
++{
++    friend struct shared_ptr_helper<StorageSystemVectorIndexSegments>;
++
++public:
++    std::string getName() const override { return "StorageSystemVectorIndexSegments"; }
++
++    Pipe read(
++        const Names & column_names,
++        const StorageSnapshotPtr & storage_snapshot,
++        SelectQueryInfo & query_info,
++        ContextPtr context,
++        QueryProcessingStage::Enum processed_stage,
++        size_t max_block_size,
++        unsigned num_streams) override;
++
++protected:
++    explicit StorageSystemVectorIndexSegments(const StorageID & table_id_);
++};
++
++}
+diff --git a/src/Storages/System/attachSystemTables.cpp b/src/Storages/System/attachSystemTables.cpp
+index 86ba75923f..6b813574b2 100644
+--- a/src/Storages/System/attachSystemTables.cpp
++++ b/src/Storages/System/attachSystemTables.cpp
+@@ -10,24 +10,34 @@
+ 
+ #include <Interpreters/Context.h>
+ #include <Storages/System/StorageSystemAggregateFunctionCombinators.h>
++#include <Storages/System/StorageSystemAsynchronousInserts.h>
+ #include <Storages/System/StorageSystemAsynchronousMetrics.h>
+ #include <Storages/System/StorageSystemBuildOptions.h>
+-#include <Storages/System/StorageSystemCollations.h>
+ #include <Storages/System/StorageSystemClusters.h>
++#include <Storages/System/StorageSystemCollations.h>
+ #include <Storages/System/StorageSystemColumns.h>
+-#include <Storages/System/StorageSystemDatabases.h>
++#include <Storages/System/StorageSystemConnections.h>
++#include <Storages/System/StorageSystemContributors.h>
++#include <Storages/System/StorageSystemCurrentRoles.h>
++#include <Storages/System/StorageSystemDDLWorkerQueue.h>
+ #include <Storages/System/StorageSystemDataSkippingIndices.h>
+-#include <Storages/System/StorageSystemVectorIndices.h>
+ #include <Storages/System/StorageSystemDataTypeFamilies.h>
++#include <Storages/System/StorageSystemDatabases.h>
+ #include <Storages/System/StorageSystemDetachedParts.h>
+ #include <Storages/System/StorageSystemDictionaries.h>
++#include <Storages/System/StorageSystemDisks.h>
++#include <Storages/System/StorageSystemDistributionQueue.h>
++#include <Storages/System/StorageSystemEnabledRoles.h>
++#include <Storages/System/StorageSystemErrors.h>
+ #include <Storages/System/StorageSystemEvents.h>
+ #include <Storages/System/StorageSystemFormats.h>
+ #include <Storages/System/StorageSystemFunctions.h>
++#include <Storages/System/StorageSystemGrants.h>
+ #include <Storages/System/StorageSystemGraphite.h>
++#include <Storages/System/StorageSystemLicenses.h>
+ #include <Storages/System/StorageSystemMacros.h>
++#include <Storages/System/StorageSystemMergeTreeSettings.h>
+ #include <Storages/System/StorageSystemMerges.h>
+-#include <Storages/System/StorageSystemReplicatedFetches.h>
+ #include <Storages/System/StorageSystemMetrics.h>
+ #include <Storages/System/StorageSystemModels.h>
+ #include <Storages/System/StorageSystemMutations.h>
+@@ -35,46 +45,37 @@
+ #include <Storages/System/StorageSystemOne.h>
+ #include <Storages/System/StorageSystemPartMovesBetweenShards.h>
+ #include <Storages/System/StorageSystemParts.h>
+-#include <Storages/System/StorageSystemProjectionParts.h>
+ #include <Storages/System/StorageSystemPartsColumns.h>
+-#include <Storages/System/StorageSystemProjectionPartsColumns.h>
++#include <Storages/System/StorageSystemPrivileges.h>
+ #include <Storages/System/StorageSystemProcesses.h>
++#include <Storages/System/StorageSystemProjectionParts.h>
++#include <Storages/System/StorageSystemProjectionPartsColumns.h>
++#include <Storages/System/StorageSystemQuotaLimits.h>
++#include <Storages/System/StorageSystemQuotaUsage.h>
++#include <Storages/System/StorageSystemQuotas.h>
++#include <Storages/System/StorageSystemQuotasUsage.h>
+ #include <Storages/System/StorageSystemReplicas.h>
++#include <Storages/System/StorageSystemReplicatedFetches.h>
+ #include <Storages/System/StorageSystemReplicationQueue.h>
+-#include <Storages/System/StorageSystemDistributionQueue.h>
++#include <Storages/System/StorageSystemRoleGrants.h>
++#include <Storages/System/StorageSystemRoles.h>
++#include <Storages/System/StorageSystemRowPolicies.h>
+ #include <Storages/System/StorageSystemSettings.h>
+-#include <Storages/System/StorageSystemMergeTreeSettings.h>
++#include <Storages/System/StorageSystemSettingsProfileElements.h>
++#include <Storages/System/StorageSystemSettingsProfiles.h>
++#include <Storages/System/StorageSystemStoragePolicies.h>
+ #include <Storages/System/StorageSystemTableEngines.h>
+ #include <Storages/System/StorageSystemTableFunctions.h>
+ #include <Storages/System/StorageSystemTables.h>
+-#include <Storages/System/StorageSystemZooKeeper.h>
+-#include <Storages/System/StorageSystemContributors.h>
+-#include <Storages/System/StorageSystemErrors.h>
+-#include <Storages/System/StorageSystemWarnings.h>
+-#include <Storages/System/StorageSystemDDLWorkerQueue.h>
+-#include <Storages/System/StorageSystemLicenses.h>
+ #include <Storages/System/StorageSystemTimeZones.h>
+-#include <Storages/System/StorageSystemDisks.h>
+-#include <Storages/System/StorageSystemStoragePolicies.h>
+-#include <Storages/System/StorageSystemZeros.h>
+-#include <Storages/System/StorageSystemUsers.h>
+-#include <Storages/System/StorageSystemRoles.h>
+-#include <Storages/System/StorageSystemGrants.h>
+-#include <Storages/System/StorageSystemRoleGrants.h>
+-#include <Storages/System/StorageSystemCurrentRoles.h>
+-#include <Storages/System/StorageSystemEnabledRoles.h>
+-#include <Storages/System/StorageSystemSettingsProfiles.h>
+-#include <Storages/System/StorageSystemSettingsProfileElements.h>
+-#include <Storages/System/StorageSystemRowPolicies.h>
+-#include <Storages/System/StorageSystemQuotas.h>
+-#include <Storages/System/StorageSystemQuotaLimits.h>
+-#include <Storages/System/StorageSystemQuotaUsage.h>
+-#include <Storages/System/StorageSystemQuotasUsage.h>
+-#include <Storages/System/StorageSystemConnections.h>
+-#include <Storages/System/StorageSystemUserDirectories.h>
+-#include <Storages/System/StorageSystemPrivileges.h>
+-#include <Storages/System/StorageSystemAsynchronousInserts.h>
+ #include <Storages/System/StorageSystemTransactions.h>
++#include <Storages/System/StorageSystemUserDirectories.h>
++#include <Storages/System/StorageSystemUsers.h>
++#include <Storages/System/StorageSystemVectorIndexSegments.h>
++#include <Storages/System/StorageSystemVectorIndices.h>
++#include <Storages/System/StorageSystemWarnings.h>
++#include <Storages/System/StorageSystemZeros.h>
++#include <Storages/System/StorageSystemZooKeeper.h>
+ 
+ #ifdef OS_LINUX
+ #include <Storages/System/StorageSystemStackTrace.h>
+@@ -131,6 +132,7 @@ void attachSystemTablesLocal(ContextPtr context, IDatabase & system_database)
+     attach<StorageSystemWarnings>(context, system_database, "warnings");
+     attach<StorageSystemDataSkippingIndices>(context, system_database, "data_skipping_indices");
+     attach<StorageSystemVectorIndices>(context, system_database, "vector_indices");
++    attach<StorageSystemVectorIndexSegments>(context, system_database, "vector_index_segments");
+     attach<StorageSystemLicenses>(context, system_database, "licenses");
+     attach<StorageSystemTimeZones>(context, system_database, "time_zones");
+ #ifdef OS_LINUX
+diff --git a/src/Storages/VectorIndexInfo.cpp b/src/Storages/VectorIndexInfo.cpp
+new file mode 100644
+index 0000000000..25885425d7
+--- /dev/null
++++ b/src/Storages/VectorIndexInfo.cpp
+@@ -0,0 +1,39 @@
++#include <SearchIndex/Common/Utils.h>
++#include <Storages/VectorIndexInfo.h>
++#include <VectorIndex/Metadata.h>
++
++namespace DB
++{
++
++VectorIndexInfo::VectorIndexInfo(
++    const String & database_,
++    const String & table_,
++    const VectorIndex::Metadata & metadata,
++    VectorIndexStatus status_,
++    const String & err_msg_)
++    : database(database_), table(table_), status(status_), err_msg(err_msg_)
++{
++    part = metadata.segment_id.current_part_name;
++    owner_part = metadata.segment_id.owner_part_name;
++    owner_part_id = metadata.segment_id.owner_part_id;
++    name = metadata.segment_id.vector_index_name;
++    type = Search::enumToString(metadata.type);
++    total_vec = metadata.total_vec;
++
++    setIndexSize(metadata);
++}
++
++String VectorIndexInfo::statusString() const
++{
++    return Search::enumToString(status);
++}
++
++String VectorIndexInfo::getMetadataInfoString(const String & info_name, const VectorIndex::Metadata & metadata)
++{
++    if (metadata.infos.contains(info_name))
++        return metadata.infos.at(info_name);
++    else
++        return "";
++}
++
++}
+diff --git a/src/Storages/VectorIndexInfo.h b/src/Storages/VectorIndexInfo.h
+new file mode 100644
+index 0000000000..d210dd547c
+--- /dev/null
++++ b/src/Storages/VectorIndexInfo.h
+@@ -0,0 +1,171 @@
++#pragma once
++
++#include <memory>
++#include <vector>
++#include <base/types.h>
++#include <Common/Stopwatch.h>
++
++namespace VectorIndex
++{
++class Metadata;
++}
++
++namespace DB
++{
++
++using Float64 = double;
++
++enum VectorIndexStatus
++{
++    SMALL_PART,
++    PENDING,
++    BUILDING,
++    BUILT,
++    LOADED,
++    ERROR
++};
++
++const String MEMORY_USAGE_BYTES = "memory_usage_bytes";
++const String DISK_USAGE_BYTES = "disk_usage_bytes";
++
++class VectorIndexInfo
++{
++public:
++    /// Newly created vector index
++    VectorIndexInfo(
++        const String & database_,
++        const String & table_,
++        const String & part_,
++        const String & name_,
++        const String & type_,
++        UInt64 total_vec_,
++        VectorIndexStatus status_)
++        : database(database_)
++        , table(table_)
++        , part(part_)
++        , owner_part(part_)
++        , owner_part_id(0)
++        , name(name_)
++        , type(type_)
++        , status(status_)
++        , total_vec(total_vec_)
++        , memory_usage_bytes(0)
++        , disk_usage_bytes(0)
++    {
++    }
++
++    VectorIndexInfo(
++        const String & database_,
++        const String & table_,
++        const String & part_,
++        const String & name_,
++        const String & type_,
++        UInt64 total_vec_,
++        UInt64 memory_usage_bytes_,
++        UInt64 disk_usage_bytes_,
++        const String & owner_part_ = "",
++        Int32 owner_part_id_ = 0,
++        VectorIndexStatus status_ = BUILT,
++        const String & err_msg_ = "")
++        : database(database_)
++        , table(table_)
++        , part(part_)
++        , owner_part(owner_part_.empty() ? part_ : owner_part_)
++        , owner_part_id(owner_part_id_)
++        , name(name_)
++        , type(type_)
++        , status(status_)
++        , err_msg(err_msg_)
++        , total_vec(total_vec_)
++        , memory_usage_bytes(memory_usage_bytes_)
++        , disk_usage_bytes(disk_usage_bytes_)
++    {
++    }
++
++    VectorIndexInfo(
++        const String & database_,
++        const String & table_,
++        const VectorIndex::Metadata & metadata,
++        VectorIndexStatus status_ = BUILT,
++        const String & err_msg_ = "");
++
++    String database;
++    String table;
++    String part;
++
++    /// For vector index from merged old part
++    String owner_part;
++    Int32 owner_part_id;
++
++    /// Index name
++    String name;
++    /// Index type
++    String type;
++
++    VectorIndexStatus status;
++    String err_msg;
++
++    void onBuildStart()
++    {
++        watch = std::make_unique<Stopwatch>();
++        status = BUILDING;
++    }
++
++    void onBuildFinish(bool success, const String & err = "")
++    {
++        if (watch != nullptr)
++            watch->stop();
++
++        if (success)
++            status = BUILT;
++        else
++            onError(err);
++    }
++
++    void onError(const String & err = "")
++    {
++        status = ERROR;
++        err_msg = err;
++    }
++
++    void onIndexLoad() { status = LOADED; }
++
++    void onIndexUnload() { status = BUILT; }
++
++    /// Total number of vectors (including deleted ones)
++    UInt64 total_vec;
++
++    /// Index building progress
++    UInt8 progress() const { return status == BUILT || status == LOADED ? 100 : 0; }
++    /// Elapsed time of index building
++    double elapsed() { return watch == nullptr ? 0 : watch->elapsedSeconds(); }
++
++    // size of vector index in memory
++    UInt64 memory_usage_bytes;
++    // Size of vector index on disk
++    UInt64 disk_usage_bytes;
++
++    void setIndexSize(const VectorIndex::Metadata & metadata)
++    {
++        memory_usage_bytes = getMetadataInfoInt64(MEMORY_USAGE_BYTES, metadata);
++        disk_usage_bytes = getMetadataInfoInt64(DISK_USAGE_BYTES, metadata);
++    }
++
++    String statusString() const;
++
++private:
++    /// Stopwatch for index build
++    StopwatchUniquePtr watch{nullptr};
++
++    static String getMetadataInfoString(const String & info_name, const VectorIndex::Metadata & metadata);
++
++    static Int64 getMetadataInfoInt64(const String & info_name, const VectorIndex::Metadata & metadata)
++    {
++        String value = getMetadataInfoString(info_name, metadata);
++        return value.empty() ? 0 : std::stol(value);
++    }
++};
++
++using VectorIndexInfoPtr = std::shared_ptr<VectorIndexInfo>;
++using VectorIndexInfoPtrList = std::vector<VectorIndexInfoPtr>;
++}
+diff --git a/src/VectorIndex/VectorIndexCommon.h b/src/VectorIndex/VectorIndexCommon.h
+index 200235e6bc..a48d72a429 100644
+--- a/src/VectorIndex/VectorIndexCommon.h
++++ b/src/VectorIndex/VectorIndexCommon.h
+@@ -6,10 +6,10 @@
+ #include <Poco/JSON/JSON.h>
+ #include <Poco/JSON/Object.h>
+ 
+-#include <Common/Exception.h>
+ #include <Compression/CompressedReadBuffer.h>
+ #include <Compression/CompressedWriteBuffer.h>
+ #include <Interpreters/OpenTelemetrySpanLog.h>
++#include <Common/Exception.h>
+ 
+ #include <VectorIndex/BruteForceSearch.h>
+ #include <VectorIndex/IOReader.h>
+diff --git a/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.reference b/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.reference
+new file mode 100644
+index 0000000000..a91109ed94
+--- /dev/null
++++ b/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.reference
+@@ -0,0 +1,68 @@
++all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
++0
++all_1_1_0	all_1_1_0	0	vec_ind	LOADED
++--- detach
++--- attach
++all_1_1_0	all_1_1_0	0	vec_ind	BUILT
++--- query
++2	2.69
++3	3.8899999
++1	7.49
++4	11.089999
++0	18.29
++5	24.289999
++6	43.49
++7	68.69
++8	99.89
++9	137.09
++0
++all_1_1_0	all_1_1_0	0	vec_ind	LOADED
++--- drop vector index
++--- add vector index
++all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
++0
++all_1_1_0	all_1_1_0	0	vec_ind	LOADED
++--- truncate
++0
++--- insert
++all_2_2_0	all_2_2_0	0	vec_ind	BUILDING
++0
++all_2_2_0	all_2_2_0	0	vec_ind	LOADED
++--- lightweight delete
++all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
++--- insert
++all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
++all_4_4_0	all_4_4_0	0	vec_ind	BUILDING
++0
++all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
++all_4_4_0	all_4_4_0	0	vec_ind	LOADED
++--- merge
++all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
++all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
++--- query
++2	2.69
++1	7.49
++4	11.089999
++0	18.29
++5	24.289999
++6	43.49
++7	68.69
++8	99.89
++9	137.09
++10	180.29
++0
++all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
++all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
++--- drop table
++0
++--- test auto build after merge
++--- insert part 1
++0
++all_1_1_0	all_1_1_0	0	vec_ind	LOADED
++--- insert part 2
++0
++all_1_1_0	all_1_1_0	0	vec_ind	LOADED
++all_2_2_0	all_2_2_0	0	vec_ind	LOADED
++--- merge
++0
++all_1_2_1	all_1_2_1	0	vec_ind	LOADED
+diff --git a/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.sql b/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.sql
+new file mode 100644
+index 0000000000..20ebf5e35c
+--- /dev/null
++++ b/tests/queries/2_vector_search/00031_mqvs_vector_index_segments.sql
+@@ -0,0 +1,154 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_vector_segments SYNC;
++CREATE TABLE test_vector_segments
++(
++    id    UInt32,
++    vector  Array(Float32),
++    CONSTRAINT check_length CHECK length(vector) = 3
++)
++ENGINE = MergeTree
++ORDER BY id
++SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true, max_rows_for_slow_mode_single_vector_index_build = 10;
++
++INSERT INTO test_vector_segments SELECT number, [number,number,number] FROM numbers(1000);
++
++ALTER TABLE test_vector_segments ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- detach';
++
++DETACH TABLE test_vector_segments SYNC;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- attach';
++
++ATTACH TABLE test_vector_segments;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- query';
++
++SELECT id, distance(vector, [1.2, 2.3, 3.4]) AS dist FROM test_vector_segments order by dist limit 10;
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- drop vector index';
++
++ALTER TABLE test_vector_segments DROP VECTOR INDEX vec_ind;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- add vector index';
++
++ALTER TABLE test_vector_segments ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- truncate';
++
++TRUNCATE TABLE test_vector_segments SYNC;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- insert';
++
++INSERT INTO test_vector_segments SELECT number, [number,number,number] FROM numbers(1000);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- lightweight delete';
++
++DELETE FROM test_vector_segments WHERE id = 3;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- insert';
++
++INSERT INTO test_vector_segments SELECT number+1000, [number+1000,number+1000,number+1000] FROM numbers(1000);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- merge';
++
++OPTIMIZE TABLE test_vector_segments FINAL;
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- query';
++
++SELECT id, distance(vector, [1.2, 2.3, 3.4]) AS dist FROM test_vector_segments order by dist limit 10;
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- drop table';
++
++DROP TABLE test_vector_segments SYNC;
++
++SELECT count() FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- test auto build after merge';
++
++CREATE TABLE test_vector_segments
++(
++    id    UInt32,
++    vector  Array(Float32),
++    CONSTRAINT check_length CHECK length(vector) = 3
++)
++    ENGINE = MergeTree
++        ORDER BY id
++        SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, max_rows_for_slow_mode_single_vector_index_build = 10;
++
++SELECT '--- insert part 1';
++
++INSERT INTO test_vector_segments SELECT number, [number,number,number] FROM numbers(1000);
++
++ALTER TABLE test_vector_segments ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- insert part 2';
++
++INSERT INTO test_vector_segments SELECT number+1000, [number+1000,number+1000,number+1000] FROM numbers(1000);
++
++SELECT sleep(2);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++SELECT '--- merge';
++
++OPTIMIZE TABLE test_vector_segments FINAL;
++
++SELECT sleep(3);
++
++SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_segments';
++
++DROP TABLE test_vector_segments SYNC;
+\ No newline at end of file
+-- 
+2.32.1 (Apple Git-133)
+

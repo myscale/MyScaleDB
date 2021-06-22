@@ -1,0 +1,34 @@
+From f1bb69f641bfc433082d9d843373318ebd9f046c Mon Sep 17 00:00:00 2001
+From: Xu Jing <xuj@moqi.ai>
+Date: Fri, 12 May 2023 18:39:03 +0800
+Subject: [PATCH 26/49] fix 02514 stateless test
+
+---
+ src/Interpreters/InterpreterCreateQuery.cpp                    | 3 ++-
+ .../02514_database_replicated_no_arguments_for_rmt.reference   | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/Interpreters/InterpreterCreateQuery.cpp b/src/Interpreters/InterpreterCreateQuery.cpp
+index dbce0b8159..191682f6fd 100644
+--- a/src/Interpreters/InterpreterCreateQuery.cpp
++++ b/src/Interpreters/InterpreterCreateQuery.cpp
+@@ -263,7 +263,8 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
+     }
+ 
+     if (create.storage->engine->name == "Replicated"
+-        && !getContext()->getSettingsRef().allow_experimental_database_replicated)
++        && !getContext()->getSettingsRef().allow_experimental_database_replicated
++        && !internal)
+     {
+         throw Exception("Replicated is an experimental database engine. "
+                         "Enable allow_experimental_database_replicated to use it.", ErrorCodes::UNKNOWN_DATABASE_ENGINE);
+diff --git a/tests/queries/0_stateless/02514_database_replicated_no_arguments_for_rmt.reference b/tests/queries/0_stateless/02514_database_replicated_no_arguments_for_rmt.reference
+index 65ed303b6f..df8237e93e 100644
+--- a/tests/queries/0_stateless/02514_database_replicated_no_arguments_for_rmt.reference
++++ b/tests/queries/0_stateless/02514_database_replicated_no_arguments_for_rmt.reference
+@@ -1 +1 @@
+-0|localhost	0		0	0
++s1|r1	0		0	0
+-- 
+2.32.1 (Apple Git-133)
+

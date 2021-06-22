@@ -1,0 +1,2096 @@
+From 830e1869112d1ab706f2135e80e708ca84e6cc4d Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Fri, 3 Mar 2023 01:27:11 +0000
+Subject: [PATCH 17/51] Fix issues for ReplicatedMergeTree with vector index
+
+---
+ src/Common/ProfileEvents.cpp                  |   5 +-
+ src/Storages/MergeTree/DataPartsExchange.cpp  |   3 +-
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp |  12 +-
+ src/Storages/MergeTree/IMergeTreeDataPart.h   |   5 +-
+ src/Storages/MergeTree/MergeTreeData.cpp      |   4 +-
+ src/Storages/MergeTree/MergeTreeData.h        |   6 +-
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 134 +++++++-----
+ .../MergeTreeVectorIndexBuilderUpdater.h      |  14 +-
+ .../MergeTree/MutateFromLogEntryTask.cpp      |  10 +-
+ src/Storages/MergeTree/MutateTask.cpp         |   3 +-
+ .../MergeTree/ReplicatedMergeTreeLogEntry.cpp |  22 ++
+ .../MergeTree/ReplicatedMergeTreeLogEntry.h   |   6 +-
+ .../MergeTree/ReplicatedMergeTreeQueue.cpp    |  72 ++++++-
+ .../MergeTree/ReplicatedMergeTreeQueue.h      |   7 +
+ .../MergeTree/ReplicatedVectorIndexTask.cpp   | 153 ++++++++++++++
+ .../MergeTree/ReplicatedVectorIndexTask.h     |  80 +++++++
+ src/Storages/MergeTree/VectorIndexEntry.h     |  35 ++--
+ .../MergeTree/VectorIndexMergeTreeTask.cpp    |  35 ++--
+ .../MergeTree/VectorIndexMergeTreeTask.h      |   5 +-
+ src/Storages/StorageMergeTree.cpp             |  37 ++--
+ src/Storages/StorageMergeTree.h               |   5 +-
+ src/Storages/StorageReplicatedMergeTree.cpp   | 198 ++++++++++++++----
+ src/Storages/StorageReplicatedMergeTree.h     |  11 +-
+ .../__init__.py                               |   0
+ .../test_mqvs_replicated_vector_index/test.py |  49 +++++
+ ...lightweight_delete_with_decouple.reference |  78 +++++++
+ ...cated_lightweight_delete_with_decouple.sql |  46 ++++
+ ...dd_fail_status_in_vector_indices.reference |   6 +
+ ...ated_add_fail_status_in_vector_indices.sql |  30 +++
+ ...0_mqvs_drop_vector_index_and_drop_table.sh |   2 +-
+ ...drop_vector_index_and_drop_table.reference |   7 +
+ ...cated_drop_vector_index_and_drop_table.sql |  23 ++
+ ...d_lightweight_delete_with_vector.reference |  15 ++
+ ...licated_lightweight_delete_with_vector.sql |  25 +++
+ ...plicated_merge_with_vector_index.reference |  11 +
+ ...qvs_replicated_merge_with_vector_index.sql |  31 +++
+ ..._mutation_can_reuse_vector_index.reference |  12 ++
+ ...23_mqvs_mutation_can_reuse_vector_index.sh |  89 ++++++++
+ 38 files changed, 1109 insertions(+), 177 deletions(-)
+ create mode 100644 src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
+ create mode 100644 src/Storages/MergeTree/ReplicatedVectorIndexTask.h
+ create mode 100644 tests/integration/test_mqvs_replicated_vector_index/__init__.py
+ create mode 100644 tests/integration/test_mqvs_replicated_vector_index/test.py
+ create mode 100644 tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
+ create mode 100644 tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
+ create mode 100644 tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.reference
+ create mode 100644 tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.sql
+ create mode 100644 tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.reference
+ create mode 100644 tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.sql
+ create mode 100644 tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.reference
+ create mode 100644 tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.sql
+ create mode 100644 tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.reference
+ create mode 100644 tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.sql
+ create mode 100644 tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.reference
+ create mode 100755 tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.sh
+
+diff --git a/src/Common/ProfileEvents.cpp b/src/Common/ProfileEvents.cpp
+index eea90c165e..1599241f62 100644
+--- a/src/Common/ProfileEvents.cpp
++++ b/src/Common/ProfileEvents.cpp
+@@ -352,7 +352,10 @@
+     M(ScalarSubqueriesCacheMiss, "Number of times a read from a scalar subquery was not cached and had to be calculated completely")\
+     \
+     M(VectorIndexBuildFailEvents, "Number of vector index build fail events.") \
+-    M(VectorIndexLoadFailEvents, "Number of vector index load fail events")
++    M(VectorIndexLoadFailEvents, "Number of vector index load fail events") \
++    M(CreatedLogEntryForBuildVIndex, "Successfully created log entry to build vector index for part in ReplicatedMergeTree.") \
++    M(NotCreatedLogEntryForBuildVIndex, \
++      "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.")
+ 
+ namespace ProfileEvents
+ {
+diff --git a/src/Storages/MergeTree/DataPartsExchange.cpp b/src/Storages/MergeTree/DataPartsExchange.cpp
+index 0dcccc3326..b8dda611db 100644
+--- a/src/Storages/MergeTree/DataPartsExchange.cpp
++++ b/src/Storages/MergeTree/DataPartsExchange.cpp
+@@ -689,7 +689,8 @@ void Fetcher::downloadBaseOrProjectionPartToDisk(
+ 
+         if (file_name != "checksums.txt" &&
+             file_name != "columns.txt" &&
+-            file_name != IMergeTreeDataPart::DEFAULT_COMPRESSION_CODEC_FILE_NAME)
++            file_name != IMergeTreeDataPart::DEFAULT_COMPRESSION_CODEC_FILE_NAME &&
++            !endsWith(file_name, IMergeTreeDataPart::VECTOR_INDEX_FILE_EXTENSION))
+             checksums.addFile(file_name, file_size, expected_hash);
+ 
+         if (sync)
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index dee81bf889..c7c1c2894d 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -722,7 +722,7 @@ void IMergeTreeDataPart::loadIndex()
+     }
+ }
+ 
+-NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums() const
++NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums(bool include_vector_files) const
+ {
+     if (!isStoredOnDisk())
+         return {};
+@@ -737,6 +737,16 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums() const
+     if (volume->getDisk()->exists(txn_version_path))
+         result.emplace(TXN_VERSION_METADATA_FILE_NAME);
+ 
++    /// Get vector index files
++    if (include_vector_files && (containAnyVectorIndex() || containRowIdsMaps()))
++    {
++        for (auto it = volume->getDisk()->iterateDirectory(getFullRelativePath()); it->isValid(); it->next())
++        {
++            if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
++                result.emplace(it->name());
++        }
++    }
++
+     return result;
+ }
+ 
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.h b/src/Storages/MergeTree/IMergeTreeDataPart.h
+index 23883ff5bf..9c99b7995e 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.h
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.h
+@@ -502,7 +502,8 @@ public:
+ 
+     /// Return set of metadata file names without checksums. For example,
+     /// columns.txt or checksums.txt itself.
+-    NameSet getFileNamesWithoutChecksums() const;
++    /// Mutations should not skip vector index files.
++    NameSet getFileNamesWithoutChecksums(bool include_vector_files = true) const;
+ 
+     /// File with compression codec name which was used to compress part columns
+     /// by default. Some columns may have their own compression codecs, but
+@@ -520,6 +521,8 @@ public:
+ 
+     static inline constexpr auto TXN_VERSION_METADATA_FILE_NAME = "txn_version.txt";
+ 
++    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx";
++
+     /// One of part files which is used to check how many references (I'd like
+     /// to say hardlinks, but it will confuse even more) we have for the part
+     /// for zero copy replication. Sadly it's very complex.
+diff --git a/src/Storages/MergeTree/MergeTreeData.cpp b/src/Storages/MergeTree/MergeTreeData.cpp
+index 89b576a752..5ff849bc97 100644
+--- a/src/Storages/MergeTree/MergeTreeData.cpp
++++ b/src/Storages/MergeTree/MergeTreeData.cpp
+@@ -4836,7 +4836,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
+ 
+                 part->remove_time.store(0, std::memory_order_relaxed); /// The part will be removed without waiting for old_parts_lifetime seconds.
+                 data.modifyPartState(part, DataPartState::Outdated);
+-                part->cancelBuild();
++                /// part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
+             }
+             else
+             {
+@@ -4849,7 +4849,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
+                     reduce_rows += covered_part->rows_count;
+ 
+                     data.modifyPartState(covered_part, DataPartState::Outdated);
+-                    covered_part->cancelBuild();
++                    /// covered_part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
+                     data.removePartContributionToColumnAndSecondaryIndexSizes(covered_part);
+                 }
+ 
+diff --git a/src/Storages/MergeTree/MergeTreeData.h b/src/Storages/MergeTree/MergeTreeData.h
+index 99c66c2b71..5805f6b57c 100644
+--- a/src/Storages/MergeTree/MergeTreeData.h
++++ b/src/Storages/MergeTree/MergeTreeData.h
+@@ -967,8 +967,6 @@ public:
+     /// Do nothing for non-replicated tables
+     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
+ 
+-    virtual void finishVectorIndexJob(const std::vector<String> & processed_parts) = 0;
+-
+     /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
+     struct MergeTreeVectorIndexStatus
+     {
+@@ -998,6 +996,9 @@ public:
+     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
+     /// Mutex for currently_submerging_parts and currently_emerging_parts
+     mutable std::mutex currently_submerging_emerging_mutex;
++
++    /// Mutex for currently_vector_indexing_parts
++    mutable std::mutex currently_vector_indexing_parts_mutex;
+     std::set<String> currently_vector_indexing_parts;
+ 
+     /// Mutex for parts currently processing in background
+@@ -1011,6 +1012,7 @@ protected:
+     friend class StorageReplicatedMergeTree;
+     friend class MergeTreeDataWriter;
+     friend class MergeTask;
++    friend class MergeTreeVectorIndexBuilderUpdater;
+ 
+     bool require_part_metadata;
+ 
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 45d4c8b79a..ee2f30f835 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -6,6 +6,7 @@
+ #include <VectorIndex/VectorIndexCommon.h>
+ #include <Common/ProfileEvents.h>
+ #include <Common/Stopwatch.h>
++#include <Common/StringUtils/StringUtils.h>
+ 
+ /// #define build_fail_test
+ 
+@@ -14,6 +15,12 @@ namespace ProfileEvents
+ extern const Event VectorIndexBuildFailEvents;
+ }
+ 
++namespace CurrentMetrics
++{
++    extern const Metric BackgroundVectorIndexPoolTask;
++    extern const Metric BackgroundSlowModeVectorIndexPoolTask;
++}
++
+ namespace DB
+ {
+ 
+@@ -45,6 +52,8 @@ static bool checkOperationIsNotCanceled(ActionBlocker & builds_blocker)
+ MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
+     : data(data_), log(&Poco::Logger::get(data.getLogName() + " (VectorIndexUpdater)"))
+ {
++    if (startsWith(data.getName(), "Replicated"))
++        is_replicated = true;
+ }
+ 
+ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot)
+@@ -134,30 +143,60 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
+     }
+ }
+ 
+-VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVectorIndex(
++bool MergeTreeVectorIndexBuilderUpdater::allowToBuildVectorIndex(const bool slow_mode, const size_t builds_count_in_queue) const
++{
++    const auto settings = data.getContext()->getSettingsRef();
++    size_t occupied = 0;
++
++    /// Allow build vector index only if there are enough threads.
++    if (slow_mode)
++    {
++        /// Check slow mode build vector index log entry in queue
++        if (builds_count_in_queue >= settings.background_slow_mode_vector_pool_size)
++            return false;
++
++        occupied = CurrentMetrics::values[CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask].load(std::memory_order_relaxed);
++
++        if (occupied < settings.background_slow_mode_vector_pool_size)
++            return true;
++    }
++    else
++    {
++        /// Check build vector index log entry in queue
++        if (builds_count_in_queue >= settings.background_vector_pool_size)
++            return false;
++
++        occupied = CurrentMetrics::values[CurrentMetrics::BackgroundVectorIndexPoolTask].load(std::memory_order_relaxed);
++
++        if (occupied < settings.background_vector_pool_size)
++            return true;
++    }
++
++    return false;
++}
++
++VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorIndex(
+     const StorageMetadataPtr & metadata_snapshot,
+-    size_t max_parts_number,
+-    bool select_slow_mode_parts,
++    bool select_slow_mode_part,
+     const MergeTreeData::DataParts & currently_merging_mutating_parts)
+ {
+     if (metadata_snapshot->vec_indices.empty())
+-    {
+         return {};
+-    }
+-
+-    std::vector<String> part_names;
+ 
+     size_t min_rows_to_build_vector_index = data.getSettings()->min_rows_to_build_vector_index;
+     for (const auto & part : data.getDataPartsForInternalUsage())
+     {
+-        /// LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] part name: {}, count: {}", part->name, currently_vector_indexing_parts.count(part->name));
++        /// TODO: Support atomic insert, avoid to select active data parts in an uncommited transaction.
+ 
+         /// Skip empty part
+         if (part->isEmpty())
+             continue;
+ 
+-        /// need to check currently_vector_indexing_parts.count(part) > 0
+-        if (data.currently_vector_indexing_parts.count(part->name) > 0 || part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
++        if (part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
++            continue;
++
++        /// ReplicatedMergeTree depends on virtual_parts for merge, MergeTree depends on currently_merging_mutating_parts
++        if (is_replicated && data.partIsAssignedToBackgroundOperation(part))
+             continue;
+ 
+         if (part->containRowIdsMaps() && data.getSettings()->distable_rebuild_for_decouple)
+@@ -165,67 +204,58 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVector
+ 
+         /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
+         /// The new part already blocked merge to select it, hence it's safe here. all_1_1_0 can avoid index build selection for future parts all_1_1_0_*
+-        bool skip_build_index = false;
+-        for (const auto & part_name : data.currently_vector_indexing_parts)
+         {
+-            auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
+-            if (part->info.contains(info))
++            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
++            if (data.currently_vector_indexing_parts.count(part->name) > 0)
++                continue;
++
++            bool skip_build_index = false;
++            for (const auto & part_name : data.currently_vector_indexing_parts)
+             {
+-                LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
+-                skip_build_index = true;
+-                break;
++                auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
++                if (part->info.contains(info))
++                {
++                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
++                    skip_build_index = true;
++                    break;
++                }
+             }
+-        }
+ 
+-        if (skip_build_index)
+-            continue;
++            if (skip_build_index)
++                continue;
++        }
+ 
+         for (const auto & vec_index : metadata_snapshot->vec_indices)
+         {
+             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
+             {
+-                if (select_slow_mode_parts)
++                if (select_slow_mode_part)
+                 {
+                     if (!isSlowModePart(part))
+                         continue;
+ 
+-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
+-                    part_names.emplace_back(part->name);
++                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}", part->name);
++                    return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
+                 }
+                 else /// normal fast mode
+                 {
+                     if (isSlowModePart(part))
+                         continue;
+ 
+-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
+-                    part_names.emplace_back(part->name);
++                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}", part->name);
++                    return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
+                 }
+-
+-                LOG_TRACE(log, "this part will get built index: {}", part->name);
+-                ///since each index building task is time-consuming, it's pointless to have a long list
+-                if (part_names.size() >= max_parts_number)
+-                {
+-                    return std::make_shared<VectorIndexEntry>(part_names, data);
+-                }
+-                break;
+             }
+         }
+     }
+ 
+-    if (part_names.empty())
+-    {
+-        return {};
+-    }
+-    else
+-    {
+-        return std::make_shared<VectorIndexEntry>(part_names, data);
+-    }
++    return {};
+ }
+ 
+ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+-    const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode)
++    const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool tune, bool slow_mode)
+ {
+-    if (part_names.empty())
++    if (part_name.empty())
+     {
+         LOG_INFO(log, "no data");
+         return BuildVectorIndexStatus::NO_DATA_PART;
+@@ -240,26 +270,27 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+     Stopwatch watch;
+     /// build vector index part by part
+     /// we may consider building vector index in parallel in the future.
+-    if (!part_names.empty())
+-        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_names[0], slow_mode);
+-    for (auto & part_name : part_names)
++    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_name, slow_mode);
++
++    /// One part is selected to build index.
+     {
+         MergeTreeDataPartPtr part = data.getActiveContainingPart(part_name);
+         if (!part)
+         {
+-            continue;
++            LOG_INFO(log, "[buildVectorIndex] part:{} is not active, no need to build index", part_name);
++            return BuildVectorIndexStatus::SUCCESS;
+         }
+ 
+         if (part->vector_index_build_cancelled)
+         {
+-            LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled.", part->name);
+-            continue;
++            LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled", part->name);
++            return BuildVectorIndexStatus::BUILD_FAIL;
+         }
+ 
+         /// Check latest metadata
+         if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+         {
+-            LOG_INFO(log, "Vector index has been dropped, no need to build it.");
++            LOG_INFO(log, "Vector index has been dropped, no need to build it");
+             return BuildVectorIndexStatus::SUCCESS;
+         }
+ 
+@@ -330,8 +361,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+     }
+ 
+     watch.stop();
+-    if (!part_names.empty())
+-        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_names[0], watch.elapsedSeconds(), slow_mode);
++    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
+ 
+ #ifdef build_fail_test
+     LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask increment VectorIndexBuildFailEvents.");
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
+index 352cd7739b..880cd5402b 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
+@@ -41,18 +41,21 @@ class MergeTreeVectorIndexBuilderUpdater
+ public:
+     MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_);
+ 
+-    /// select parts which vector_indexed not containing index names to build vector index
+-    VectorIndexEntryPtr selectPartsToBuildVectorIndex(
++    /// Check backgroud pool size for vector index if new log entry is allowed.
++    /// True if allowed to select part for build vector index.
++    bool allowToBuildVectorIndex(const bool slow_mode, const size_t builds_count_in_queue) const;
++
++    /// select a part which vector_indexed not containing index names to build vector index
++    VectorIndexEntryPtr selectPartToBuildVectorIndex(
+         const StorageMetadataPtr & metadata_snapshot,
+-        size_t max_parts_number,
+-        bool select_slow_mode_parts,
++        bool select_slow_mode_part,
+         const MergeTreeData::DataParts & currently_merging_mutating_parts = {});
+ 
+     void removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot);
+ 
+     /// handle build index task
+     BuildVectorIndexStatus
+-    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode);
++    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool tune, bool slow_mode);
+ 
+     /** Is used to cancel all index builds. On cancel() call all currently running actions will throw exception soon.
+       * All new attempts to start a vector index build will throw an exception until all 'LockHolder' objects will be destroyed.
+@@ -75,6 +78,7 @@ private:
+     Counter counter;
+ 
+     MergeTreeData & data;
++    bool is_replicated = false; /// Mark if replicated
+     //const size_t background_pool_size;
+ 
+     Poco::Logger * log;
+diff --git a/src/Storages/MergeTree/MutateFromLogEntryTask.cpp b/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
+index 414daaa3ae..00185b4e6e 100644
+--- a/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
++++ b/src/Storages/MergeTree/MutateFromLogEntryTask.cpp
+@@ -150,6 +150,9 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
+     try
+     {
+         storage.checkPartChecksumsAndCommit(*transaction_ptr, new_part);
++
++        /// Safe here, the source part status is Outdated, vector index move cannot find it.
++        future_mutated_part->parts[0]->setPartIsMutating(false);
+     }
+     catch (const Exception & e)
+     {
+@@ -192,7 +195,12 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
+ 
+     /// Update vector index bitmap after mutations with lightweight delete.
+     if (new_part->lightweight_delete_mask_updated)
+-        new_part->onLightweightDelete();
++    {
++        if (new_part->containAnyVectorIndex())
++            new_part->onLightweightDelete();
++        else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
++            new_part->onDecoupledLightWeightDelete();
++    }
+ 
+     return true;
+ }
+diff --git a/src/Storages/MergeTree/MutateTask.cpp b/src/Storages/MergeTree/MutateTask.cpp
+index aea25c388a..3568406d1e 100644
+--- a/src/Storages/MergeTree/MutateTask.cpp
++++ b/src/Storages/MergeTree/MutateTask.cpp
+@@ -305,7 +305,8 @@ NameSet collectFilesToSkip(
+     const String & mrk_extension,
+     const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc)
+ {
+-    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums();
++    /// Don't skip to create hard links for vector index files in mutations.
++    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums(false);
+ 
+     /// Skip updated files
+     for (const auto & entry : updated_header)
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.cpp b/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.cpp
+index 89515b863c..29451af89b 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.cpp
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.cpp
+@@ -159,6 +159,15 @@ void ReplicatedMergeTreeLogEntryData::writeText(WriteBuffer & out) const
+             out << "sync_pinned_part_uuids\n";
+             break;
+ 
++        case BUILD_VECTOR_INDEX:
++            out << "build_vector_index\n"
++                << escape << index_name
++                << "\nfrom\n"
++                << source_parts.at(0)
++                << "\nslow_mode:\n"
++                << slow_mode;
++            break;
++
+         default:
+             throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown log entry type: {}", static_cast<int>(type));
+     }
+@@ -336,6 +345,15 @@ void ReplicatedMergeTreeLogEntryData::readText(ReadBuffer & in)
+         in >> new_part_name;
+         in >> "\nsource_shard: " >> source_shard;
+     }
++    else if (type_str == "build_vector_index")
++    {
++        type = BUILD_VECTOR_INDEX;
++        String source_part;
++        in >> escape >> index_name
++           >> "\nfrom\n" >> source_part;
++        source_parts.push_back(source_part);
++        in >> "\nslow_mode:\n" >> slow_mode;
++    }
+ 
+     if (!trailing_newline_found)
+         in >> "\n";
+@@ -501,6 +519,10 @@ Strings ReplicatedMergeTreeLogEntryData::getVirtualPartNames(MergeTreeDataFormat
+     if (type == CLONE_PART_FROM_SHARD)
+         return {};
+ 
++    /// Doesn't produce any part.
++    if (type == BUILD_VECTOR_INDEX)
++        return {};
++
+     return {new_part_name};
+ }
+ 
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.h b/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.h
+index e304a9c1e8..17f5653677 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.h
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeLogEntry.h
+@@ -63,8 +63,7 @@ struct ReplicatedMergeTreeLogEntryData
+             case ReplicatedMergeTreeLogEntryData::ALTER_METADATA:   return "ALTER_METADATA";
+             case ReplicatedMergeTreeLogEntryData::SYNC_PINNED_PART_UUIDS: return "SYNC_PINNED_PART_UUIDS";
+             case ReplicatedMergeTreeLogEntryData::CLONE_PART_FROM_SHARD:  return "CLONE_PART_FROM_SHARD";
+-            case ReplicatedMergeTreeLogEntryData::BUILD_VECTOR_INDEX:
+-                return "BUILD_VECTOR_INDEX";
++            case ReplicatedMergeTreeLogEntryData::BUILD_VECTOR_INDEX:     return "BUILD_VECTOR_INDEX";
+             default:
+                 throw Exception("Unknown log entry type: " + DB::toString<int>(type), ErrorCodes::LOGICAL_ERROR);
+         }
+@@ -169,6 +168,9 @@ struct ReplicatedMergeTreeLogEntryData
+     /// The quorum value (for GET_PART) is a non-zero value when the quorum write is enabled.
+     size_t quorum = 0;
+ 
++    /// For build vector index, true for slow mode.
++    bool slow_mode = false;
++
+     /// If this MUTATE_PART entry caused by alter(modify/drop) query.
+     bool isAlterMutation() const
+     {
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeQueue.cpp b/src/Storages/MergeTree/ReplicatedMergeTreeQueue.cpp
+index ecc18e8143..7ced1b3fc9 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeQueue.cpp
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeQueue.cpp
+@@ -262,6 +262,13 @@ void ReplicatedMergeTreeQueue::insertUnlocked(
+         LOG_TRACE(log, "Adding alter metadata version {} to the queue", entry->alter_version);
+         alter_sequence.addMetadataAlter(entry->alter_version, state_lock);
+     }
++
++    /// Update currently scheduled build index part, avoid to create duplicate build index entry in case of restart.
++    if (entry->type == LogEntry::BUILD_VECTOR_INDEX)
++    {
++        std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
++        storage.currently_vector_indexing_parts.insert(entry->source_parts.at(0));
++    }
+ }
+ 
+ 
+@@ -1374,6 +1381,16 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
+     if (entry.type == LogEntry::BUILD_VECTOR_INDEX)
+     {
+         LOG_TRACE(log, "Get vector index build log entry {} of type {}", entry.znode_name, entry.typeToString());
++        String part_name = entry.source_parts.at(0);
++        if (future_parts.count(part_name))
++        {
++            out_postpone_reason = fmt::format(
++                "Not executing log entry {} of type {} for part {} "
++                "because the part is not ready yet (log entry for that part is being processed).",
++                entry.znode_name, entry.typeToString(), part_name);
++            LOG_TRACE(log, fmt::runtime(out_postpone_reason));
++            return false;
++        }
+     }
+ 
+     return true;
+@@ -1552,6 +1569,8 @@ ReplicatedMergeTreeQueue::OperationsInQueue ReplicatedMergeTreeQueue::countMerge
+     size_t count_merges = 0;
+     size_t count_mutations = 0;
+     size_t count_merges_with_ttl = 0;
++    size_t count_vector_index_builds = 0;
++    size_t count_slow_vector_index_builds = 0;
+     for (const auto & entry : queue)
+     {
+         if (entry->type == ReplicatedMergeTreeLogEntry::MERGE_PARTS)
+@@ -1562,9 +1581,16 @@ ReplicatedMergeTreeQueue::OperationsInQueue ReplicatedMergeTreeQueue::countMerge
+         }
+         else if (entry->type == ReplicatedMergeTreeLogEntry::MUTATE_PART)
+             ++count_mutations;
++        else if (entry->type == ReplicatedMergeTreeLogEntry::BUILD_VECTOR_INDEX)
++        {
++            if (entry->slow_mode)
++                ++count_slow_vector_index_builds;
++            else
++                ++count_vector_index_builds;
++        }
+     }
+ 
+-    return OperationsInQueue{count_merges, count_mutations, count_merges_with_ttl};
++    return OperationsInQueue{count_merges, count_mutations, count_merges_with_ttl, count_vector_index_builds, count_slow_vector_index_builds};
+ }
+ 
+ 
+@@ -2134,6 +2160,10 @@ bool ReplicatedMergeTreeMergePredicate::canMergeTwoParts(
+         return false;
+     }
+ 
++    /// Checks related to vector index
++    if (!canMergeWithVectorIndex(left, right))
++        return false;
++
+     return MergeTreeData::partsContainSameProjections(left, right);
+ }
+ 
+@@ -2177,6 +2207,46 @@ bool ReplicatedMergeTreeMergePredicate::canMergeSinglePart(
+     return true;
+ }
+ 
++bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
++    const MergeTreeData::DataPartPtr & left,
++    const MergeTreeData::DataPartPtr & right) const
++{
++    /// Check if part contains merged vector index
++    if (left->containRowIdsMaps() || right->containRowIdsMaps())
++        return false;
++
++    /// Check if part is building vector index
++    {
++        std::lock_guard lock(left->storage.currently_vector_indexing_parts_mutex);
++        for (const auto & part_name : left->storage.currently_vector_indexing_parts)
++        {
++            auto info = MergeTreePartInfo::fromPartName(part_name, queue.format_version);
++            if (left->info.contains(info) || right->info.contains(info))
++                return false;
++        }
++    }
++
++    /// Check if two parts contain vector index files.
++    /// Two parts can be merged when both have built vector index or both not.
++    auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
++    bool can_merge = true;
++    for (const auto & vec_index : metadata_snapshot->vec_indices)
++    {
++        if ((left->containVectorIndex(vec_index.name, vec_index.column) && right->containVectorIndex(vec_index.name, vec_index.column)) 
++            || (!left->containVectorIndex(vec_index.name, vec_index.column) && !right->containVectorIndex(vec_index.name, vec_index.column)))
++        {
++            /// can merge case
++            continue;
++        }
++        else
++        {
++            can_merge = false;
++            break;
++        }
++    }
++
++    return can_merge;
++}
+ 
+ std::optional<std::pair<Int64, int>> ReplicatedMergeTreeMergePredicate::getDesiredMutationVersion(const MergeTreeData::DataPartPtr & part) const
+ {
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeQueue.h b/src/Storages/MergeTree/ReplicatedMergeTreeQueue.h
+index ae0ca80634..55c98cde4d 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeQueue.h
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeQueue.h
+@@ -33,6 +33,7 @@ private:
+     friend class ReplicatedMergeTreeMergePredicate;
+     friend class MergeFromLogEntryTask;
+     friend class ReplicatedMergeMutateTaskBase;
++    friend class ReplicatedVectorIndexTask;
+ 
+     using LogEntry = ReplicatedMergeTreeLogEntry;
+     using LogEntryPtr = LogEntry::Ptr;
+@@ -55,6 +56,8 @@ private:
+         size_t merges = 0;
+         size_t mutations = 0;
+         size_t merges_with_ttl = 0;
++        size_t vector_index_builds = 0; /// fast vector index build
++        size_t slow_vector_index_builds = 0; /// slow vector index build
+     };
+ 
+     /// To calculate min_unprocessed_insert_time, max_processed_insert_time, for which the replica lag is calculated.
+@@ -493,6 +496,10 @@ public:
+                           const MergeTreeData::DataPartPtr & right,
+                           String * out_reason = nullptr) const;
+ 
++    /// Can we merge two parts with vector index?
++    bool canMergeWithVectorIndex(const MergeTreeData::DataPartPtr & left,
++                                 const MergeTreeData::DataPartPtr & right) const;
++
+     /// Can we assign a merge this part and some other part?
+     /// For example a merge of a part and itself is needed for TTL.
+     /// This predicate is checked for the first part of each range.
+diff --git a/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp b/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
+new file mode 100644
+index 0000000000..8a56d358fa
+--- /dev/null
++++ b/src/Storages/MergeTree/ReplicatedVectorIndexTask.cpp
+@@ -0,0 +1,153 @@
++#include <Storages/MergeTree/ReplicatedVectorIndexTask.h>
++
++#include <Storages/MergeTree/MergeTreeData.h>
++
++
++namespace DB
++{
++
++namespace ErrorCodes
++{
++    extern const int LOGICAL_ERROR;
++}
++
++
++StorageID ReplicatedVectorIndexTask::getStorageID()
++{
++    return storage.getStorageID();
++}
++
++bool ReplicatedVectorIndexTask::executeStep()
++{
++    auto remove_processed_entry = [&] () -> bool
++    {
++        try
++        {
++            storage.queue.removeProcessedEntry(storage.getZooKeeper(), selected_entry->log_entry);
++            state = State::SUCCESS;
++
++            std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
++            storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
++        }
++        catch (...)
++        {
++            tryLogCurrentException(__PRETTY_FUNCTION__);
++        }
++
++        return false;
++    };
++
++    switch (state)
++    {
++        case State::NEED_PREPARE :
++        {
++            bool res = false;
++            bool need_fetch = false;
++            std::tie(res, need_fetch) = prepare();
++
++            /// Avoid resheduling, execute fetch here, in the same thread.
++            if (!res)
++            {
++                /// There is no need to build vector index for some reasons.
++                return remove_processed_entry();
++            }
++
++            state = State::NEED_EXECUTE_BUILD_VECTOR_INDEX;
++            return true;
++        }
++        case State::NEED_EXECUTE_BUILD_VECTOR_INDEX :
++        {
++            try
++            {
++                build_status = builder.buildVectorIndex(metadata_snapshot, source_part->name, false, entry.slow_mode);
++                storage.updateVectorIndexBuildStatus(entry.source_parts[0], true, "");
++
++                /// For memory limit failure, try to run build 3 times.
++                if (build_status == BuildVectorIndexStatus::BUILD_FAIL && !source_part->vector_index_build_error)
++                    return true;
++            }
++            catch (...)
++            {
++                String exception_message = getCurrentExceptionMessage(false);
++                LOG_ERROR(log, "something went wrong during index building: {}", exception_message);
++                storage.updateVectorIndexBuildStatus(entry.source_parts[0], false, exception_message);
++
++                /// Set build error for part, avoid to build it again.
++                auto part = storage.getActiveContainingPart(entry.source_parts[0]);
++                if (part)
++                    part->setBuildError();
++
++                /// Remove build index log entry to let other tables continue to create entry and build vector index.
++                remove_processed_entry();
++
++                throw;
++            }
++
++            /// Need to call remove_processed_entry()
++            state = State::NEED_FINALIZE;
++            return true;
++        }
++        case State::NEED_FINALIZE :
++        {
++            /// For failure build, execute_fetch should return some error status of the vector index building.
++            return remove_processed_entry();
++        }
++        case State::SUCCESS :
++        {
++            throw Exception(ErrorCodes::LOGICAL_ERROR, "Do not call execute on previously succeeded task");
++        }
++    }
++    return false;
++}
++
++void ReplicatedVectorIndexTask::onCompleted()
++{
++    bool delay = state == State::SUCCESS;
++    task_result_callback(delay);
++}
++
++ReplicatedVectorIndexTask::~ReplicatedVectorIndexTask()
++{
++    LOG_TRACE(log, "destroy vector index job with vector index entry: {}", entry.source_parts.at(0));
++}
++
++std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
++{
++    const String & source_part_name = entry.source_parts.at(0);
++
++    if (metadata_snapshot->vec_indices.empty())
++    {
++        LOG_DEBUG(log, "Metadata of source part {} doesn't have vector index; will skip to build it", source_part_name);
++        return {false, false};
++    }
++
++    source_part = storage.getActiveContainingPart(source_part_name);
++    if (!source_part)
++    {
++        LOG_DEBUG(log, "Source part {} for vector index building is not ready; will skip to build vector index", source_part_name);
++        return {false, false};
++    }
++    /// No need to check part name, mutations are not blocked by build vector index. 
++
++    /// If we already have this vector index in this part, we do not need to do anything.
++
++    /// TODO - Now we support only ONE vector index for a table.
++    /// If multiples are supported, the log entry should contain the name and column of the vector index.
++    for (const auto & vec_index : metadata_snapshot->vec_indices)
++    {
++        if (source_part->containVectorIndex(vec_index.name, vec_index.column))
++        {
++            LOG_DEBUG(log, "Source part {} already have vector index built", source_part->name);
++            return {false, false};
++        }
++    }
++
++    /// TODO - add estimation on needed space for vector index building
++
++    /// TODO - building vector index is more expensive than fetching and it may be betterr to do building index tasks on one replica
++    /// instead of building the same vector index on all replicas.
++
++    return {true, false};
++}
++
++}
+diff --git a/src/Storages/MergeTree/ReplicatedVectorIndexTask.h b/src/Storages/MergeTree/ReplicatedVectorIndexTask.h
+new file mode 100644
+index 0000000000..5c55240d1a
+--- /dev/null
++++ b/src/Storages/MergeTree/ReplicatedVectorIndexTask.h
+@@ -0,0 +1,80 @@
++#pragma once
++
++#include <functional>
++
++#include <Core/Names.h>
++
++#include <Storages/MergeTree/IExecutableTask.h>
++#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
++#include <Storages/MergeTree/ReplicatedMergeTreeQueue.h>
++#include <Storages/StorageReplicatedMergeTree.h>
++#include <base/logger_useful.h>
++
++namespace DB
++{
++
++struct StorageInMemoryMetadata;
++using StorageMetadataPtr = std::shared_ptr<const StorageInMemoryMetadata>;
++
++class StorageReplicatedMergeTree;
++
++class ReplicatedVectorIndexTask : public IExecutableTask
++{
++public:
++    template <class Callback>
++    ReplicatedVectorIndexTask(
++        StorageReplicatedMergeTree & storage_,
++        ReplicatedMergeTreeQueue::SelectedEntryPtr & selected_entry_,
++        MergeTreeVectorIndexBuilderUpdater & builder_,
++        Callback && task_result_callback_)
++        : storage(storage_)
++        , metadata_snapshot(storage.getInMemoryMetadataPtr())
++        , selected_entry(selected_entry_)
++        , entry(*selected_entry->log_entry)
++        , builder(builder_)
++        , log(&Poco::Logger::get("ReplicatedVectorIndexTask"))
++        , task_result_callback(std::forward<Callback>(task_result_callback_))
++    {
++    }
++
++    bool executeStep() override;
++    StorageID getStorageID() override;
++    UInt64 getPriority() override { return priority; };
++    void onCompleted() override;
++
++    ~ReplicatedVectorIndexTask() override;
++
++private:
++    /// result, need_to_fetch
++    std::pair<bool, bool> prepare();
++
++    UInt64 priority{0};
++
++    StorageReplicatedMergeTree & storage;
++    StorageMetadataPtr metadata_snapshot;
++    ReplicatedMergeTreeQueue::SelectedEntryPtr selected_entry;
++    ReplicatedMergeTreeLogEntry & entry;
++    MergeTreeVectorIndexBuilderUpdater & builder;
++    std::unique_ptr<Stopwatch> stopwatch;
++    Poco::Logger * log;
++
++    MergeTreeData::DataPartPtr source_part{nullptr};
++    BuildVectorIndexStatus build_status;
++    String replica_to_fetch;
++
++    enum class State
++    {
++        NEED_PREPARE,
++        NEED_EXECUTE_BUILD_VECTOR_INDEX,
++        NEED_FINALIZE,
++
++        SUCCESS
++    };
++
++    State state{State::NEED_PREPARE};
++    IExecutableTask::TaskResultCallback task_result_callback;
++
++    ContextMutablePtr fake_query_context;
++};
++
++}
+diff --git a/src/Storages/MergeTree/VectorIndexEntry.h b/src/Storages/MergeTree/VectorIndexEntry.h
+index 6070e841d1..de8443eba2 100644
+--- a/src/Storages/MergeTree/VectorIndexEntry.h
++++ b/src/Storages/MergeTree/VectorIndexEntry.h
+@@ -10,28 +10,33 @@ namespace DB
+ 
+ struct VectorIndexEntry
+ {
+-    //std::vector<MergeTreeDataPartPtr> data_parts;
+-
+-    std::vector<String> data_part_names;
++    String part_name;
++    String vector_index_name;
+     MergeTreeData & data;
++    bool is_replicated;
+ 
+-    VectorIndexEntry(const std::vector<String> data_part_names_, MergeTreeData & data_) : data_part_names(std::move(data_part_names_)), data(data_) 
+-    { 
+-        for (const auto & data_part : data_part_names)
+-        {
+-            LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[constructor] currently_vector_indexing_parts add: {}", data_part);
+-            data.currently_vector_indexing_parts.insert(data_part);
+-        }
++    VectorIndexEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, const bool is_replicated_)
++     : part_name(std::move(part_name_))
++     , vector_index_name(index_name_)
++     , data(data_)
++     , is_replicated(is_replicated_)
++    {
++        LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[constructor] currently_vector_indexing_parts add: {}", part_name);
++        /// insert for replicated merge tree to avoid creating log entry multiple times for the same part.
++        std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
++        data.currently_vector_indexing_parts.insert(part_name);
+     }
+ 
+     ~VectorIndexEntry() 
+     {
+-        std::lock_guard lock(data.currently_processing_in_background_mutex);
+-        for (const auto & data_part : data_part_names)
++        /// VectorIndexEntry will be distroyed for replicated merge tree after create log entry.
++        if (!is_replicated)
+         {
+-            LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[deconstructor] currently_vector_indexing_parts remove: {}", data_part);
+-            data.currently_vector_indexing_parts.erase(data_part);
+-        } 
++            LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[deconstructor] currently_vector_indexing_parts remove: {}", part_name);
++
++            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
++            data.currently_vector_indexing_parts.erase(part_name);
++        }
+     }
+ };
+ 
+diff --git a/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp b/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
+index 05cc960d55..2a9c52642c 100644
+--- a/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
++++ b/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
+@@ -19,28 +19,23 @@ StorageID VectorIndexMergeTreeTask::getStorageID()
+ 
+ bool VectorIndexMergeTreeTask::executeStep()
+ {
+-    if (vector_index_entry != nullptr && !vector_index_entry->data_part_names.empty())
++    if (vector_index_entry != nullptr)
+     {
+-        LOG_DEBUG(&Poco::Logger::get("(VectorIndexMergeTreeTask)"), "execute vector index build for : {} slow_mode: {}", vector_index_entry->data_part_names[0], slow_mode);
++        LOG_DEBUG(log, "execute vector index build for : {} slow_mode: {}", vector_index_entry->part_name, slow_mode);
+         try
+         {
+-            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->data_part_names, false, slow_mode);
+-            storage.updateVectorIndexBuildStatus(vector_index_entry->data_part_names[0], true, "");
++            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, false, slow_mode);
++            storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, true, "");
+         }
+         catch (...)
+         {
+             String exception_message = getCurrentExceptionMessage(false);
+-            LOG_ERROR(&Poco::Logger::get("(VectorIndexMergeTreeTask)"), "something went wrong during index building: {}", exception_message);
+-            storage.updateVectorIndexBuildStatus(vector_index_entry->data_part_names[0], false, exception_message);
++            LOG_ERROR(log, "something went wrong during index building: {}", exception_message);
++            storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, false, exception_message);
+ 
+-            for (const String & part_name : vector_index_entry->data_part_names)
+-            {
+-                auto part = storage.getActiveContainingPart(part_name);
+-                if (part)
+-                {
+-                    part->setBuildError();
+-                }
+-            }
++            auto part = storage.getActiveContainingPart(vector_index_entry->part_name);
++            if (part)
++                part->setBuildError();
+         }
+     }
+     return false;
+@@ -53,21 +48,15 @@ UInt64 VectorIndexMergeTreeTask::getPriority()
+ 
+ void VectorIndexMergeTreeTask::onCompleted()
+ {
+-    for (const auto & part : vector_index_entry->data_part_names)
+-        LOG_DEBUG(&Poco::Logger::get("vectorIndexTask"), "on complete: {}", part);
++    if (vector_index_entry)
++        LOG_DEBUG(log, "on complete: {}", vector_index_entry->part_name);
+ 
+-    /// storage.finishVectorIndexJob(std::move(vector_index_entry->data_part_names));
+     task_result_callback(true);
+ }
+ 
+ VectorIndexMergeTreeTask::~VectorIndexMergeTreeTask()
+ {
+-    LOG_TRACE(&Poco::Logger::get("vectorIndexTask"), "destroy vector index job with vector index entry:");
+-    for (auto & data : vector_index_entry->data_part_names)
+-    {
+-        LOG_TRACE(&Poco::Logger::get("vectorIndexTask"), "{}", data);
+-    }
+-    /// storage.finishVectorIndexJob(std::move(vector_index_entry->data_part_names));
++    LOG_TRACE(log, "destroy vector index job with vector index entry: {}", vector_index_entry->part_name);
+ }
+ 
+ }
+diff --git a/src/Storages/MergeTree/VectorIndexMergeTreeTask.h b/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
+index a3cc9bec37..eef9f6ff6f 100644
+--- a/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
++++ b/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
+@@ -35,8 +35,9 @@ public:
+         , builder(builder_)
+         , task_result_callback(std::forward<Callback>(task_result_callback_))
+         , slow_mode(slow_mode_)
++        , log(&Poco::Logger::get("VectorIndexMergeTreeTask"))
+     {
+-        LOG_INFO(&Poco::Logger::get("VectorIndexMergeTreeTask"), "create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
++        LOG_INFO(log, "create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
+     }
+ 
+     bool executeStep() override;
+@@ -58,6 +59,8 @@ private:
+     ContextMutablePtr fake_query_context;
+ 
+     bool slow_mode;
++
++    Poco::Logger * log;
+ };
+ 
+ }
+diff --git a/src/Storages/StorageMergeTree.cpp b/src/Storages/StorageMergeTree.cpp
+index f5c57aafc9..f44af68481 100644
+--- a/src/Storages/StorageMergeTree.cpp
++++ b/src/Storages/StorageMergeTree.cpp
+@@ -32,6 +32,7 @@
+ #include <Storages/MergeTree/MergeTreeSink.h>
+ #include <Storages/MergeTree/MergeTreeDataPartInMemory.h>
+ #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
++#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
+ #include <Storages/MergeTree/PartitionPruner.h>
+ #include <Storages/MergeTree/MergeList.h>
+ #include <Storages/MergeTree/checkDataPart.h>
+@@ -829,11 +830,20 @@ void StorageMergeTree::loadMutations()
+ 
+ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right)
+ {
+-    for (const auto & part_name : currently_vector_indexing_parts)
++    if (left->containRowIdsMaps() || right->containRowIdsMaps())
++        return false;
++
+     {
+-        auto info = MergeTreePartInfo::fromPartName(part_name, format_version);
+-        if (left->info.contains(info) || right->info.contains(info))
+-            return false;
++        std::lock_guard lock(currently_vector_indexing_parts_mutex);
++        for (const auto & part_name : currently_vector_indexing_parts)
++        {
++            if (part_name == left->name || part_name == right->name)
++                return false;
++
++            auto info = MergeTreePartInfo::fromPartName(part_name, format_version);
++            if (left->info.contains(info) || right->info.contains(info))
++                return false;
++        }
+     }
+ 
+     bool can_merge = true;
+@@ -900,8 +910,6 @@ std::shared_ptr<MergeMutateSelectedEntry> StorageMergeTree::selectPartsToMerge(
+             return !currently_merging_mutating_parts.count(right);
+         return !currently_merging_mutating_parts.count(left) && !currently_merging_mutating_parts.count(right)
+             && getCurrentMutationVersion(left, lock) == getCurrentMutationVersion(right, lock) && partsContainSameProjections(left, right)
+-            && !currently_vector_indexing_parts.count(left->name) && !currently_vector_indexing_parts.count(right->name)
+-            && !left->containRowIdsMaps() && !right->containRowIdsMaps()
+             && canMergeForVectorIndex(metadata_snapshot, left, right);
+     };
+ 
+@@ -1208,16 +1216,6 @@ std::shared_ptr<MergeMutateSelectedEntry> StorageMergeTree::selectPartsToMutate(
+     return {};
+ }
+ 
+-void StorageMergeTree::finishVectorIndexJob(const std::vector<String>& processed_parts)
+-{
+-    std::unique_lock lock(currently_processing_in_background_mutex);
+-    for (auto & part : processed_parts)
+-    {
+-        LOG_DEBUG(log, "[finishVectorIndexJob] finish part: {}", part);
+-        currently_vector_indexing_parts.erase(part);
+-    }
+-}
+-
+ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assignee) //-V657
+ {
+     if (shutdown_called)
+@@ -1255,6 +1253,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
+ 
+         has_mutations = !current_mutations_by_version.empty();
+         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
++
++        /// Consider vector index building when no merge or mutate.
++        /// TODO: Add selectPartToBuildVectorIndex to do some checks, including memory limit/pool size.
+         if (!merge_entry && !mutate_entry)
+         {
+             if (vec_index_builder_updater.builds_blocker.isCancelled())
+@@ -1262,9 +1263,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
+ 
+             /// first for new data parts, then for merged data parts   
+             /// only select one part for each build
+-            vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, false, currently_merging_mutating_parts);
++            vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false, currently_merging_mutating_parts);
+             if (!vector_index_entry)
+-                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, true, currently_merging_mutating_parts);
++                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true, currently_merging_mutating_parts);
+         }
+     }
+ 
+diff --git a/src/Storages/StorageMergeTree.h b/src/Storages/StorageMergeTree.h
+index d9aad86673..d3e33d5868 100644
+--- a/src/Storages/StorageMergeTree.h
++++ b/src/Storages/StorageMergeTree.h
+@@ -20,7 +20,6 @@
+ #include <Storages/MergeTree/FutureMergedMutatedPart.h>
+ #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
+ #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
+-#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
+ #include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+ 
+ #include <Disks/StoragePolicy.h>
+@@ -113,7 +112,6 @@ public:
+ 
+     MergeTreeDeduplicationLog * getDeduplicationLog() { return deduplication_log.get(); }
+ 
+-    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
+ private:
+ 
+     /// Mutex and condvar for synchronous mutations wait
+@@ -223,8 +221,6 @@ private:
+ 
+     void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
+ 
+-    std::shared_ptr<VectorIndexEntry> selectPartsToBuildVectorIndex(const StorageMetadataPtr & metadata_snapshot);
+-
+     /// Returns maximum version of a part, with respect of mutations which would not change it.
+     Int64 getUpdatedDataVersion(
+         const DataPartPtr & part,
+@@ -268,6 +264,7 @@ private:
+     friend class MergeTreeData;
+     friend class MergePlainMergeTreeTask;
+     friend class MutatePlainMergeTreeTask;
++    friend class MergeTreeVectorIndexBuilderUpdater;
+ 
+ 
+ protected:
+diff --git a/src/Storages/StorageReplicatedMergeTree.cpp b/src/Storages/StorageReplicatedMergeTree.cpp
+index 96292c4f2f..598d565759 100644
+--- a/src/Storages/StorageReplicatedMergeTree.cpp
++++ b/src/Storages/StorageReplicatedMergeTree.cpp
+@@ -33,8 +33,7 @@
+ #include <Storages/MergeTree/ReplicatedMergeTreeQuorumEntry.h>
+ #include <Storages/MergeTree/ReplicatedMergeTreeSink.h>
+ #include <Storages/MergeTree/ReplicatedMergeTreeTableMetadata.h>
+-#include <Storages/MergeTree/VectorIndexEntry.h>
+-#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
++#include <Storages/MergeTree/ReplicatedVectorIndexTask.h>
+ #include <Storages/PartitionCommands.h>
+ #include <Storages/StorageReplicatedMergeTree.h>
+ #include <Storages/VirtualColumnUtils.h>
+@@ -101,6 +100,8 @@ namespace ProfileEvents
+     extern const Event NotCreatedLogEntryForMerge;
+     extern const Event CreatedLogEntryForMutation;
+     extern const Event NotCreatedLogEntryForMutation;
++    extern const Event CreatedLogEntryForBuildVIndex;
++    extern const Event NotCreatedLogEntryForBuildVIndex;
+ }
+ 
+ namespace CurrentMetrics
+@@ -1558,6 +1559,8 @@ bool StorageReplicatedMergeTree::executeLogEntry(LogEntry & entry)
+             throw Exception(ErrorCodes::LOGICAL_ERROR, "Merge has to be executed by another function");
+         case LogEntry::MUTATE_PART:
+             throw Exception(ErrorCodes::LOGICAL_ERROR, "Mutation has to be executed by another function");
++        case LogEntry::BUILD_VECTOR_INDEX:
++            throw Exception(ErrorCodes::LOGICAL_ERROR, "Building vector index has to be executed by another function");
+         case LogEntry::ALTER_METADATA:
+             return executeMetadataAlter(entry);
+         case LogEntry::SYNC_PINNED_PART_UUIDS:
+@@ -2931,36 +2934,8 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
+ 
+         /// remove dropped vector indices
+         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+-        {
+-            std::unique_lock lock(currently_processing_in_background_mutex);
+-            auto vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+-                metadata_snapshot, 1, false);
+ 
+-            if (vector_index_entry)
+-            {
+-                auto & parts = vector_index_entry->data_part_names;
+-                LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+-                auto task = std::make_shared<VectorIndexMergeTreeTask>(
+-                    *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
+-                assignee.scheduleVectorIndexTask(task);
+-                return true;
+-            }
+-            else
+-            {
+-                auto slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+-                    metadata_snapshot, 1, true);
+-                if (slow_mode_vector_index_entry)
+-                {
+-                    auto & parts = slow_mode_vector_index_entry->data_part_names;
+-                    LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+-                    auto task = std::make_shared<VectorIndexMergeTreeTask>(
+-                        *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+-                    assignee.scheduleSlowModeVectorIndexTask(task);
+-                    return true;
+-                }
+-                return false;   
+-            }
+-        }
++        return false;
+     }
+ 
+ 
+@@ -2988,6 +2963,13 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
+         assignee.scheduleMergeMutateTask(task);
+         return true;
+     }
++    else if (job_type == LogEntry::BUILD_VECTOR_INDEX)
++    {
++        auto task = std::make_shared<ReplicatedVectorIndexTask>(
++                *this, selected_entry, vec_index_builder_updater, common_assignee_trigger);
++        assignee.scheduleVectorIndexTask(task);
++        return true;
++    }
+     else
+     {
+         assignee.scheduleCommonTask(ExecutableLambdaAdapter::create(
+@@ -3117,6 +3099,39 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
+                         break;
+                 }
+             }
++            /// Consider vector index building when no merge / mutations selected.
++            /// TODO: control index building by memory limit ...
++            if ((create_result == CreateMergeEntryResult::Other) && !getInMemoryMetadataPtr()->vec_indices.empty())
++            {
++                /// Limit the number of build vector index entries in queue.
++                auto settings = getContext()->getSettingsRef();
++                auto metadata_snapshot = getInMemoryMetadataPtr();
++
++                VectorIndexEntryPtr vector_index_entry = nullptr;
++                bool slow_mode = false;
++
++                /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
++                if (vec_index_builder_updater.allowToBuildVectorIndex(false, merges_and_mutations_queued.vector_index_builds))
++                {
++                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
++                }
++
++                if (!vector_index_entry && vec_index_builder_updater.allowToBuildVectorIndex(true, merges_and_mutations_queued.slow_vector_index_builds))
++                {
++                    /// No fast build index selected, try to select slow build index.
++                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
++                    slow_mode = true;
++                }
++
++                if (vector_index_entry)
++                {
++                    create_result = createLogEntryToBuildVIndexForPart(
++                                vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred.getVersion(), slow_mode);
++
++                    std::lock_guard lock(currently_vector_indexing_parts_mutex);
++                    currently_vector_indexing_parts.insert(vector_index_entry->part_name);
++                }
++            }
+         }
+     }
+     catch (...)
+@@ -3315,6 +3330,67 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
+     return CreateMergeEntryResult::Ok;
+ }
+ 
++StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::createLogEntryToBuildVIndexForPart(
++    const String & part_name,
++    const String & vector_index_name,
++    int32_t log_version,
++    bool slow_mode)
++{
++    auto zookeeper = getZooKeeper();
++
++    /// If there is no information about part in ZK, we will not build vector index for it.
++    if (!zookeeper->exists(fs::path(replica_path) / "parts" / part_name))
++    {
++        LOG_WARNING(log, "Part {} (that was selected for vector index building) exists locally but not in ZooKeeper."
++                " Won't build vector index for that part and will check it.", part_name);
++        enqueuePartForCheck(part_name);
++
++        return CreateMergeEntryResult::MissingPart;
++    }
++
++    ReplicatedMergeTreeLogEntryData entry;
++    entry.type = LogEntry::BUILD_VECTOR_INDEX;
++    entry.source_replica = replica_name;
++    entry.create_time = time(nullptr);
++
++    entry.source_parts.push_back(part_name);
++    entry.index_name = vector_index_name;
++    entry.slow_mode = slow_mode;
++
++    Coordination::Requests ops;
++    Coordination::Responses responses;
++
++    ops.emplace_back(zkutil::makeCreateRequest(
++        fs::path(zookeeper_path) / "log/log-", entry.toString(),
++        zkutil::CreateMode::PersistentSequential));
++
++    ops.emplace_back(zkutil::makeSetRequest(
++        fs::path(zookeeper_path) / "log", "", log_version)); /// Check and update version.
++
++    Coordination::Error code = zookeeper->tryMulti(ops, responses);
++
++    if (code == Coordination::Error::ZOK)
++    {
++        String path_created = dynamic_cast<const Coordination::CreateResponse &>(*responses.front()).path_created;
++        entry.znode_name = path_created.substr(path_created.find_last_of('/') + 1);
++
++        ProfileEvents::increment(ProfileEvents::CreatedLogEntryForBuildVIndex);
++        LOG_TRACE(log, "Created log entry {} for building vector index {} in part {}", path_created, vector_index_name, part_name);
++    }
++    else if (code == Coordination::Error::ZBADVERSION)
++    {
++        ProfileEvents::increment(ProfileEvents::NotCreatedLogEntryForBuildVIndex);
++        LOG_TRACE(log, "Log entry is not created for building vector index {} in part {} because log was updated", vector_index_name, part_name);
++        return CreateMergeEntryResult::LogUpdated;
++    }
++    else
++    {
++        zkutil::KeeperMultiException::check(code, ops, responses);
++    }
++
++    return CreateMergeEntryResult::Ok;
++}
++
+ void StorageReplicatedMergeTree::removePartFromZooKeeper(const String & part_name, Coordination::Requests & ops, bool has_children)
+ {
+     String part_path = fs::path(replica_path) / "parts" / part_name;
+@@ -4128,6 +4204,9 @@ void StorageReplicatedMergeTree::startup()
+         startBackgroundMovesIfNeeded();
+ 
+         part_moves_between_shards_orchestrator.start();
++
++        /// Temporary directories contain incomplete results of vector index building.
++        clearTemporaryIndexBuildDirectories();
+     }
+     catch (...)
+     {
+@@ -4165,7 +4244,7 @@ void StorageReplicatedMergeTree::shutdown()
+     fetcher.blocker.cancelForever();
+     merger_mutator.merges_blocker.cancelForever();
+     parts_mover.moves_blocker.cancelForever();
+-    vec_index_builder_updater.builds_blocker.cancelForever();
++    vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancle background vector index build tasks
+     stopBeingLeader();
+ 
+     restarting_thread.shutdown();
+@@ -4190,6 +4269,15 @@ void StorageReplicatedMergeTree::shutdown()
+         /// Wait for all of them
+         std::unique_lock lock(data_parts_exchange_ptr->rwlock);
+     }
++
++    /// Temporary directories contain incomplete results of vector index building.
++    clearTemporaryIndexBuildDirectories();
++
++    /// Clear cached vector index
++    clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
++
++    /// Clear primary key cache if exists.
++    clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
+ }
+ 
+ 
+@@ -4558,14 +4646,47 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
+         LOG_INFO(log, "Metadata changed in ZooKeeper. Applying changes locally.");
+ 
+         auto metadata_diff = ReplicatedMergeTreeTableMetadata(*this, getInMemoryMetadataPtr()).checkAndFindDiff(metadata_from_entry, getInMemoryMetadataPtr()->getColumns(), getContext());
++        /// Save old vector indices to check if drop/add vector index happens.
++        auto old_vec_indices = getInMemoryMetadataPtr()->getVectorIndices();
++
+         setTableStructure(std::move(columns_from_entry), metadata_diff);
+         metadata_version = entry.alter_version;
+ 
+         LOG_INFO(log, "Applied changes to the metadata of the table. Current metadata version: {}", metadata_version);
+         if (metadata_diff.vector_indices_changed)
+         {
+-            LOG_INFO(log, "Get vector index change, start background job immediately");
+-            background_operations_assignee.trigger();
++            /// Compare old and new vector_indices to determine add or drop vector index
++            /// Currently only ONE vector index is supported.
++            auto new_vec_indices = getInMemoryMetadataPtr()->getVectorIndices();
++            if (old_vec_indices.empty())
++            {
++                /// Add vector index case.
++                LOG_INFO(log, "Get add vector index, start background job immediately");
++                background_operations_assignee.trigger();
++            }
++            else if (new_vec_indices.empty())
++            {
++                /// Drop vector index case.
++                LOG_INFO(log, "Get drop vector index, clear index cache and stop building vector index immediately");
++
++                /// Delete vector index files.
++                for (const auto & part : getDataPartsForInternalUsage())
++                {
++                    // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
++
++                    /// Clear cache first, now getAllSegementIds() is based on vector index files
++                    for (auto & vec_index_desc : old_vec_indices)
++                    {
++                        auto segment_ids = VectorIndex::getAllSegmentIds(part->getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
++                        for (auto & segment_id : segment_ids)
++                            VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
++
++                        /// Delete files in part directory if exists and metadata
++                        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column);
++                    }
++                }
++            }
++
+         }
+     }
+ 
+@@ -7195,15 +7316,6 @@ std::unique_ptr<MergeTreeSettings> StorageReplicatedMergeTree::getDefaultSetting
+     return std::make_unique<MergeTreeSettings>(getContext()->getReplicatedMergeTreeSettings());
+ }
+ 
+-void StorageReplicatedMergeTree::finishVectorIndexJob(const std::vector<String> & processed_parts)
+-{
+-    std::unique_lock lock(currently_processing_in_background_mutex);
+-    for (auto & part : processed_parts)
+-    {
+-        currently_vector_indexing_parts.erase(part);
+-    }
+-}
+-
+ 
+ String StorageReplicatedMergeTree::getTableSharedID() const
+ {
+diff --git a/src/Storages/StorageReplicatedMergeTree.h b/src/Storages/StorageReplicatedMergeTree.h
+index 9d46b7544b..32753670fb 100644
+--- a/src/Storages/StorageReplicatedMergeTree.h
++++ b/src/Storages/StorageReplicatedMergeTree.h
+@@ -314,6 +314,8 @@ private:
+     friend class MergeFromLogEntryTask;
+     friend class MutateFromLogEntryTask;
+     friend class ReplicatedMergeMutateTaskBase;
++    friend class MergeTreeVectorIndexBuilderUpdater;
++    friend class ReplicatedVectorIndexTask;
+ 
+     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
+     using LogEntry = ReplicatedMergeTreeLogEntry;
+@@ -788,8 +790,13 @@ private:
+     /// Create ephemeral lock in zookeeper for part and disk which support zero copy replication.
+     /// If somebody already holding the lock -- return std::nullopt.
+     std::optional<ZeroCopyLock> tryCreateZeroCopyExclusiveLock(const String & part_name, const DiskPtr & disk) override;
+-    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
+-    /// mutable std::mutex currently_processing_in_background_mutex;
++
++    /// Create log entry for vector index build.
++    CreateMergeEntryResult createLogEntryToBuildVIndexForPart(
++      const String & part_name,
++      const String & vector_index_name,
++      int32_t log_version,
++      bool slow_mode = false);
+ 
+ protected:
+     /** If not 'attach', either creates a new table in ZK, or adds a replica to an existing table.
+diff --git a/tests/integration/test_mqvs_replicated_vector_index/__init__.py b/tests/integration/test_mqvs_replicated_vector_index/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/tests/integration/test_mqvs_replicated_vector_index/test.py b/tests/integration/test_mqvs_replicated_vector_index/test.py
+new file mode 100644
+index 0000000000..7b14ba7585
+--- /dev/null
++++ b/tests/integration/test_mqvs_replicated_vector_index/test.py
+@@ -0,0 +1,49 @@
++import logging
++import random
++import threading
++import time
++from collections import Counter
++
++import pytest
++from helpers.cluster import ClickHouseCluster
++
++cluster = ClickHouseCluster(__file__)
++
++node1 = cluster.add_instance("node1", macros={"cluster": "test1"}, with_zookeeper=True)
++node2 = cluster.add_instance("node2", macros={"cluster": "test1"}, with_zookeeper=True)
++
++all_nodes = [node1, node2]
++
++
++def prepare_cluster():
++    for node in all_nodes:
++        node.query(
++            """
++        DROP TABLE IF EXISTS test_vector SYNC;
++        CREATE TABLE test_vector(id Int32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 960)
++        ENGINE ReplicatedMergeTree('/clickhouse/{cluster}/tables/test/test_vector', '{instance}')
++        ORDER BY id;
++        """
++        )
++
++@pytest.fixture(scope="module")
++def started_cluster():
++    try:
++        cluster.start()
++        yield cluster
++
++    finally:
++        cluster.shutdown()
++
++
++def test_build_index_prevent_merge(started_cluster):
++    prepare_cluster()
++
++    node1.query("INSERT INTO test_vector SELECT number, range(960) FROM numbers(100000) SETTINGS min_insert_block_size_rows=1000")
++    node1.query("ALTER TABLE test_vector ADD VECTOR INDEX replia_ind vector TYPE HNSWFLAT('metric_type=L2','m=16','ef_c=128');")
++    node1.query("OPTIMIZE TABLE test_vector FINAL")
++
++    node2.wait_for_log_line("index build complete", timeout=100)
++
++    assert int(node1.count_in_log("Vector index build is cancelled").strip()) == 0
++    assert int(node2.count_in_log("Vector index build is cancelled").strip()) == 0
+diff --git a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
+new file mode 100644
+index 0000000000..53febe7ab5
+--- /dev/null
++++ b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
+@@ -0,0 +1,78 @@
++0
++0
++--- Original topK result
++0	[0,0,0]	0.030000001
++1	[1,1,1]	2.4299998
++2	[2,2,2]	10.83
++3	[3,3,3]	25.230003
++4	[4,4,4]	45.630005
++5	[5,5,5]	72.03
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++--- Lightweight delete on parts with vector index
++0	[0,0,0]	0.030000001
++1	[1,1,1]	2.4299998
++3	[3,3,3]	25.230003
++4	[4,4,4]	45.630005
++5	[5,5,5]	72.03
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++12	[12,12,12]	424.82996
++13	[13,13,13]	499.22998
++14	[14,14,14]	579.63
++15	[15,15,15]	666.02997
++16	[16,16,16]	758.42993
++--- Decoupled part when source parts contain lightweight delete
++0
++0	[0,0,0]	0.030000001
++1	[1,1,1]	2.4299998
++3	[3,3,3]	25.230003
++4	[4,4,4]	45.630005
++5	[5,5,5]	72.03
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++12	[12,12,12]	424.82996
++13	[13,13,13]	499.22998
++14	[14,14,14]	579.63
++15	[15,15,15]	666.02997
++16	[16,16,16]	758.42993
++--- Lightweight delete on decoupled part
++test_replicated_vector	v1	HNSWFLAT	1	InProgress
++0	[0,0,0]	0.030000001
++1	[1,1,1]	2.4299998
++4	[4,4,4]	45.630005
++5	[5,5,5]	72.03
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++12	[12,12,12]	424.82996
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++11	[11,11,11]	356.42996
++12	[12,12,12]	424.82996
++13	[13,13,13]	499.22998
++14	[14,14,14]	579.63
++16	[16,16,16]	758.42993
++17	[17,17,17]	856.82996
+diff --git a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
+new file mode 100644
+index 0000000000..c1ecf47a81
+--- /dev/null
++++ b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
+@@ -0,0 +1,46 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_replicated_vector SYNC;
++DROP TABLE IF EXISTS test_replicated_vector2 SYNC;
++CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
++CREATE TABLE test_replicated_vector2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r2') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
++INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(100);
++ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++
++SELECT sleep(3);
++
++INSERT INTO test_replicated_vector SELECT number + 100, [number + 100, number + 100, number + 100] FROM numbers(100);
++INSERT INTO test_replicated_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
++
++SELECT sleep(3);
++SELECT '--- Original topK result';
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
++
++set allow_experimental_lightweight_delete=1;
++set mutations_sync=2;
++
++SELECT '--- Lightweight delete on parts with vector index';
++delete from test_replicated_vector where id = 2;
++delete from test_replicated_vector where id = 10;
++
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2;
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector prewhere id > 5;
++
++SELECT '--- Decoupled part when source parts contain lightweight delete';
++optimize table test_replicated_vector final;
++SELECT sleep(2);
++
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2 prewhere id > 5;
++
++SELECT '--- Lightweight delete on decoupled part';
++delete from test_replicated_vector where id = 3;
++delete from test_replicated_vector where id = 15;
++
++select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_replicated_vector';
++
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2;
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector prewhere id > 5;
++
++DROP TABLE IF EXISTS test_replicated_vector SYNC;
++DROP TABLE IF EXISTS test_replicated_vector2 SYNC;
+diff --git a/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.reference b/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.reference
+new file mode 100644
+index 0000000000..d5ee6e9e53
+--- /dev/null
++++ b/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.reference
+@@ -0,0 +1,6 @@
++0
++0
++0
++test_replicated_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = cosine\', \'ef_c=256\')	Error	all_0_0_0	 [VectorIndex] unsupported metric_type COSINE. (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
++test_replicated_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	Error	all_0_0_0	 [VectorIndex] These parameters are not supported in Index type IVFFLAT : metric : IP, . (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
++test_replicated_success_vector	v1_success	v1_success vector TYPE HNSWFLAT	Built		
+diff --git a/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.sql b/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.sql
+new file mode 100644
+index 0000000000..90191e9ec7
+--- /dev/null
++++ b/tests/queries/2_vector_search/00019_mqvs_replicated_add_fail_status_in_vector_indices.sql
+@@ -0,0 +1,30 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_replicated_success_vector SYNC;
++CREATE TABLE test_replicated_success_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00019/success_vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++ALTER TABLE test_replicated_success_vector ADD VECTOR INDEX v1_success vector TYPE HNSWFLAT;
++INSERT INTO test_replicated_success_vector SELECT number, [number, number, number] FROM numbers(2100);
++
++SELECT sleep(2);
++
++DROP TABLE IF EXISTS test_replicated_fail_vector SYNC;
++CREATE TABLE test_replicated_fail_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00019/fail_vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++-- Unsupported parameter: metric_type = cosine
++ALTER TABLE test_replicated_fail_vector ADD VECTOR INDEX v1_fail vector TYPE HNSWSQ('metric_type = cosine', 'ef_c=256');
++INSERT INTO test_replicated_fail_vector SELECT number, [number, number, number] FROM numbers(2100);
++
++SELECT sleep(2);
++
++DROP TABLE IF EXISTS test_replicated_fail_vector_2 SYNC;
++CREATE TABLE test_replicated_fail_vector_2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00019/fail_vector_2', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
++-- Unsupported parameter: meric=IP
++ALTER TABLE test_replicated_fail_vector_2 ADD VECTOR INDEX vindex vector TYPE IVFFLAT('metric=IP', 'ncentroids=5000');
++INSERT INTO test_replicated_fail_vector_2 SELECT number, [number, number, number] FROM numbers(2100);
++
++SELECT sleep(2);
++
++SELECT table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() order by table;
++
++DROP TABLE test_replicated_fail_vector_2 SYNC;
++DROP TABLE test_replicated_fail_vector SYNC;
++DROP TABLE test_replicated_success_vector SYNC;
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+index 7cacf7003b..b96fe4aac7 100755
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+@@ -2,7 +2,7 @@
+ # Tags: no-parallel
+ 
+ max_response_time_drop_vector_index=1
+-max_response_time_drop_table=10
++max_response_time_drop_table=20
+ 
+ # create table & insert data
+ clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
+diff --git a/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.reference b/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.reference
+new file mode 100644
+index 0000000000..0213acb188
+--- /dev/null
++++ b/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.reference
+@@ -0,0 +1,7 @@
++-- Test drop index not blocked by concurently buiding vector index
++test_drop_replica_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	InProgress
++0
++-- Empty result, no vector index v1 after drop index
++0
++-- Test drop table can interrupt building vector index, not blocked by it
++test_drop_replica_table	v2	HNSWPQ	v2 vector TYPE HNSWPQ	InProgress
+diff --git a/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.sql b/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.sql
+new file mode 100644
+index 0000000000..ce847e6f26
+--- /dev/null
++++ b/tests/queries/2_vector_search/00020_mqvs_replicated_drop_vector_index_and_drop_table.sql
+@@ -0,0 +1,23 @@
++DROP TABLE IF EXISTS test_drop_replica_table SYNC;
++
++CREATE TABLE test_drop_replica_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine= ReplicatedMergeTree('/clickhouse/tables/default/test_drop_replica_table', '1') ORDER BY id;
++INSERT INTO test_drop_replica_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);
++
++optimize table test_drop_replica_table final;
++
++ALTER TABLE test_drop_replica_table ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++SELECT '-- Test drop index not blocked by concurently buiding vector index';
++SELECT table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_replica_table';
++
++SELECT sleep(2);
++
++ALTER TABLE test_drop_replica_table DROP VECTOR INDEX v1;
++SELECT '-- Empty result, no vector index v1 after drop index';
++SELECT table, name, type, expr, status FROM system.vector_indices where database = currentDatabase() and table = 'test_drop_replica_table';
++
++ALTER TABLE test_drop_replica_table ADD VECTOR INDEX v2 vector TYPE HNSWPQ;
++SELECT sleep(3);
++SELECT '-- Test drop table can interrupt building vector index, not blocked by it';
++SELECT table, name, type, expr, status FROM system.vector_indices where database = currentDatabase() and table = 'test_drop_replica_table';
++
++DROP TABLE IF EXISTS test_drop_replica_table SYNC;
+diff --git a/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.reference b/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.reference
+new file mode 100644
+index 0000000000..82919b2282
+--- /dev/null
++++ b/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.reference
+@@ -0,0 +1,15 @@
++0
++0
++0	[0,0,0]	0.030000001
++1	[1,1,1]	2.4299998
++3	[3,3,3]	25.230003
++4	[4,4,4]	45.630005
++5	[5,5,5]	72.03
++6	[6,6,6]	104.43001
++7	[7,7,7]	142.83
++8	[8,8,8]	187.23
++9	[9,9,9]	237.62997
++10	[10,10,10]	294.02997
++Test build vector index for new inserted part after lightweight delete
++0
++Built
+diff --git a/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.sql b/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.sql
+new file mode 100644
+index 0000000000..353c8fd49a
+--- /dev/null
++++ b/tests/queries/2_vector_search/00022_mqvs_replicated_lightweight_delete_with_vector.sql
+@@ -0,0 +1,25 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_replicated_vector;
++CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00022/vector_insert', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
++ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(2100);
++
++SELECT sleep(2);
++
++set allow_experimental_lightweight_delete=1;
++set mutations_sync=1;
++
++delete from test_replicated_vector where id = 2;
++
++SELECT sleep(2);
++
++SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
++
++SELECT 'Test build vector index for new inserted part after lightweight delete';
++INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(2100,1001);
++
++SELECT sleep(2);
++SELECT status FROM system.vector_indices where database=currentDatabase() and table='test_replicated_vector';
++
++DROP TABLE test_replicated_vector SYNC;
+diff --git a/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.reference b/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.reference
+new file mode 100644
+index 0000000000..d45732f75d
+--- /dev/null
++++ b/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.reference
+@@ -0,0 +1,11 @@
++0
++Test merge on part with vector index and part w/o index built
++test_replicated_vector_merge	all_0_0_0
++test_replicated_vector_merge	all_1_1_0
++0
++Test merge on all parts with vector index built
++Built
++test_replicated_vector_merge	all_0_1_1
++Test merge on decoupled part
++test_replicated_vector_merge	all_0_1_1
++test_replicated_vector_merge	all_2_2_0
+diff --git a/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.sql b/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.sql
+new file mode 100644
+index 0000000000..7cd851c51e
+--- /dev/null
++++ b/tests/queries/2_vector_search/00022_mqvs_replicated_merge_with_vector_index.sql
+@@ -0,0 +1,31 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_replicated_vector_merge SYNC;
++CREATE TABLE test_replicated_vector_merge(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00022/vector_merge', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true;
++ALTER TABLE test_replicated_vector_merge ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++INSERT INTO test_replicated_vector_merge SELECT number, [number, number, number] FROM numbers(100);
++
++SELECT sleep(2);
++INSERT INTO test_replicated_vector_merge SELECT number, [number, number, number] FROM numbers(200,1000);
++
++OPTIMIZE TABLE test_replicated_vector_merge FINAL;
++
++SELECT 'Test merge on part with vector index and part w/o index built';
++SELECT table, name from system.parts where database=currentDatabase() and table='test_replicated_vector_merge' and active;
++
++SELECT sleep(3);
++SELECT 'Test merge on all parts with vector index built';
++SELECT status from system.vector_indices where table='test_replicated_vector_merge';
++
++OPTIMIZE TABLE test_replicated_vector_merge FINAL;
++
++SELECT table, name from system.parts where database=currentDatabase() and table='test_replicated_vector_merge' and active;
++
++INSERT INTO test_replicated_vector_merge SELECT number, [number, number, number] FROM numbers(1100,1000);
++
++OPTIMIZE TABLE test_replicated_vector_merge FINAL;
++
++SELECT 'Test merge on decoupled part';
++SELECT table, name from system.parts where database=currentDatabase() and table='test_replicated_vector_merge' and active;
++
++DROP TABLE test_replicated_vector_merge sync;
+diff --git a/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.reference b/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.reference
+new file mode 100644
+index 0000000000..5310e72188
+--- /dev/null
++++ b/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.reference
+@@ -0,0 +1,12 @@
++mutation on mergetree can reuse vector index
++all_1_1_0	Compact
++all_2_2_0	Wide
++all_3_3_0	Compact
++3	3	Built
++3	3	Built
++mutation on replicated mergetree can reuse vector index
++all_0_0_0	Compact
++all_1_1_0	Wide
++2	2	Built
++2	2	Built
++mutation on replicated mergetree does not cancel building vector index
+diff --git a/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.sh b/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.sh
+new file mode 100755
+index 0000000000..d8418b1531
+--- /dev/null
++++ b/tests/queries/2_vector_search/00023_mqvs_mutation_can_reuse_vector_index.sh
+@@ -0,0 +1,89 @@
++#!/usr/bin/env bash
++# Tags: no-parallel
++
++echo 'mutation on mergetree can reuse vector index'
++clickhouse-client -q "drop table if exists test_mutation sync"
++clickhouse-client -q "create table test_mutation (id Int32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 480) ENGINE = MergeTree ORDER BY id settings min_rows_for_wide_part=5000, min_rows_for_compact_part=1000, min_bytes_for_wide_part=0, min_bytes_for_compact_part=0"
++clickhouse-client -q "alter table test_mutation add vector index replia_ind vector type HNSWFLAT"
++
++clickhouse-client -q "insert into test_mutation select number, range(480) from numbers(1000)"
++clickhouse-client -q "insert into test_mutation select number, range(480) from numbers(1000,5000)"
++clickhouse-client -q "insert into test_mutation select number, range(480) from numbers(6000,1000)"
++
++clickhouse-client -q "SELECT name, part_type from system.parts where database=currentDatabase() and table='test_mutation'"
++status="InProgress"
++time=0
++while [[ $status != "Built" && $time != 5 ]]
++do
++        status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_mutation' and name = 'replia_ind'"`
++        sleep 2
++        ((++time))
++done
++if [ $time -eq 5 ]; then
++        echo "fail to build index for test_mutation"
++fi
++
++clickhouse-client -q "SELECT total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE table='test_mutation' and database=currentDatabase()"
++
++# check vector index status after lightweight delete
++clickhouse-client --allow_experimental_lightweight_delete=1 --mutations_sync=1 -q "delete from test_mutation where id in (10, 1002)"
++clickhouse-client -q "SELECT total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE table='test_mutation' and database=currentDatabase()"
++
++clickhouse-client -q "DROP TABLE test_mutation sync"
++
++echo 'mutation on replicated mergetree can reuse vector index'
++clickhouse-client -q "drop table if exists test_replica_mutation sync"
++clickhouse-client -q "create table test_replica_mutation (id Int32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 480) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00022/test_mutation', 'r1') ORDER BY id settings min_rows_for_wide_part=5000, min_rows_for_compact_part=1000, min_bytes_for_wide_part=0, min_bytes_for_compact_part=0"
++clickhouse-client -q "alter table test_replica_mutation add vector index replia_ind vector type HNSWFLAT"
++
++clickhouse-client -q "insert into test_replica_mutation select number, range(480) from numbers(1001)"
++clickhouse-client -q "insert into test_replica_mutation select number, range(480) from numbers(1001,5000)"
++
++clickhouse-client -q "SELECT name, part_type from system.parts where database=currentDatabase() and table='test_replica_mutation'"
++
++# wait build index finish
++status="InProgress"
++time=0
++while [[ $status != "Built" && $time != 5 ]]
++do
++        status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_replica_mutation' and name = 'replia_ind'"`
++        sleep 2
++        ((++time))
++done
++if [ $time -eq 5 ]; then
++        echo "fail to build index for test_replica_mutation"
++fi
++
++clickhouse-client -q "SELECT total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE table='test_replica_mutation' and database=currentDatabase()"
++
++# check vector index status after lightweight delete
++clickhouse-client --allow_experimental_lightweight_delete=1 --mutations_sync=1 -q "delete from test_replica_mutation where id in (10, 1002)"
++clickhouse-client -q "SELECT total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE table='test_replica_mutation' and database=currentDatabase()"
++
++clickhouse-client -q "DROP TABLE test_replica_mutation sync"
++
++echo 'mutation on replicated mergetree does not cancel building vector index'
++clickhouse-client -q "drop table if exists test_replica_mutation_cancel sync"
++clickhouse-client -q "create table test_replica_mutation_cancel (id Int32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 480) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00022/test_mutation_cancel', 'r1') ORDER BY id settings min_rows_for_wide_part=6000, min_rows_for_compact_part=1000, min_bytes_for_wide_part=0, min_bytes_for_compact_part=0"
++clickhouse-client -q "alter table test_replica_mutation_cancel add vector index replia_ind vector type HNSWFLAT"
++
++clickhouse-client -q "insert into test_replica_mutation_cancel select number, range(480) from numbers(50000)"
++sleep 1
++clickhouse-client --allow_experimental_lightweight_delete=1 --mutations_sync=1 -q "delete from test_replica_mutation_cancel where id < 1000"
++
++# check build index is not cancled by mutation
++status="InProgress"
++time=0
++while [[ $status != "Built" && $status != "Error" && $time < 5 ]]
++do
++        status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_replica_mutation_cancel' and name = 'replia_ind'"`
++        sleep 2
++        ((++time))
++done
++
++if [[ $status != "InProgress" && $status != "Built" ]]; then
++        echo "build index of old part is canceled"
++fi
++
++clickhouse-client -q "SELECT latest_failed_part FROM system.vector_indices WHERE table='test_replica_mutation' and database=currentDatabase()"
++clickhouse-client -q "DROP TABLE test_replica_mutation_cancel sync"
+-- 
+2.32.1 (Apple Git-133)
+

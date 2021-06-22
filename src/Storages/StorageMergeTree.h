@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/Names.h>
@@ -14,6 +18,7 @@
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 
 #include <Disks/StoragePolicy.h>
 #include <Common/SimpleIncrement.h>
@@ -51,6 +56,8 @@ public:
     ~StorageMergeTree() override;
 
     std::string getName() const override { return merging_params.getModeName() + "MergeTree"; }
+
+    bool isShutdown() const override { return shutdown_called.load(); }
 
     bool supportsParallelInsert() const override { return true; }
 
@@ -124,6 +131,7 @@ private:
     MergeTreeDataSelectExecutor reader;
     MergeTreeDataWriter writer;
     MergeTreeDataMergerMutator merger_mutator;
+    MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
 
     std::unique_ptr<MergeTreeDeduplicationLog> deduplication_log;
 
@@ -137,9 +145,6 @@ private:
     /// For clearOldBrokenDetachedParts
     AtomicStopwatch time_after_previous_cleanup_broken_detached_parts;
 
-    /// Mutex for parts currently processing in background
-    /// merging (also with TTL), mutating or moving.
-    mutable std::mutex currently_processing_in_background_mutex;
     mutable std::condition_variable currently_processing_in_background_condition;
 
     /// Parts that currently participate in merge or mutation.
@@ -147,6 +152,11 @@ private:
     DataParts currently_merging_mutating_parts;
 
     std::map<UInt64, MergeTreeMutationEntry> current_mutations_by_version;
+
+    /// We store information about mutations which are not applicable to the partition of each part.
+    /// The value is a maximum version for a part which will be the same as his current version,
+    /// that is, to which version it can be upgraded without any change.
+    std::map<std::pair<Int64, Int64>, UInt64> updated_version_by_block_range;
 
     std::atomic<bool> shutdown_called {false};
     std::atomic<bool> flush_called {false};
@@ -223,6 +233,12 @@ private:
     UInt32 getMaxLevelInBetween(
         const DataPartPtr & left,
         const DataPartPtr & right) const;
+    void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
+
+    /// Returns maximum version of a part, with respect of mutations which would not change it.
+    Int64 getUpdatedDataVersion(
+        const DataPartPtr & part,
+        std::unique_lock<std::mutex> & /* currently_processing_in_background_mutex_lock */) const;
 
     size_t clearOldMutations(bool truncate = false);
 
@@ -259,10 +275,14 @@ private:
 
     std::unique_ptr<MergeTreeSettings> getDefaultSettings() const override;
 
+    bool canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right);
+
+    friend class MergeTreeProjectionBlockOutputStream;
     friend class MergeTreeSink;
     friend class MergeTreeData;
     friend class MergePlainMergeTreeTask;
     friend class MutatePlainMergeTreeTask;
+    friend class MergeTreeVectorIndexBuilderUpdater;
 
 
 protected:

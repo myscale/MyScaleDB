@@ -67,7 +67,6 @@ static DataTypePtr create(const ASTPtr & arguments)
     return std::make_shared<DataTypeArray>(DataTypeFactory::instance().get(arguments->children[0]));
 }
 
-
 void registerDataTypeArray(DataTypeFactory & factory)
 {
     factory.registerDataType("Array", create);

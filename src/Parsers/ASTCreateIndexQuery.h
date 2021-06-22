@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #pragma once
 
 #include <Parsers/ASTQueryWithOnCluster.h>
@@ -9,6 +14,7 @@ namespace DB
 {
 
 /** CREATE INDEX [IF NOT EXISTS] name ON [db].name (expression) TYPE type GRANULARITY value
+ * CREATE VECTOR INDEX [IF NOT EXISTS] name on [db].name column TYPE typename(args)
  */
 
 class ASTCreateIndexQuery : public ASTQueryWithTableAndOutput, public ASTQueryWithOnCluster
@@ -20,6 +26,8 @@ public:
     ASTPtr index_decl;
 
     bool if_not_exists{false};
+
+    bool is_vector_index{false};
 
     String getID(char delim) const override;
 

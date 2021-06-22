@@ -56,8 +56,10 @@ from .config_cluster import *
 
 HELPERS_DIR = p.dirname(__file__)
 CLICKHOUSE_ROOT_DIR = p.join(p.dirname(__file__), "../../..")
+# set mqdb test compose dir
 LOCAL_DOCKER_COMPOSE_DIR = p.join(
-    CLICKHOUSE_ROOT_DIR, "docker/test/integration/runner/compose/"
+    CLICKHOUSE_ROOT_DIR, "docker/test/mqdb_test_integration/runner/compose/"
+    # CLICKHOUSE_ROOT_DIR, "docker/test/integration/runner/compose/"
 )
 DEFAULT_ENV_NAME = ".env"
 
@@ -383,7 +385,7 @@ class ClickHouseCluster:
             "CLICKHOUSE_TESTS_DOCKERD_HOST"
         )
         self.docker_api_version = os.environ.get("DOCKER_API_VERSION")
-        self.docker_base_tag = os.environ.get("DOCKER_BASE_TAG", "latest")
+        self.docker_base_tag = os.environ.get("DOCKER_BASE_TAG", "1.4")
 
         self.base_cmd = ["docker-compose"]
         if custom_dockerd_host:
@@ -845,7 +847,7 @@ class ClickHouseCluster:
 
         env_variables["keeper_binary"] = binary_path
         env_variables["keeper_cmd_prefix"] = keeper_cmd_prefix
-        env_variables["image"] = "clickhouse/integration-test:" + self.docker_base_tag
+        env_variables["image"] = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration:" + self.docker_base_tag
         env_variables["user"] = str(os.getuid())
         env_variables["keeper_fs"] = "bind"
         for i in range(1, 4):
@@ -1437,8 +1439,8 @@ class ClickHouseCluster:
         with_coredns=False,
         hostname=None,
         env_variables=None,
-        image="clickhouse/integration-test",
-        tag=None,
+        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration",
+        tag=1.4,
         stay_alive=False,
         ipv4_address=None,
         ipv6_address=None,
@@ -1818,8 +1820,8 @@ class ClickHouseCluster:
     def get_instance_ip(self, instance_name):
         logging.debug("get_instance_ip instance_name={}".format(instance_name))
         docker_id = self.get_instance_docker_id(instance_name)
-        # for cont in self.docker_client.containers.list():
-        # logging.debug("CONTAINERS LIST: ID={} NAME={} STATUS={}".format(cont.id, cont.name, cont.status))
+        for cont in self.docker_client.containers.list():
+            logging.debug("CONTAINERS LIST: ID={} NAME={} STATUS={}".format(cont.id, cont.name, cont.status))
         handle = self.docker_client.containers.get(docker_id)
         return list(handle.attrs["NetworkSettings"]["Networks"].values())[0][
             "IPAddress"
@@ -3078,8 +3080,9 @@ class ClickHouseInstance:
         copy_common_configs=True,
         hostname=None,
         env_variables=None,
-        image="clickhouse/integration-test",
-        tag="latest",
+        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration",
+        tag="1.4",
+        # tag="latest",
         stay_alive=False,
         ipv4_address=None,
         ipv6_address=None,

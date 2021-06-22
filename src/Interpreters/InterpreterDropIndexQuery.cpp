@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Access/ContextAccess.h>
 #include <Databases/DatabaseReplicated.h>
 #include <Interpreters/Context.h>
@@ -6,6 +11,7 @@
 #include <Parsers/ASTDropIndexQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Storages/AlterCommands.h>
+#include <Storages/StorageDistributed.h>
 
 namespace DB
 {
@@ -19,17 +25,10 @@ namespace ErrorCodes
 BlockIO InterpreterDropIndexQuery::execute()
 {
     auto current_context = getContext();
-    const auto & drop_index = query_ptr->as<ASTDropIndexQuery &>();
+    auto & drop_index = query_ptr->as<ASTDropIndexQuery &>();
 
     AccessRightsElements required_access;
     required_access.emplace_back(AccessType::ALTER_DROP_INDEX, drop_index.getDatabase(), drop_index.getTable());
-
-    if (!drop_index.cluster.empty())
-    {
-        DDLQueryOnClusterParams params;
-        params.access_to_check = std::move(required_access);
-        return executeDDLQueryOnCluster(query_ptr, current_context, params);
-    }
 
     current_context->checkAccess(required_access);
     auto table_id = current_context->resolveStorageID(drop_index, Context::ResolveOrdinary);
@@ -47,13 +46,47 @@ BlockIO InterpreterDropIndexQuery::execute()
     if (table->isStaticStorage())
         throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
 
+    /// Convert drop vector index command on distributed table into an equivalent distributed ddl on local tables.
+    if (drop_index.is_vector_index)
+    {
+        if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
+        {
+            /// We only check the first command, and not check if alter table contains mixed table struct and data commands.
+            drop_index.setTable(dist_table->getRemoteTableName());
+            drop_index.cluster = dist_table->getClusterName();
+
+            String remote_database;
+            if (!dist_table->getRemoteDatabaseName().empty())
+                remote_database = dist_table->getRemoteDatabaseName();
+            else
+                remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
+
+            drop_index.setDatabase(remote_database);
+        }
+    }
+
+    if (!drop_index.cluster.empty())
+    {
+        DDLQueryOnClusterParams params;
+        params.access_to_check = std::move(required_access);
+        return executeDDLQueryOnCluster(query_ptr, current_context, params);
+    }
+
     /// Convert ASTDropIndexQuery to AlterCommand.
     AlterCommands alter_commands;
 
     AlterCommand command;
     command.ast = drop_index.convertToASTAlterCommand();
-    command.type = AlterCommand::DROP_INDEX;
-    command.index_name = drop_index.index_name->as<ASTIdentifier &>().name();
+    if(drop_index.is_vector_index)
+    {
+        command.vec_index_name = drop_index.index_name->as<ASTIdentifier &>().name();
+        command.type = AlterCommand::DROP_VECTOR_INDEX;
+    }
+    else
+    {
+        command.index_name = drop_index.index_name->as<ASTIdentifier &>().name();
+        command.type = AlterCommand::DROP_INDEX;
+    }
     command.if_exists = drop_index.if_exists;
 
     alter_commands.emplace_back(std::move(command));

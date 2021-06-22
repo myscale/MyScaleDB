@@ -1,0 +1,362 @@
+From c2e75534d22a462f049e39d12b5a1d03a4afe106 Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Mon, 16 Jan 2023 13:57:09 +0800
+Subject: [PATCH 16/85] Use ActionBlock to cancel background build vector index
+ task
+
+---
+ src/Interpreters/ActionLocksManager.cpp       |  1 +
+ src/Interpreters/InterpreterDropQuery.cpp     |  9 ++--
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 40 +++++++++++-------
+ .../MergeTreeVectorIndexBuilderUpdater.h      |  5 +++
+ .../ReplicatedMergeTreeRestartingThread.cpp   |  1 +
+ src/Storages/StorageMergeTree.cpp             |  9 +++-
+ src/Storages/StorageReplicatedMergeTree.cpp   |  1 +
+ src/Storages/VectorIndicesDescription.cpp     |  8 ++++
+ src/Storages/VectorIndicesDescription.h       |  2 +
+ ...drop_vector_index_and_drop_table.reference |  6 +--
+ ...0_mqvs_drop_vector_index_and_drop_table.sh | 41 +++++++++++--------
+ 11 files changed, 80 insertions(+), 43 deletions(-)
+
+diff --git a/src/Interpreters/ActionLocksManager.cpp b/src/Interpreters/ActionLocksManager.cpp
+index 0f9b4d01bd..c312eef1f8 100644
+--- a/src/Interpreters/ActionLocksManager.cpp
++++ b/src/Interpreters/ActionLocksManager.cpp
+@@ -16,6 +16,7 @@ namespace ActionLocks
+     extern const StorageActionBlockType DistributedSend = 5;
+     extern const StorageActionBlockType PartsTTLMerge = 6;
+     extern const StorageActionBlockType PartsMove = 7;
++    extern const StorageActionBlockType PartsBuildIndex = 8; /// Action lock for vector index build
+ }
+ 
+ 
+diff --git a/src/Interpreters/InterpreterDropQuery.cpp b/src/Interpreters/InterpreterDropQuery.cpp
+index 2ad3b0d380..5563e7fe69 100644
+--- a/src/Interpreters/InterpreterDropQuery.cpp
++++ b/src/Interpreters/InterpreterDropQuery.cpp
+@@ -11,6 +11,7 @@
+ #include <Common/quoteString.h>
+ #include <Common/typeid_cast.h>
+ #include <Databases/DatabaseReplicated.h>
++#include <Storages/MergeTree/MergeTreeData.h>
+ 
+ #include "config_core.h"
+ 
+@@ -38,6 +39,7 @@ namespace ErrorCodes
+ namespace ActionLocks
+ {
+     extern const StorageActionBlockType PartsMerge;
++    extern const StorageActionBlockType PartsBuildIndex;
+ }
+ 
+ static DatabasePtr tryGetDatabase(const String & database_name, bool if_exists)
+@@ -212,6 +214,7 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
+             {
+                 /// And for simple MergeTree we can stop merges before acquiring the lock
+                 auto merges_blocker = table->getActionLock(ActionLocks::PartsMerge);
++                auto builds_blocker = table->getActionLock(ActionLocks::PartsBuildIndex);
+                 auto table_lock = table->lockExclusively(context_->getCurrentQueryId(), context_->getSettingsRef().lock_acquire_timeout);
+             }
+ 
+@@ -232,12 +235,6 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
+             else
+                 table->checkTableCanBeDropped();
+ 
+-            if(!table->getInMemoryMetadata().vec_indices.empty())
+-            {
+-                StorageInMemoryMetadata metadata_table = table->getInMemoryMetadata();
+-                metadata_table.vec_indices.clear();
+-                table->setInMemoryMetadata(metadata_table);
+-            }
+             table->flushAndShutdown();
+ 
+             TableExclusiveLockHolder table_lock;
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 02d0f94a44..a826f2b5a8 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -21,11 +21,25 @@ namespace ErrorCodes
+ {
+     extern const int MEMORY_LIMIT_EXCEEDED;
+     extern const int LOGICAL_ERROR;
++    extern const int ABORTED;
+ }
+ 
+ /// minimum interval (seconds) between check if need to remove dropped vector index cache.
+ static const auto RECHECK_VECTOR_INDDEX_CACHE_INTERVAL_SECONDS = 600;
+ 
++namespace BuildIndexHelpers
++{
++
++static bool checkOperationIsNotCanceled(ActionBlocker & builds_blocker)
++{
++    if (builds_blocker.isCancelled())
++        throw Exception("Cancelled building vector index", ErrorCodes::ABORTED);
++
++    return true;
++}
++
++}
++
+ MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
+     : data(data_), log(&Poco::Logger::get(data.getLogName() + " (VectorIndexUpdater)"))
+ {
+@@ -261,8 +275,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+         BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
+         try
+         {
+-            LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
+-            status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
++            if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
++            {
++                LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
++                status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
++            }
+         }
+         catch (Exception & e)
+         {
+@@ -526,23 +543,15 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+         std::vector<float> vector_raw_data_train;
+ 
+         /// process data block by block
+-        while (num_rows_read < part->rows_count)
++        while (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker) && num_rows_read < part->rows_count)
+         {
+             if (part->vector_index_build_cancelled)
+             {
+                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index build is cancelled for part {}", part->name);
+             }
+ 
+-            bool found = false;
+-            for (auto & vec_index_desc_storage : part->storage.getInMemoryMetadataPtr()->vec_indices)
+-            {
+-                if (vec_index_desc == vec_index_desc_storage)
+-                {
+-                    found = true;
+-                    break;
+-                }
+-            }
+-            if(!found)
++            auto & latest_vec_indices = part->storage.getInMemoryMetadataPtr()->vec_indices;
++            if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
+             {
+                 LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+                 disk->removeRecursive(vector_tmp_relative_path);
+@@ -725,7 +734,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             return BuildVectorIndexStatus::BUILD_FAIL;
+         }
+ 
+-        if (!part->vector_index_build_cancelled)
++        if (!part->vector_index_build_cancelled && BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
+         {
+             if (tune)
+             {
+@@ -767,7 +776,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             if (future_part)
+             {
+                 /// Check the latest metadata before move files, in case drop index submitted during index building.
+-                if (future_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
++                auto & latest_vec_indices = future_part->storage.getInMemoryMetadataPtr()->vec_indices;
++                if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
+                 {
+                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+                     disk->removeRecursive(vector_tmp_relative_path);
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
+index 796b87312f..352cd7739b 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h
+@@ -54,6 +54,11 @@ public:
+     BuildVectorIndexStatus
+     buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode);
+ 
++    /** Is used to cancel all index builds. On cancel() call all currently running actions will throw exception soon.
++      * All new attempts to start a vector index build will throw an exception until all 'LockHolder' objects will be destroyed.
++      */
++    ActionBlocker builds_blocker;
++
+ private:
+     class Counter
+     {
+diff --git a/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp b/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
+index de34929b43..598d498752 100644
+--- a/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
++++ b/src/Storages/MergeTree/ReplicatedMergeTreeRestartingThread.cpp
+@@ -381,6 +381,7 @@ void ReplicatedMergeTreeRestartingThread::partialShutdown(bool part_of_full_shut
+         auto fetch_lock = storage.fetcher.blocker.cancel();
+         auto merge_lock = storage.merger_mutator.merges_blocker.cancel();
+         auto move_lock = storage.parts_mover.moves_blocker.cancel();
++        auto build_block = storage.vec_index_builder_updater.builds_blocker.cancel();
+         storage.background_operations_assignee.finish();
+     }
+ 
+diff --git a/src/Storages/StorageMergeTree.cpp b/src/Storages/StorageMergeTree.cpp
+index 83ca0936f7..cf0aae010c 100644
+--- a/src/Storages/StorageMergeTree.cpp
++++ b/src/Storages/StorageMergeTree.cpp
+@@ -64,6 +64,7 @@ namespace ActionLocks
+     extern const StorageActionBlockType PartsMerge;
+     extern const StorageActionBlockType PartsTTLMerge;
+     extern const StorageActionBlockType PartsMove;
++    extern const StorageActionBlockType PartsBuildIndex;
+ }
+ 
+ 
+@@ -173,6 +174,7 @@ void StorageMergeTree::shutdown()
+ 
+     merger_mutator.merges_blocker.cancelForever();
+     parts_mover.moves_blocker.cancelForever();
++    vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancle background vector index build tasks
+ 
+     background_operations_assignee.finish();
+     background_moves_assignee.finish();
+@@ -1125,6 +1127,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
+         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+         if (!merge_entry && !mutate_entry)
+         {
++            if (vec_index_builder_updater.builds_blocker.isCancelled())
++                return false;
++
+             /// first for new data parts, then for merged data parts   
+             /// only select one part for each build
+             vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, false, currently_merging_mutating_parts);
+@@ -1696,13 +1701,15 @@ ActionLock StorageMergeTree::getActionLock(StorageActionBlockType action_type)
+         return merger_mutator.ttl_merges_blocker.cancel();
+     else if (action_type == ActionLocks::PartsMove)
+         return parts_mover.moves_blocker.cancel();
++    else if (action_type == ActionLocks::PartsBuildIndex)
++        return vec_index_builder_updater.builds_blocker.cancel();
+ 
+     return {};
+ }
+ 
+ void StorageMergeTree::onActionLockRemove(StorageActionBlockType action_type)
+ {
+-    if (action_type == ActionLocks::PartsMerge ||  action_type == ActionLocks::PartsTTLMerge)
++    if (action_type == ActionLocks::PartsMerge ||  action_type == ActionLocks::PartsTTLMerge || action_type == ActionLocks::PartsBuildIndex)
+         background_operations_assignee.trigger();
+     else if (action_type == ActionLocks::PartsMove)
+         background_moves_assignee.trigger();
+diff --git a/src/Storages/StorageReplicatedMergeTree.cpp b/src/Storages/StorageReplicatedMergeTree.cpp
+index 1ea7b52580..c53f8441d3 100644
+--- a/src/Storages/StorageReplicatedMergeTree.cpp
++++ b/src/Storages/StorageReplicatedMergeTree.cpp
+@@ -4164,6 +4164,7 @@ void StorageReplicatedMergeTree::shutdown()
+     fetcher.blocker.cancelForever();
+     merger_mutator.merges_blocker.cancelForever();
+     parts_mover.moves_blocker.cancelForever();
++    vec_index_builder_updater.builds_blocker.cancelForever();
+     stopBeingLeader();
+ 
+     restarting_thread.shutdown();
+diff --git a/src/Storages/VectorIndicesDescription.cpp b/src/Storages/VectorIndicesDescription.cpp
+index 4280521d6a..2adef6dc20 100644
+--- a/src/Storages/VectorIndicesDescription.cpp
++++ b/src/Storages/VectorIndicesDescription.cpp
+@@ -231,6 +231,14 @@ bool VectorIndicesDescription::has(const String & name) const
+     return false;
+ }
+ 
++bool VectorIndicesDescription::has(const VectorIndexDescription & vec_index_desc) const
++{
++    for (const auto & index : *this)
++        if (index == vec_index_desc)
++            return true;
++    return false;
++}
++
+ String VectorIndicesDescription::toString() const
+ {
+     if (empty())
+diff --git a/src/Storages/VectorIndicesDescription.h b/src/Storages/VectorIndicesDescription.h
+index 005427c9ae..9a0609b0ae 100644
+--- a/src/Storages/VectorIndicesDescription.h
++++ b/src/Storages/VectorIndicesDescription.h
+@@ -76,6 +76,8 @@ struct VectorIndicesDescription : public std::vector<VectorIndexDescription>
+ {
+     /// Index with name exists
+     bool has(const String & name) const;
++    /// Index with name and type desc exists
++    bool has(const VectorIndexDescription & vec_index_desc) const;
+     /// Convert description to string
+     String toString() const;
+     /// Parse description from string
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+index 443cb43075..f73662afec 100644
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+@@ -1,5 +1,5 @@
+-test_drop_table	v1	HNSWSQ	v1 vector TYPE HNSWSQ	NoVectorIndexData
++test_drop_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	NoVectorIndexData
+ -- Empty result, no vector index v1
+--- Create a new vector index v2 with different name and different type
+-test_drop_table	v2	HNSWFLAT	v2 vector TYPE HNSWFLAT	Built
+ ok
++-- Create a new vector index v2 with different name and different type
++test_build_index	v2	HNSWSQ	v2 vector TYPE HNSWSQ	Built
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+index 6c439386a0..073ceed269 100755
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+@@ -12,7 +12,7 @@ clickhouse-client -q "optimize table test_drop_table final;"
+ 
+ # when building vector index, drop this vector index
+ # drop vector index v1
+-clickhouse-client -q "ALTER TABLE test_drop_table ADD VECTOR INDEX v1 vector TYPE HNSWSQ;"
++clickhouse-client -q "ALTER TABLE test_drop_table ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;"
+ clickhouse-client -q "select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_table';"
+ sleep 3
+ clickhouse-client -q "ALTER TABLE test_drop_table DROP VECTOR INDEX v1;"
+@@ -20,24 +20,8 @@ clickhouse-client -q "select '-- Empty result, no vector index v1';"
+ clickhouse-client -q "select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_table';"
+ sleep $max_response_time_drop_vector_index
+ 
+-# create vector index v2
+-clickhouse-client -q "ALTER TABLE test_drop_table ADD VECTOR INDEX v2 vector TYPE HNSWFLAT;"
+-status="NotBuilt"
+-while [[ $status != "Built" ]]
+-do
+-        status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_drop_table' and name = 'v2';"`
+-        if [ $(clickhouse-client -q "select 1" 2>&1 | grep "Connection refused" | wc -l) == "1" ]; then
+-            exit 1;
+-        fi
+-        sleep 1
+-done
+-clickhouse-client -q "select '-- Create a new vector index v2 with different name and different type';"
+-clickhouse-client -q "select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_table';"
+-clickhouse-client -q "ALTER TABLE test_drop_table DROP VECTOR INDEX v2;"
+-
+-
+ # when building vector index, drop the table
+-clickhouse-client -q "ALTER TABLE test_drop_table ADD VECTOR INDEX v3 vector TYPE HNSWPQ;"
++clickhouse-client -q "ALTER TABLE test_drop_table ADD VECTOR INDEX v2 vector TYPE HNSWPQ;"
+ sleep 3
+ time_start=`date +%s`
+ clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
+@@ -46,3 +30,24 @@ time_interval=$(( $time_end - $time_start ))
+ if [ $time_interval -lt $max_response_time_drop_table ]
+     then echo 'ok'
+ fi
++
++# add a new vector index with different name after drop index to confirm sucessully build.
++clickhouse-client -q "DROP TABLE IF EXISTS test_build_index;"
++clickhouse-client -q "CREATE TABLE test_build_index(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
++clickhouse-client -q "INSERT INTO test_build_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(10000);"
++clickhouse-client -q "ALTER TABLE test_build_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;"
++sleep 1
++clickhouse-client -q "ALTER TABLE test_build_index DROP VECTOR INDEX v1;"
++clickhouse-client -q "ALTER TABLE test_build_index ADD VECTOR INDEX v2 vector TYPE HNSWSQ;"
++status="NotBuilt"
++while [[ $status != "Built" ]]
++do
++        status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_build_index' and name = 'v2';"`
++        if [ $(clickhouse-client -q "select 1" 2>&1 | grep "Connection refused" | wc -l) == "1" ]; then
++            exit 1;
++        fi
++        sleep 1
++done
++clickhouse-client -q "select '-- Create a new vector index v2 with different name and different type';"
++clickhouse-client -q "select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_build_index';"
++clickhouse-client -q "DROP TABLE test_build_index;"
+-- 
+2.32.1 (Apple Git-133)
+

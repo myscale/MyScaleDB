@@ -16,6 +16,7 @@ namespace ErrorCodes
     extern const int UNKNOWN_ROW_POLICY;
     extern const int UNKNOWN_QUOTA;
     extern const int THERE_IS_NO_PROFILE;
+    extern const int UNKNOWN_CONNECTION;
     extern const int LOGICAL_ERROR;
     extern const int BAD_ARGUMENTS;
 }
@@ -79,6 +80,11 @@ const AccessEntityTypeInfo & AccessEntityTypeInfo::get(AccessEntityType type_)
         case AccessEntityType::QUOTA:
         {
             static const auto info = make_info("QUOTA", "QUOTAS", 'Q', ErrorCodes::UNKNOWN_QUOTA);
+            return info;
+        }
+        case AccessEntityType::CONNECTION:
+        {
+            static const auto info = make_info("CONNECTION", "CONNECTIONS", 'C', ErrorCodes::UNKNOWN_CONNECTION);
             return info;
         }
         case AccessEntityType::MAX: break;

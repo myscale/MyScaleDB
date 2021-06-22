@@ -1,0 +1,17 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <allow_experimental_database_replicated>1</allow_experimental_database_replicated>
+            <default_database_engine>Replicated</default_database_engine>
+            <database_replicated_default_zk_path_prefix>/clickhouse/test/databases/</database_replicated_default_zk_path_prefix>
+            <database_replicated_default_cluster_name>{cluster}</database_replicated_default_cluster_name>
+            <default_table_engine>ReplicatedMergeTree</default_table_engine>
+            <database_replicated_allow_replicated_engine_arguments>0</database_replicated_allow_replicated_engine_arguments>
+        </default>
+    </profiles>
+    <users>
+        <default>
+            <profile>default</profile>
+        </default>
+    </users>
+</clickhouse>

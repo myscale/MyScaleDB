@@ -1,0 +1,459 @@
+From e6435185c8a258d37b718d16306b6bf095e97ffd Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 26 Dec 2022 19:57:03 +0800
+Subject: [PATCH 022/150] refine comments
+
+---
+ src/VectorIndex/FlatIndex.h    | 15 ++------------
+ src/VectorIndex/HNSWIndex.cpp  |  4 +++-
+ src/VectorIndex/HNSWIndex.h    | 16 ++++++---------
+ src/VectorIndex/HNSWPQ.cpp     |  1 +
+ src/VectorIndex/HNSWPQ.h       | 12 ++++--------
+ src/VectorIndex/HNSWSQ.h       | 14 +++++--------
+ src/VectorIndex/IVFFlatIndex.h | 17 +++-------------
+ src/VectorIndex/IVFPQIndex.h   | 16 ++-------------
+ src/VectorIndex/IVFSQIndex.h   | 16 ++-------------
+ src/VectorIndex/VectorIndex.h  | 36 +++++++++++++++++-----------------
+ 10 files changed, 46 insertions(+), 101 deletions(-)
+
+diff --git a/src/VectorIndex/FlatIndex.h b/src/VectorIndex/FlatIndex.h
+index bb02fe8bf2..50f7e4e4b0 100644
+--- a/src/VectorIndex/FlatIndex.h
++++ b/src/VectorIndex/FlatIndex.h
+@@ -30,7 +30,6 @@ public:
+     FlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
+     {
+         in_mem = true;
+-        //TODO initialized index with dynamic fields
+         faiss::MetricType metrictype;
+         switch (me)
+         {
+@@ -42,31 +41,21 @@ public:
+                 break;
+             case Metrics::Cosine:
+                 metrictype = faiss::METRIC_Cosine;
+-                //TODO conitnued
+         }
+         getMyParameters(parameters);
+         index = std::make_shared<faiss::IndexFlatFilter>(dimension_, metrictype);
+-        //index->verbose = true;
+     }
+ 
+-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr dataset, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+-
+-
+-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+-
+     void getMyParameters(Parameters params) override;
+ 
+     bool compare(const VectorIndex & other) override;
+diff --git a/src/VectorIndex/HNSWIndex.cpp b/src/VectorIndex/HNSWIndex.cpp
+index ec4e42e314..a14fa8bb6f 100644
+--- a/src/VectorIndex/HNSWIndex.cpp
++++ b/src/VectorIndex/HNSWIndex.cpp
+@@ -213,6 +213,7 @@ void HNSWIndex::getMyParameters(Parameters params)
+         throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
++
+ int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)
+ {
+ #pragma omp parallel for
+@@ -220,9 +221,10 @@ int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)
+     {
+         index->markDelete(ids[i]);
+     }
+-    ///HNSW does mark for delete, so it will delete required number of items
++    /// HNSW does mark for delete, so it will delete required number of items
+     return n;
+ }
++
+ bool HNSWIndex::compare(const VectorIndex & other)
+ {
+     const HNSWIndex * other_p = dynamic_cast<const HNSWIndex *>(&other);
+diff --git a/src/VectorIndex/HNSWIndex.h b/src/VectorIndex/HNSWIndex.h
+index 57de2449b2..5b764b7cf1 100644
+--- a/src/VectorIndex/HNSWIndex.h
++++ b/src/VectorIndex/HNSWIndex.h
+@@ -27,29 +27,25 @@ public:
+         getMyParameters(parameters);
+     }
+ 
+-    void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & param, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+ 
+     int64_t removeWithIds(int64_t n, int64_t * ids) override;
+ 
+-    BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override; //searilize index
++    BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override;
+ 
+-    void load(BinaryPtr & bi, int64_t total_vec) override; //reverse serialize index
+-
+-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
++    void load(BinaryPtr & bi, int64_t total_vec) override;
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
++    /// When index is neither held by an explicit pointer or held in cache,
++    /// it'll destruct automatically.
+     std::shared_ptr<hnswlib::HierarchicalNSW<float>> index = nullptr;
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+ 
+     void getMyParameters(Parameters params) override;
+ 
+diff --git a/src/VectorIndex/HNSWPQ.cpp b/src/VectorIndex/HNSWPQ.cpp
+index 900f9934af..0895088665 100644
+--- a/src/VectorIndex/HNSWPQ.cpp
++++ b/src/VectorIndex/HNSWPQ.cpp
+@@ -203,6 +203,7 @@ AccParametersPack HNSWpq::exploreTask(
+     (void)log;
+     return AccParametersPack();
+ }
++
+ int64_t HNSWpq::removeWithIds(int64_t n, int64_t * ids)
+ {
+     faiss::IDSelectorBatch batch_selector(n, ids);
+diff --git a/src/VectorIndex/HNSWPQ.h b/src/VectorIndex/HNSWPQ.h
+index 5a22384d0d..07d0273210 100644
+--- a/src/VectorIndex/HNSWPQ.h
++++ b/src/VectorIndex/HNSWPQ.h
+@@ -31,29 +31,25 @@ class HNSWpq : public VectorIndex
+ public:
+     HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
+ 
+-    void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     int64_t removeWithIds(int64_t n, int64_t * ids) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & param, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+ 
+     BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override; //searilize index
+ 
+     void load(BinaryPtr & bi, int64_t total_vec) override; //reverse serialize index
+ 
+-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
+-
+     VectorDatasetPtr getInMemVectors() override;
+ 
++    /// When index is neither held by an explicit pointer or held in cache,
++    /// it'll destruct automatically.
+     std::shared_ptr<faiss::IndexHNSWfastPQ> index = nullptr;
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+ 
+     void getMyParameters(Parameters p) override;
+ 
+diff --git a/src/VectorIndex/HNSWSQ.h b/src/VectorIndex/HNSWSQ.h
+index b888acd54f..a2922c6e56 100644
+--- a/src/VectorIndex/HNSWSQ.h
++++ b/src/VectorIndex/HNSWSQ.h
+@@ -25,29 +25,25 @@ class HNSWsq : public VectorIndex
+ public:
+     HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
+ 
+-    void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     int64_t removeWithIds(int64_t n, int64_t * ids) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & param, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+ 
+     BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override; //searilize index
+ 
+-    void load(BinaryPtr & bi, int64_t total_vec) override; //reverse serialize index
+-
+-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
++    void load(BinaryPtr & bi, int64_t total_vec) override;
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
++    /// When index is neither held by an explicit pointer or held in cache,
++    /// it'll destruct automatically.
+     std::shared_ptr<faiss::IndexHNSWfastSQ> index = nullptr;
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+ 
+     void getMyParameters(Parameters params) override;
+ 
+diff --git a/src/VectorIndex/IVFFlatIndex.h b/src/VectorIndex/IVFFlatIndex.h
+index b6aa4c7758..85f76a3eb5 100644
+--- a/src/VectorIndex/IVFFlatIndex.h
++++ b/src/VectorIndex/IVFFlatIndex.h
+@@ -24,28 +24,20 @@ namespace VectorIndex
+ {
+ class IVFFlatIndex : public FaissIndex
+ {
+-    ///the IVFFlat index type conforming to the generalized vector index standard,
+-    ///with these standarlization it could be used by execution engine.
+ public:
+     IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
+     {
+         in_mem = false;
+-        //TODO initialized index with dynamic fields
+         getMyParameters(parameters);
+-        //index->verbose = true;
+     }
+ 
+-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr dataset, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+-
+-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
+@@ -55,11 +47,8 @@ public:
+ 
+     void tune(VectorDatasetPtr base, int topK);
+ 
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+-
+ private:
+-    ///These are just default values, outside class shouldn't access them for reference.
++    /// These are just default values, outside class shouldn't access them for reference.
+     int ncentroids = 1024;
+     float std_m = 6.0;
+     float multiplier = 1.3;
+diff --git a/src/VectorIndex/IVFPQIndex.h b/src/VectorIndex/IVFPQIndex.h
+index ddee9a5663..7b477286f0 100644
+--- a/src/VectorIndex/IVFPQIndex.h
++++ b/src/VectorIndex/IVFPQIndex.h
+@@ -24,39 +24,27 @@ namespace VectorIndex
+ {
+ class IVFPQIndex : public FaissIndex
+ {
+-    ///the IVFPQ index type conforming to the generalized vector index standard,
+-    ///with these standarlization it could be used by execution engine.
+ public:
+     IVFPQIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
+     {
+         in_mem = false;
+-        //TODO initialized index with dynamic fields
+         getMyParameters(parameters);
+-        //index->verbose = true;
+     }
+ 
+-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr dataset, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+-
+     void getMyParameters(Parameters params) override;
+ 
+     bool compare(const VectorIndex & other) override;
+ 
+-    //    std::unordered_map<std::string, std::string>
+-    //    exploreTask(const float *query_data, const int64_t *gt,int topK,int query_size,bool oneRecall, std::mutex &m, std::condition_variable &cv, bool &go) override;
+-
+     int ncentroids = 1024;
+     int M = 16;
+     int bit_size = 8;
+diff --git a/src/VectorIndex/IVFSQIndex.h b/src/VectorIndex/IVFSQIndex.h
+index e6b2d55f71..7f23a6eb1c 100644
+--- a/src/VectorIndex/IVFSQIndex.h
++++ b/src/VectorIndex/IVFSQIndex.h
+@@ -24,32 +24,23 @@ namespace VectorIndex
+ {
+ class IVFSQIndex : public FaissIndex
+ {
+-    ///the IVFSQ index type conforming to the generalized vector index standard,
+-    ///with these standarlization it could be used by execution engine.
+ public:
+     IVFSQIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
+     {
+         in_mem = false;
+-        //TODO initialized index with dynamic fields
+         getMyParameters(parameters);
+-        //index->verbose = true;
+     }
+ 
+-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
++    void train(const VectorDatasetPtr dataset, int64_t total) override;
+ 
+-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
+-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
++    void addWithoutId(const VectorDatasetPtr dataset) override;
+ 
+     void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+         override;
+-    //filter the index with bitmap and perform searching.
+ 
+     VectorDatasetPtr getInMemVectors() override;
+ 
+-    //when index is neither held by an explicit pointer or held in cache,
+-    //it'll destruct automatically.
+-
+     void getMyParameters(Parameters params) override;
+ 
+     bool compare(const VectorIndex & other) override;
+@@ -57,9 +48,6 @@ public:
+ private:
+     faiss::ScalarQuantizer::QuantizerType parse_SQ_string(String bits);
+ 
+-    //    std::unordered_map<std::string, std::string>
+-    //    exploreTask(const float *query_data, const int64_t *gt,int topK,int query_size,bool oneRecall, std::mutex &m, std::condition_variable &cv, bool &go) override;
+-
+     int ncentroids = 1024;
+     faiss::ScalarQuantizer::QuantizerType quantizer = faiss::ScalarQuantizer::QT_8bit;
+ };
+diff --git a/src/VectorIndex/VectorIndex.h b/src/VectorIndex/VectorIndex.h
+index 72e76f4ce9..ed93f3800e 100644
+--- a/src/VectorIndex/VectorIndex.h
++++ b/src/VectorIndex/VectorIndex.h
+@@ -43,44 +43,44 @@ using AccParametersPack = std::unordered_map<float, Parameters>;
+ #define PARAMETER_PACK_NAME "_parameter"
+ 
+ 
++/// Interface for vector index definitions,
++/// user-defined vector index should implement all these methods.
+ class VectorIndex
+ {
+-    /// interface for vector index definitions,
+-    /// user-defined vector index should implement all these methods.
+ public:
+     VectorIndex() = default;
+     VectorIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_) : it(it_), me(me_), im(im_), dimension(dimension_) { }
+ 
+-    ///train vector index on a set of data, should not insert the data.
++    /// Train vector index on a set of data. Should not insert the data.
+     virtual void train(const VectorDatasetPtr dataset, const int64_t total_vector_expected) = 0;
+ 
+-    ///adding data into index, the data is supposed to be stored with an <id, vector> mapping inside
+-    ///the index such that id autoincrement and one can easily map from an id to the vector inserted.
++    /// Adding data into index, the data is supposed to be stored with an <id, vector> mapping inside
++    /// the index such that id autoincrement and one can easily map from an id to the vector inserted.
+     virtual void addWithoutId(const VectorDatasetPtr dataset) = 0;
+ 
++    /// Remove vectors from index. This function is not used because we use
++    /// VectorSegmentExecutor::delete_bitmap to mark deletion.
+     virtual int64_t removeWithIds(int64_t n, int64_t * ids) = 0;
+ 
+-    ///search the index with the given dataset and a filter, returns id and distance of each result up to topK results.
++    /// Search the index with the given dataset and a filter, returns id and distance of each result up to topK results.
+     virtual void search(
+         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+         = 0;
+ 
+-    ///serialize index into binaries in memory, returns a pointer to that binary.
++    /// Serialize index into binaries in memory, returns a pointer to that binary.
+     virtual BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) = 0;
+ 
+-    ///load index from binaries into a usable index.
++    /// Load index from binaries into a usable index.
+     virtual void load(BinaryPtr & bi, int64_t total_vec) = 0;
+ 
+-    // virtual void remove(const int32_t * ids) = 0; //从 index 中删除 id 对应的 vector.
+-
+-    ///the type of index（IVFFLAT,HNSW, etc）
++    /// The type of index (IVFFLAT, HNSW, etc)
+     IndexType indexType() { return it; }
+ 
+     IndexMode indexMode() { return im; }
+ 
+     Metrics metrics() { return me; }
+ 
+-    ///whether the data in index is uncompressed
++    /// Whether the data in index is uncompressed
+     bool inMemVectors() { return in_mem; }
+ 
+     void setTrained() { trained = true; }
+@@ -101,10 +101,10 @@ public:
+         }
+     }
+ 
+-    ///if possible, get uncompressed vectors stored in memory
++    /// If possible, get uncompressed vectors stored in memory
+     virtual VectorDatasetPtr getInMemVectors() = 0;
+ 
+-    /// set parameters for build and search
++    /// Set parameters for build and search
+     virtual void getMyParameters(Parameters params) = 0;
+ 
+     virtual AccParametersPack exploreTask(
+@@ -140,8 +140,8 @@ public:
+     virtual ~VectorIndex() = default;
+ 
+ protected:
+-    IndexType it; //ivfpq, flat, hnsw
+-    Metrics me; // L1, L2, ip, shannon
++    IndexType it; // ivfpq, flat, hnsw
++    Metrics me; // L1, L2, IP, Cosine
+     IndexMode im; // cpu, gpu
+     int dimension; // dimension
+     bool in_mem; // if vectors are stored fully in mem
+@@ -154,8 +154,8 @@ protected:
+     virtual BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) = 0;
+ 
+ private:
+-/// used to store old2new row id map for merge operation.
+-    std::vector<int> row_ids_map; 
++    /// used to store old2new row id map for merge operation.
++    std::vector<int> row_ids_map;
+ };
+ 
+ using VectorIndexPtr = std::shared_ptr<VectorIndex>;
+-- 
+2.32.1 (Apple Git-133)
+

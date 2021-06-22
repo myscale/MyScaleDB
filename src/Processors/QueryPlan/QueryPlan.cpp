@@ -191,8 +191,10 @@ QueryPipelineBuilderPtr QueryPlan::buildQueryPipeline(
 
             stack.pop();
         }
-        else
+        else 
+        {
             stack.push(Frame{.node = frame.node->children[next_child]});
+        }
     }
 
     last_pipeline->setProgressCallback(build_pipeline_settings.progress_callback);

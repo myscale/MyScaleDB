@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <memory>
 
 #include <filesystem>
@@ -20,6 +24,8 @@
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTIndexDeclaration.h>
+#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ParserCreateQuery.h>
@@ -155,7 +161,18 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
             throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE, "Database engine must be specified for ATTACH DATABASE query");
         auto engine = std::make_shared<ASTFunction>();
         auto storage = std::make_shared<ASTStorage>();
-        engine->name = "Atomic";
+        auto default_database_engine = getContext()->getSettingsRef().default_database_engine.value;
+        switch (default_database_engine) {
+            case DefaultDatabaseEngine::Ordinary:
+                engine->name = "Ordinary";
+                break;
+            case DefaultDatabaseEngine::Replicated:
+                engine->name = "Replicated";
+                break;
+            default:
+                engine->name = "Atomic";
+                break;
+        }
         engine->no_empty_args = true;
         storage->set(storage->engine, engine);
         create.set(create.storage, storage);
@@ -227,6 +244,46 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         metadata_path = metadata_path / "metadata" / database_name_escaped;
     }
 
+    if (create.storage->engine->name == "Replicated"
+        && !internal && !create.attach)
+    {
+        if (!getContext()->getSettingsRef().allow_experimental_database_replicated)
+            throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
+                            "Replicated is an experimental database engine. "
+                            "Enable allow_experimental_database_replicated to use it.");
+        
+        if (!getContext()->getSettingsRef().database_replicated_allow_explicit_arguments
+        && create.storage->engine->arguments && create.storage->engine->arguments->children.size() != 0)
+            throw Exception(ErrorCodes::INCORRECT_QUERY,
+                                    "Only queries like `CREATE DATABASE <database>` are supported for creating database");
+
+        /// CREATE REPLICATED DATABASE WITH ON CLUSTER CLAUSE
+        if (getContext()->getSettingsRef().database_replicated_always_execute_with_on_cluster
+        && getContext()->getSettingsRef().database_replicated_default_cluster_name.value.size() > 0
+        && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
+        {
+            create.cluster = getContext()->getSettingsRef().database_replicated_default_cluster_name.value;
+            return executeQueryOnCluster(create);
+        }
+    }
+
+    if (create.storage->engine->name == "Replicated" && !create.attach)
+    {
+        if (!create.storage->engine->arguments)
+            create.storage->engine->arguments = std::make_shared<ASTExpressionList>();
+
+        /// Fill in default parameters
+        String default_zk_path_prefix = getContext()->getSettingsRef().database_replicated_default_zk_path_prefix.value;
+        if (create.storage->engine->arguments->children.size() == 0 && default_zk_path_prefix.size() > 0)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>(default_zk_path_prefix + database_name));
+
+        if (create.storage->engine->arguments->children.size() == 1)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{shard}"));
+
+        if (create.storage->engine->arguments->children.size() == 2)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{replica}"));
+    }
+
     if ((create.storage->engine->name == "MaterializeMySQL" || create.storage->engine->name == "MaterializedMySQL")
         && !getContext()->getSettingsRef().allow_experimental_database_materialized_mysql
         && !internal && !create.attach)
@@ -234,15 +291,6 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
                         "MaterializedMySQL is an experimental database engine. "
                         "Enable allow_experimental_database_materialized_mysql to use it.");
-    }
-
-    if (create.storage->engine->name == "Replicated"
-        && !getContext()->getSettingsRef().allow_experimental_database_replicated
-        && !internal && !create.attach)
-    {
-        throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
-                        "Replicated is an experimental database engine. "
-                        "Enable allow_experimental_database_replicated to use it.");
     }
 
     if (create.storage->engine->name == "MaterializedPostgreSQL"
@@ -441,6 +489,16 @@ ASTPtr InterpreterCreateQuery::formatIndices(const IndicesDescription & indices)
 
     for (const auto & index : indices)
         res->children.push_back(index.definition_ast->clone());
+
+    return res;
+}
+
+ASTPtr InterpreterCreateQuery::formatVectorIndices(const VectorIndicesDescription & vec_indices)
+{
+    auto res = std::make_shared<ASTExpressionList>();
+
+    for (const auto & vec_index : vec_indices)
+        res->children.push_back(vec_index.definition_ast->clone());
 
     return res;
 }
@@ -669,6 +727,8 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
     if (create.columns_list)
     {
+        properties.constraints = getConstraintsDescription(create.columns_list->constraints);
+
         if (create.as_table_function && (create.columns_list->indices || create.columns_list->constraints))
             throw Exception(ErrorCodes::INCORRECT_QUERY, "Indexes and constraints are not supported for table functions");
 
@@ -695,6 +755,25 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
                 properties.indices.push_back(index_desc);
             }
+
+        if (create.columns_list->vec_indices)
+            for (const auto & vec_index : create.columns_list->vec_indices->children)
+            {
+                const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
+                if (properties.constraints.empty())
+                {
+                    throw Exception(
+                        ErrorCodes::INCORRECT_QUERY,
+                        "When creating table with a vector index, you need to define the Constraint information for the table.");
+                }
+                if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
+                {
+                    throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
+                }
+                properties.vec_indices.push_back(
+                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+            }
+
         if (create.columns_list->projections)
             for (const auto & projection_ast : create.columns_list->projections->children)
             {
@@ -702,7 +781,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 properties.projections.add(std::move(projection));
             }
 
-        properties.constraints = getConstraintsDescription(create.columns_list->constraints);
+        
     }
     else if (!create.as_table.empty())
     {
@@ -720,6 +799,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
         {
             properties.indices = as_storage_metadata->getSecondaryIndices();
             properties.projections = as_storage_metadata->getProjections().clone();
+            properties.vec_indices = as_storage_metadata->getVectorIndices();
         }
         else
         {
@@ -780,11 +860,13 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
     ASTPtr new_columns = formatColumns(properties.columns);
     ASTPtr new_indices = formatIndices(properties.indices);
+    ASTPtr new_vec_indices = formatVectorIndices(properties.vec_indices);
     ASTPtr new_constraints = formatConstraints(properties.constraints);
     ASTPtr new_projections = formatProjections(properties.projections);
 
     create.columns_list->setOrReplace(create.columns_list->columns, new_columns);
     create.columns_list->setOrReplace(create.columns_list->indices, new_indices);
+    create.columns_list->setOrReplace(create.columns_list->vec_indices, new_vec_indices);
     create.columns_list->setOrReplace(create.columns_list->constraints, new_constraints);
     create.columns_list->setOrReplace(create.columns_list->projections, new_projections);
 
@@ -1088,6 +1170,16 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     String current_database = getContext()->getCurrentDatabase();
     auto database_name = create.database ? create.getDatabase() : current_database;
 
+    bool need_convert_table = !create.attach && create.storage && create.storage->engine &&
+                              getContext()->getSettingsRef().database_replicated_always_convert_table_to_replicated &&
+                              DatabaseCatalog::instance().getDatabase(database_name)->getEngineName() == "Replicated" &&
+                              !startsWith(create.storage->engine->name, "Replicated") && endsWith(create.storage->engine->name, "MergeTree");
+
+    if (need_convert_table) {
+        /// Convert *MergeTree to Replicated*MergeTree for table in database with engine Replicated when creating table
+        create.storage->engine->name = "Replicated" + create.storage->engine->name;
+    }    
+
     DDLGuardPtr ddl_guard;
 
     // If this is a stub ATTACH query, read the query definition from the database
@@ -1138,7 +1230,6 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     }
 
     /// TODO throw exception if !create.attach_short_syntax && !create.attach_from_path && !internal
-
     if (create.attach_from_path)
     {
         chassert(!ddl_guard);
@@ -1167,7 +1258,7 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     }
     else if (create.attach && !create.attach_short_syntax && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
     {
-        auto * log = &Poco::Logger::get("InterpreterCreateQuery");
+        // auto * log = &Poco::Logger::get("InterpreterCreateQuery");
         LOG_WARNING(log, "ATTACH TABLE query with full table definition is not recommended: "
                          "use either ATTACH TABLE {}; to attach existing table "
                          "or CREATE TABLE {} <table definition>; to create new table "
@@ -1686,7 +1777,7 @@ BlockIO InterpreterCreateQuery::execute()
 {
     FunctionNameNormalizer().visit(query_ptr.get());
     auto & create = query_ptr->as<ASTCreateQuery &>();
-
+    // LOG_DEBUG(log, "[create] query: {}", create.dumpTree());
     bool is_create_database = create.database && !create.table;
     if (!create.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {

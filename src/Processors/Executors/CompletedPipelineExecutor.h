@@ -22,6 +22,9 @@ public:
     /// If returns true, query would be cancelled.
     void setCancelCallback(std::function<bool()> is_cancelled, size_t interactive_timeout_ms_);
 
+    /// Used for atomic insert to check if execution is cancelled.
+    bool isCancelled() const { return cancelled; }
+
     void execute();
     struct Data;
 
@@ -30,6 +33,7 @@ private:
     std::function<bool()> is_cancelled_callback;
     size_t interactive_timeout_ms = 0;
     std::unique_ptr<Data> data;
+    bool cancelled = false;
 };
 
 }

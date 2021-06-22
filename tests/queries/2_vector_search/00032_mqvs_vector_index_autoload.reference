@@ -1,0 +1,49 @@
+--- init
+0
+0
+0
+0
+0
+all_0_0_0	all_0_0_0	0	vec_ind	LOADED
+all_0_0_0\tvec_ind\n
+--- drop vector index
+0
+
+--- add vector index
+0
+0
+0
+0
+0
+all_0_0_0\tvec_ind\n
+--- insert again
+0
+all_0_0_0\tvec_ind\nall_1_1_0\tvec_ind\n
+--- merge
+0
+all_0_1_1\tvec_ind\n
+--- drop table
+--- init (disable_rebuild_for_decouple)
+0
+0
+0
+0
+0
+all_0_0_0	all_0_0_0	0	vec_ind	LOADED
+all_0_0_0\tvec_ind\n
+--- lightweight delete
+0
+all_0_0_0\tvec_ind\n
+--- insert again
+0
+0
+0
+0
+0
+all_0_0_0_1	all_0_0_0_1	0	vec_ind	LOADED
+all_2_2_0	all_2_2_0	0	vec_ind	LOADED
+all_0_0_0\tvec_ind\nall_2_2_0\tvec_ind\n
+--- merge
+all_0_2_1_1	all_0_0_0_1	0	vec_ind	LOADED
+all_0_2_1_1	all_2_2_0	1	vec_ind	LOADED
+all_0_2_1\tvec_ind\n

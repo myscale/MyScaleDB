@@ -121,6 +121,7 @@ ASTPtr ConstantNode::toASTImpl(const ConvertToASTOptions & options) const
         case Field::Types::IPv6:
         case Field::Types::Null:
         case Field::Types::CustomType:
+        case Field::Types::ObjectToFetch:
         {
             need_to_add_cast_function = true;
             break;

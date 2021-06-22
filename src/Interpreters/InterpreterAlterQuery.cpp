@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Interpreters/InterpreterAlterQuery.h>
 
 #include <Access/Common/AccessRightsElement.h>
@@ -20,6 +24,7 @@
 #include <Storages/LiveView/StorageLiveView.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/PartitionCommands.h>
+#include <Storages/StorageDistributed.h>
 #include <Common/typeid_cast.h>
 
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
@@ -39,6 +44,7 @@ namespace ErrorCodes
     extern const int INCORRECT_QUERY;
     extern const int NOT_IMPLEMENTED;
     extern const int TABLE_IS_READ_ONLY;
+    extern const int QUERY_NOT_ALLOWED;
 }
 
 
@@ -50,7 +56,7 @@ InterpreterAlterQuery::InterpreterAlterQuery(const ASTPtr & query_ptr_, ContextP
 BlockIO InterpreterAlterQuery::execute()
 {
     FunctionNameNormalizer().visit(query_ptr.get());
-    const auto & alter = query_ptr->as<ASTAlterQuery &>();
+    auto & alter = query_ptr->as<ASTAlterQuery &>();
     if (alter.alter_object == ASTAlterQuery::AlterObjectType::DATABASE)
     {
         return executeToDatabase(alter);
@@ -65,7 +71,7 @@ BlockIO InterpreterAlterQuery::execute()
 }
 
 
-BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
+BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
 {
     BlockIO res;
 
@@ -95,6 +101,39 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
     checkStorageSupportsTransactionsIfNeeded(table, getContext());
     if (table->isStaticStorage())
         throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
+
+    ///Convert vector index commands on distributed table into an equivalent distributed ddl on local tables.
+    if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
+    {
+        /// We only check the first command, and not check if alter table contains mixed table struct and data commands.
+        auto * command_ast = alter.command_list->children.at(0)->as<ASTAlterCommand>();
+
+        if (auto alter_command = AlterCommand::parse(command_ast))
+        {
+            if (alter_command->type == AlterCommand::ADD_VECTOR_INDEX || alter_command->type == AlterCommand::DROP_VECTOR_INDEX)
+            {
+                alter.setTable(dist_table->getRemoteTableName());
+                alter.cluster = dist_table->getClusterName();
+
+                String remote_database;
+                if (!dist_table->getRemoteDatabaseName().empty())
+                    remote_database = dist_table->getRemoteDatabaseName();
+                else
+                    remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
+
+                alter.setDatabase(remote_database);
+            }
+        }
+    }
+
+    if (!alter.cluster.empty())
+    {
+        auto required_access = getRequiredAccess();
+        DDLQueryOnClusterParams params;
+        params.access_to_check = std::move(required_access);
+        return executeDDLQueryOnCluster(query_ptr, getContext(), params);
+    }
+
     auto table_lock = table->lockForShare(getContext()->getCurrentQueryId(), getContext()->getSettingsRef().lock_acquire_timeout);
     auto metadata_snapshot = table->getInMemoryMetadataPtr();
 
@@ -123,6 +162,20 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
             if (mut_command->type == MutationCommand::MATERIALIZE_TTL && !metadata_snapshot->hasAnyTTL())
                 throw Exception(ErrorCodes::INCORRECT_QUERY, "Cannot MATERIALIZE TTL as there is no TTL set for table {}",
                     table->getStorageID().getNameForLogs());
+
+            if (mut_command->type == MutationCommand::DELETE && metadata_snapshot->hasVectorIndices())
+                throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                    "ALTER TABLE ... DELETE is not allowed for table {} with vector index. Please use DELETE FROM instead",
+                    table->getStorageID().getNameForLogs());
+
+
+            if (mut_command->type == MutationCommand::UPDATE && metadata_snapshot->hasVectorIndices()){
+                for(auto vectorIndexDescription : metadata_snapshot->getVectorIndices()){
+                    if(mut_command->column_to_update_expression.contains(vectorIndexDescription.column))
+                        throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                                        " ALTER UPDATE vector column with index is not allowed, Please use DELETE and INSERT statement instead");
+                }
+            }
 
             mutation_commands.emplace_back(std::move(*mut_command));
         }
@@ -179,6 +232,9 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
         StorageInMemoryMetadata metadata = table->getInMemoryMetadata();
         alter_commands.validate(table, getContext());
         alter_commands.prepare(metadata);
+        auto total_rows = table->totalRows(getContext()->getSettingsRef());
+        if (!total_rows.has_value() || total_rows.value() == 0)
+            alter_commands.setTableEmptyFlag(true);
         table->checkAlterIsPossible(alter_commands, getContext());
         table->alter(alter_commands, getContext(), alter_lock);
     }
@@ -297,11 +353,13 @@ AccessRightsElements InterpreterAlterQuery::getRequiredAccessForCommand(const AS
             break;
         }
         case ASTAlterCommand::ADD_INDEX:
+        case ASTAlterCommand::ADD_VECTOR_INDEX:
         {
             required_access.emplace_back(AccessType::ALTER_ADD_INDEX, database, table);
             break;
         }
         case ASTAlterCommand::DROP_INDEX:
+        case ASTAlterCommand::DROP_VECTOR_INDEX:
         {
             if (command.clear_index)
                 required_access.emplace_back(AccessType::ALTER_CLEAR_INDEX, database, table);

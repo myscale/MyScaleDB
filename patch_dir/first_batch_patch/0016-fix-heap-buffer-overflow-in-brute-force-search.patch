@@ -1,0 +1,26 @@
+From 374f3aece7d67e1822d549e1cd0b6c5ee13d1908 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Wed, 14 Dec 2022 17:17:21 +0800
+Subject: [PATCH 016/150] fix heap-buffer-overflow in brute force search
+
+---
+ src/Storages/MergeTree/MergeTreeVectorScanManager.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+index 0f3553f480..ddfd9dca28 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+@@ -1254,7 +1254,8 @@ void MergeTreeVectorScanManager::searchWrapper(
+     {
+         for (int i = 0; i < k * nq; i++)
+         {
+-            per_id[i] = actual_id_in_range[per_id[i]];
++            if (per_id[i] > -1)
++                per_id[i] = actual_id_in_range[per_id[i]];
+         }
+     }
+ 
+-- 
+2.32.1 (Apple Git-133)
+

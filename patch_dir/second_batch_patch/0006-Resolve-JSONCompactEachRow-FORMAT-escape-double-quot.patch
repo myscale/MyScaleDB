@@ -1,0 +1,130 @@
+From 0b2e0e868e7de70002c559e704bbc4e12c1dd549 Mon Sep 17 00:00:00 2001
+From: Xiaoyao Guan <xiaoyaog@moqi.ai>
+Date: Thu, 29 Dec 2022 07:10:37 +0000
+Subject: [PATCH 06/85] Resolve "JSONCompactEachRow FORMAT escape double quotes
+ in response"
+
+---
+ src/Formats/FormatSettings.h                  |  1 +
+ src/Formats/JSONEachRowUtils.cpp              | 22 +++++++++++++++++++
+ src/Formats/JSONEachRowUtils.h                |  2 ++
+ .../JSONCompactEachRowRowOutputFormat.cpp     |  6 +++--
+ ...llel_formatting_json_and_friends.reference |  8 +++----
+ 5 files changed, 33 insertions(+), 6 deletions(-)
+
+diff --git a/src/Formats/FormatSettings.h b/src/Formats/FormatSettings.h
+index a99d7dc466..5aca0dd3b3 100644
+--- a/src/Formats/FormatSettings.h
++++ b/src/Formats/FormatSettings.h
+@@ -133,6 +133,7 @@ struct FormatSettings
+         bool escape_forward_slashes = true;
+         bool named_tuples_as_objects = false;
+         bool serialize_as_strings = false;
++        bool validate_utf8 = false;
+     } json;
+ 
+     struct
+diff --git a/src/Formats/JSONEachRowUtils.cpp b/src/Formats/JSONEachRowUtils.cpp
+index 66e0538fef..439045681e 100644
+--- a/src/Formats/JSONEachRowUtils.cpp
++++ b/src/Formats/JSONEachRowUtils.cpp
+@@ -2,6 +2,8 @@
+ #include <Formats/JSONEachRowUtils.h>
+ #include <Formats/ReadSchemaUtils.h>
+ #include <IO/ReadBufferFromString.h>
++#include <IO/WriteBufferValidUTF8.h>
++#include <IO/WriteHelpers.h>
+ #include <DataTypes/Serializations/SerializationNullable.h>
+ #include <DataTypes/DataTypeNullable.h>
+ #include <DataTypes/DataTypesNumber.h>
+@@ -326,4 +328,24 @@ bool readFieldImpl(ReadBuffer & in, IColumn & column, const DataTypePtr & type,
+     }
+ }
+ 
++Strings makeNamesValidJSONStrings(const Strings & names, const FormatSettings & settings, bool validate_utf8)
++{
++    Strings result;
++    result.reserve(names.size());
++    for (const auto & name : names)
++    {
++        WriteBufferFromOwnString buf;
++        if (validate_utf8)
++        {
++            WriteBufferValidUTF8 validating_buf(buf);
++            writeJSONString(name, validating_buf, settings);
++        }
++        else
++            writeJSONString(name, buf, settings);
++
++        result.push_back(buf.str().substr(1, buf.str().size() - 2));
++    }
++    return result;
++}
++
+ }
+diff --git a/src/Formats/JSONEachRowUtils.h b/src/Formats/JSONEachRowUtils.h
+index 8d304e2ffd..a2cad70f1e 100644
+--- a/src/Formats/JSONEachRowUtils.h
++++ b/src/Formats/JSONEachRowUtils.h
+@@ -32,4 +32,6 @@ bool nonTrivialPrefixAndSuffixCheckerJSONEachRowImpl(ReadBuffer & buf);
+ 
+ bool readFieldImpl(ReadBuffer & in, IColumn & column, const DataTypePtr & type, const SerializationPtr & serialization, const String & column_name, const FormatSettings & format_settings, bool yield_strings);
+ 
++Strings makeNamesValidJSONStrings(const Strings & names, const FormatSettings & settings, bool validate_utf8);
++
+ }
+diff --git a/src/Processors/Formats/Impl/JSONCompactEachRowRowOutputFormat.cpp b/src/Processors/Formats/Impl/JSONCompactEachRowRowOutputFormat.cpp
+index 4a2c4209ac..bbc8557c92 100644
+--- a/src/Processors/Formats/Impl/JSONCompactEachRowRowOutputFormat.cpp
++++ b/src/Processors/Formats/Impl/JSONCompactEachRowRowOutputFormat.cpp
+@@ -2,6 +2,7 @@
+ #include <IO/WriteBufferValidUTF8.h>
+ #include <Processors/Formats/Impl/JSONCompactEachRowRowOutputFormat.h>
+ #include <Formats/FormatFactory.h>
++#include <Formats/JSONEachRowUtils.h>
+ #include <Formats/registerWithNamesAndTypes.h>
+ 
+ 
+@@ -69,6 +70,7 @@ void JSONCompactEachRowRowOutputFormat::writeTotals(const Columns & columns, siz
+ 
+ void JSONCompactEachRowRowOutputFormat::writeLine(const std::vector<String> & values)
+ {
++    makeNamesValidJSONStrings(values, settings, settings.json.validate_utf8);
+     writeRowStartDelimiter();
+     for (size_t i = 0; i < values.size(); ++i)
+     {
+@@ -86,10 +88,10 @@ void JSONCompactEachRowRowOutputFormat::writePrefix()
+     const auto & header = getPort(PortKind::Main).getHeader();
+ 
+     if (with_names)
+-        writeLine(header.getNames());
++        writeLine(makeNamesValidJSONStrings(header.getNames(), settings, settings.json.validate_utf8));
+ 
+     if (with_types)
+-        writeLine(header.getDataTypeNames());
++        writeLine(makeNamesValidJSONStrings(header.getDataTypeNames(), settings, settings.json.validate_utf8));
+ }
+ 
+ void JSONCompactEachRowRowOutputFormat::consumeTotals(DB::Chunk chunk)
+diff --git a/tests/queries/1_stateful/00159_parallel_formatting_json_and_friends.reference b/tests/queries/1_stateful/00159_parallel_formatting_json_and_friends.reference
+index 42e69ea3a0..787b57ce76 100644
+--- a/tests/queries/1_stateful/00159_parallel_formatting_json_and_friends.reference
++++ b/tests/queries/1_stateful/00159_parallel_formatting_json_and_friends.reference
+@@ -19,10 +19,10 @@ e3231b1c8187de4da6752d692b2ddba9  -
+ JSONCompactStringsEachRowWithNames, true
+ e3231b1c8187de4da6752d692b2ddba9  -
+ JSONCompactEachRowWithNamesAndTypes, false
+-21302d11da0bf8d37ab599e28a51bac2  -
++d40c4327c63eded184eee185a5330e12  -
+ JSONCompactEachRowWithNamesAndTypes, true
+-21302d11da0bf8d37ab599e28a51bac2  -
++d40c4327c63eded184eee185a5330e12  -
+ JSONCompactStringsEachRowWithNamesAndTypes, false
+-21302d11da0bf8d37ab599e28a51bac2  -
++d40c4327c63eded184eee185a5330e12  -
+ JSONCompactStringsEachRowWithNamesAndTypes, true
+-21302d11da0bf8d37ab599e28a51bac2  -
++d40c4327c63eded184eee185a5330e12  -
+-- 
+2.32.1 (Apple Git-133)
+

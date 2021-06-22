@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include "MergeTreeDataMergerMutator.h"
 
 #include <Storages/MergeTree/MergedBlockOutputStream.h>
@@ -41,6 +45,8 @@
 #include <numeric>
 
 #include <boost/algorithm/string/replace.hpp>
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+
 
 namespace CurrentMetrics
 {
@@ -369,6 +375,9 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectPartsToMerge(
         merge_settings.max_parts_to_merge_at_once = data_settings->max_parts_to_merge_at_once;
         if (!data_settings->min_age_to_force_merge_on_partition_only)
             merge_settings.min_age_to_force_merge = data_settings->min_age_to_force_merge_seconds;
+
+        if (!metadata_snapshot->vec_indices.empty())
+            merge_settings.base = data_settings->simple_merge_selector_base;
 
         if (aggressive)
             merge_settings.base = 1;

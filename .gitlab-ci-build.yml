@@ -1,0 +1,176 @@
+######################################## BUILDS #########################################
+# TODO 编译 deb with sanitizer 参数的 aarch64 版本文件
+build_binary:
+  stage: build
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    when: always
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+      - artifacts/performance_pack_*
+      - build/CMakeFiles/CMakeOutput.log
+      - build/CMakeFiles/CMakeError.log
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --build-type Release --arch linux-x86_64 --package
+    - cp build/programs/clickhouse artifacts/.
+    - docker/builder/tools/package_performance.sh all
+    - tar -zcf performance_pack_amd64.tar.gz performance_pack
+    - mv performance_pack_amd64.tar.gz artifacts/.
+    # - docker/builder/build.py --output artifacts --build-type Release --arch linux-aarch64 --package
+    - |-
+      if [ "$CI_MERGE_REQUEST_LABELS" = "quick-image" ]; then
+        docker/builder/tools/docker-info.sh
+        docker/builder/tools/docker-buildx.sh
+        docker/builder/tools/quick-image.sh
+      fi
+  rules:
+    - if: '$CI_TEST_IN_K8S == "false"'
+
+build_with_sanitizer_asanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKAsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+
+build_with_sanitizer_tsanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKTsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+
+build_with_sanitizer_ubsanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKUBsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+
+build_with_sanitizer_msanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  # image: harbor.internal.moqi.ai/mqdb/builder:2.9.4
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKMsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
+    # - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory --compiler "clang-16"
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+
+build_for_integration_test:
+  stage: build
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/programs/*
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-x86_64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"

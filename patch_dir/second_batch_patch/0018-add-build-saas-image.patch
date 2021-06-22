@@ -1,0 +1,549 @@
+From 51f05df42a3a06e228ff073c40b5094dd6ae6bb8 Mon Sep 17 00:00:00 2001
+From: Yi Ma <yim@moqi.ai>
+Date: Mon, 30 Jan 2023 15:29:00 +0800
+Subject: [PATCH 18/85] add build saas image
+
+---
+ .gitlab-ci-build.yml               | 19 ++++++++++------
+ .gitlab-ci-functional-test.yml     | 16 ++++++++-----
+ .gitlab-ci-integration-test.yml    | 16 +++++++------
+ .gitlab-ci-memory-leak-test.yml    | 36 ++++++++++++++++++------------
+ .gitlab-ci-performance-test.yml    | 17 ++++++++------
+ .gitlab-ci.yml                     | 32 +++++++++++++++++++-------
+ docker/builder/tools/image.sh      | 14 ++++++------
+ docker/builder/tools/saas-image.sh | 15 +++++++++++++
+ 8 files changed, 109 insertions(+), 56 deletions(-)
+ create mode 100755 docker/builder/tools/saas-image.sh
+
+diff --git a/.gitlab-ci-build.yml b/.gitlab-ci-build.yml
+index 48c40895b3..4c6303a0bc 100644
+--- a/.gitlab-ci-build.yml
++++ b/.gitlab-ci-build.yml
+@@ -11,7 +11,7 @@ build_binary:
+     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+     paths:
+       - artifacts/*.deb
+-      - build/programs/clickhouse 
++      - build/programs/clickhouse
+       - artifacts/performance_pack_*
+   retry: 2
+   script:
+@@ -29,6 +29,7 @@ build_binary:
+     - ls -al artifacts
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
++
+ build_with_sanitizer_asanbinary:
+   stage: build
+   parallel:
+@@ -54,8 +55,9 @@ build_with_sanitizer_asanbinary:
+     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ build_with_sanitizer_tsanbinary:
+   stage: build
+   parallel:
+@@ -81,8 +83,9 @@ build_with_sanitizer_tsanbinary:
+     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ build_with_sanitizer_ubsanbinary:
+   stage: build
+   parallel:
+@@ -108,8 +111,9 @@ build_with_sanitizer_ubsanbinary:
+     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ build_with_sanitizer_msanbinary:
+   stage: build
+   parallel:
+@@ -135,8 +139,9 @@ build_with_sanitizer_msanbinary:
+     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ build_for_integration_test:
+   stage: build
+   variables:
+@@ -155,5 +160,5 @@ build_for_integration_test:
+     - docker/builder/tools/submodule-update.sh
+     - docker/builder/build.py --output artifacts --arch linux-x86_64
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+\ No newline at end of file
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+diff --git a/.gitlab-ci-functional-test.yml b/.gitlab-ci-functional-test.yml
+index 69a483fc2d..9c07ab64be 100644
+--- a/.gitlab-ci-functional-test.yml
++++ b/.gitlab-ci-functional-test.yml
+@@ -2,7 +2,7 @@
+ ######### VECTOR TESTS ###########
+ vector_search_test:
+   stage: functional-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   parallel:
+@@ -18,11 +18,12 @@ vector_search_test:
+     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
++
+ ###################################### FUNCTIONAL TESTS ######################################
+ ########## SMOKE TESTS ###########
+ smoke_test:
+   stage: functional-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.0
+@@ -43,11 +44,12 @@ smoke_test:
+     - docker/builder/tools/check_job_states.sh mqdb_run_smoke
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
++
+ ### FUNCTIONAL STATELESS TESTS ###
+ # TODO Split stateless/stateful tests pipline
+ stateless_test:
+   stage: functional-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   artifacts:
+@@ -68,10 +70,11 @@ stateless_test:
+     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
++
+ ### FUNCTIONAL STATEFUL TESTS ####
+ stateful_test:
+   stage: functional-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   artifacts:
+@@ -92,10 +95,11 @@ stateful_test:
+     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
++
+ ####### AST FUZZER TESTS #########
+ fuzzer_test:
+   stage: functional-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+@@ -115,4 +119,4 @@ fuzzer_test:
+     - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+   rules:
+-    - if: '$CI_TEST_VECTOR_DB != "true"'
+\ No newline at end of file
++    - if: '$CI_TEST_VECTOR_DB != "true"'
+diff --git a/.gitlab-ci-integration-test.yml b/.gitlab-ci-integration-test.yml
+index 6f9c345ed7..c0029e2aa2 100644
+--- a/.gitlab-ci-integration-test.yml
++++ b/.gitlab-ci-integration-test.yml
+@@ -1,7 +1,7 @@
+ ######################################## INTEGRATION TESTS ###################################
+ integration_test0:
+   stage: failover-test
+-  needs: 
++  needs:
+     - job: build_for_integration_test
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
+@@ -14,11 +14,12 @@ integration_test0:
+     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 0 --runner-image-version 1.2 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" ||:'
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
++
+ integration_test1:
+   stage: failover-test
+-  needs: 
++  needs:
+     - job: build_for_integration_test
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
+@@ -31,11 +32,12 @@ integration_test1:
+     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 1 --runner-image-version 1.2 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" ||:'
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
++
+ integration_test2:
+   stage: failover-test
+-  needs: 
++  needs:
+     - job: build_for_integration_test
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
+@@ -48,5 +50,5 @@ integration_test2:
+     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 2 --runner-image-version 1.2 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" ||:'
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+\ No newline at end of file
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+diff --git a/.gitlab-ci-memory-leak-test.yml b/.gitlab-ci-memory-leak-test.yml
+index 89180bf3a1..1afacab8b1 100644
+--- a/.gitlab-ci-memory-leak-test.yml
++++ b/.gitlab-ci-memory-leak-test.yml
+@@ -2,7 +2,7 @@
+ # TODO build test image for arm64
+ stress_test_asan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+@@ -24,9 +24,10 @@ stress_test_asan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ stress_test_tsan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_tsanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+@@ -46,11 +47,12 @@ stress_test_tsan:
+     - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+     - docker/builder/tools/check_job_states.sh mqdb_run_stress
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'  # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ stress_test_ubsan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+@@ -72,9 +74,10 @@ stress_test_ubsan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ stress_test_msan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_msanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+@@ -96,9 +99,10 @@ stress_test_msan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ vector-test-asan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+   parallel:
+@@ -123,11 +127,12 @@ vector-test-asan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ vector-test-tsan:
+   stage: memory-leak-test
+-  needs: 
+-   - job: build_with_sanitizer_tsanbinary
+-     artifacts: true
++  needs:
++    - job: build_with_sanitizer_tsanbinary
++      artifacts: true
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -151,9 +156,10 @@ vector-test-tsan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ vector-test-msan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_msanbinary
+       artifacts: true
+   parallel:
+@@ -178,9 +184,10 @@ vector-test-msan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ vector-test-ubsan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+   parallel:
+@@ -205,9 +212,10 @@ vector-test-ubsan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++
+ fuzzer_test-asan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+@@ -231,7 +239,7 @@ fuzzer_test-asan:
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+ fuzzer_test-ubsan:
+   stage: memory-leak-test
+-  needs: 
++  needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+@@ -252,4 +260,4 @@ fuzzer_test-ubsan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+\ No newline at end of file
++    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+diff --git a/.gitlab-ci-performance-test.yml b/.gitlab-ci-performance-test.yml
+index ece1df201f..a8deb4765a 100644
+--- a/.gitlab-ci-performance-test.yml
++++ b/.gitlab-ci-performance-test.yml
+@@ -1,7 +1,7 @@
+ ####################################### PERFORMANCE TESTS ####################################
+ performance_test0:
+   stage: performance-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+@@ -22,9 +22,10 @@ performance_test0:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
++
+ performance_test1:
+   stage: performance-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+@@ -45,9 +46,10 @@ performance_test1:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
++
+ performance_test2:
+   stage: performance-test
+-  needs: 
++  needs:
+     - job: build_binary
+       artifacts: true
+   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+@@ -68,12 +70,13 @@ performance_test2:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
++
+ ########## VECTOR-DB ###########
+ vector_db_test:
+   stage: benchmark
+   dependencies: ["build_image"]
+   image: harbor.internal.moqi.ai/tools/k8s-gitlab-ci:2.0.1
+-  script: 
++  script:
+     - mkdir -p $HOME/Downloads/
+     - cp $KUBECONFIG_CONTENT $HOME/Downloads/cls-config
+     - export KUBECONFIG=$KUBECONFIG:$HOME/Downloads/cls-config
+@@ -81,7 +84,7 @@ vector_db_test:
+     - cd docker/test/mqdb_run_vector_db_test
+     - cp setup_mqdb.yaml setup_mqdb_tmp.yaml
+     - sed -i "s/IMAGE_VERSION/${VERSION_STRING}-${GIT_COMMIT}/" setup_mqdb_tmp.yaml
+-    - 'kubectl delete ns vector-db-test ||:'
++    - "kubectl delete ns vector-db-test ||:"
+     - kubectl create ns vector-db-test
+     - kubectl apply -f setup_mqdb_tmp.yaml
+     - sleep 60
+@@ -96,5 +99,5 @@ vector_db_test:
+     - kubectl cp config.json vector-db-test/$WORK_POD_NAME:/home/.
+     - timeout 300 kubectl logs -f $WORK_POD_NAME
+   rules:
+-  # [TODO] Add more policy
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'    # Trigger pipline during scheduled tasks
++    # [TODO] Add more policy
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 3d44c177d6..517f7a7e3b 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -1,16 +1,17 @@
+ workflow:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
++    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+ 
+ image: harbor.internal.moqi.ai/mqdb/builder:2.1
++
+ include:
+-  - '/.gitlab-ci-build.yml'
+-  - '/.gitlab-ci-functional-test.yml'
+-  - '/.gitlab-ci-integration-test.yml'
+-  - '/.gitlab-ci-memory-leak-test.yml'
+-  - '/.gitlab-ci-performance-test.yml'
++  - "/.gitlab-ci-build.yml"
++  - "/.gitlab-ci-functional-test.yml"
++  - "/.gitlab-ci-integration-test.yml"
++  - "/.gitlab-ci-memory-leak-test.yml"
++  - "/.gitlab-ci-performance-test.yml"
+ 
+ stages:
+   - check-pipeline
+@@ -34,10 +35,11 @@ check_pipeline_already_running:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+   script:
+     - if [[ -f .schedule_cache ]]; then
+-          echo "already ran for this commit, nothing to do";
+-          exit 1;
++      echo "already ran for this commit, nothing to do";
++      exit 1;
+       fi
+     - echo "done" > .schedule_cache
++
+ style_check:
+   stage: build
+   image: harbor.internal.moqi.ai/mqdb/style-check
+@@ -66,6 +68,7 @@ build_package:
+     - docker/builder/tools/submodule-update.sh
+     - docker/builder/build.py --output artifacts --profile release --arch linux-x86_64 --package
+     - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package
++
+ build_package_with_license:
+   stage: package
+   dependencies: []
+@@ -86,6 +89,7 @@ build_package_with_license:
+     - docker/builder/tools/submodule-update.sh
+     - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-x86_64 --package
+     - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-aarch64 --package
++
+ build_image:
+   stage: image
+   dependencies: ["build_package"]
+@@ -94,6 +98,18 @@ build_image:
+     - docker/builder/tools/docker-buildx.sh
+   script:
+     - docker/builder/tools/image.sh
++
++build_saas_image:
++  stage: image
++  dependencies: ["build_package"]
++  # only:
++  #   - mqdb-stable
++  before_script:
++    - docker/builder/tools/docker-info.sh
++    - docker/builder/tools/docker-buildx.sh
++  script:
++    - docker/builder/tools/saas-image.sh
++
+ upload_performance_file_to_s3:
+   stage: deploy
+   dependencies: ["build_binary"]
+diff --git a/docker/builder/tools/image.sh b/docker/builder/tools/image.sh
+index 71b972125c..3a6ebe910c 100755
+--- a/docker/builder/tools/image.sh
++++ b/docker/builder/tools/image.sh
+@@ -8,18 +8,18 @@ cp -rfv artifacts/clickhouse-*.tgz docker/mqdb-client/
+ cp -rfv artifacts/clickhouse-*.tgz docker/mqdb-ssh-client/
+ cp -fv tests/vector_search/benchmark.py docker/mqdb-ssh-client/
+ 
+-HARBOR_USER_NAMENAME="yim@moqi.ai"
++HARBOR_USER_NAME="yim@moqi.ai"
+ HARBOR_USER_PASSWORD="Zhu88jie"
+-REGISTRY="harbor.internal.moqi.ai"
+-NAMESPACE="mqdb"
++HARBOR_REGISTRY="harbor.internal.moqi.ai"
++HARBOR_NAMESPACE="mqdb"
+ 
+-echo $HARBOR_USER_PASSWORD | docker login $REGISTRY --username $HARBOR_USER_NAMENAME --password-stdin
++echo $HARBOR_USER_PASSWORD | docker login $HARBOR_REGISTRY --username $HARBOR_USER_NAME --password-stdin
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $REGISTRY/$NAMESPACE/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
++docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $REGISTRY/$NAMESPACE/mqdb-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-client --push
++docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-client --push
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $REGISTRY/$NAMESPACE/mqdb-ssh-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-ssh-client --push
++docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-ssh-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-ssh-client --push
+ 
+ rm -rfv docker/mqdb/clickhouse-*.tgz
+ rm -rfv docker/mqdb-client/clickhouse-*.tgz
+diff --git a/docker/builder/tools/saas-image.sh b/docker/builder/tools/saas-image.sh
+new file mode 100755
+index 0000000000..5b15f203b8
+--- /dev/null
++++ b/docker/builder/tools/saas-image.sh
+@@ -0,0 +1,15 @@
++#!/usr/bin/env bash
++set -e
++
++source docker/builder/tools/version.sh
++
++cp -rfv artifacts/clickhouse-*.tgz docker/mqdb/
++
++DOCKER_HUB_USER_NAME="myscale"
++DOCKER_HUB_USER_PASSWORD="dckr_pat_G5xUzsovxR4NrnaenDqZGtxM6CA"
++
++echo $DOCKER_HUB_USER_PASSWORD | docker login --username $DOCKER_HUB_USER_NAME --password-stdin
++
++docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $DOCKER_HUB_USER_NAME/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
++
++rm -rfv docker/mqdb/clickhouse-*.tgz
+-- 
+2.32.1 (Apple Git-133)
+

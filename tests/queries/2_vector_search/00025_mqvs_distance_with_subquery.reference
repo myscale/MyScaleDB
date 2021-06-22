@@ -1,0 +1,47 @@
+0
+Scalar Subquery in distance function
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+Scalar Subquery with float32 data type in distance function
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+Scalar Subquery with float32 data type in batch distance function
+0
+1
+2
+3
+4
+0
+1
+2
+3
+4
+Scalar Subquery inside WITH clause in distance function
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+Test remove unneeded distance function column in subquery
+1

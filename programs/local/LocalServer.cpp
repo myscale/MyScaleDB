@@ -48,6 +48,7 @@
 #include <boost/program_options/options_description.hpp>
 #include <base/argsToConfig.h>
 #include <filesystem>
+#include <VectorIndex/VectorSegmentExecutor.h>
 
 #if defined(FUZZING_MODE)
     #include <Functions/getFuzzerData.h>
@@ -445,6 +446,8 @@ try
 
     processConfig();
     initTtyBuffer(toProgressOption(config().getString("progress", "default")));
+
+    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(0);
 
     applyCmdSettings(global_context);
 

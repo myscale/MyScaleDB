@@ -83,7 +83,6 @@ namespace DB
 
 DB::PipeFDs signal_pipe;
 
-
 /** Reset signal handler to the default and send signal to itself.
   * It's called from user signal handler to write core dump.
   */

@@ -1,0 +1,34 @@
+From ec20e8bdd9c9387e2d43a130253d3b75ab897e47 Mon Sep 17 00:00:00 2001
+From: shanfengp <shanfengp@moqi.ai>
+Date: Sun, 2 Jul 2023 10:18:15 +0800
+Subject: [PATCH 6/7] fix 174
+
+---
+ src/VectorIndex/VectorSegmentExecutor.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 8669405cc2..fba1f32dd5 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -39,6 +39,7 @@ namespace DB::ErrorCodes
+ extern const int STD_EXCEPTION;
+ extern const int CORRUPTED_DATA;
+ extern const int LOGICAL_ERROR;
++extern const int CANNOT_OPEN_FILE;
+ }
+ 
+ namespace VectorIndex
+@@ -444,7 +445,8 @@ Status VectorSegmentExecutor::load()
+                 printMemoryInfo(log, "After load");
+                 total_vec = index->numData();
+                 LOG_INFO(log, "load total_vec={}", total_vec);
+-                readBitMap();
++                if(!readBitMap())
++                    throw DB::Exception("ReadBitMap error", DB::ErrorCodes::CANNOT_OPEN_FILE);
+ 
+                 /// May failed to load merged row ids map due to background index build may remove them when finished.
+                 handleMergedMaps();
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,193 @@
+From 511046058e9cbde6e3c221a3d0cd7a38532a0357 Mon Sep 17 00:00:00 2001
+From: Mochi Xu <mochix@moqi.ai>
+Date: Thu, 8 Jun 2023 07:34:12 +0000
+Subject: [PATCH 45/49] Fix compilation warnings in ClickHouse
+
+---
+ contrib/search-index                      |  2 +-
+ src/VectorIndex/BruteForceSearch.h        |  7 -----
+ src/VectorIndex/PartReader.h              |  3 --
+ src/VectorIndex/VectorIndexCommon.h       | 34 -----------------------
+ src/VectorIndex/VectorSegmentExecutor.cpp | 33 ----------------------
+ src/VectorIndex/VectorSegmentExecutor.h   | 31 ---------------------
+ 6 files changed, 1 insertion(+), 109 deletions(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index eb7636340f..7240877fbc 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit eb7636340fc6b30ce0da5fd016ad6a22c220897d
++Subproject commit 7240877fbc7577cbe668ecfe5e219484d2ddbd8c
+diff --git a/src/VectorIndex/BruteForceSearch.h b/src/VectorIndex/BruteForceSearch.h
+index 1a1d3c0371..1c6810d0e8 100644
+--- a/src/VectorIndex/BruteForceSearch.h
++++ b/src/VectorIndex/BruteForceSearch.h
+@@ -1,13 +1,6 @@
+ #pragma once
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wdocumentation"
+-#pragma GCC diagnostic ignored "-Wunused-function"
+ #include <faiss/utils/distances.h>
+-#pragma GCC diagnostic pop
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wunused-parameter"
+ #include <SearchIndex/VectorIndex.h>
+-#pragma GCC diagnostic pop
+ #include <VectorIndex/Status.h>
+ 
+ namespace VectorIndex
+diff --git a/src/VectorIndex/PartReader.h b/src/VectorIndex/PartReader.h
+index d037cc5669..e5cdc3231f 100644
+--- a/src/VectorIndex/PartReader.h
++++ b/src/VectorIndex/PartReader.h
+@@ -6,10 +6,7 @@
+ #include <base/logger_useful.h>
+ #include <Common/Exception.h>
+ 
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+ #include <SearchIndex/VectorIndex.h>
+-#pragma GCC diagnostic pop
+ 
+ namespace DB::ErrorCodes
+ {
+diff --git a/src/VectorIndex/VectorIndexCommon.h b/src/VectorIndex/VectorIndexCommon.h
+index a48d72a429..fcf016ac28 100644
+--- a/src/VectorIndex/VectorIndexCommon.h
++++ b/src/VectorIndex/VectorIndexCommon.h
+@@ -22,42 +22,8 @@
+ #include <rapidjson/writer.h>
+ #pragma GCC diagnostic pop
+ 
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
+-#pragma GCC diagnostic ignored "-Wunused-parameter"
+-#pragma GCC diagnostic ignored "-Wextra-semi-stmt"
+-#pragma GCC diagnostic ignored "-Wold-style-cast"
+-#pragma GCC diagnostic ignored "-Wc++20-compat"
+-#pragma GCC diagnostic ignored "-Walloca"
+-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+-#pragma GCC diagnostic ignored "-Wgcc-compat"
+-#pragma GCC diagnostic ignored "-Wcovered-switch-default"
+-#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+-#pragma GCC diagnostic ignored "-Wextra-semi"
+-#pragma GCC diagnostic ignored "-Wfinal-dtor-non-final-class"
+-#pragma GCC diagnostic ignored "-Wundef"
+-#pragma GCC diagnostic ignored "-Wsuggest-override"
+-#pragma GCC diagnostic ignored "-Wshadow-field-in-constructor"
+-#pragma GCC diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
+-#pragma GCC diagnostic ignored "-Wmismatched-tags"
+-#pragma GCC diagnostic ignored "-Wundefined-reinterpret-cast"
+-#pragma GCC diagnostic ignored "-Wsign-compare"
+-#pragma GCC diagnostic ignored "-Wshadow-uncaptured-local"
+-#pragma GCC diagnostic ignored "-Wunused-variable"
+-#pragma GCC diagnostic ignored "-Wunused-private-field"
+-#pragma GCC diagnostic ignored "-Wshadow-field"
+-#pragma GCC diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wshadow"
+-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wrange-loop-bind-reference"
+-#pragma GCC diagnostic ignored "-Wenum-compare-switch"
+-#pragma GCC diagnostic ignored "-Wnewline-eof"
+-#pragma GCC diagnostic ignored "-Wreorder-ctor"
+-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+-#pragma GCC diagnostic ignored "-Wreserved-identifier"
+ #include <SearchIndex/SearchIndexCommon.h>
+ #include <SearchIndex/VectorIndex.h>
+-#pragma GCC diagnostic pop
+ 
+ #define VECTOR_INDEX_FILE_SUFFIX ".vidx2"
+ #define MAX_BRUTE_FORCE_SEARCH_SIZE 50000
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 59d4ff2864..1d763ff4ce 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -29,41 +29,8 @@
+ #include <VectorIndex/Metadata.h>
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
+-#pragma GCC diagnostic ignored "-Wunused-parameter"
+-#pragma GCC diagnostic ignored "-Wextra-semi-stmt"
+-#pragma GCC diagnostic ignored "-Wold-style-cast"
+-#pragma GCC diagnostic ignored "-Wc++20-compat"
+-#pragma GCC diagnostic ignored "-Walloca"
+-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+-#pragma GCC diagnostic ignored "-Wgcc-compat"
+-#pragma GCC diagnostic ignored "-Wcovered-switch-default"
+-#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+-#pragma GCC diagnostic ignored "-Wextra-semi"
+-#pragma GCC diagnostic ignored "-Wfinal-dtor-non-final-class"
+-#pragma GCC diagnostic ignored "-Wundef"
+-#pragma GCC diagnostic ignored "-Wsuggest-override"
+-#pragma GCC diagnostic ignored "-Wshadow-field-in-constructor"
+-#pragma GCC diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
+-#pragma GCC diagnostic ignored "-Wmismatched-tags"
+-#pragma GCC diagnostic ignored "-Wundefined-reinterpret-cast"
+-#pragma GCC diagnostic ignored "-Wsign-compare"
+-#pragma GCC diagnostic ignored "-Wshadow-uncaptured-local"
+-#pragma GCC diagnostic ignored "-Wunused-variable"
+-#pragma GCC diagnostic ignored "-Wunused-private-field"
+-#pragma GCC diagnostic ignored "-Wshadow-field"
+-#pragma GCC diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wshadow"
+-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wrange-loop-bind-reference"
+-#pragma GCC diagnostic ignored "-Wenum-compare-switch"
+-#pragma GCC diagnostic ignored "-Wnewline-eof"
+-#pragma GCC diagnostic ignored "-Wreorder-ctor"
+-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+ #include <SearchIndex/Common/Utils.h>
+ #include <SearchIndex/IndexDataFileIO.h>
+-#pragma GCC diagnostic pop
+ 
+ #include <base/logger_useful.h>
+ 
+diff --git a/src/VectorIndex/VectorSegmentExecutor.h b/src/VectorIndex/VectorSegmentExecutor.h
+index e14dceedd0..6b1899ebe2 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.h
++++ b/src/VectorIndex/VectorSegmentExecutor.h
+@@ -10,38 +10,7 @@
+ #include <VectorIndex/Status.h>
+ #include <base/logger_useful.h>
+ 
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wunused-function"
+-#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
+-#pragma GCC diagnostic ignored "-Wunused-parameter"
+-#pragma GCC diagnostic ignored "-Wextra-semi-stmt"
+-#pragma GCC diagnostic ignored "-Wold-style-cast"
+-#pragma GCC diagnostic ignored "-Wc++20-compat"
+-#pragma GCC diagnostic ignored "-Walloca"
+-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+-#pragma GCC diagnostic ignored "-Wgcc-compat"
+-#pragma GCC diagnostic ignored "-Wcovered-switch-default"
+-#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+-#pragma GCC diagnostic ignored "-Wextra-semi"
+-#pragma GCC diagnostic ignored "-Wfinal-dtor-non-final-class"
+-#pragma GCC diagnostic ignored "-Wundef"
+-#pragma GCC diagnostic ignored "-Wsuggest-override"
+-#pragma GCC diagnostic ignored "-Wshadow-field-in-constructor"
+-#pragma GCC diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
+-#pragma GCC diagnostic ignored "-Wmismatched-tags"
+-#pragma GCC diagnostic ignored "-Wundefined-reinterpret-cast"
+-#pragma GCC diagnostic ignored "-Wsign-compare"
+-#pragma GCC diagnostic ignored "-Wshadow-uncaptured-local"
+-#pragma GCC diagnostic ignored "-Wunused-variable"
+-#pragma GCC diagnostic ignored "-Wunused-private-field"
+-#pragma GCC diagnostic ignored "-Wshadow-field"
+-#pragma GCC diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wshadow"
+-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+-#pragma GCC diagnostic ignored "-Wrange-loop-bind-reference"
+-#pragma GCC diagnostic ignored "-Wenum-compare-switch"
+ #include <SearchIndex/VectorSearch.h>
+-#pragma GCC diagnostic pop
+ 
+ namespace VectorIndex
+ {
+-- 
+2.32.1 (Apple Git-133)
+

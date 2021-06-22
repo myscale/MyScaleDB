@@ -1,0 +1,47 @@
+From 0ec4e85635156bb81a5438b4d62d6ad548342e81 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 30 Jan 2023 14:12:34 +0800
+Subject: [PATCH 14/85] fix compilation scripts
+
+---
+ scripts/config_on_linux.sh | 2 +-
+ scripts/setup_build.sh     | 6 +++---
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/scripts/config_on_linux.sh b/scripts/config_on_linux.sh
+index fa66fc7599..31a268e840 100644
+--- a/scripts/config_on_linux.sh
++++ b/scripts/config_on_linux.sh
+@@ -8,7 +8,7 @@ mkdir -p $CURDIR/../$BUILD_FOLDER/
+ cd $CURDIR/../$BUILD_FOLDER/
+ export LD_LIBRARY_PATH=/usr/lib/llvm-13/lib:/opt/intel/oneapi/mkl/2021.4.0/lib/intel64/:${LD_LIBRARY_PATH}
+ cmake -G Ninja .. -DCMAKE_C_COMPILER=$(command -v clang-13) \
+-    -DCMAKE_CXX_COMPILER=$(command -v clang++-13) $SANITIZER_ARGS \
++    -DCMAKE_CXX_COMPILER=$(command -v clang++-13) $SANITIZE_ARGS \
+     -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+     -DENABLE_CLICKHOUSE_ALL=OFF \
+diff --git a/scripts/setup_build.sh b/scripts/setup_build.sh
+index 870c7c6d03..d66b64e80c 100644
+--- a/scripts/setup_build.sh
++++ b/scripts/setup_build.sh
+@@ -20,13 +20,13 @@ fi
+ if [ $# -ge 2 ]; then
+     if [ "$2" == "ASAN" ]; then
+         BUILD_FOLDER="${BUILD_FOLDER}-asan"
+-        SANIITIZE_ARGS="-DSANITIZE=address"
++        SANITIZE_ARGS="-DSANITIZE=address"
+     elif [ "$2" == "TSAN" ]; then
+         BUILD_FOLDER="${BUILD_FOLDER}-tsan"
+-        SANIITIZE_ARGS="-DSANITIZE=thread"
++        SANITIZE_ARGS="-DSANITIZE=thread"
+     elif [ "$2" == "MSAN" ]; then
+         BUILD_FOLDER="${BUILD_FOLDER}-msan"
+-        SANIITIZE_ARGS="-DSANITIZE=memory"
++        SANITIZE_ARGS="-DSANITIZE=memory"
+     else
+         echo "Invalid sanitizer mode: $2"
+         exit 1
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,189 @@
+From d6bbb94fc04f2d0799d18f16ef001aaa93268bbd Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Wed, 8 Feb 2023 18:29:25 +0800
+Subject: [PATCH 24/85] Fix data race issue in containVectorIndex() and
+ performPrefilter()
+
+---
+ .../QueryPlan/ReadWithVectorScan.cpp          | 11 +++++++++--
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp |  6 ++++++
+ src/Storages/MergeTree/IMergeTreeDataPart.h   | 19 ++++++++++++++++---
+ ...MergeTreeSelectWithVectorScanProcessor.cpp | 19 ++++++++-----------
+ .../MergeTreeSelectWithVectorScanProcessor.h  |  8 ++++++++
+ src/Storages/SelectQueryInfo.h                |  2 ++
+ 6 files changed, 49 insertions(+), 16 deletions(-)
+
+diff --git a/src/Processors/QueryPlan/ReadWithVectorScan.cpp b/src/Processors/QueryPlan/ReadWithVectorScan.cpp
+index f467375acd..3883db7e47 100644
+--- a/src/Processors/QueryPlan/ReadWithVectorScan.cpp
++++ b/src/Processors/QueryPlan/ReadWithVectorScan.cpp
+@@ -162,8 +162,15 @@ Pipe ReadWithVectorScan::readFromParts(
+         return {};
+ 
+     const auto & client_info = context->getClientInfo();
+-    
+-    
++
++    /// Prewhere info should not be changed, because it is shared by parts.
++    if (prewhere_info)
++    {
++        /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
++        /// In this case, we need only rows statisfied prewhere conditions.
++        prewhere_info->need_filter = true;
++    }
++
+     for (const auto & part : parts)
+     {
+         auto vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index c3b15b2915..dbfd133346 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -1127,9 +1127,15 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
+ 
+     /// Clear from metadata
+     if (containVectorIndex(index_name, col_name))
++    {
++        std::lock_guard lock(vector_indexed_mutex);
+         vector_indexed.erase(index_name + "_" + col_name);
++    }
+     else if (index_name.empty()) /// Empty index name will clear all vector indices.
++    {
++        std::lock_guard lock(vector_indexed_mutex);
+         vector_indexed.clear();
++    }
+ 
+     /// Clear vector index build flags
+     vector_index_build_error = false;
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.h b/src/Storages/MergeTree/IMergeTreeDataPart.h
+index 751f69f820..94bd05ed12 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.h
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.h
+@@ -323,6 +323,7 @@ public:
+     Checksums checksums;
+ 
+     /// TODO: move vector index related structures out of data part class
++    mutable std::mutex vector_indexed_mutex;
+     mutable std::set<String> vector_indexed;
+ 
+     /// Used for decouple part
+@@ -356,11 +357,23 @@ public:
+ 
+     mutable bool lightweight_delete_mask_updated = false;
+ 
+-    bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
++    bool containAnyVectorIndex() const
++    {
++        std::lock_guard lock(vector_indexed_mutex);
++        return !vector_indexed.empty();
++    }
+ 
+-    bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
++    bool containVectorIndex(String index_name, String col_name) const
++    {
++        std::lock_guard lock(vector_indexed_mutex);
++        return vector_indexed.contains(index_name + "_" + col_name);
++    }
+ 
+-    void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
++    void addVectorIndex(String index_name) const
++    {
++        std::lock_guard lock(vector_indexed_mutex);
++        vector_indexed.insert(index_name);
++    }
+ 
+     /// remove specified vector index from part, both disk and metadata.
+     void removeVectorIndex(const String & index_name, const String & col_name) const;
+diff --git a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+index 7a907c2f96..0094e66520 100644
+--- a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
++++ b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+@@ -117,12 +117,12 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges &
+         }
+     }
+ 
+-    bool bak_remove_prewhere_column = prewhere_info->remove_prewhere_column;
+-    prewhere_info->remove_prewhere_column = true;
+-
+-    /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
+-    /// In this case, we need only rows statisfied prewhere conditions.
+-    prewhere_info->need_filter = true;
++    /// No need to return prewhere column
++    {
++        std::lock_guard lock(prewhere_info->prewhere_info_mutex);
++        if (!prewhere_info->remove_prewhere_column)
++            prewhere_info->remove_prewhere_column = true;
++    }
+ 
+     auto input = std::make_unique<MergeTreeInOrderSelectProcessor>(
+             storage, storage_snapshot, data_part, max_block_size_rows, preferred_block_size_bytes,
+@@ -158,9 +158,6 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges &
+         }
+     }
+ 
+-    /// Restore the remove_prewhere_column.
+-    prewhere_info->remove_prewhere_column = bak_remove_prewhere_column;
+-
+     return new_filter;
+ }
+ 
+@@ -547,7 +544,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+     Block res_block;
+ 
+     /// Add prewhere column name to avoid column not found error
+-    if (prewhere_info && !prewhere_info->remove_prewhere_column)
++    if (prewhere_info && !original_remove_prewhere_column)
+     {
+         ColumnWithTypeAndName prewhere_col;
+ 
+@@ -654,7 +651,7 @@ try
+ 
+     task = std::make_unique<MergeTreeReadTask>(
+         data_part, mark_ranges_for_task, part_index_in_query, ordered_names, column_name_set, task_columns,
+-        prewhere_info && prewhere_info->remove_prewhere_column,
++        prewhere_info && original_remove_prewhere_column,
+         std::move(size_predictor), vector_scan_manager);
+ 
+     return true;
+diff --git a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h
+index d4e1120b2e..f2d1c5091c 100644
+--- a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h
++++ b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h
+@@ -16,6 +16,10 @@ public:
+         LOG_TRACE(log, "Reading {} ranges in order from part {}, approx. {} rows starting from {}",
+             all_mark_ranges.size(), data_part->name, total_rows,
+             data_part->index_granularity.getMarkStartingRow(all_mark_ranges.front().begin));
++
++        /// Save original remove_prewhere_column, which will be changed to true in performPrefilter()
++        if (prewhere_info)
++            original_remove_prewhere_column = prewhere_info->remove_prewhere_column;
+     }
+ 
+     String getName() const override { return "MergeTreeReadWithVectorScan"; }
+@@ -43,6 +47,10 @@ private:
+ 
+     /// True if the query can use primary key cache.
+     bool use_primary_key_cache = false;
++
++    /// Used for vector scan to handle cases when both prewhere and where exist
++    /// remove_prewhere_column is set to true when vector scan try to get _part_offset for rows satisfying prewhere conds.
++    bool original_remove_prewhere_column = false;
+ };
+ 
+ }
+diff --git a/src/Storages/SelectQueryInfo.h b/src/Storages/SelectQueryInfo.h
+index c1268140bc..8416335f53 100644
+--- a/src/Storages/SelectQueryInfo.h
++++ b/src/Storages/SelectQueryInfo.h
+@@ -71,6 +71,8 @@ struct PrewhereInfo
+             : prewhere_actions(std::move(prewhere_actions_)), prewhere_column_name(std::move(prewhere_column_name_)) {}
+ 
+     std::string dump() const;
++
++    mutable std::mutex prewhere_info_mutex;
+ };
+ 
+ /// Helper struct to store all the information about the filter expression.
+-- 
+2.32.1 (Apple Git-133)
+

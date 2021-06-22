@@ -1,0 +1,6 @@
+0
+test_drop_index	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	Built
+-- Empty result, no vector index
+-- Create a new vector index with same name but different type
+0
+test_drop_index	v1	IVFFlat	v1 vector TYPE IVFFlat	Built

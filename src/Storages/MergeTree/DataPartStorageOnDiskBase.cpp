@@ -9,6 +9,7 @@
 #include <Backups/BackupEntryFromSmallFile.h>
 #include <Backups/BackupEntryFromImmutableFile.h>
 #include <Disks/SingleDiskVolume.h>
+#include <VectorIndex/VectorIndexCommon.h>
 
 namespace DB
 {
@@ -20,6 +21,11 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int FILE_DOESNT_EXIST;
     extern const int CORRUPTED_DATA;
+}
+
+VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage)
+{
+    return storage.volume;
 }
 
 DataPartStorageOnDiskBase::DataPartStorageOnDiskBase(VolumePtr volume_, std::string root_path_, std::string part_dir_)
@@ -683,6 +689,17 @@ void DataPartStorageOnDiskBase::clearDirectory(
         request.emplace_back(fs::path(dir) / "default_compression_codec.txt", true);
         request.emplace_back(fs::path(dir) / "delete-on-destroy.txt", true);
         request.emplace_back(fs::path(dir) / "txn_version.txt", true);
+
+        /// Add files for vector index
+        Names files;
+        disk->listFiles(dir, files);
+        for (const auto & file : files)
+        {
+            if (!endsWith(file, VECTOR_INDEX_FILE_SUFFIX))
+                continue;
+
+            request.emplace_back(fs::path(dir) / file);
+        }
 
         disk->removeSharedFiles(request, !can_remove_shared_data, names_not_to_remove);
         disk->removeDirectory(dir);

@@ -1,0 +1,95 @@
+From 5508ec946d99490590ea71c043665e9b8b6685aa Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Thu, 29 Jun 2023 06:11:05 +0000
+Subject: [PATCH 3/7] Fix race issues on vector index temporary directory
+
+---
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 21 +++++++++++++++----
+ src/Storages/StorageReplicatedMergeTree.cpp   |  7 ++++---
+ 2 files changed, 21 insertions(+), 7 deletions(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 0c185409e3..b8d6f4b5bf 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -456,8 +456,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 }
+                 else
+                 {
+-                    disk->removeRecursive(vector_tmp_relative_path);
+                     LOG_DEBUG(log, "Remove incomplete temporary directory {}", vector_tmp_relative_path);
++                    disk->removeRecursive(vector_tmp_relative_path);
+                 }
+             }
+         }
+@@ -556,10 +556,17 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             LOG_DEBUG(log, "Serialize vector index");
+             VectorIndex::Status seri_status = vec_index_builder->serialize();
+             LOG_DEBUG(log, "Serialization status: {}", seri_status.getCode());
++
+             if (!seri_status.fine())
+             {
+                 /// Remove temporay directory
+-                disk->removeRecursive(vector_tmp_relative_path);
++                if (disk->exists(vector_tmp_relative_path))
++                {
++                    LOG_DEBUG(log, "seri_status is not fine, will remove vector_tmp_relative_path {}", vector_tmp_relative_path);
++                    disk->removeRecursive(vector_tmp_relative_path);
++                }
++                else
++                    LOG_DEBUG(log, "seri_status is not fine, vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
+ 
+                 part->onVectorIndexBuildError(vec_index_desc.name, seri_status.getMessage());
+ 
+@@ -601,7 +608,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
+                 {
+                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+-                    disk->removeRecursive(vector_tmp_relative_path);
++                    if (disk->exists(vector_tmp_relative_path))
++                        disk->removeRecursive(vector_tmp_relative_path);
++                    else
++                        LOG_DEBUG(log, "[Dropped] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
+                     part->removeVectorIndexInfo(vec_index_desc.name);
+                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
+                     return BuildVectorIndexStatus::SUCCESS;
+@@ -731,7 +741,10 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const
+     if (!found_vector_file)
+     {
+         LOG_DEBUG(log, "Failed to find any vector index files in directory {}, will remove it", vector_tmp_relative_path);
+-        disk->removeRecursive(vector_tmp_relative_path);
++        if (disk->exists(vector_tmp_relative_path))
++            disk->removeRecursive(vector_tmp_relative_path);
++        else
++            LOG_DEBUG(log, "[moveVectorIndexFilesToFuturePart] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
+ 
+         return false;
+     }
+diff --git a/src/Storages/StorageReplicatedMergeTree.cpp b/src/Storages/StorageReplicatedMergeTree.cpp
+index 1e458b8b4e..3009c218e7 100644
+--- a/src/Storages/StorageReplicatedMergeTree.cpp
++++ b/src/Storages/StorageReplicatedMergeTree.cpp
+@@ -4189,6 +4189,10 @@ void StorageReplicatedMergeTree::startup()
+ 
+         startBeingLeader();
+ 
++        /// Move here to avoid wrongly remove just started background build in restart_thread.
++        /// Temporary directories contain incomplete results of build vector index.
++        clearTemporaryIndexBuildDirectories();
++
+         /// In this thread replica will be activated.
+         restarting_thread.start();
+ 
+@@ -4201,9 +4205,6 @@ void StorageReplicatedMergeTree::startup()
+         startBackgroundMovesIfNeeded();
+ 
+         part_moves_between_shards_orchestrator.start();
+-
+-        /// Temporary directories contain incomplete results of vector index building.
+-        clearTemporaryIndexBuildDirectories();
+     }
+     catch (...)
+     {
+-- 
+2.32.1 (Apple Git-133)
+

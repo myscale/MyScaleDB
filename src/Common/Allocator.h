@@ -208,7 +208,7 @@ protected:
 private:
     void * allocNoTrack(size_t size, size_t alignment)
     {
-        void * buf;
+        void * buf = nullptr; /// Initialize it to avoid warning in memory sanitizer
         size_t mmap_min_alignment = ::getPageSize();
 
         if (size >= MMAP_THRESHOLD)

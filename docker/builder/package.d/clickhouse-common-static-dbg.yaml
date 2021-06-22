@@ -1,0 +1,34 @@
+# package sources should be placed in ${PWD}/root
+# nfpm should run from the same directory with a config
+name: "clickhouse-common-static-dbg"
+arch: "${ARCH}" # amd64, arm64
+platform: "linux"
+version: "${VERSION_STRING}"
+vendor: "ClickHouse Inc."
+homepage: "https://clickhouse.com"
+license: "Apache"
+section: "database"
+priority: "optional"
+
+replaces:
+  - clickhouse-common-dbg
+conflicts:
+  - clickhouse-common-dbg
+
+maintainer: "ClickHouse Dev Team <packages+linux@clickhouse.com>"
+description: |
+  debugging symbols for clickhouse-common-static
+    This package contains the debugging symbols for clickhouse-common.
+
+contents:
+  - src: usr/lib/debug/usr/bin/clickhouse.debug
+    dst: /usr/lib/debug/usr/bin/clickhouse.debug
+  - src: usr/lib/debug/usr/bin/clickhouse-odbc-bridge.debug
+    dst: /usr/lib/debug/usr/bin/clickhouse-odbc-bridge.debug
+  - src: usr/lib/debug/usr/bin/clickhouse-library-bridge.debug
+    dst: /usr/lib/debug/usr/bin/clickhouse-library-bridge.debug
+  # docs
+  - src: usr/share/doc/clickhouse/LICENSE
+    dst: /usr/share/doc/clickhouse-common-static-dbg/LICENSE
+  - src: usr/share/doc/clickhouse/NOTICE.txt
+    dst: /usr/share/doc/clickhouse-common-static-dbg/NOTICE.txt

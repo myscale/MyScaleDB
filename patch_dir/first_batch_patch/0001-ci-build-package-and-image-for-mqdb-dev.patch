@@ -1,0 +1,32 @@
+From 633706b86ed686c83e3f5bd078740b2b30402c88 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 28 Nov 2022 15:55:28 +0800
+Subject: [PATCH 001/150] ci: build package and image for mqdb-dev
+
+---
+ .gitlab-ci.yml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 6a7f4c7ccc..d00dd3cb28 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -90,6 +90,7 @@ build_package:
+   only:
+     - mqdb-master
+     - mqdb-staging
++    - mqdb-dev
+   artifacts:
+     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
+     paths:
+@@ -129,6 +130,7 @@ build_image:
+   only:
+     - mqdb-master
+     - mqdb-staging
++    - mqdb-dev
+   before_script:
+     - docker/builder/tools/docker-info.sh
+     - docker/builder/tools/docker-buildx.sh
+-- 
+2.32.1 (Apple Git-133)
+

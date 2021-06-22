@@ -1,0 +1,27 @@
+From 8e3f8db2be90a47ce4d438ba4f6258c20e56b36f Mon Sep 17 00:00:00 2001
+From: Linpeng Tang <linpengt@moqi.ai>
+Date: Tue, 16 May 2023 01:49:43 +0000
+Subject: [PATCH 16/49] Revert "tune logging to increase performance for
+ alpha=1"
+
+This reverts commit 45e5ca03e8b8b4dddf92ae15c4467b05f42f841f
+---
+ src/Interpreters/executeQuery.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/Interpreters/executeQuery.cpp b/src/Interpreters/executeQuery.cpp
+index 83cfe0de3e..b0a9afe72a 100644
+--- a/src/Interpreters/executeQuery.cpp
++++ b/src/Interpreters/executeQuery.cpp
+@@ -998,7 +998,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+ 
+                 if (elem.read_rows != 0)
+                 {
+-                    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Read {} rows, {} in {} sec., {} rows/sec., {}/sec.",
++                    LOG_INFO(&Poco::Logger::get("executeQuery"), "Read {} rows, {} in {} sec., {} rows/sec., {}/sec.",
+                         elem.read_rows, ReadableSize(elem.read_bytes), elapsed_seconds,
+                         static_cast<size_t>(elem.read_rows / elapsed_seconds),
+                         ReadableSize(elem.read_bytes / elapsed_seconds));
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,90 @@
+From bff3332999783b0ede5a5c827af2371d176c8b45 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Fri, 9 Dec 2022 18:41:54 +0800
+Subject: [PATCH 012/150] Fix memory usage of FLAT vector index
+
+---
+ contrib/faiss                             |  2 +-
+ src/VectorIndex/FlatIndex.cpp             | 10 +---------
+ src/VectorIndex/VectorSegmentExecutor.cpp | 11 ++++++-----
+ 3 files changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/contrib/faiss b/contrib/faiss
+index 3b2bd9ab7a..de29268c79 160000
+--- a/contrib/faiss
++++ b/contrib/faiss
+@@ -1 +1 @@
+-Subproject commit 3b2bd9ab7a7aa7a475ab6bf16edbbb614d1ade32
++Subproject commit de29268c79a2c86ddf5084e4ccca4238b6b58d97
+diff --git a/src/VectorIndex/FlatIndex.cpp b/src/VectorIndex/FlatIndex.cpp
+index 8fb819a3f5..7c6752557a 100644
+--- a/src/VectorIndex/FlatIndex.cpp
++++ b/src/VectorIndex/FlatIndex.cpp
+@@ -17,6 +17,7 @@ namespace VectorIndex
+ {
+ void FlatIndex::train(VectorDatasetPtr dataset, int64_t total)
+ {
++    reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->reserve(total);
+ }
+ 
+ void FlatIndex::addWithoutId(VectorDatasetPtr dataset)
+@@ -52,17 +53,8 @@ void FlatIndex::search(
+ 
+     LOG_DEBUG(log, "[search] raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
+ 
+-    //TODO make dynamic or user defined
+     reinterpret_cast<faiss::IndexFlatFilter *>(index.get())
+         ->search(num_query, query_datas, topK, distances, result_id, inner_bit_map.get());
+-    //distance might not be useful in many cases
+-
+-    /*
+-    for (int32_t i = 0; i < topK; ++i)
+-    {
+-        LOG_DEBUG(log, "[search] result {} {}", result_id[i], distances[i]);
+-    }
+-    */
+ }
+ 
+ VectorDatasetPtr FlatIndex::getInMemVectors()
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 95ac3309a9..84eae58a74 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -236,11 +236,12 @@ Status VectorSegmentExecutor::cache()
+ 
+ Status VectorSegmentExecutor::serialize()
+ {
+-    /// serialization contains three steps:
++    /// Serialization contains three steps:
+     /// 1. write vector_index_ready file to mark that we start writting
+     /// 2. incrementally write index file
+     /// 3. write vector_index_ready file to mark that we finished writting
+-    /// vector_index_ready file is a binary_log which can only be appended to but not altered
++    ///    vector_index_ready file is a binary_log which can only be appended
++    ///    to but not altered
+     try
+     {
+         int64_t binary_total_size = 0;
+@@ -250,8 +251,8 @@ Status VectorSegmentExecutor::serialize()
+         startWrite();
+         while (!last_part)
+         {
+-            ///even though we set the max bytes to serialize for serialization,
+-            ///it could exceed this amount by accident,then we need to handle the exceeded part.
++            /// Even though we set the max bytes to serialize for serialization,
++            /// it could exceed this amount by accident,then we need to handle the exceeded part.
+             LOG_INFO(log, "expected segment_size: {}", optimal_segment_size);
+             index_binary = index->serialize(optimal_segment_size, last_part);
+             if (index_binary->size <= 0)
+@@ -266,7 +267,7 @@ Status VectorSegmentExecutor::serialize()
+             {
+                 size_t max_allowed_per_write = compressBound(actual_all, cmb);
+                 bool last_sub_part = (last_part & (max_allowed_per_write == actual_all));
+-                ///write index loop, compress and write index in small parts
++                /// write index loop, compress and write index in small parts
+                 Status stat = writePart(last_sub_part, segment_count, index_binary->data + written, max_allowed_per_write);
+                 if (!stat.fine())
+                 {
+-- 
+2.32.1 (Apple Git-133)
+

@@ -88,6 +88,16 @@ void FieldVisitorHash::operator() (const Tuple & x) const
         applyVisitor(*this, elem);
 }
 
+void FieldVisitorHash::operator() (const ObjectToFetch & x) const
+{
+    UInt8 type = Field::Types::ObjectToFetch;
+    hash.update(type);
+    hash.update(x.size());
+
+    for (const auto & elem : x)
+        applyVisitor(*this, elem);
+}
+
 void FieldVisitorHash::operator() (const Map & x) const
 {
     UInt8 type = Field::Types::Map;

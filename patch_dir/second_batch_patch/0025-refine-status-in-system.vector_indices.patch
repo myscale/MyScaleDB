@@ -1,0 +1,123 @@
+From 851ef2266d1621f2b0336e0469674df39c75e710 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Thu, 9 Feb 2023 20:37:31 +0800
+Subject: [PATCH 25/85] refine status in system.vector_indices
+
+---
+ src/Storages/System/StorageSystemVectorIndices.cpp  | 13 +++++++------
+ .../00005_mqvs_build_ivfflat_index.reference        |  2 +-
+ .../00006_mqvs_build_hnswflat_index.reference       |  2 +-
+ .../00015_mqvs_create_vector_index.reference        |  2 +-
+ ..._mqvs_lightweight_delete_with_decouple.reference |  2 +-
+ ...mqvs_add_fail_status_in_vector_indices.reference |  4 ++--
+ ..._mqvs_drop_vector_index_and_drop_table.reference |  2 +-
+ 7 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/src/Storages/System/StorageSystemVectorIndices.cpp b/src/Storages/System/StorageSystemVectorIndices.cpp
+index 165c75d4b1..70778259a9 100644
+--- a/src/Storages/System/StorageSystemVectorIndices.cpp
++++ b/src/Storages/System/StorageSystemVectorIndices.cpp
+@@ -141,6 +141,7 @@ protected:
+                 {
+                     ++rows_count;
+ 
++                    const auto fail_status = data->getVectorIndexBuildStatus();
+                     size_t src_index = 0;
+                     size_t res_index = 0;
+ 
+@@ -183,17 +184,18 @@ protected:
+                     {
+                         size_t built_parts = getBuiltParts(data_parts, index);
+                         size_t small_parts = getSmallParts(data, data_parts, index);
+-                        if (built_parts + small_parts == 0)
++
++                        if (built_parts + small_parts == data_parts.size())
+                         {
+-                            res_columns[res_index++]->insert("NoVectorIndexData");
++                            res_columns[res_index++]->insert("Built");
+                         }
+-                        else if (built_parts + small_parts == data_parts.size())
++                        else if (fail_status.latest_failed_part.empty())
+                         {
+-                            res_columns[res_index++]->insert("Built");
++                            res_columns[res_index++]->insert("InProgress");
+                         }
+                         else
+                         {
+-                            res_columns[res_index++]->insert("DataIncomplete");
++                            res_columns[res_index++]->insert("Error");
+                         }
+                     }
+                     /// host
+@@ -203,7 +205,6 @@ protected:
+                         res_columns[res_index++]->insert(host);
+                     }
+ 
+-                    const auto fail_status = data->getVectorIndexBuildStatus();
+                     /// latest failed part
+                     if (column_mask[src_index++])
+                     {
+diff --git a/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.reference b/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.reference
+index 0de501811b..8ae86880ce 100644
+--- a/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.reference
++++ b/tests/queries/2_vector_search/00005_mqvs_build_ivfflat_index.reference
+@@ -1 +1 @@
+-test_ivfflat	v1	IVFFLAT	v1 vector TYPE IVFFLAT(\'ncentroids = 1\')	NoVectorIndexData
++test_ivfflat	v1	IVFFLAT	v1 vector TYPE IVFFLAT(\'ncentroids = 1\')	Built
+diff --git a/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.reference b/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.reference
+index 62783982e2..f06c280a00 100644
+--- a/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.reference
++++ b/tests/queries/2_vector_search/00006_mqvs_build_hnswflat_index.reference
+@@ -1 +1 @@
+-test_hnsw	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT(\'m = 10\')	NoVectorIndexData
++test_hnsw	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT(\'m = 10\')	Built
+diff --git a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
+index 59f758331a..71ded6d40b 100644
+--- a/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
++++ b/tests/queries/2_vector_search/00015_mqvs_create_vector_index.reference
+@@ -4,7 +4,7 @@ table:  test_vector
+ name:   i_h
+ type:   FLAT
+ expr:   i_h vector TYPE FLAT
+-status: NoVectorIndexData
++status: Built
+ CREATE TABLE default.test_vector\n(\n    `id` UInt64,\n    `vector` FixedArray(Float32, 3),\n    `label` String,\n    INDEX i_a id TYPE minmax GRANULARITY 4,\n    INDEX i_label label TYPE bloom_filter GRANULARITY 2\n)\nENGINE = MergeTree\nPRIMARY KEY id\nORDER BY id\nSETTINGS index_granularity = 8192
+ test_vector	i_a	minmax	id	4
+ test_vector	i_label	bloom_filter	label	2
+diff --git a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.reference b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.reference
+index 4d60214a45..2721e4cc36 100644
+--- a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.reference
++++ b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.reference
+@@ -51,7 +51,7 @@
+ 15	[15,15,15]	666.02997
+ 16	[16,16,16]	758.42993
+ --- lightweight delete on decoupled part
+-test_vector	v1	HNSWFLAT	1	NoVectorIndexData
++test_vector	v1	HNSWFLAT	1	InProgress
+ 0	[0,0,0]	0.030000001
+ 1	[1,1,1]	2.4299998
+ 4	[4,4,4]	45.630005
+diff --git a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.reference b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.reference
+index 795594de6e..19b0dc2173 100644
+--- a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.reference
++++ b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.reference
+@@ -1,4 +1,4 @@
+ 0
+-test_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = cosine\', \'ef_c=256\')	NoVectorIndexData	all_1_1_0	 [VectorIndex] unsupported metric_type COSINE. (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
+-test_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	NoVectorIndexData	all_1_1_0	 [VectorIndex] These parameters are not supported in Index type IVFFLAT : metric : IP, . (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
++test_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = cosine\', \'ef_c=256\')	Error	all_1_1_0	 [VectorIndex] unsupported metric_type COSINE. (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
++test_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	Error	all_1_1_0	 [VectorIndex] These parameters are not supported in Index type IVFFLAT : metric : IP, . (UNSUPPORTED_PARAMETER) (version 22.3.7.5)
+ test_success_vector	v1_success	v1_success vector TYPE HNSWFLAT	Built		
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+index f73662afec..5d7a980f55 100644
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+@@ -1,4 +1,4 @@
+-test_drop_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	NoVectorIndexData
++test_drop_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	InProgress
+ -- Empty result, no vector index v1
+ ok
+ -- Create a new vector index v2 with different name and different type
+-- 
+2.32.1 (Apple Git-133)
+

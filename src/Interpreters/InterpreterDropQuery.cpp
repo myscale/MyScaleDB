@@ -12,6 +12,7 @@
 #include <Common/quoteString.h>
 #include <Common/typeid_cast.h>
 #include <Databases/DatabaseReplicated.h>
+#include <Storages/MergeTree/MergeTreeData.h>
 
 #include "config.h"
 
@@ -39,6 +40,7 @@ namespace ErrorCodes
 namespace ActionLocks
 {
     extern const StorageActionBlockType PartsMerge;
+    extern const StorageActionBlockType PartsBuildIndex;
 }
 
 static DatabasePtr tryGetDatabase(const String & database_name, bool if_exists)
@@ -55,6 +57,20 @@ InterpreterDropQuery::InterpreterDropQuery(const ASTPtr & query_ptr_, ContextMut
 BlockIO InterpreterDropQuery::execute()
 {
     auto & drop = query_ptr->as<ASTDropQuery &>();
+    
+    /// DROP REPLICATED DATABASE WITH ON CLUSTER CLAUSE
+    if (drop.cluster.empty() && drop.database && !drop.table
+        && drop.kind == ASTDropQuery::Kind::Drop
+        && getContext()->getSettingsRef().database_replicated_always_execute_with_on_cluster
+        && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
+    {
+        const auto & database_name = drop.getDatabase();
+        auto ddl_guard = DatabaseCatalog::instance().getDDLGuard(database_name, "");
+        DatabasePtr database = tryGetDatabase(database_name, drop.if_exists);
+        if (database && database->getEngineName() == "Replicated")
+            drop.cluster = (getContext()->getSettingsRef().database_replicated_default_cluster_name.value.size() > 0) ? getContext()->getSettingsRef().database_replicated_default_cluster_name.value : database_name;
+    }
+
     if (!drop.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {
         DDLQueryOnClusterParams params;
@@ -142,6 +158,8 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
         /// Prevents recursive drop from drop database query. The original query must specify a table.
         bool is_drop_or_detach_database = !query_ptr->as<ASTDropQuery>()->table;
 
+        getContext()->setDetachQuery(false);
+
         AccessFlags drop_storage;
 
         if (table->isView())
@@ -168,6 +186,7 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
         if (query.kind == ASTDropQuery::Kind::Detach)
         {
             context_->checkAccess(drop_storage, table_id);
+            getContext()->setDetachQuery(true);
 
             if (table->isDictionary())
             {
@@ -215,6 +234,11 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             /// For the rest of tables types exclusive lock is needed
             if (!std::dynamic_pointer_cast<MergeTreeData>(table))
                 table_excl_lock = table->lockExclusively(context_->getCurrentQueryId(), context_->getSettingsRef().lock_acquire_timeout);
+            
+            if (!table->supportsReplication())
+            {
+                auto builds_blocker = table->getActionLock(ActionLocks::PartsBuildIndex);
+            }
 
             auto metadata_snapshot = table->getInMemoryMetadataPtr();
             /// Drop table data, don't touch metadata

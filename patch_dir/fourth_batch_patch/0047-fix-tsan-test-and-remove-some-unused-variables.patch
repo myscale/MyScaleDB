@@ -1,0 +1,108 @@
+From f5aeac6c2b236933f4cdf8586a28f4ddad8654b1 Mon Sep 17 00:00:00 2001
+From: Zhuo Qiu <jewelz.q.915@gmail.com>
+Date: Fri, 9 Jun 2023 11:16:09 +0800
+Subject: [PATCH 47/49] fix tsan test and remove some unused variables
+
+---
+ .../MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp  | 2 --
+ src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp       | 4 ----
+ src/Storages/StorageReplicatedMergeTree.cpp               | 8 ++++----
+ src/Storages/StorageReplicatedMergeTree.h                 | 2 +-
+ 4 files changed, 5 insertions(+), 11 deletions(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+index 7748311223..f3ded451d4 100644
+--- a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
++++ b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+@@ -254,7 +254,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+     {
+         MergeTreeRangeReader* prev_reader = nullptr;
+         bool last_reader = false;
+-        size_t pre_readers_shift = 0;
+ 
+         /// Initialize primary key cache
+         const auto & primary_key = storage_snapshot->metadata->getPrimaryKey();
+@@ -297,7 +296,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+             task->pre_range_readers.push_back(
+                 MergeTreeRangeReader(pre_reader_for_step[0].get(), prev_reader, &lightweight_delete_filter_step, last_reader, non_const_virtual_column_names));
+             prev_reader = &task->pre_range_readers.back();
+-            pre_readers_shift++;
+         }
+         task->range_reader = MergeTreeRangeReader(reader.get(), prev_reader, nullptr, true, non_const_virtual_column_names);
+     }
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp b/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
+index 747912386a..4f82a51e87 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
+@@ -157,15 +157,11 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
+ 
+     std::vector<MarkRange> ranges_stack = {{0, marks_count}};
+ 
+-    size_t steps = 0;
+-
+     while (!ranges_stack.empty())
+     {
+         MarkRange range = ranges_stack.back();
+         ranges_stack.pop_back();
+ 
+-        steps++;
+-
+         if (!need_this_range(range))
+             continue;
+ 
+diff --git a/src/Storages/StorageReplicatedMergeTree.cpp b/src/Storages/StorageReplicatedMergeTree.cpp
+index 6dd7c99376..1e458b8b4e 100644
+--- a/src/Storages/StorageReplicatedMergeTree.cpp
++++ b/src/Storages/StorageReplicatedMergeTree.cpp
+@@ -4238,7 +4238,7 @@ void StorageReplicatedMergeTree::shutdown()
+         return;
+ 
+     /// Save cached vector index info before shutdown
+-    if (vidx_init_loaded)
++    if (vidx_init_loaded.load())
+         writeVectorIndexInfoToZookeeper();
+ 
+     /// Cancel fetches, merges and mutations to force the queue_task to finish ASAP.
+@@ -5567,7 +5567,7 @@ void StorageReplicatedMergeTree::getStatus(Status & res, bool with_zk_fields)
+     res.can_become_leader = storage_settings_ptr->replicated_can_become_leader;
+     res.is_readonly = is_readonly;
+     res.is_session_expired = !zookeeper || zookeeper->expired();
+-    res.is_data_synced = vidx_init_loaded;
++    res.is_data_synced = vidx_init_loaded.load();
+ 
+     res.queue = queue.getStatus();
+     res.absolute_delay = getAbsoluteDelay(); /// NOTE: may be slightly inconsistent with queue status.
+@@ -8196,7 +8196,7 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
+ 
+ void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
+ {
+-    if (!vidx_init_loaded)
++    if (!vidx_init_loaded.load())
+     {
+         bool synced = false;
+         Stopwatch watch;
+@@ -8229,7 +8229,7 @@ void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
+ 
+         LOG_INFO(log, "Loading vector indices from zookeeper done in {} seconds", watch.elapsedSeconds());
+ 
+-        vidx_init_loaded = true;
++        vidx_init_loaded.store(true);
+     }
+ 
+     writeVectorIndexInfoToZookeeper();
+diff --git a/src/Storages/StorageReplicatedMergeTree.h b/src/Storages/StorageReplicatedMergeTree.h
+index db17c5d4ec..a9dfe559c2 100644
+--- a/src/Storages/StorageReplicatedMergeTree.h
++++ b/src/Storages/StorageReplicatedMergeTree.h
+@@ -423,7 +423,7 @@ private:
+     BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
+ 
+     /// Whether vector indices were initially loaded on table start-up
+-    volatile bool vidx_init_loaded = false;
++    std::atomic<bool> vidx_init_loaded{false};
+ 
+     /// It is acquired when writing vector index info to zookeeper
+     std::mutex vidx_info_mutex;
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,78 @@
+From 24fdf5fb636ee55b394e688300e1adb7de493b32 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Thu, 4 May 2023 20:21:43 +0800
+Subject: [PATCH 07/49] fix filtered search crash and reduce load time
+
+---
+ contrib/search-index                                   |  2 +-
+ src/VectorIndex/VectorSegmentExecutor.cpp              |  3 ---
+ .../00028_mqvs_index_mstg_build_search.reference       | 10 ++++++++++
+ .../00028_mqvs_index_mstg_build_search.sql             |  6 +++++-
+ 4 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index b782085d4d..c45dbac6d2 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit b782085d4d88a1e29e6dd663cf37d8e81bc55d05
++Subproject commit c45dbac6d22cec32baa0245357c64a9fee786c2a
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 18c47aa326..4e0ecc6d16 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -570,9 +570,6 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
+     {
+         if (fallback_to_flat)
+             parameters.clear();
+-        if (filter)
+-            LOG_DEBUG(
+-                log, "searching with filter count: {}, filter ratio: {}", filter->count(), filter->count() / static_cast<float>(total_vec));
+         return performSearch(dataset, k, filter, parameters);
+     }
+     catch (const SearchIndexException & e)
+diff --git a/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.reference b/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.reference
+index 2c47b6133d..6eb6badd10 100644
+--- a/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.reference
++++ b/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.reference
+@@ -12,3 +12,13 @@ test_mstg	v1	v1 vector TYPE MSTG(\'metric_type=Cosine\')	Built
+ 7	0.00016528368
+ 10	0.00040733814
+ 11	0.00079762936
++9	0.000118255615
++7	0.00016528368
++10	0.00040733814
++11	0.00079762936
++6	0.00079995394
++7	0.00016528368
++10	0.00040733814
++11	0.00079762936
++6	0.00079995394
++12	0.0012449622
+diff --git a/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.sql b/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.sql
+index 8dd5557d4d..9cd6ddc005 100644
+--- a/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.sql
++++ b/tests/queries/2_vector_search/00028_mqvs_index_mstg_build_search.sql
+@@ -2,7 +2,7 @@
+ 
+ DROP TABLE IF EXISTS test_mstg SYNC;
+ 
+-CREATE TABLE test_mstg(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 8) engine=MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1;
++CREATE TABLE test_mstg(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 8) engine=MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, min_bytes_to_build_vector_index=1;
+ INSERT INTO test_mstg SELECT number, [number, number + 7, number + 6, number + 5, number + 4, number + 3, number + 2, number + 1] FROM numbers(1000);
+ OPTIMIZE TABLE test_mstg FINAL;
+ 
+@@ -17,6 +17,10 @@ ALTER TABLE test_mstg ADD VECTOR INDEX v1 vector TYPE MSTG('metric_type=Cosine')
+ SELECT sleep(1);
+ SELECT table, name, expr, status, latest_failed_part, latest_fail_reason FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_mstg';
+ 
++SELECT id, distance('alpha=4')(vector, [8., 15, 14, 13, 12, 11, 10, 9]) AS d FROM test_mstg ORDER BY d LIMIT 5;
++SELECT id, distance('alpha=4')(vector, [8., 15, 14, 13, 12, 11, 10, 9]) AS d FROM test_mstg WHERE id != 8 ORDER BY d LIMIT 5;
++SET mutations_sync=1;
++DELETE FROM test_mstg WHERE id = 8 OR id = 9;
+ SELECT id, distance('alpha=4')(vector, [8., 15, 14, 13, 12, 11, 10, 9]) AS d FROM test_mstg ORDER BY d LIMIT 5;
+ 
+ DROP TABLE test_mstg sync;
+-- 
+2.32.1 (Apple Git-133)
+

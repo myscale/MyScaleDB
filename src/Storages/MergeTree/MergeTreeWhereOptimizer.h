@@ -41,7 +41,7 @@ public:
         const std::optional<NameSet> & supported_columns_,
         Poco::Logger * log_);
 
-    void optimize(SelectQueryInfo & select_query_info, const ContextPtr & context) const;
+    void optimize(SelectQueryInfo & select_query_info, const ContextPtr & context);
 
     struct FilterActionsOptimizeResult
     {
@@ -144,6 +144,7 @@ private:
     Poco::Logger * log;
     std::unordered_map<std::string, UInt64> column_sizes;
     UInt64 total_size_of_queried_columns = 0;
+    bool has_vector_func = false;
 };
 
 
