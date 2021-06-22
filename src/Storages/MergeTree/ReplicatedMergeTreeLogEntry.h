@@ -32,20 +32,21 @@ struct ReplicatedMergeTreeLogEntryData
 {
     enum Type
     {
-        EMPTY,          /// Not used.
-        GET_PART,       /// Get the part from another replica.
-        ATTACH_PART,    /// Attach the part, possibly from our own replica (if found in /detached folder).
-                        /// You may think of it as a GET_PART with some optimisations as they're nearly identical.
-        MERGE_PARTS,    /// Merge the parts.
-        DROP_RANGE,     /// Delete the parts in the specified partition in the specified number range.
-        CLEAR_COLUMN,   /// NOTE: Deprecated. Drop specific column from specified partition.
-        CLEAR_INDEX,    /// NOTE: Deprecated. Drop specific index from specified partition.
-        REPLACE_RANGE,  /// Drop certain range of partitions and replace them by new ones
-        MUTATE_PART,    /// Apply one or several mutations to the part.
+        EMPTY, /// Not used.
+        GET_PART, /// Get the part from another replica.
+        ATTACH_PART, /// Attach the part, possibly from our own replica (if found in /detached folder).
+        /// You may think of it as a GET_PART with some optimisations as they're nearly identical.
+        MERGE_PARTS, /// Merge the parts.
+        DROP_RANGE, /// Delete the parts in the specified partition in the specified number range.
+        CLEAR_COLUMN, /// NOTE: Deprecated. Drop specific column from specified partition.
+        CLEAR_INDEX, /// NOTE: Deprecated. Drop specific index from specified partition.
+        REPLACE_RANGE, /// Drop certain range of partitions and replace them by new ones
+        MUTATE_PART, /// Apply one or several mutations to the part.
         ALTER_METADATA, /// Apply alter modification according to global /metadata and /columns paths
         SYNC_PINNED_PART_UUIDS, /// Synchronization point for ensuring that all replicas have up to date in-memory state.
         CLONE_PART_FROM_SHARD,  /// Clone part from another shard.
         DROP_PART,      /// NOTE: Virtual (has the same (de)serialization format as DROP_RANGE). Deletes the specified part.
+        BUILD_VECTOR_INDEX, /// build vector index.
     };
 
     static String typeToString(Type type)
@@ -64,6 +65,7 @@ struct ReplicatedMergeTreeLogEntryData
             case ReplicatedMergeTreeLogEntryData::SYNC_PINNED_PART_UUIDS: return "SYNC_PINNED_PART_UUIDS";
             case ReplicatedMergeTreeLogEntryData::CLONE_PART_FROM_SHARD:  return "CLONE_PART_FROM_SHARD";
             case ReplicatedMergeTreeLogEntryData::DROP_PART:  return "DROP_PART";
+            case ReplicatedMergeTreeLogEntryData::BUILD_VECTOR_INDEX:     return "BUILD_VECTOR_INDEX";
             default:
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown log entry type: {}", DB::toString<int>(type));
         }
@@ -171,6 +173,9 @@ struct ReplicatedMergeTreeLogEntryData
 
     /// The quorum value (for GET_PART) is a non-zero value when the quorum write is enabled.
     size_t quorum = 0;
+
+    /// For build vector index, true for slow mode.
+    bool slow_mode = false;
 
     /// If this MUTATE_PART entry caused by alter(modify/drop) query.
     bool isAlterMutation() const

@@ -10,6 +10,7 @@ namespace DB
 
 class IVolume;
 using VolumePtr = std::shared_ptr<IVolume>;
+class MergeTreeVectorIndexBuilderUpdater;
 
 class DataPartStorageOnDiskBase : public IDataPartStorage
 {
@@ -96,6 +97,11 @@ public:
     bool hasActiveTransaction() const override;
 
 protected:
+    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class MergeTreeVectorScanManager;
+    friend class IMergeTreeDataPart;
+    friend VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage);
+
     DiskPtr getDisk() const;
 
     DataPartStorageOnDiskBase(VolumePtr volume_, std::string root_path_, std::string part_dir_, DiskTransactionPtr transaction_);

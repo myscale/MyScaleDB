@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/MergeTreeReadPool.h>
 #include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
 #include <Storages/MergeTree/LoadedMergeTreeDataPartInfoForReader.h>
@@ -206,9 +210,16 @@ MergeTreeReadTaskPtr MergeTreeReadPool::getTask(size_t thread)
         : std::make_unique<MergeTreeBlockSizePredictor>(*per_part.size_predictor); /// make a copy
 
     return std::make_unique<MergeTreeReadTask>(
-        part.data_part, ranges_to_get_from_part, part.part_index_in_query,
-        per_part.column_name_set, per_part.task_columns,
-        std::move(curr_task_size_predictor));
+        part.data_part,
+        ranges_to_get_from_part,
+        part.part_index_in_query,
+        per_part.column_name_set,
+        per_part.task_columns,
+        std::move(curr_task_size_predictor),
+        0,
+        std::future<std::unique_ptr<IMergeTreeReader>>(),
+        std::vector<std::future<std::unique_ptr<IMergeTreeReader>>>(),
+        part.vector_scan_manager);
 }
 
 Block MergeTreeReadPool::getHeader() const

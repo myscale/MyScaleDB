@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 #include <Core/Block.h>
 #include <Common/logger_useful.h>
@@ -140,6 +144,7 @@ private:
         /// Current position from the begging of file in rows
         size_t position() const;
         size_t readRows(Columns & columns, size_t num_rows);
+        Poco::Logger * log = &Poco::Logger::get("DelayedStream");
     };
 
     /// Very thin wrapper for DelayedStream
@@ -207,6 +212,9 @@ public:
     private:
         /// Only MergeTreeRangeReader is supposed to access ReadResult internals.
         friend class MergeTreeRangeReader;
+        friend class IMergeTreeSelectAlgorithm;
+        friend class MergeTreeVectorScanManager;
+        friend class MergeTreeSelectWithVectorScanProcessor;
 
         using NumRows = std::vector<size_t>;
 
@@ -216,9 +224,20 @@ public:
             MarkRange range;
         };
 
+        struct ReadRangeInfo
+        {
+            size_t start_row;
+            size_t row_num;
+            size_t start_mark;
+            size_t end_mark;
+        };
+
         using RangesInfo = std::vector<RangeInfo>;
+        using ReadRangesInfo = std::vector<ReadRangeInfo>;
 
         explicit ReadResult(Poco::Logger * log_) : log(log_) {}
+
+        const ReadRangesInfo & readRanges() const { return read_ranges; }
 
         static size_t getLastMark(const MergeTreeRangeReader::ReadResult::RangesInfo & ranges);
 
@@ -227,6 +246,7 @@ public:
         void addRows(size_t rows) { num_read_rows += rows; }
         void addRange(const MarkRange & range) { started_ranges.push_back({rows_per_granule.size(), range}); }
 
+        void addReadRangeInfo(size_t start_row_, size_t row_num_, size_t start_mark_, size_t end_mark_);
         /// Add current step filter to the result and then for each granule calculate the number of filtered rows at the end.
         /// Remove them and update filter.
         /// Apply the filter to the columns and update num_rows if required
@@ -254,6 +274,7 @@ public:
         Block additional_columns;
 
         RangesInfo started_ranges;
+        ReadRangesInfo read_ranges;
         /// The number of rows read from each granule.
         /// Granule here is not number of rows between two marks
         /// It's amount of rows per single reading act

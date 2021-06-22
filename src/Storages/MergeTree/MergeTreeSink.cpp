@@ -180,6 +180,10 @@ void MergeTreeSink::finishDelayedChunk()
         /// Part can be deduplicated, so increment counters and add to part log only if it's really added
         if (added)
         {
+            //at this point, the part is commited and written to storage's index.
+            //TODO vec_indices assumed to hold only one index type
+            //storage.startCreateVectorIndexJobForOnePart(part);
+
             auto counters_snapshot = std::make_shared<ProfileEvents::Counters::Snapshot>(partition.part_counters.getPartiallyAtomicSnapshot());
             PartLog::addNewPart(storage.getContext(), PartLog::PartLogEntry(part, partition.elapsed_ns, counters_snapshot));
             storage.incrementInsertedPartsProfileEvent(part->getType());

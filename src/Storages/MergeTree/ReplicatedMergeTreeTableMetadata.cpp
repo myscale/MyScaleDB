@@ -78,6 +78,8 @@ ReplicatedMergeTreeTableMetadata::ReplicatedMergeTreeTableMetadata(const MergeTr
 
     skip_indices = metadata_snapshot->getSecondaryIndices().toString();
 
+    vector_indices = metadata_snapshot->getVectorIndices().toString();
+
     projections = metadata_snapshot->getProjections().toString();
 
     if (data.canUseAdaptiveGranularity())
@@ -112,6 +114,9 @@ void ReplicatedMergeTreeTableMetadata::write(WriteBuffer & out) const
 
     if (!skip_indices.empty())
         out << "indices: " << skip_indices << "\n";
+
+    if (!vector_indices.empty())
+        out << "vector indices: " << vector_indices << "\n";
 
     if (!projections.empty())
         out << "projections: " << projections << "\n";
@@ -156,6 +161,9 @@ void ReplicatedMergeTreeTableMetadata::read(ReadBuffer & in)
 
     if (checkString("indices: ", in))
         in >> skip_indices >> "\n";
+
+    if (checkString("vector indices: ", in))
+        in >> vector_indices >> "\n";
 
     if (checkString("projections: ", in))
         in >> projections >> "\n";
@@ -271,6 +279,17 @@ void ReplicatedMergeTreeTableMetadata::checkEquals(const ReplicatedMergeTreeTabl
                 from_zk.skip_indices, parsed_zk_skip_indices, skip_indices);
     }
 
+    String parsed_zk_vector_indices = VectorIndicesDescription::parse(from_zk.vector_indices, columns).toString();
+    if (vector_indices != parsed_zk_vector_indices)
+    {
+        throw Exception(
+            ErrorCodes::METADATA_MISMATCH,
+            "Existing table metadata in ZooKeeper differs in vector indexes. Stored in ZooKeeper: {}, parsed from ZooKeeper: {}, local: {}",
+            from_zk.vector_indices,
+            parsed_zk_vector_indices,
+            vector_indices);
+    }
+
     String parsed_zk_projections = ProjectionsDescription::parse(from_zk.projections, columns, context).toString();
     if (projections != parsed_zk_projections)
     {
@@ -337,6 +356,12 @@ ReplicatedMergeTreeTableMetadata::checkAndFindDiff(const ReplicatedMergeTreeTabl
         diff.new_constraints = from_zk.constraints;
     }
 
+    if (vector_indices != from_zk.vector_indices)
+    {
+        diff.vector_indices_changed = true;
+        diff.new_vector_indices = from_zk.vector_indices;
+    }
+
     return diff;
 }
 
@@ -395,6 +420,9 @@ StorageInMemoryMetadata ReplicatedMergeTreeTableMetadata::Diff::getNewMetadata(c
 
         if (skip_indices_changed)
             new_metadata.secondary_indices = IndicesDescription::parse(new_skip_indices, new_columns, context);
+
+        if (vector_indices_changed)
+            new_metadata.vec_indices = VectorIndicesDescription::parse(new_vector_indices, new_columns);
 
         if (constraints_changed)
             new_metadata.constraints = ConstraintsDescription::parse(new_constraints);

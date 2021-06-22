@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/NamesAndTypes.h>
@@ -7,6 +11,7 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Storages/MergeTree/IMergeTreeReadPool.h>
+#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/SelectQueryInfo.h>
 
 #include <mutex>
@@ -139,6 +144,7 @@ private:
     {
         MergeTreeData::DataPartPtr data_part;
         size_t part_index_in_query;
+        MergeTreeVectorScanManagerPtr vector_scan_manager;
     };
 
     std::vector<Part> parts_with_idx;

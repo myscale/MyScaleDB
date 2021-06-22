@@ -381,6 +381,7 @@ struct WhichDataType
     constexpr bool isIPv6() const { return idx == TypeIndex::IPv6; }
     constexpr bool isArray() const { return idx == TypeIndex::Array; }
     constexpr bool isTuple() const { return idx == TypeIndex::Tuple; }
+    constexpr bool isObjectToFetch() const { return idx == TypeIndex::ObjectToFetch; }
     constexpr bool isMap() const {return idx == TypeIndex::Map; }
     constexpr bool isSet() const { return idx == TypeIndex::Set; }
     constexpr bool isInterval() const { return idx == TypeIndex::Interval; }
@@ -411,6 +412,7 @@ inline bool isDateTime64(const T & data_type) { return WhichDataType(data_type).
 inline bool isEnum(const DataTypePtr & data_type) { return WhichDataType(data_type).isEnum(); }
 inline bool isDecimal(const DataTypePtr & data_type) { return WhichDataType(data_type).isDecimal(); }
 inline bool isTuple(const DataTypePtr & data_type) { return WhichDataType(data_type).isTuple(); }
+inline bool isObjectToFetch(const DataTypePtr & data_type) { return WhichDataType(data_type).isObjectToFetch(); }
 inline bool isArray(const DataTypePtr & data_type) { return WhichDataType(data_type).isArray(); }
 inline bool isMap(const DataTypePtr & data_type) {return WhichDataType(data_type).isMap(); }
 inline bool isInterval(const DataTypePtr & data_type) {return WhichDataType(data_type).isInterval(); }
@@ -517,6 +519,12 @@ template <typename T>
 inline bool isStringOrFixedString(const T & data_type)
 {
     return WhichDataType(data_type).isStringOrFixedString();
+}
+
+template <typename T>
+inline bool isObjectToFetch(const T & data_type)
+{
+    return WhichDataType(data_type).isObjectToFetch();
 }
 
 template <typename T>

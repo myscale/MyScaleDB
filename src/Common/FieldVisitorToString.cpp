@@ -113,6 +113,32 @@ String FieldVisitorToString::operator() (const Tuple & x) const
     return wb.str();
 }
 
+String FieldVisitorToString::operator() (const ObjectToFetch & x) const
+{
+    WriteBufferFromOwnString wb;
+
+    // For single-element tuples we must use the explicit tuple() function,
+    // or they will be parsed back as plain literals.
+    if (x.size() > 1)
+    {
+        wb << '(';
+    }
+    else
+    {
+        wb << "objecttofetch(";
+    }
+
+    for (auto it = x.begin(); it != x.end(); ++it)
+    {
+        if (it != x.begin())
+            wb << ", ";
+        wb << applyVisitor(*this, *it);
+    }
+    wb << ')';
+
+    return wb.str();
+}
+
 String FieldVisitorToString::operator() (const Map & x) const
 {
     WriteBufferFromOwnString wb;

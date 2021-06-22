@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <iomanip>
 #include <IO/Operators.h>
 #include <Parsers/ASTAlterQuery.h>
@@ -101,6 +105,8 @@ const char * ASTAlterCommand::typeToString(ASTAlterCommand::Type type)
         case REMOVE_SAMPLE_BY: return "REMOVE_SAMPLE_BY";
         case ADD_INDEX: return "ADD_INDEX";
         case DROP_INDEX: return "DROP_INDEX";
+        case ADD_VECTOR_INDEX: return "ADD_VECTOR_INDEX";
+        case DROP_VECTOR_INDEX: return "DROP_VECTOR_INDEX";
         case MATERIALIZE_INDEX: return "MATERIALIZE_INDEX";
         case ADD_CONSTRAINT: return "ADD_CONSTRAINT";
         case DROP_CONSTRAINT: return "DROP_CONSTRAINT";
@@ -485,6 +491,22 @@ void ASTAlterCommand::formatImpl(const FormatSettings & settings, FormatState & 
 
         settings.ostr << (settings.hilite ? hilite_keyword : "") << " TO ";
         rename_to->formatImpl(settings, state, frame);
+    }
+    else if (type == ASTAlterCommand::ADD_VECTOR_INDEX)
+    {
+        settings.ostr << (settings.hilite ? hilite_keyword : "") << "ADD VECTOR INDEX " << (if_not_exists ? "IF NOT EXISTS " : "") << (settings.hilite ? hilite_none : "");
+        vec_index_decl->formatImpl(settings, state, frame);
+    }
+    else if (type == ASTAlterCommand::DROP_VECTOR_INDEX)
+    {
+        settings.ostr << (settings.hilite ? hilite_keyword : "")
+                      << (clear_index ? "CLEAR " : "DROP ") << "VECTOR INDEX " << (if_exists ? "IF EXISTS " : "") << (settings.hilite ? hilite_none : "");
+        vec_index->formatImpl(settings, state, frame);
+        if (partition)
+        {
+            settings.ostr << (settings.hilite ? hilite_keyword : "") << " IN PARTITION " << (settings.hilite ? hilite_none : "");
+            partition->formatImpl(settings, state, frame);
+        }
     }
     else
         throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "Unexpected type of ALTER");

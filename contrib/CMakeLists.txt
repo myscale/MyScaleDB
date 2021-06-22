@@ -193,6 +193,11 @@ add_contrib (google-benchmark-cmake google-benchmark)
 
 add_contrib (ulid-c-cmake ulid-c)
 
+set(MYSCALE_MODE ON)
+set(MYSCALE_MODE_WITH_UPGRADE ON)
+set(SI_PYBIND OFF)
+set(SCANN_PYBIND OFF)
+add_contrib (search-index)
 # Put all targets defined here and in subdirectories under "contrib/<immediate-subdir>" folders in GUI-based IDEs.
 # Some of third-party projects may override CMAKE_FOLDER or FOLDER property of their targets, so they would not appear
 # in "contrib/..." as originally planned, so we workaround this by fixing FOLDER properties of all targets manually,

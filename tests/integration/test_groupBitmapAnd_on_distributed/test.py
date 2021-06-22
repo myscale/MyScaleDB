@@ -39,7 +39,7 @@ def start_cluster():
     finally:
         cluster.shutdown()
 
-
+@pytest.mark.skip(reason="using clickhouse official image, does not support openmp")
 def test_groupBitmapAnd_on_distributed_table(start_cluster):
     local_table_name = "bitmap_column_expr_test"
     distributed_table_name = "bitmap_column_expr_test_dst"
@@ -76,7 +76,7 @@ def test_groupBitmapAnd_on_distributed_table(start_cluster):
         ).strip()
         assert result == expected
 
-
+@pytest.mark.skip(reason="using clickhouse official image, does not support openmp")
 def test_groupBitmapAnd_function_versioning(start_cluster):
     local_table_name = "bitmap_column_expr_versioning_test"
     distributed_table_name = "bitmap_column_expr_versioning_test_dst"

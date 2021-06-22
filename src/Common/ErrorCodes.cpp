@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <chrono>
@@ -650,6 +654,10 @@
     M(679, IO_URING_SUBMIT_ERROR) \
     M(690, MIXED_ACCESS_PARAMETER_TYPES) \
     M(691, UNKNOWN_ELEMENT_OF_ENUM) \
+    M(692, UNKNOWN_VECTOR_INDEX_COMMAND) \
+    M(693, ILLEGAL_VECTOR_SCAN) \
+    M(694, UNKNOWN_CONNECTION) \
+    M(695, INVALID_VECTOR_INDEX) \
     \
     M(999, KEEPER_EXCEPTION) \
     M(1000, POCO_EXCEPTION) \

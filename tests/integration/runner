@@ -11,6 +11,7 @@ import subprocess
 import sys
 import string
 import random
+import zlib  # for crc32
 
 
 def random_str(length=6):
@@ -24,12 +25,16 @@ CURRENT_WORK_DIR = os.getcwd()
 VOLUME_NAME = "clickhouse_integration_tests"
 CONTAINER_NAME = f"{VOLUME_NAME}_{random_str()}"
 
-CONFIG_DIR_IN_REPO = "programs/server"
+# CONFIG_DIR_IN_REPO = "programs/server"
+CONFIG_DIR_IN_REPO = "programs/server_tmp"
 INTEGRATION_DIR_IN_REPO = "tests/integration"
 SRC_DIR_IN_REPO = "src"
 
-DIND_INTEGRATION_TESTS_IMAGE_NAME = "clickhouse/integration-tests-runner"
+DIND_INTEGRATION_TESTS_IMAGE_NAME = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration"
+# DIND_INTEGRATION_TESTS_IMAGE_NAME = "clickhouse/integration-tests-runner"
 
+def stringhash(s):
+    return zlib.crc32(s.encode("utf-8"))
 
 def check_args_and_update_paths(args):
     if args.clickhouse_root:
@@ -172,6 +177,12 @@ if __name__ == "__main__":
         ),
         help="Path to clickhouse binary. For example /usr/bin/clickhouse",
     )
+    
+    parser.add_argument(
+        "--image_version",
+        default="latest",
+        help="version for test image version")
+
 
     parser.add_argument(
         "--odbc-bridge-binary",
@@ -297,6 +308,37 @@ if __name__ == "__main__":
         dest="dockerd_volume",
         help="Bind volume to this dir to use for dockerd files",
     )
+    
+    parser.add_argument(
+        "--tests_list_file",
+        default="def",
+        type=str,
+        help="File containing the names of tests")
+    parser.add_argument(
+        "--exclude_test_list_file",
+        default="none",
+        type=str,
+        help="File containing the names of excluded tests")
+    parser.add_argument(
+        "--hash_test",
+        action='store_true',
+        default=False,
+        help="Split test cases using hash")
+    parser.add_argument(
+        "--hash_test_total",
+        type=int,
+        default=3,
+        help="Split test cases into several parts")
+    parser.add_argument(
+        "--hash_test_num",
+        type=int,
+        default=0,
+        help="The number of test cases split using hash")
+    parser.add_argument(
+        "--run_in_ci",
+        action='store_true',
+        default=False,
+        help="Whether the current pipline is running in ci")
 
     parser.add_argument("pytest_args", nargs="*", help="args for pytest command")
 
@@ -392,6 +434,38 @@ if __name__ == "__main__":
 
     if args.keyword_expression:
         args.pytest_args += ["-k", args.keyword_expression]
+    
+    +    t_lists = []
+    if not len(args.tests_list) and args.tests_list_file != "def":
+        logging.info("use test file {}".format(args.tests_list_file))
+        with open(args.tests_list_file) as f:
+            for f_line in f.readlines():
+                t_lists.append(f_line)
+    elif len(args.tests_list):
+        logging.info("use tests_list", ' '.join(args.tests_list))
+        t_lists = args.tests_list
+    else:
+        logging.info("Test cases are not specified through documentation or tests_list")
+    if args.exclude_test_list_file != "none":
+        logging.info("use excluded tests file {}".format(args.exclude_test_list_file))
+        with open(args.exclude_test_list_file) as f:
+            for f_line in f.readlines():
+                logging.info("remove {} from test_list".format(f_line))
+                if f_line in t_lists:
+                    t_lists.remove(str(f_line))
+    
+    new_t_lists = []
+    if args.hash_test:
+        logging.info("Split test cases using hash, hash total {}, hash num {}".format(args.hash_test_total, args.hash_test_num))
+        for index, t_name in enumerate(t_lists):
+            # if index % args.hash_test_total == args.hash_test_num:
+            if stringhash(t_name) % args.hash_test_total == args.hash_test_num:
+                new_t_lists.append(t_name)
+            else:
+                continue
+        logging.info("new test list len: {}, old test list len: {}".format(len(new_t_lists), len(t_lists)))
+    else:
+        new_t_lists = t_lists
 
     cmd_base = "docker run {net} {tty} --rm --name {name} --privileged \
         --volume={odbc_bridge_bin}:/clickhouse-odbc-bridge --volume={bin}:/clickhouse \
@@ -416,9 +490,10 @@ if __name__ == "__main__":
         parallel=parallel_args,
         rand=rand_args,
         opts=" ".join(args.pytest_args).replace("'", "\\'"),
-        tests_list=" ".join(args.tests_list),
+        # tests_list=' '.join(args.tests_list),
+        tests_list=' '.join(new_t_lists),
         dockerd_internal_volume=dockerd_internal_volume,
-        img=DIND_INTEGRATION_TESTS_IMAGE_NAME + ":" + args.docker_image_version,
+        img=DIND_INTEGRATION_TESTS_IMAGE_NAME + ":" + args.image_version,
         name=CONTAINER_NAME,
     )
 

@@ -105,6 +105,7 @@ enum class DefaultDatabaseEngine
 {
     Ordinary,
     Atomic,
+    Replicated,
 };
 
 DECLARE_SETTING_ENUM(DefaultDatabaseEngine)

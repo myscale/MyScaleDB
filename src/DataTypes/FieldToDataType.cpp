@@ -1,5 +1,6 @@
 #include <DataTypes/FieldToDataType.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypeObjectToFetch.h>
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeObject.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -155,6 +156,21 @@ DataTypePtr FieldToDataType<on_error>::operator() (const Tuple & tuple) const
         element_types.push_back(applyVisitor(*this, element));
 
     return std::make_shared<DataTypeTuple>(element_types);
+}
+
+template <LeastSupertypeOnError on_error>
+DataTypePtr FieldToDataType<on_error>::operator() (const ObjectToFetch & x) const
+{
+    if (x.empty())
+        throw Exception(ErrorCodes::EMPTY_DATA_PASSED, "Cannot infer type of an empty objecttofetch");
+
+    DataTypes element_types;
+    element_types.reserve(x.size());
+
+    for (const auto & element : x)
+        element_types.push_back(applyVisitor(FieldToDataType(), element));
+
+    return std::make_shared<DataTypeObjectToFetch>(element_types);
 }
 
 template <LeastSupertypeOnError on_error>

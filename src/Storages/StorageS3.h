@@ -288,6 +288,8 @@ public:
 
     bool supportsPartitionBy() const override;
 
+    bool supportsTransactions() const override { return true; }
+
     using ObjectInfos = StorageS3Source::ObjectInfos;
 
     static void processNamedCollectionResult(StorageS3::Configuration & configuration, const NamedCollection & collection);

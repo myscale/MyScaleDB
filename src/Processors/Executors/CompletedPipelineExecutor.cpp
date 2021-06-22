@@ -92,7 +92,10 @@ void CompletedPipelineExecutor::execute()
                 break;
 
             if (is_cancelled_callback())
+            {
                 data->executor->cancel();
+                cancelled = true;
+            }
         }
 
         if (data->has_exception)
@@ -103,6 +106,8 @@ void CompletedPipelineExecutor::execute()
         PipelineExecutor executor(pipeline.processors, pipeline.process_list_element);
         executor.setReadProgressCallback(pipeline.getReadProgressCallback());
         executor.execute(pipeline.getNumThreads());
+        if (executor.isCancelled())
+            cancelled = true;
     }
 }
 

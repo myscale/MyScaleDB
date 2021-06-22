@@ -1,0 +1,12 @@
+mutation on mergetree can reuse vector index
+all_1_1_0	Compact
+all_2_2_0	Wide
+all_3_3_0	Compact
+3	3	Built
+3	3	Built
+mutation on replicated mergetree can reuse vector index
+all_0_0_0	Compact
+all_1_1_0	Wide
+2	2	Built
+2	2	Built
+mutation on replicated mergetree does not cancel building vector index

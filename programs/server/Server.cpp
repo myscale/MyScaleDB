@@ -1,3 +1,6 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
 #include "Server.h"
 
 #include <memory>
@@ -95,8 +98,11 @@
 #include <filesystem>
 #include <unordered_set>
 
+#include <VectorIndex/VectorSegmentExecutor.h>
+
 #include "config.h"
 #include "config_version.h"
+
 
 #if defined(OS_LINUX)
 #    include <cstddef>
@@ -253,7 +259,6 @@ namespace ErrorCodes
     extern const int NETWORK_ERROR;
     extern const int CORRUPTED_DATA;
 }
-
 
 static std::string getCanonicalPath(std::string && path)
 {
@@ -647,8 +652,8 @@ static void sanityChecks(Server & server)
     if (server.context()->getMergeTreeSettings().allow_remote_fs_zero_copy_replication)
     {
         server.context()->addWarningMessage("The setting 'allow_remote_fs_zero_copy_replication' is enabled for MergeTree tables."
-            " But the feature of 'zero-copy replication' is under development and is not ready for production."
-            " The usage of this feature can lead to data corruption and loss. The setting should be disabled in production.");
+                                            " But the feature of 'zero-copy replication' is under development and is not ready for production."
+                                            " The usage of this feature can lead to data corruption and loss. The setting should be disabled in production.");
     }
 }
 
@@ -968,6 +973,7 @@ try
         if (effective_user_id == 0)
         {
             message += " Run under 'sudo -u " + data_owner + "'.";
+            message += " path is: " + path_str;
             throw Exception::createDeprecated(message, ErrorCodes::MISMATCHING_USERS_FOR_PROCESS_AND_DATA);
         }
         else
@@ -1090,6 +1096,12 @@ try
         fs::create_directories(user_scripts_path);
     }
 
+    {
+        std::string vector_index_cache_path = config().getString("vector_index_cache_path", path / "vector_index_cache/");
+        global_context->setVectorIndexCachePath(vector_index_cache_path);
+        fs::create_directories(vector_index_cache_path);
+    }
+
     /// top_level_domains_lists
     {
         const std::string & top_level_domains_path = config().getString("top_level_domains_path", path / "top_level_domains/");
@@ -1181,6 +1193,8 @@ try
         SensitiveDataMasker::setInstance(std::make_unique<SensitiveDataMasker>(config(), "query_masking_rules"));
     }
 
+    size_t max_memory_usage = 0; // vector index calc need it
+
     auto main_config_reloader = std::make_unique<ConfigReloader>(
         config_path,
         include_from_path,
@@ -1225,6 +1239,8 @@ try
             total_memory_tracker.setMetric(CurrentMetrics::MemoryTracking);
 
             total_memory_tracker.setAllowUseJemallocMemory(server_settings.allow_use_jemalloc_memory);
+
+            max_memory_usage = max_server_memory_usage;
 
             auto * global_overcommit_tracker = global_context->getGlobalOvercommitTracker();
             total_memory_tracker.setOvercommitTracker(global_overcommit_tracker);
@@ -1489,6 +1505,18 @@ try
     if (server_settings.index_mark_cache_size)
         global_context->setIndexMarkCache(server_settings.index_mark_cache_size);
 
+    /// Size of cache for primary key, default size is 64 MB.
+    size_t primary_key_cache_size = server_settings.primary_key_cache_size;
+    if (!primary_key_cache_size)
+        LOG_ERROR(log, "When the size of the primary key cache is 0, the primary key cache will be disabled.");
+    if (primary_key_cache_size > max_cache_size)
+    {
+        primary_key_cache_size = max_cache_size;
+        LOG_INFO(log, "Primary key cache size was lowered to {} because the system has low amount of memory",
+            formatReadableSizeWithBinarySuffix(mark_cache_size));
+    }
+    global_context->setPrimaryKeyCacheSize(primary_key_cache_size);
+
     if (server_settings.mmap_cache_size)
         global_context->setMMappedFileCache(server_settings.mmap_cache_size);
 
@@ -1521,6 +1549,14 @@ try
     CompressionCodecEncrypted::Configuration::instance().load(config(), "encryption_codecs");
 
     SCOPE_EXIT({
+<<<<<<< HEAD
+=======
+        if (license_task)
+            (*license_task)->deactivate();
+
+        offlineInstanceInZookeeper(config(), global_context, log);
+
+>>>>>>> 64548b319cf (Revert "add error message, close offline instance when checking license is disabled")
         async_metrics.stop();
 
         /** Ask to cancel background jobs all table engines,
@@ -1595,6 +1631,27 @@ try
     /// Set current database name before loading tables and databases because
     /// system logs may copy global context.
     global_context->setCurrentDatabaseNameInGlobalContext(default_database);
+
+    const double vector_index_cache_size_ratio_of_memory
+        = global_context->getConfigRef().getDouble("vector_index_cache_size_ratio_of_memory", 0.9);
+    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_size_ratio_of_memory);
+    //max_server_memory_usage
+    double vector_index_ratio = 0.0;
+    if (vector_index_cache_size_ratio_of_memory < 0.3)
+    {
+        vector_index_ratio = 0.3;
+    }
+    else if (vector_index_cache_size_ratio_of_memory > 0.9)
+    {
+        vector_index_ratio = 0.9;
+    }
+    else
+    {
+        vector_index_ratio = vector_index_cache_size_ratio_of_memory;
+    }
+    const size_t vector_index_cache_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_ratio);
+    LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", vector_index_cache_max_size_in_bytes);
+    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size_in_bytes);
 
     LOG_INFO(log, "Loading metadata from {}", path_str);
 

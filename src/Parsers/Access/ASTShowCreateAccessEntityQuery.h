@@ -20,6 +20,7 @@ using Strings = std::vector<String>;
   * SHOW CREATE [ROW] POLICIES [name ON [database.]table [, name2 ON database2.table2 ...] | name | ON database.table]
   * SHOW CREATE QUOTA [name]
   * SHOW CREATE QUOTAS [name [, name2 ...]]
+  * SHOW CREATE CONNECTION [name]
   */
 class ASTShowCreateAccessEntityQuery : public ASTQueryWithOutput
 {

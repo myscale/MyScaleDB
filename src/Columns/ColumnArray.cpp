@@ -300,6 +300,7 @@ void ColumnArray::insert(const Field & x)
 {
     const Array & array = x.get<const Array &>();
     size_t size = array.size();
+
     for (size_t i = 0; i < size; ++i)
         getData().insert(array[i]);
     getOffsets().push_back(getOffsets().back() + size);

@@ -594,6 +594,7 @@ private:
 
             double seconds = info->work_time / concurrency;
 
+            print_key_value("Time", seconds);
             print_key_value("QPS", info->queries.load() / seconds);
             print_key_value("RPS", info->read_rows / seconds);
             print_key_value("MiBPS", info->read_bytes / seconds / 1048576);

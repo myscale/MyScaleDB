@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <map>
 #include <set>
 #include <optional>
@@ -72,6 +76,7 @@
 #include <Interpreters/InterserverIOHandler.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/SessionLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -112,6 +117,7 @@
 #include <Storages/StorageView.h>
 #include <Parsers/ASTFunction.h>
 #include <base/find_symbols.h>
+#include <VectorIndex/CacheManager.h>
 
 #include <Interpreters/Cache/FileCache.h>
 
@@ -151,6 +157,11 @@ namespace CurrentMetrics
     extern const Metric IOPrefetchThreadsActive;
     extern const Metric IOWriterThreads;
     extern const Metric IOWriterThreadsActive;
+    extern const Metric BackgroundVectorIndexPoolTask;
+    extern const Metric BackgroundVectorIndexPoolSize;
+
+    extern const Metric BackgroundSlowModeVectorIndexPoolTask;
+    extern const Metric BackgroundSlowModeVectorIndexPoolSize;
 }
 
 namespace DB
@@ -216,6 +227,7 @@ struct ContextSharedPart : boost::noncopyable
     String user_files_path;                                 /// Path to the directory with user provided files, usable by 'file' table function.
     String dictionaries_lib_path;                           /// Path to the directory with user provided binaries and libraries for external dictionaries.
     String user_scripts_path;                               /// Path to the directory with user provided scripts.
+    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MSTG disk mode
     ConfigurationPtr config;                                /// Global configuration settings.
 
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
@@ -248,6 +260,7 @@ struct ContextSharedPart : boost::noncopyable
     std::unique_ptr<AccessControl> access_control;
     mutable ResourceManagerPtr resource_manager;
     mutable UncompressedCachePtr uncompressed_cache;        /// The cache of decompressed blocks.
+    size_t primary_key_cache_size;                          /// The cache size of primary key, default 64 MB.
     mutable MarkCachePtr mark_cache;                        /// Cache of marks in compressed files.
     mutable std::unique_ptr<ThreadPool> load_marks_threadpool; /// Threadpool for loading marks cache.
     mutable std::unique_ptr<ThreadPool> prefetch_threadpool; /// Threadpool for loading marks cache.
@@ -303,6 +316,8 @@ struct ContextSharedPart : boost::noncopyable
     OrdinaryBackgroundExecutorPtr moves_executor;
     OrdinaryBackgroundExecutorPtr fetch_executor;
     OrdinaryBackgroundExecutorPtr common_executor;
+    MergeMutateBackgroundExecutorPtr vector_index_executor;
+    MergeMutateBackgroundExecutorPtr slow_mode_vector_index_executor;
 
     RemoteHostFilter remote_host_filter; /// Allowed URL from config.xml
 
@@ -494,6 +509,8 @@ struct ContextSharedPart : boost::noncopyable
             moves_executor->wait();
         if (common_executor)
             common_executor->wait();
+        if (vector_index_executor)
+            vector_index_executor->wait();
 
         TransactionLog::shutdownIfAny();
 
@@ -724,6 +741,12 @@ String Context::getUserScriptsPath() const
     return shared->user_scripts_path;
 }
 
+String Context::getVectorIndexCachePath() const
+{
+    auto lock = getLock();
+    return shared->vector_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -786,6 +809,9 @@ void Context::setPath(const String & path)
 
     if (shared->user_scripts_path.empty())
         shared->user_scripts_path = shared->path + "user_scripts/";
+    
+    if (shared->vector_index_cache_path.empty())
+        shared->vector_index_cache_path = shared->path + "vector_index_cache/";
 }
 
 static void setupTmpPath(Poco::Logger * log, const std::string & path)
@@ -921,6 +947,12 @@ void Context::setUserScriptsPath(const String & path)
 {
     auto lock = getLock();
     shared->user_scripts_path = path;
+}
+
+void Context::setVectorIndexCachePath(const String & path)
+{
+    auto lock = getLock();
+    shared->vector_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const
@@ -2056,6 +2088,11 @@ ThreadPool & Context::getPrefetchThreadpool() const
     return *shared->prefetch_threadpool;
 }
 
+void Context::flushAllVectorIndexWillUnload() const
+{
+    VectorIndex::CacheManager::flushWillUnloadLog();
+}
+
 void Context::setIndexUncompressedCache(size_t max_size_in_bytes)
 {
     auto lock = getLock();
@@ -2081,6 +2118,18 @@ void Context::dropIndexUncompressedCache() const
         shared->index_uncompressed_cache->reset();
 }
 
+void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
+{
+    auto lock = getLock();
+    shared->primary_key_cache_size = max_size_in_bytes;
+}
+
+
+size_t Context::getPrimaryKeyCacheSize() const
+{
+    auto lock = getLock();
+    return shared->primary_key_cache_size;
+}
 
 void Context::setIndexMarkCache(size_t cache_size_in_bytes)
 {
@@ -2978,6 +3027,19 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
     return shared->system_logs->transactions_info_log;
 }
 
+std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
+{
+    auto lock = getLock();
+
+    if (!shared->system_logs)
+        return {};
+    
+    if (part_database == DatabaseCatalog::SYSTEM_DATABASE)
+        return {};
+
+    return shared->system_logs->vector_index_event_log;
+}
+
 
 std::shared_ptr<ProcessorsProfileLog> Context::getProcessorsProfileLog() const
 {
@@ -3346,6 +3408,10 @@ void Context::shutdown()
     shared->shutdown();
 }
 
+bool Context::isShutdown() const
+{
+    return shared->shutdown_called;
+}
 
 Context::ApplicationType Context::getApplicationType() const
 {
@@ -3824,6 +3890,8 @@ void Context::initializeBackgroundExecutorsIfNeeded()
     size_t background_move_pool_size = server_settings.background_move_pool_size;
     size_t background_fetches_pool_size = server_settings.background_fetches_pool_size;
     size_t background_common_pool_size = server_settings.background_common_pool_size;
+    size_t background_vector_pool_size = server_settings.background_vector_pool_size;
+    size_t background_slow_mode_vector_pool_size = server_settings.background_slow_mode_vector_pool_size;
 
     /// With this executor we can execute more tasks than threads we have
     shared->merge_mutate_executor = std::make_shared<MergeMutateBackgroundExecutor>
@@ -3867,6 +3935,27 @@ void Context::initializeBackgroundExecutorsIfNeeded()
         CurrentMetrics::BackgroundCommonPoolSize
     );
     LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}", background_common_pool_size, background_common_pool_size);
+
+    shared->vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "VectorIndex",
+        background_vector_pool_size,
+        background_vector_pool_size,
+        CurrentMetrics::BackgroundVectorIndexPoolTask,
+        CurrentMetrics::BackgroundVectorIndexPoolSize
+    );
+
+    shared->slow_mode_vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "SlowVecIndex",
+        background_slow_mode_vector_pool_size,
+        background_slow_mode_vector_pool_size,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolSize
+    );
+
+    LOG_INFO(shared->log, "Initialized background executor for vector index operations with num_threads={}, num_tasks={}",
+             background_vector_pool_size, background_vector_pool_size);
 
     shared->are_background_executors_initialized = true;
 }
@@ -3982,6 +4071,17 @@ ThreadPool & Context::getThreadPoolWriter() const
     return *shared->threadpool_writer;
 }
 
+/// reuse common executor
+MergeMutateBackgroundExecutorPtr Context::getVectorIndexExecutor() const
+{
+    return shared->vector_index_executor;
+}
+
+MergeMutateBackgroundExecutorPtr Context::getSlowModeVectorIndexExecutor() const
+{
+    return shared->slow_mode_vector_index_executor;
+}
+
 ReadSettings Context::getReadSettings() const
 {
     ReadSettings res;
@@ -4042,6 +4142,21 @@ ReadSettings Context::getReadSettings() const
     res.mmap_cache = getMMappedFileCache().get();
 
     return res;
+}
+
+std::optional<VectorScanDescription> Context::getVecScanDescription() const
+{
+    return vector_scan_description;
+}
+
+void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+{
+    vector_scan_description = vec_scan_desc;
+}
+
+void Context::resetVecScanDescription() const
+{
+    vector_scan_description.reset();
 }
 
 WriteSettings Context::getWriteSettings() const

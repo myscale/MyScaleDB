@@ -1,3 +1,6 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
 #include <Common/CurrentMetrics.h>
 
 
@@ -26,6 +29,10 @@
     M(BackgroundDistributedSchedulePoolSize, "Limit on number of tasks in BackgroundDistributedSchedulePool") \
     M(BackgroundMessageBrokerSchedulePoolTask, "Number of active tasks in BackgroundProcessingPool for message streaming") \
     M(BackgroundMessageBrokerSchedulePoolSize, "Limit on number of tasks in BackgroundProcessingPool for message streaming") \
+    M(BackgroundVectorIndexPoolTask, "Number of active vector index tasks in an associated background pool") \
+    M(BackgroundVectorIndexPoolSize, "Limit on number of tasks in an associated background pool") \
+    M(BackgroundSlowModeVectorIndexPoolTask, "Number of active slow mode vector index tasks in an associated background pool") \
+    M(BackgroundSlowModeVectorIndexPoolSize, "Limit on number of slow mode vector index tasks in an associated background pool") \
     M(CacheDictionaryUpdateQueueBatches, "Number of 'batches' (a set of keys) in update queue in CacheDictionaries.") \
     M(CacheDictionaryUpdateQueueKeys, "Exact number of keys in update queue in CacheDictionaries.") \
     M(DiskSpaceReservedForMerge, "Disk space reserved for currently running background merges. It is slightly more than the total size of currently merging parts.") \

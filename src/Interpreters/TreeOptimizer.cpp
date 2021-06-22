@@ -114,6 +114,12 @@ void optimizeGroupBy(ASTSelectQuery * select_query, ContextPtr context)
     {
         if (const auto * function = group_exprs[i]->as<ASTFunction>())
         {
+            /// Skip vector scan function
+            if (isVectorScanFunc(function->name))
+            {
+                ++i;
+                continue;
+            }
             /// assert function is injective
             if (possibly_injective_function_names.contains(function->name))
             {

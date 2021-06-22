@@ -21,7 +21,7 @@ select 'messages shorter than 10', max2(countDistinctOrDefault(message_format_st
 select 'messages shorter than 16', max2(countDistinctOrDefault(message_format_string), 40) from logs where length(message_format_string) < 16;
 
 -- Same as above, but exceptions must be more informative. Feel free to update the threshold or remove this query if really necessary
-select 'exceptions shorter than 30', max2(countDistinctOrDefault(message_format_string), 125) from logs where length(message_format_string) < 30 and message ilike '%DB::Exception%';
+select 'exceptions shorter than 30', max2(countDistinctOrDefault(message_format_string), 130) from logs where length(message_format_string) < 30 and message ilike '%DB::Exception%';
 
 
 -- Avoid too noisy messages: top 1 message frequency must be less than 30%. We should reduce the threshold
@@ -33,7 +33,7 @@ select 'noisy Trace messages', max2((select count() from logs where level!='Test
     group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.16);
 
 -- Same as above for Debug
-select 'noisy Debug messages', max2((select count() from logs where level <= 'Debug' group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.09);
+select 'noisy Debug messages', max2((select count() from logs where level <= 'Debug' group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.095);
 
 -- Same as above for Info
 select 'noisy Info messages', max2((select count() from logs where level <= 'Information' group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.05);

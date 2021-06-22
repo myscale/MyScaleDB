@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -22,10 +26,12 @@
 #include <Interpreters/QueryNormalizer.h>
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Interpreters/RewriteOrderByVisitor.hpp>
+#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
 #include <Interpreters/TreeRewriter.h>
+#include <Interpreters/convertFieldToType.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/getTableExpressions.h>
 #include <Interpreters/replaceAliasColumnsInQuery.h>
@@ -38,6 +44,7 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
@@ -56,7 +63,20 @@
 #include <Common/checkStackSize.h>
 #include <Storages/StorageView.h>
 
+#include <DataTypes/DataTypesNumber.h>
+#include <DataTypes/DataTypeTuple.h>
+
+#include <DataTypes/DataTypeArray.h>
+#include <Functions/FunctionHelpers.h>
+
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/StorageInMemoryMetadata.h>
+
 #include <AggregateFunctions/AggregateFunctionFactory.h>
+#include <Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/VectorIndexCommon.h>
+
+#include <Parsers/formatAST.h>
 
 namespace DB
 {
@@ -70,6 +90,7 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
+    extern const int SYNTAX_ERROR;
     extern const int UNKNOWN_IDENTIFIER;
 }
 
@@ -426,6 +447,10 @@ void removeUnneededColumnsFromSelectClause(ASTSelectQuery * select_query, const 
                 if (!data.aggregates.empty())
                     new_elements.push_back(elem);
             }
+
+            /// Removing vector search function can change number of rows.
+            if (func && isVectorScanFunc(func->name))
+                new_elements.push_back(elem);
         }
     }
 
@@ -749,6 +774,8 @@ std::vector<const ASTFunction *> getAggregates(ASTPtr & query, const ASTSelectQu
                 // We also can't have window functions inside aggregate functions,
                 // because the window functions are calculated later.
                 assertNoWindows(arg, "inside an aggregate function");
+                /// Currently not support distance function inside aggregate functions
+                assertNoVectorScan(arg, "inside an aggregate function");
             }
         }
     }
@@ -872,6 +899,70 @@ struct RewriteShardNum
 };
 using RewriteShardNumVisitor = InDepthNodeVisitor<RewriteShardNum, true>;
 
+/// Get all distance functions, remove duplicated functions
+std::vector<const ASTFunction *> getVectorScanFunctions(ASTPtr & query, const ASTSelectQuery & select_query)
+{
+    GetVectorScanVisitor::Data data;
+    GetVectorScanVisitor(data).visit(query);
+
+    /// Addtional check for distance functions
+    if (data.vector_scan_funcs.size() > 1)
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support multiple distance funcs in one query now.");
+
+    /// vector scan function is found, check exists in order by / where clauses.
+    if (data.vector_scan_funcs.size() == 1)
+    {
+        if (!select_query.orderBy())
+        {
+            /// TODO: Will be removed when distance functions are implemented
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without ORDER BY clause");
+        }
+
+        bool is_batch = isBatchDistance(data.vector_scan_funcs[0]->getColumnName());
+        if (!is_batch && !select_query.limitLength())
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
+        else if (is_batch && !select_query.limitByLength())
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch distance function without LIMIT N BY clause");
+
+        if (select_query.orderBy())
+        {
+            GetVectorScanVisitor::Data order_by_data;
+            GetVectorScanVisitor(order_by_data).visit(select_query.orderBy());
+
+            if (order_by_data.vector_scan_funcs.size() != 1)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without distance function inside ORDER BY clause");
+        }
+    }
+
+    return data.vector_scan_funcs;
+}
+
+void addDistanceFuncColName(const String & distance_col_name, NamesAndTypesList & source_columns)
+{
+    if (isDistance(distance_col_name))
+    {
+        if (!source_columns.contains(distance_col_name)) /* consider second analysis round */
+        {
+            NameAndTypePair new_name_pair(distance_col_name, std::make_shared<DataTypeFloat32>());
+            source_columns.push_back(new_name_pair);
+        }
+    }
+    else if (isBatchDistance(distance_col_name))
+    {
+        if (!source_columns.contains(distance_col_name)) /* consider second analysis round */
+        {
+            auto id_type = std::make_shared<DataTypeUInt32>();
+            auto distance_type = std::make_shared<DataTypeFloat32>();
+            DataTypes types;
+            types.emplace_back(id_type);
+            types.emplace_back(distance_type);
+            auto type = std::make_shared<DataTypeTuple>(types);
+            NameAndTypePair new_name_pair(distance_col_name, type);
+            source_columns.push_back(new_name_pair);
+        }
+    }
+}
+
 }
 
 TreeRewriterResult::TreeRewriterResult(
@@ -948,6 +1039,9 @@ void TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
 
                 required.erase(name);
             }
+            /// Add vector scan function column name when exists in right joined table
+            else if (isVectorScanFunc(name))
+                analyzed_join->addJoinedColumn(joined_column);
         }
     }
 
@@ -1073,6 +1167,17 @@ void TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         }
     }
 
+    /// insert distance func columns into source columns here
+    if (!vector_scan_funcs.empty() && !vector_from_right_table)
+    {
+        for (auto node : vector_scan_funcs)
+        {
+            const String distance_col_name = node->getColumnName();
+            addDistanceFuncColName(distance_col_name, source_columns);
+            unknown_required_source_columns.erase(distance_col_name);
+        }
+    }
+
     if (!unknown_required_source_columns.empty())
     {
         constexpr auto format_string = "Missing columns: {} while processing query: '{}', required columns:{}{}";
@@ -1150,6 +1255,225 @@ NameSet TreeRewriterResult::getArrayJoinSourceNameSet() const
     return forbidden_columns;
 }
 
+void TreeRewriterResult::collectForVectorScanFunctions(
+    ASTSelectQuery * select_query,
+    const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
+    ContextPtr context)
+{
+    /// distance function exists in main query's select caluse
+    if (vector_scan_funcs.size() == 1)
+    {
+        /// Get topK from limit N
+        bool is_batch = isBatchDistance(vector_scan_funcs[0]->getColumnName());
+        ASTPtr length_ast = nullptr;
+        if (!is_batch && select_query->limitLength())
+            length_ast = select_query->limitLength();
+        else if (is_batch && select_query->limitByLength())
+            length_ast = select_query->limitByLength();
+
+        if (length_ast)
+        {
+            const auto & [field, type] = evaluateConstantExpression(length_ast, context);
+
+            if (isNativeNumber(type))
+            {
+                Field converted = convertFieldToType(field, DataTypeUInt64());
+                if (!converted.isNull())
+                    limit_length = converted.safeGet<UInt64>();
+            }
+        }
+
+        /// TODO: Will be removed when distance functions are implemented
+        if (limit_length == 0)
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
+
+        /// There is no vector scan function, hence the checks like input paramters are put here.
+        /// Check if vector column in vector scan func exists in left table or right joined table
+        /// Insert distance func columns into source columns here
+        const ASTFunction * node = vector_scan_funcs[0];
+        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
+
+        if (arguments.size() != 2)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
+
+        String vec_col_name = arguments[0]->getColumnName();
+        String distance_col_name = node->getColumnName();
+        StorageMetadataPtr metadata_snapshot = nullptr;
+        bool table_is_remote = false; /// Mark if the storage with vector column is distributed.
+
+        std::optional<NameAndTypePair> search_column_type = std::nullopt;
+
+        if (storage_snapshot && storage_snapshot->metadata->getColumns().has(vec_col_name))
+        {
+            /// distance func column name should add to left table's source_columns
+            /// Will be added inside collectUsedColumns() after erase unrequired columns.
+            /// addDistanceFuncColName(distance_col_name, source_columns);
+            metadata_snapshot = storage_snapshot->metadata;
+            table_is_remote = is_remote_storage;
+
+            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vec_col_name);
+        }
+        else if (tables_with_columns.size() > 1)
+        {
+            /// Check if vector column name exists in right joined table
+            const auto & right_table = tables_with_columns[1];
+            String table_name = right_table.table.getQualifiedNamePrefix(false);
+
+            /// Handle cases where left table and right table both have the same vector column.
+            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
+                vec_col_name = identifier->shortName();
+
+            if (!right_table.hasColumn(vec_col_name))
+            {
+                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
+            }
+
+            search_column_type = right_table.columns.tryGetByName(vec_col_name);
+            vector_from_right_table = true;
+
+            /// distance func column name should add to right joined table's source columns
+            addDistanceFuncColName(distance_col_name, analyzed_join->columns_from_joined_table);
+
+            /// Add distance func column to original_names too
+            auto & original_names = analyzed_join->original_names;
+            original_names[distance_col_name] = distance_col_name;
+
+            /// Get metadata for right table
+            auto table_id = context->resolveStorageID(StorageID(right_table.table.database, right_table.table.table, right_table.table.uuid));
+            const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
+            metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
+            table_is_remote = right_table_storage->isRemote();
+        }
+        else if (tables_with_columns.size() == 1)
+        {
+            /// Left table is subquery
+            const auto & left_table = tables_with_columns[0];
+            String table_name = left_table.table.getQualifiedNamePrefix(false);
+
+            if (!left_table.hasColumn(vec_col_name))
+            {
+                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
+            }
+
+            /// Unable get metadata for left table, because the table name and UUID are empty.
+            search_column_type = left_table.columns.tryGetByName(vec_col_name);
+        }
+        else
+        {
+            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", vec_col_name);
+        }
+
+        /// Check vector column data type
+        if (search_column_type)
+        {
+            const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
+            if (!array_type)
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Search column {} should be Array type", vec_col_name);
+            }
+            else
+            {
+                WhichDataType which(array_type->getNestedType());
+                if (!which.isFloat32())
+                    throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "The element type inside the array must be `Float32`.");
+            }
+        }
+        else
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", vec_col_name);
+        }
+
+        /// When metric_type = IP in definition of vector index, order by must be DESC.
+        /// Skip the check when table is distributed.
+        if (metadata_snapshot && !table_is_remote)
+        {
+            /// 1 for ASC, -1 for DESC
+            direction = 1;
+
+            auto order_by = select_query->orderBy();
+            if (!order_by)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without ORDER BY clause");
+
+            /// Find the direction for distance func
+            for (const auto & child : order_by->children)
+            {
+                auto * order_by_element = child->as<ASTOrderByElement>();
+                if (!order_by_element || order_by_element->children.empty())
+                    continue;
+                ASTPtr order_expression = order_by_element->children.at(0);
+
+                if (!is_batch && isDistance(order_expression->getColumnName()))
+                {
+                    direction = order_by_element->direction;
+                    break;
+                }
+                else if (is_batch)
+                {
+                    /// order by batch_distance column name's 1 and 2, where 2 is distance column.
+                    if (auto * function = order_expression->as<ASTFunction>(); function->name == "tupleElement")
+                    {
+                        const ASTs & func_arguments = function->arguments->as<ASTExpressionList &>().children;
+                        if (func_arguments.size() >= 2 && isBatchDistance(func_arguments[0]->getColumnName()))
+                        {
+                            if (func_arguments[1]->getColumnName() == "2")
+                            {
+                                direction = order_by_element->direction;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            /// The default value is vector_search_metric_type in MergeTree, but we cannot get it here.
+            String metric_type = "L2";
+            for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
+            {
+                if (vector_index_desc.column == vec_col_name)
+                {
+                    const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
+                    if (index_parameter.contains("metric_type"))
+                    {
+                        /// Get metric_type in index definition
+                        metric_type = index_parameter.at("metric_type");
+                        break;
+                    }
+                }
+            }
+
+            Poco::toUpperInPlace(metric_type);
+            if (metric_type == "IP")
+            {
+                if (direction == 1)
+                    throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance DESC' when the metric type is IP");
+            }
+            else if (direction == -1)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance ASC' when the metric type is {}", metric_type);
+        }
+    }
+    /// Interpreter select on the right joined table where vector column exists, insert distance func column name.
+    else if (auto vector_scan_desc = context->getVecScanDescription())
+    {
+        /// Add vector scan func name and type to source columns
+        addDistanceFuncColName(vector_scan_desc->column_name, source_columns);
+
+        /// Add vector scan func name to select clauses if not exists
+        const auto select_expression_list = select_query->select();
+        bool found = false;
+        for (const auto & elem : select_expression_list->children)
+        {
+            String name = elem->getAliasOrColumnName();
+            if (name == vector_scan_desc->column_name)
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+            select_expression_list->children.emplace_back(std::make_shared<ASTIdentifier>(vector_scan_desc->column_name));
+    }
+}
+
 TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     ASTPtr & query,
     TreeRewriterResult && result,
@@ -1161,6 +1485,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     const NameToNameMap parameter_values,
     const NameToNameMap parameter_types) const
 {
+    DB::OpenTelemetry::SpanHolder span("TreeRewriter::analyzeSelect");
     auto * select_query = query->as<ASTSelectQuery>();
     if (!select_query)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Select analyze for not select asts.");
@@ -1260,6 +1585,11 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
         for (auto & column : result.source_columns)
             column.name = StorageView::replaceQueryParameterWithValue(column.name, parameter_values, parameter_types);
     }
+
+    result.vector_scan_funcs = getVectorScanFunctions(query, *select_query);
+
+    /// Special handling for vector scan function
+    result.collectForVectorScanFunctions(select_query, tables_with_columns, getContext());
 
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 

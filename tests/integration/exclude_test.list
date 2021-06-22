@@ -1,0 +1,7 @@
+test_dns_cache
+test_parallel_replicas_custom_key
+test_backward_compatibility
+test_compression_codec_read
+test_distributed_insert_backward_compatibility
+test_replicated_merge_tree_compatibility
+test_version_update

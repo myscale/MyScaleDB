@@ -1,5 +1,6 @@
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Common/typeid_cast.h>
+#include <Common/VectorScanUtils.h>
 #include <Core/Names.h>
 #include <Parsers/IAST.h>
 #include <Parsers/ASTIdentifier.h>
@@ -8,6 +9,8 @@
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTInterpolateElement.h>
+
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -53,7 +56,7 @@ bool RequiredSourceColumnsMatcher::needChildVisit(const ASTPtr & node, const AST
     if (const auto * f = node->as<ASTFunction>())
     {
         /// "lambda" visit children itself.
-        if (f->name == "lambda")
+        if (f->name == "lambda" || isVectorScanFunc(f->name))
             return false;
     }
 

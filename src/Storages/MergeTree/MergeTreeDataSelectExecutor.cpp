@@ -27,6 +27,7 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/ReadFromPreparedSource.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
+#include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/QueryPlan/UnionStep.h>
 #include <Processors/QueryPlan/QueryIdHolder.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
@@ -160,6 +161,7 @@ QueryPlanPtr MergeTreeDataSelectExecutor::read(
     const auto & snapshot_data = assert_cast<const MergeTreeData::SnapshotData &>(*storage_snapshot->data);
 
     const auto & parts = snapshot_data.parts;
+
 
     if (!query_info.projection)
     {
@@ -1335,6 +1337,25 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
     bool sample_factor_column_queried = false;
 
     selectColumnNames(column_names_to_return, data, real_column_names, virt_column_names, sample_factor_column_queried);
+
+    if (query_info.vector_scan_info)
+    {
+        return std::make_unique<ReadWithVectorScan>(
+            std::move(parts),
+            real_column_names,
+            virt_column_names,
+            data,
+            query_info,
+            storage_snapshot,
+            context,
+            max_block_size,
+            num_streams,
+            sample_factor_column_queried,
+            max_block_numbers_to_read,
+            log,
+            enable_parallel_reading
+        );
+    }
 
     return std::make_unique<ReadFromMergeTree>(
         std::move(parts),

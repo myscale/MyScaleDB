@@ -1,7 +1,12 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Interpreters/IdentifierSemantic.h>
+#include <Interpreters/TreeRewriter.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
@@ -14,6 +19,7 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/ActionsDAG.h>
 #include <base/map.h>
+#include <Common/VectorScanUtils.h>
 
 namespace DB
 {
@@ -46,7 +52,7 @@ MergeTreeWhereOptimizer::MergeTreeWhereOptimizer(
     }
 }
 
-void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context) const
+void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context)
 {
     auto & select = select_query_info.query->as<ASTSelectQuery &>();
     if (!select.where() || select.prewhere())
@@ -61,6 +67,10 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.array_joined_names = determineArrayJoinedNames(select);
     where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().move_all_conditions_to_prewhere;
     where_optimizer_context.is_final = select.final();
+
+    /// Move as much as possible where conditions to prewhere for vector search
+    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->vector_scan_funcs.empty())
+        has_vector_func = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
     RPNBuilderTreeNode node(select.where().get(), tree_context);
@@ -215,6 +225,39 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 
         cond.columns_size = getColumnsSize(cond.table_columns);
 
+        auto containVectorScanFunc = [&]()
+        {
+            if (function_node_optional.has_value() && function_node_optional->getASTNode()
+                && function_node_optional->getASTNode()->as<ASTFunction>())
+            {
+                auto func = function_node_optional->getASTNode()->as<ASTFunction>();
+                if (!func->arguments->children.empty())
+                {
+                    for (auto & argu : func->arguments->children)
+                    {
+                        if (isVectorScanFunc(argu->getColumnName()))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+
+//        bool require_distance_func = false;
+//        for (const auto & col : queried_columns)
+//        {
+//            LOG_DEBUG(log, "Queried column: {}", col);
+//            if (isVectorScanFunc(col))
+//            {
+//                require_distance_func = true;
+//                break;
+//            }
+//        }
+
+        LOG_DEBUG(log, "containVectorScanFunc(cond.node): {}", containVectorScanFunc());
+
         cond.viable =
             !has_invalid_column &&
             /// Condition depend on some column. Constant expressions are not moved.
@@ -226,7 +269,8 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             /// Some identifiers can unable to support PREWHERE (usually because of different types in Merge engine)
             && columnsSupportPrewhere(cond.table_columns)
             /// Do not move conditions involving all queried columns.
-            && cond.table_columns.size() < queried_columns.size();
+            && cond.table_columns.size() < queried_columns.size()
+            && !containVectorScanFunc();
 
         if (cond.viable)
             cond.good = isConditionGood(node, table_columns);
@@ -312,10 +356,12 @@ std::optional<MergeTreeWhereOptimizer::OptimizeResult> MergeTreeWhereOptimizer::
 
         auto it = std::min_element(where_conditions.begin(), where_conditions.end());
 
+        LOG_DEBUG(log, "MergeTreeWhereOptimizer: viable is {}", it->viable);
+
         if (!it->viable)
             break;
 
-        if (!where_optimizer_context.move_all_conditions_to_prewhere)
+        if (!where_optimizer_context.move_all_conditions_to_prewhere && !has_vector_func)
         {
             bool moved_enough = false;
             if (total_size_of_queried_columns > 0)

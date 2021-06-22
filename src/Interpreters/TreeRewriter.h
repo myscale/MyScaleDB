@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/Block.h>
@@ -45,6 +49,12 @@ struct TreeRewriterResult
     std::vector<const ASTFunction *> window_function_asts;
 
     std::vector<const ASTFunction *> expressions_with_window_function;
+    std::vector<const ASTFunction *> vector_scan_funcs;
+
+    String vector_scan_metric_type;
+    UInt64 limit_length = 0;
+    bool vector_from_right_table = false;
+    int direction = 1;
 
     /// Which column is needed to be ARRAY-JOIN'ed to get the specified.
     /// For example, for `SELECT s.v ... ARRAY JOIN a AS s` will get "s.v" -> "a.v".
@@ -93,6 +103,12 @@ struct TreeRewriterResult
     const Names & requiredSourceColumnsForAccessCheck() const { return required_source_columns_before_expanding_alias_columns; }
     NameSet getArrayJoinSourceNameSet() const;
     const Scalars & getScalars() const { return scalars; }
+
+    /// Special handings for vector scan funcs: get limit_length, cases when distance func in right joined table
+    void collectForVectorScanFunctions(
+        ASTSelectQuery * select_query,
+        const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
+        ContextPtr context);
 };
 
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;

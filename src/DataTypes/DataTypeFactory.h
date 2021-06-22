@@ -100,5 +100,7 @@ void registerDataTypeDomainBool(DataTypeFactory & factory);
 void registerDataTypeDomainSimpleAggregateFunction(DataTypeFactory & factory);
 void registerDataTypeDomainGeo(DataTypeFactory & factory);
 void registerDataTypeObject(DataTypeFactory & factory);
+void registerDataTypeObjectURL(DataTypeFactory & factory);
+void registerDataTypeObjectToFetch(DataTypeFactory & factory);
 
 }

@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Storages/MergeTree/MergeTreeBackgroundExecutor.h>
@@ -48,6 +52,8 @@ private:
     /// Mutex for thread safety
     std::mutex holder_mutex;
 
+    Poco::Logger * log = &Poco::Logger::get("BackgroundJobsAssignee");
+
 public:
     /// In case of ReplicatedMergeTree the first assignee will be responsible for
     /// polling the replication queue and schedule operations according to the LogEntry type
@@ -70,7 +76,8 @@ public:
     void scheduleFetchTask(ExecutableTaskPtr fetch_task);
     void scheduleMoveTask(ExecutableTaskPtr move_task);
     void scheduleCommonTask(ExecutableTaskPtr common_task, bool need_trigger);
-
+    void scheduleVectorIndexTask(ExecutableTaskPtr vector_index_task);    
+    void scheduleSlowModeVectorIndexTask(ExecutableTaskPtr vector_index_task);
     /// Just call finish
     ~BackgroundJobsAssignee();
 

@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Common/quoteString.h>
 #include <IO/Operators.h>
 #include <Parsers/ASTDropIndexQuery.h>
@@ -33,7 +38,8 @@ void ASTDropIndexQuery::formatQueryImpl(const FormatSettings & settings, FormatS
 
     settings.ostr << (settings.hilite ? hilite_keyword : "") << indent_str;
 
-    settings.ostr << "DROP INDEX " << (if_exists ? "IF EXISTS " : "");
+    settings.ostr << "DROP " << (is_vector_index ? "VECTOR " : "");
+    settings.ostr << "INDEX " << (if_exists ? "IF EXISTS " : "");
     index_name->formatImpl(settings, state, frame);
     settings.ostr << " ON ";
 
@@ -55,10 +61,18 @@ void ASTDropIndexQuery::formatQueryImpl(const FormatSettings & settings, FormatS
 ASTPtr ASTDropIndexQuery::convertToASTAlterCommand() const
 {
     auto command = std::make_shared<ASTAlterCommand>();
-    command->type = ASTAlterCommand::DROP_INDEX;
-    command->index = index_name->clone();
     command->if_exists = if_exists;
-
+    if (is_vector_index)
+    {
+        command->type = ASTAlterCommand::DROP_VECTOR_INDEX;
+        command->vec_index = index_name->clone();
+    }
+    else
+    {
+        command->type = ASTAlterCommand::DROP_INDEX;
+        command->index = index_name->clone();
+    }
+    command->detach = false;
     return command;
 }
 

@@ -6,6 +6,8 @@
 #include <map>
 #include <optional>
 
+#include <Common/logger_useful.h>
+
 namespace DB
 {
 

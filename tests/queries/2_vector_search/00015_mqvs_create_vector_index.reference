@@ -1,0 +1,11 @@
+Row 1:
+──────
+table:  test_vector
+name:   i_h
+type:   FLAT
+expr:   i_h vector TYPE FLAT
+status: Built
+CREATE TABLE default.test_vector\n(\n    `id` UInt64,\n    `vector` Array(Float32),\n    `label` String,\n    INDEX i_a id TYPE minmax GRANULARITY 4,\n    INDEX i_label label TYPE bloom_filter GRANULARITY 2,\n    CONSTRAINT vector_len CHECK length(vector) = 3\n)\nENGINE = MergeTree\nPRIMARY KEY id\nORDER BY id\nSETTINGS index_granularity = 8192
+test_vector	i_a	minmax	id	4
+test_vector	i_label	bloom_filter	label	2
+test_vector	i_label	bloom_filter	label	2

@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/IMergeTreeDataPartInfoForReader.h>
@@ -110,6 +114,9 @@ NameSet injectRequiredColumns(
 
     for (size_t i = 0; i < columns.size(); ++i)
     {
+        /// skip distance columns
+        if (isVectorScanFunc(columns[i]))
+            continue;
         /// We are going to fetch only physical columns and system columns
         if (!storage_snapshot->tryGetColumn(options, columns[i]))
             throw Exception(ErrorCodes::NO_SUCH_COLUMN_IN_TABLE, "There is no physical column or subcolumn {} in table", columns[i]);
@@ -144,7 +151,8 @@ MergeTreeReadTask::MergeTreeReadTask(
     MergeTreeBlockSizePredictorPtr size_predictor_,
     int64_t priority_,
     std::future<MergeTreeReaderPtr> reader_,
-    std::vector<std::future<MergeTreeReaderPtr>> && pre_reader_for_step_)
+    std::vector<std::future<MergeTreeReaderPtr>> && pre_reader_for_step_,
+    const MergeTreeVectorScanManagerPtr & vector_scan_manager_)
     : data_part{data_part_}
     , mark_ranges{mark_ranges_}
     , part_index_in_query{part_index_in_query_}
@@ -153,6 +161,7 @@ MergeTreeReadTask::MergeTreeReadTask(
     , size_predictor{size_predictor_}
     , reader(std::move(reader_))
     , pre_reader_for_step(std::move(pre_reader_for_step_))
+    , vector_scan_manager(vector_scan_manager_)
     , priority(priority_)
 {
 }

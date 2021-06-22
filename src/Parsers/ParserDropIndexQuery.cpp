@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Parsers/ASTDropIndexQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/CommonParsers.h>
@@ -14,6 +19,7 @@ bool ParserDropIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected
     node = query;
 
     ParserKeyword s_drop("DROP");
+    ParserKeyword s_vector("VECTOR");
     ParserKeyword s_index("INDEX");
     ParserKeyword s_on("ON");
     ParserKeyword s_if_exists("IF EXISTS");
@@ -21,10 +27,14 @@ bool ParserDropIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected
 
     String cluster_str;
     bool if_exists = false;
+    bool is_vector_index = false;
 
     if (!s_drop.ignore(pos, expected))
         return false;
 
+    if (s_vector.ignore(pos, expected))
+        is_vector_index = true;
+    
     if (!s_index.ignore(pos, expected))
         return false;
 
@@ -60,6 +70,8 @@ bool ParserDropIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected
 
     if (query->table)
         query->children.push_back(query->table);
+
+    query->is_vector_index = is_vector_index;
 
     return true;
 }

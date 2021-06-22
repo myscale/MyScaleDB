@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Common/quoteString.h>
 #include <IO/Operators.h>
 #include <Parsers/ASTCreateIndexQuery.h>
@@ -38,7 +43,8 @@ void ASTCreateIndexQuery::formatQueryImpl(const FormatSettings & settings, Forma
 
     settings.ostr << (settings.hilite ? hilite_keyword : "") << indent_str;
 
-    settings.ostr << "CREATE INDEX " << (if_not_exists ? "IF NOT EXISTS " : "");
+    settings.ostr << "CREATE " << (is_vector_index ? "VECTOR " : "");
+    settings.ostr << "INDEX " << (if_not_exists ? "IF NOT EXISTS " : "");
     index_name->formatImpl(settings, state, frame);
     settings.ostr << " ON ";
 
@@ -65,9 +71,18 @@ void ASTCreateIndexQuery::formatQueryImpl(const FormatSettings & settings, Forma
 ASTPtr ASTCreateIndexQuery::convertToASTAlterCommand() const
 {
     auto command = std::make_shared<ASTAlterCommand>();
-    command->type = ASTAlterCommand::ADD_INDEX;
-    command->index = index_name->clone();
-    command->index_decl = index_decl->clone();
+    if (is_vector_index)
+    {
+        command->type = ASTAlterCommand::ADD_VECTOR_INDEX;
+        command->vec_index_decl = index_decl->clone();
+        command->vec_index = index_name->clone();
+    }
+    else
+    {
+        command->type = ASTAlterCommand::ADD_INDEX;
+        command->index = index_name->clone();
+        command->index_decl = index_decl->clone();
+    }
     command->if_not_exists = if_not_exists;
 
     return command;

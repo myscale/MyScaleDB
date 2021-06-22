@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+* Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+* Co., Ltd. */
+
 #include "config.h"
 
 #include <Databases/IDatabase.h>
@@ -14,6 +18,7 @@
 #include <Storages/System/StorageSystemColumns.h>
 #include <Storages/System/StorageSystemDatabases.h>
 #include <Storages/System/StorageSystemDataSkippingIndices.h>
+#include <Storages/System/StorageSystemVectorIndices.h>
 #include <Storages/System/StorageSystemDataTypeFamilies.h>
 #include <Storages/System/StorageSystemDetachedParts.h>
 #include <Storages/System/StorageSystemDictionaries.h>
@@ -69,6 +74,7 @@
 #include <Storages/System/StorageSystemQuotaLimits.h>
 #include <Storages/System/StorageSystemQuotaUsage.h>
 #include <Storages/System/StorageSystemQuotasUsage.h>
+#include <Storages/System/StorageSystemConnections.h>
 #include <Storages/System/StorageSystemUserDirectories.h>
 #include <Storages/System/StorageSystemPrivileges.h>
 #include <Storages/System/StorageSystemAsynchronousInserts.h>
@@ -80,6 +86,7 @@
 #include <Storages/System/StorageSystemCertificates.h>
 #include <Storages/System/StorageSystemSchemaInferenceCache.h>
 #include <Storages/System/StorageSystemDroppedTables.h>
+#include <Storages/System/StorageSystemVectorIndexSegments.h>
 
 #ifdef OS_LINUX
 #include <Storages/System/StorageSystemStackTrace.h>
@@ -132,11 +139,14 @@ void attachSystemTablesLocal(ContextPtr context, IDatabase & system_database)
     attach<StorageSystemQuotaLimits>(context, system_database, "quota_limits");
     attach<StorageSystemQuotaUsage>(context, system_database, "quota_usage");
     attach<StorageSystemQuotasUsage>(context, system_database, "quotas_usage");
+    attach<StorageSystemConnections>(context, system_database, "connections");
     attach<StorageSystemUserDirectories>(context, system_database, "user_directories");
     attach<StorageSystemPrivileges>(context, system_database, "privileges");
     attach<StorageSystemErrors>(context, system_database, "errors");
     attach<StorageSystemWarnings>(context, system_database, "warnings");
     attach<StorageSystemDataSkippingIndices>(context, system_database, "data_skipping_indices");
+    attach<StorageSystemVectorIndices>(context, system_database, "vector_indices");
+    attach<StorageSystemVectorIndexSegments>(context, system_database, "vector_index_segments");
     attach<StorageSystemLicenses>(context, system_database, "licenses");
     attach<StorageSystemTimeZones>(context, system_database, "time_zones");
     attach<StorageSystemBackups>(context, system_database, "backups");
