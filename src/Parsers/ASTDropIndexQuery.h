@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #pragma once
 
 #include <optional>
@@ -12,6 +17,7 @@ namespace DB
 {
 
 /** DROP INDEX [IF EXISTS] name on [db].name
+ * DROP [VECTOR] INDEX [IF EXISTS] name on [db].name
  */
 
 class ASTDropIndexQuery : public ASTQueryWithTableAndOutput, public ASTQueryWithOnCluster
@@ -21,6 +27,8 @@ public:
     ASTPtr index_name;
 
     bool if_exists{false};
+    
+    bool is_vector_index{false};
 
     String getID(char delim) const override;
 

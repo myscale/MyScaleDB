@@ -290,6 +290,8 @@ DataTypeFactory::DataTypeFactory()
     registerDataTypeDomainGeo(*this);
     registerDataTypeMap(*this);
     registerDataTypeObject(*this);
+    registerDataTypeFixedArray(*this);
+    registerDataTypeObjectToFetch(*this);
 }
 
 DataTypeFactory & DataTypeFactory::instance()

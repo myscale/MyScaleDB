@@ -38,6 +38,7 @@
 #include <Core/BackgroundSchedulePool.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 
 
 namespace DB
@@ -404,6 +405,8 @@ private:
 
     MergeStrategyPicker merge_strategy_picker;
 
+    MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
+
     /** The queue of what needs to be done on this replica to catch up with everyone. It is taken from ZooKeeper (/replicas/me/queue/).
      * In ZK entries in chronological order. Here it is not necessary.
      */
@@ -597,6 +600,8 @@ private:
     void queueUpdatingTask();
 
     void mutationsUpdatingTask();
+
+    void vectorIndexBuildJobsUpdatingTask();
 
     /** Clone data from another replica.
       * If replica can not be cloned throw Exception.
@@ -878,6 +883,11 @@ private:
     /// If no connection to zookeeper, shutdown, readonly -- return std::nullopt.
     /// If somebody already holding the lock -- return unlocked ZeroCopyLock object (not std::nullopt).
     std::optional<ZeroCopyLock> tryCreateZeroCopyExclusiveLock(const String & part_name, const DiskPtr & disk) override;
+    void finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr> & processed_parts) override;
+
+    DataParts currently_vector_indexing_parts;
+
+    mutable std::mutex currently_processing_in_background_mutex;
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

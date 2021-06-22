@@ -28,3 +28,9 @@ curl https://clickhouse.com/ | sh
 * **FOSDEM 2023**: In the "Fast and Streaming Data" room Alexey gave a talk entitled "Building Analytical Apps With ClickHouse" that looks at the landscape of data tools, an interesting data set, and how you can interact with data quickly. Check out the recording on **[YouTube](https://www.youtube.com/watch?v=JlcI2Vfz_uk)**.
 * **Recording available**: [**v23.2 Release Webinar**](https://www.youtube.com/watch?v=2o0vRMMIrkY) NTILE Window Function support, Partition Key for GROUP By, io_uring, Apache Iceberg support, Dynamic Disks, integrations updates! Watch it now!
 * **All release webinar recordings**: [YouTube playlist](https://www.youtube.com/playlist?list=PL0Z2YDlm0b3jAlSy1JxyP8zluvXaN3nxU)
+## Other Useful Links for MQDB
+* [Build on Mac OS X](https://clickhouse.tech/docs/en/development/build-osx/) provides infomation about building and running Clickhouse on Mac OS.
+* [Build On Linux](https://clickhouse.tech/docs/en/development/cmake-in-clickhouse/#tl-dr-how-to-make-clickhouse-compile-and-link-faster) there is a complete list of flags to compile with which might boost your compilation speed. Generally, On dev21 a debug build should take about 10 mins.
+
+## How to Build MQDB
+Refer to this doc: https://moqi.quip.com/fYK8AQlR0A6Q#temp:C:GDe591fb7630ca7434ca7c296929

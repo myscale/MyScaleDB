@@ -10,6 +10,7 @@ struct Array;
 struct Tuple;
 struct Map;
 struct AggregateFunctionStateData;
+struct ObjectToFetch;
 
 /**
  * Obtain type string representation from real type if possible.
@@ -46,6 +47,7 @@ TN_MAP(DateTime64)
 TN_MAP(Array)
 TN_MAP(Tuple)
 TN_MAP(Map)
+TN_MAP(ObjectToFetch)
 
 /// Special case
 template <> constexpr inline std::string_view TypeName<AggregateFunctionStateData> = "AggregateFunctionState";

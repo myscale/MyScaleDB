@@ -1,6 +1,5 @@
 #include <Processors/ISimpleTransform.h>
 
-
 namespace DB
 {
 

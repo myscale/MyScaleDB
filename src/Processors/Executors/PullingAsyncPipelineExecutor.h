@@ -1,6 +1,11 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 #include <functional>
 #include <memory>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -62,6 +67,7 @@ private:
     QueryPipeline & pipeline;
     std::shared_ptr<LazyOutputFormat> lazy_format;
     std::unique_ptr<Data> data;
+    Poco::Logger * log = &Poco::Logger::get("Executor");
 };
 
 }

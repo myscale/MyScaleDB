@@ -69,6 +69,9 @@ namespace DB
     M(UInt64, background_schedule_pool_size, 128, "The maximum number of threads that will be used for constantly executing some lightweight periodic operations.", 0) \
     M(UInt64, background_message_broker_schedule_pool_size, 16, "The maximum number of threads that will be used for executing background operations for message streaming.", 0) \
     M(UInt64, background_distributed_schedule_pool_size, 16, "The maximum number of threads that will be used for executing distributed sends.", 0) \
+    M(UInt64, background_vector_pool_size, 1, "Number of threads for vector index building", 0)      \
+    M(UInt64, vector_index_cache_size, 100, "number of vector index to cache", 0)      \
+    M(Float, vector_index_cache_size_ratio_of_memory, 1.0, "vector_index_cache_size_ratio_of_memory", 0) \
 
 
 DECLARE_SETTINGS_TRAITS(ServerSettingsTraits, SERVER_SETTINGS)

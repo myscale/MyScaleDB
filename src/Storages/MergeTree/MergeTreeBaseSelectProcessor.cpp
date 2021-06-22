@@ -1,17 +1,34 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+#include <memory>
+#include <optional>
 #include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/RequestResponse.h>
+#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Columns/FilterDescription.h>
 #include <Common/ElapsedTimeProfileEventIncrement.h>
+#include <Columns/ColumnArray.h>
+#include <Common/FieldVisitorConvertToNumber.h>
 #include <Common/typeid_cast.h>
+#include <Common/VectorScanUtils.h>
 #include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeUUID.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeTuple.h>
 #include <Processors/Transforms/AggregatingTransform.h>
+#include <Common/logger_useful.h>
+
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/VectorIndexFactory.h>
+#include <VectorIndex/Status.h>
+
 #include <city.h>
 
 namespace ProfileEvents
@@ -381,8 +398,33 @@ static UInt64 estimateNumRows(const MergeTreeReadTask & current_task, UInt64 cur
 }
 
 
+static bool hasPrefix(const String & s, const String & pre)
+{
+    return s.size() >= pre.size() && s.find(pre) == 0;
+}
+
+
+static bool isVectorSearchByPk(const std::vector<String> & a, const std::vector<String> & b)
+{
+    size_t na = a.size();
+    size_t nb = b.size();
+    if (na + 1 != nb)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < na; ++i)
+    {
+        if (a[i] != b[i])
+        {
+            return false;
+        }
+    }
+    return hasPrefix(b[nb - 1], "distance") || hasPrefix(b[nb - 1], "batch_distance");
+}
+
 IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromPartImpl()
 {
+    Poco::Logger * log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
     if (task->size_predictor)
         task->size_predictor->startBlock();
 
@@ -391,11 +433,147 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
     const UInt64 current_preferred_max_column_in_block_size_bytes = preferred_max_column_in_block_size_bytes;
     const double min_filtration_ratio = 0.00001;
 
+    auto read_start_time = std::chrono::system_clock::now();
+
     UInt64 recommended_rows = estimateNumRows(*task, current_preferred_block_size_bytes,
-        current_max_block_size_rows, current_preferred_max_column_in_block_size_bytes, min_filtration_ratio, min_marks_to_read);
+                                              current_max_block_size_rows, current_preferred_max_column_in_block_size_bytes, min_filtration_ratio, min_marks_to_read);
     UInt64 rows_to_read = std::max(static_cast<UInt64>(1), std::min(current_max_block_size_rows, recommended_rows));
 
+    /// LOG_DEBUG(log, "[readFromPartImpl] current_max_block_size_rows: {}, recommended_rows: {}",
+    ///             current_max_block_size_rows, recommended_rows);
+
+    /// used for vector scan result merge
+    /// auto start_row = index_granularity.getMarkStartingRow(task->range_reader.currentMark()) + task->range_reader.numReadRowsInCurrentGranule();
+
+    /// LOG_DEBUG(log, "[readFromPartImpl]: start row: {}, current mark: {}", start_row, task->range_reader.currentMark());
+
+    bool pk_cache_side = false;
+
+    const KeyDescription & pk_description = storage_snapshot->metadata->getPrimaryKey();
+    const size_t pk_col_size = pk_description.column_names.size();
+
+    bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
+    LOG_DEBUG(log, "[readFromPartImpl] setting: enable_primary_key_cache = {}", enable_primary_key_cache);
+
+    if (enable_primary_key_cache && task->vector_scan_manager)
+    {
+        /// consider cache
+        /// if and only if
+        /// 1. this task is vector search
+        /// 2. primary key is only a column, and select columns is (pk, distance) or (pk, batch_distance)
+        /// 3. primary key's type is UInt32 or UInt64
+        bool match = PrimaryKeyCacheManager::isSupportedPrimaryKey(pk_description)
+            && isVectorSearchByPk(pk_description.column_names, task->task_columns.columns.getNames());
+
+        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side: {} {}",
+            PrimaryKeyCacheManager::isSupportedPrimaryKey(pk_description),
+            isVectorSearchByPk(pk_description.column_names, task->task_columns.columns.getNames()));
+
+        for (auto name : task->task_columns.columns.getNames())
+        {
+            LOG_DEBUG(log, "[readFromPartImpl] ordered_names: {}", name);
+        }
+
+        pk_cache_side = match;
+    }
+
+    if (pk_cache_side)
+    {
+        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side");
+    }
+
+    const String cache_key = task->data_part->getDataPartStorage().getRelativePath()+":"+task->data_part->name;
+
+    if (pk_cache_side)
+    {
+        std::optional<Columns> cols_opt = PrimaryKeyCacheManager::getMgr().getPartPkCache(cache_key);
+
+        if (cols_opt.has_value())
+        {
+            LOG_DEBUG(log, "[readFromPartImpl] hit cache, and key is {}", cache_key);
+
+            Columns cols = cols_opt.value();
+
+            /// cut columns
+
+            MutableColumns temp_columns;
+            temp_columns.resize(pk_col_size);
+            for (size_t i = 0; i < pk_col_size; ++i)
+            {
+                temp_columns[i] = pk_description.data_types[i]->createColumn();
+            }
+
+            MergeTreeRangeReader::ReadResult::ReadRangesInfo read_ranges;
+            const MergeTreeIndexGranularity & index_granularity = task->data_part->index_granularity;
+
+            for (auto it = task->mark_ranges.begin(); it != task->mark_ranges.cend(); ++it)
+            {
+                const MarkRange mr = *it;
+                size_t start_row = index_granularity.getMarkStartingRow(mr.begin);
+                size_t stop_row = index_granularity.getMarkStartingRow(mr.end);
+
+                MergeTreeRangeReader::ReadResult::ReadRangeInfo rri;
+                rri.start_row = start_row;
+                rri.row_num = stop_row - start_row;
+                rri.start_mark = mr.begin;
+                rri.end_mark = mr.end;
+                read_ranges.push_back(rri);
+
+                for (size_t i = 0; i < pk_col_size; ++i)
+                {
+                    temp_columns[i]->insertRangeFrom(*cols[i], start_row, stop_row - start_row);
+                }
+            }
+
+            Columns result_columns;
+            result_columns.assign(
+                std::make_move_iterator(temp_columns.begin()),
+                std::make_move_iterator(temp_columns.end())
+                );
+
+            LOG_DEBUG(log, "[readFromPartImpl] fetch from cache size = {}", result_columns[0]->size());
+
+
+            if (task->vector_scan_manager->preComputed())
+            {
+                size_t result_row_num = 0;
+
+                task->vector_scan_manager->mergeResult(
+                    result_columns, /// _Inout_
+                    result_row_num, /// _Out_
+                    read_ranges);
+
+                LOG_DEBUG(log, "[readFromPartImpl] result_columns's size = {}, result_row_num = {}",
+                          result_columns[0]->size(), result_row_num);
+
+                if (result_row_num > 0)
+                {
+                    task->mark_ranges.clear();
+                    BlockAndProgress res = { header_without_const_virtual_columns.cloneWithColumns(result_columns), result_row_num };
+                    return res;
+                }
+            }
+        }
+        else
+        {
+            LOG_DEBUG(log, "[readFromPartImpl] not hit cache, and data part name is {}", cache_key);
+        }
+    }
+
+    LOG_DEBUG(log, "[readFromPartImpl] begin read, mark_ranges size = {}", task->mark_ranges.size());
+    for (auto it = task->mark_ranges.begin(); it != task->mark_ranges.cend(); ++it)
+    {
+        LOG_DEBUG(log, "[readFromPartImpl] mark_range begin = {}, end = {}", it->begin, it->end);
+    }
+
+    LOG_DEBUG(log, "[readFromPartImpl] rows_to_read = {}", rows_to_read);
     auto read_result = task->range_reader.read(rows_to_read, task->mark_ranges);
+    LOG_DEBUG(log, "[readFromPartImpl] read_result.num_rows = {}", read_result.num_rows);
+    LOG_DEBUG(log, "[readFromPartImpl] after read, mark_ranges size = {}", task->mark_ranges.size());
+    for (auto it = task->mark_ranges.begin(); it != task->mark_ranges.cend(); ++it)
+    {
+        LOG_DEBUG(log, "[readFromPartImpl] mark_range begin = {}, end = {}", it->begin, it->end);
+    }
 
     /// All rows were filtered. Repeat.
     if (read_result.num_rows == 0)
@@ -411,8 +589,29 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     UInt64 num_filtered_rows = read_result.numReadRows() - read_result.num_rows;
 
+    /// LOG_DEBUG(log, "[readFromPartImpl] num_rows: {}, read_rows: {}", read_result.num_rows, read_result.numReadRows());
+
     size_t num_read_rows = read_result.numReadRows();
     size_t num_read_bytes = read_result.numBytesRead();
+
+    auto read_ranges = read_result.readRanges();
+
+    /*
+    for (auto range : read_ranges) 
+    {
+        
+        if (read_result.getFilter()) 
+        {
+            LOG_DEBUG(log, "[readFromPartImpl] read range: start_pos: {}, num_rows: {}, start_mark: {}, end_mark: {}, filter size: {}",
+                range.start_row, range.row_num, range.start_mark, range.end_mark, read_result.getFilter()->size());
+        }
+        else
+        {
+            LOG_DEBUG(log, "[readFromPartImpl] read range: start_pos: {}, num_rows: {}, start_mark: {}, end_mark: {}",
+                range.start_row, range.row_num, range.start_mark, range.end_mark);
+        }
+    }
+    */
 
     if (task->size_predictor)
     {
@@ -422,9 +621,64 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
             task->size_predictor->update(sample_block, read_result.columns, read_result.num_rows);
     }
 
+    if (read_result.num_rows == 0)
+        return {Block(), read_result.num_rows, num_read_rows, num_read_bytes};
+
+    /// Remove distance_func column from read_result.columns, it will be added by vector search.
+    Columns ordered_columns;
+    ordered_columns.reserve(sample_block.columns());
+    for (size_t ps = 0; ps < sample_block.columns(); ++ps)
+    {
+        auto & col_name = sample_block.getByPosition(ps).name;
+        /// TODO: not add distance column to header_without_virtual_columns
+        if (isVectorScanFunc(col_name))
+            continue;
+        ordered_columns.emplace_back(std::move(read_result.columns[ps]));
+    }
+
+    auto read_end_time = std::chrono::system_clock::now();
+
+    LOG_DEBUG(log, "[readFromPartImpl] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
+
+    /// [MQDB] vector search
+    if (task->vector_scan_manager)
+    {
+        /// already perform vector scan
+        if (task->vector_scan_manager->preComputed())
+        {
+            task->vector_scan_manager->mergeResult(
+                ordered_columns,
+                read_result.num_rows,
+                read_ranges);
+        }
+        else
+        {
+            task->vector_scan_manager->executeAfterRead(
+                task->data_part->getDataPartStorage().getFullPath(),
+                task->data_part,
+                ordered_columns,
+                read_result.num_rows,
+                read_ranges,
+                this->prewhere_info != nullptr,
+                read_result.final_filter);
+        }
+    }
+
+    if (pk_cache_side)
+    {
+        /// load pk's bin to memory
+        Columns pk_columns;
+        bool r = readPrimaryKeyBin(pk_columns);
+
+        if (r)
+        {
+            PrimaryKeyCacheManager::getMgr().setPartPkCache(cache_key, pk_columns);
+        }
+    }
+
     Block block;
     if (read_result.num_rows != 0)
-        block = sample_block.cloneWithColumns(read_result.columns);
+        block = sample_block.cloneWithColumns(ordered_columns);
 
     BlockAndProgress res = {
         .block = std::move(block),
@@ -436,6 +690,121 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 }
 
 
+bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
+{
+    Poco::Logger * const log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
+
+    const KeyDescription & primary_key = storage_snapshot->metadata->getPrimaryKey();
+    const size_t pk_columns_size = primary_key.column_names.size();
+
+    NamesAndTypesList cols;
+    const std::vector<String> pk_column_names = primary_key.column_names;
+    for (const String & col_name : pk_column_names)
+    {
+        std::optional<NameAndTypePair> nt = storage_snapshot->metadata->getColumns().getAllPhysical().tryGetByName(col_name);
+        if (nt)
+        {
+            cols.emplace_back(*nt);
+        }
+    }
+    const size_t cols_size = cols.size();
+
+    if (pk_columns_size == 0 || pk_columns_size != cols_size)
+    {
+        LOG_ERROR(log, "[readPrimaryKeyBin]: pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
+        return false;
+    }
+
+    LOG_DEBUG(log, "[readPrimaryKeyBin]: pk_columns_size = {}", pk_columns_size);
+
+    MutableColumns buffered_columns;
+    buffered_columns.resize(cols_size);
+    for (size_t i = 0; i < cols_size; ++i)
+    {
+        buffered_columns[i] = primary_key.data_types[i]->createColumn();
+    }
+
+    MergeTreeReaderPtr reader = task->data_part->getReader(
+        cols,
+        storage_snapshot->metadata,
+        MarkRanges{MarkRange(0, task->data_part->getMarksCount())},
+        nullptr,
+        storage.getContext()->getMarkCache().get(),
+        reader_settings,
+        {},
+        {});
+
+    if (!reader)
+    {
+        LOG_ERROR(log, "[readPrimaryKeyBin]: make reader failed");
+        return false;
+    }
+
+
+    /// begin to read
+
+    const MergeTreeIndexGranularity & index_granularity = task->data_part->index_granularity;
+
+    size_t current_mark = 0;
+    const size_t total_mark = task->data_part->getMarksCount();
+
+    size_t num_rows_read = 0;
+    const size_t num_rows_total = task->data_part->rows_count;
+
+    LOG_DEBUG(log, "[readPrimaryKeyBin]: total_mark = {}", total_mark);
+    LOG_DEBUG(log, "[readPrimaryKeyBin]: num_rows_total = {}", num_rows_total);
+
+    bool continue_read = false;
+
+    while (num_rows_read < num_rows_total)
+    {
+        size_t remaining_size = num_rows_total - num_rows_read;
+
+        LOG_DEBUG(log, "[readPrimaryKeyBin]: in loop: num_rows_read = {}", num_rows_read);
+        LOG_DEBUG(log, "[readPrimaryKeyBin]: in loop: remaining_size = {}", remaining_size);
+
+        Columns result;
+        result.resize(cols_size);
+
+        size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+
+        LOG_DEBUG(log, "[readPrimaryKeyBin]: in loop, count rows have be read = {}", num_rows);
+
+        continue_read = true;
+        num_rows_read += num_rows;
+
+        for (size_t i = 0; i < cols_size; ++i)
+        {
+            buffered_columns[i]->insertRangeFrom(*result[i], 0, result[i]->size());
+        }
+
+        /// calculate next mark
+        for (size_t mark = 0; mark < total_mark - 1; ++mark)
+        {
+            if (index_granularity.getMarkStartingRow(mark) >= num_rows_read
+                && index_granularity.getMarkStartingRow(mark + 1) < num_rows_read)
+            {
+                current_mark = mark;
+            }
+        }
+    }
+
+    for (auto & buffered_column : buffered_columns)
+    {
+        buffered_column->protect();
+    }
+
+    LOG_DEBUG(log, "[readPrimaryKeyBin]: finally, {} rows has been read", buffered_columns[0]->size());
+
+    out_columns.assign(
+        std::make_move_iterator(buffered_columns.begin()),
+        std::make_move_iterator(buffered_columns.end())
+    );
+
+    return true;
+}
+
+
 IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromPart()
 {
     if (!task->range_reader.isInitialized())
@@ -443,7 +812,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     return readFromPartImpl();
 }
-
 
 namespace
 {

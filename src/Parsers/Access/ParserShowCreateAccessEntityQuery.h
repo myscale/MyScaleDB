@@ -16,6 +16,7 @@ namespace DB
   * SHOW CREATE [ROW] POLICIES [name ON [database.]table [, name2 ON database2.table2 ...] | name | ON database.table]
   * SHOW CREATE QUOTA [name]
   * SHOW CREATE QUOTAS [name [, name2 ...]]
+  * SHOW CREATE CONNETION [name]
   */
 class ParserShowCreateAccessEntityQuery : public IParserBase
 {

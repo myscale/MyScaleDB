@@ -1,0 +1,1004 @@
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <random>
+#include <thread>
+#include <omp.h>
+
+#include <Common/HashTable/HashMap.h>
+#include <Compression/CompressedReadBuffer.h>
+#include <Compression/CompressedWriteBuffer.h>
+#include <Compression/CompressedReadBufferFromFile.h>
+#include <IO/ReadBufferFromFile.h>
+#include <IO/WriteHelpers.h>
+#include <VectorIndex/BruteForceSearch.h>
+#include <VectorIndex/CacheManager.h>
+#include <VectorIndex/DiskIOReader.h>
+#include <VectorIndex/DiskIOWriter.h>
+#include <VectorIndex/IndexException.h>
+#include <VectorIndex/VectorIndexFactory.h>
+#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/MergeUtils.h>
+
+#include <Common/logger_useful.h>
+
+namespace VectorIndex
+{
+std::once_flag once;
+std::shared_mutex mu;
+std::condition_variable_any cv;
+int num_thread_for_vector;
+std::atomic_int count;
+
+/// TODO segment_id needs to be dynamic in the future
+VectorSegmentExecutor::VectorSegmentExecutor(IndexType type_, const SegmentId & segment_id_, Parameters des_, size_t dimension_)
+    : dimension(dimension_), type(type_), segment_id(segment_id_), log(&Poco::Logger::get("VectorSegmentExecutor")), des(des_)
+{
+    std::call_once(once, [&] {
+        int num_threads = omp_get_max_threads();
+        if (num_threads <= 0)
+        {
+            num_threads = 16;
+        }
+        num_thread_for_vector = num_threads;
+        omp_set_num_threads(num_thread_for_vector);
+        count.store(0);
+        LOG_INFO(log, "set omp_num_threads to {}", num_threads);
+    });
+}
+
+VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_)
+    : dimension(0)
+    , type(IndexType::FLAT)
+    , mode(IndexMode::CPU)
+    , me(Metrics::L2)
+    , segment_id(segment_id_)
+    , log(&Poco::Logger::get("VectorSegmentExecutor"))
+{
+}
+
+Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t total_vectors_expected)
+{
+    Parameters para_copy = des;
+    try
+    {
+        if (!index)
+        {
+            //        if(data_set->getVectorNum()< MAX_BRUTE_FORCE_SEARCH_SIZE){
+            //            type = IndexType::FLAT;
+            //        }
+            LOG_INFO(log, "Index type actually created {}", VectorIndexFactory::typeToString(type));
+            if (para_copy.contains("metric_type"))
+            {
+                me = VectorIndexFactory::createIndexMetrics(para_copy.at("metric_type"));
+                para_copy.erase("metric_type");
+            }
+            if (para_copy.contains("mode"))
+            {
+                mode = VectorIndexFactory::createIndexMode(para_copy.at("mode"));
+                para_copy.erase("mode");
+            }
+            if (para_copy.contains("compression_scheme"))
+            {
+                cmb = DB::CompressionCodecFactory::instance().get(para_copy.find("compression_scheme")->second, {})->getMethodByte();
+                para_copy.erase("compression_scheme");
+            }
+            index = VectorIndexFactory::createIndex(type, mode, me, this->dimension, para_copy);
+
+            {
+                /// slow mode
+                if (containRowIdsMaps(segment_id.data_part_path))
+                {
+                    int num_threads = omp_get_max_threads();
+                    /// only use half cores
+                    omp_set_num_threads(std::max(1, num_threads / 4));
+                    LOG_INFO(log, "slow mode, set num threads from {} to {}", num_threads, std::max(1, num_threads / 4));
+                }
+            }
+
+            index->train(data_set, total_vectors_expected);
+            if (delete_bitMap == nullptr)
+            {
+                delete_bitMap = std::make_shared<GeneralBitMap>(total_vectors_expected);
+                memset(delete_bitMap->bitmap, 255, (total_vectors_expected / 8) + 1);
+            }
+            return Status();
+        }
+        else
+        {
+            /// maybe can never reach here
+            return Status(5, "vector index already built!");
+        }
+    }
+    catch (const IndexException & e)
+    {
+        std::cerr << "IndexException: " << e.message();
+        return Status(e.code(), e.message());
+    }
+}
+
+void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
+{
+    handleMergedMaps();
+    if (inverted_row_sources_map.empty())
+    {
+        return;
+    }
+    CacheKey cache_key = segment_id.getCacheKey();
+    CacheManager * mgr = CacheManager::getInstance();
+    IndexWithMetaPtr index = mgr->get(cache_key);
+    if (index != nullptr)
+    {
+        index->row_ids_map = this->row_ids_map;
+        index->inverted_row_ids_map = this->inverted_row_ids_map;
+        index->inverted_row_sources_map = this->inverted_row_sources_map;
+    }
+    /// not handle empty cache case here.
+}
+
+
+Status VectorSegmentExecutor::cache()
+{
+    CacheManager * mgr = CacheManager::getInstance();
+    if (index == nullptr)
+    {
+        LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
+        return Status(3);
+    }
+    if (!des.contains("type"))
+    {
+        des.insert(std::make_pair("type", VectorIndexFactory::typeToString(type)));
+    }
+    /// when cacheIndexAndMeta() is called, related files should have already been loaded.
+    IndexWithMetaPtr cache_item = std::make_shared<IndexWithMeta>(index, total_vec, op_points, delete_bitMap, des,
+        row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
+    
+    LOG_INFO(log, "cache key: {}", segment_id.getCacheKey().toString());
+    mgr->put(segment_id.getCacheKey(), cache_item);
+    LOG_INFO(log, "num of item after cache {}", mgr->countItem());
+    return Status();
+}
+
+Status VectorSegmentExecutor::serialize()
+{
+    /// serialization contains three steps:
+    /// 1. write vector_index_ready file to mark that we start writting
+    /// 2. incrementally write index file
+    /// 3. write vector_index_ready file to mark that we finished writting
+    /// vector_index_ready file is a binary_log which can only be appended to but not altered
+    try
+    {
+        int64_t binary_total_size = 0;
+        bool last_part = false;
+        int segment_count = 0;
+        BinaryPtr index_binary;
+        startWrite();
+        while (!last_part)
+        {
+            ///even though we set the max bytes to serialize for serialization,
+            ///it could exceed this amount by accident,then we need to handle the exceeded part.
+            LOG_INFO(log, "expected segment_size: {}", optimal_segment_size);
+            index_binary = index->serialize(optimal_segment_size, last_part);
+            if (index_binary->size <= 0)
+            {
+                break;
+            }
+            binary_total_size += index_binary->size;
+            LOG_INFO(log, "binary_total_size: {}", binary_total_size);
+            int64_t actual_all = index_binary->size;
+            int64_t written = 0;
+            while (actual_all > 0)
+            {
+                size_t max_allowed_per_write = compressBound(actual_all, cmb);
+                bool last_sub_part = (last_part & (max_allowed_per_write == actual_all));
+                ///write index loop, compress and write index in small parts
+                Status stat = writePart(last_sub_part, segment_count, index_binary->data + written, max_allowed_per_write);
+                if (!stat.fine())
+                {
+                    return stat;
+                }
+                segment_count++;
+                actual_all -= max_allowed_per_write;
+                written += max_allowed_per_write;
+            }
+        }
+
+        writeBitMap();
+        return finishWrite(binary_total_size);
+    }
+    catch (std::exception & e)
+    {
+        LOG_ERROR(log, "something went wrong during serialzing: {}", e.what());
+    }
+    return Status();
+}
+
+Status VectorSegmentExecutor::startWrite()
+{
+    DiskIOWriter ready_flag_writer;
+    /// try a more elegant way
+    /// String ready_file_path = segment_id.substr(0, segment_id.find("//")) + "/" + VECTOR_INDEX_READY;
+    String ready_file_path = segment_id.getVectorReadyFilePath();
+    String index_type = VectorIndexFactory::typeToString(type);
+    String paras = "";
+    String index_name = segment_id.getIndexNameWithColumn();
+    /// -1 means the index is invalid in disk
+    String binary_total_size_str = "-1";
+    String nextline = "\n";
+    
+    if (!ready_flag_writer.open(ready_file_path + VECTOR_INDEX_FILE_SUFFIX, true))
+    {
+        if (!ready_flag_writer.open(ready_file_path, true))
+        {
+            LOG_ERROR(log, "fail to open {}", ready_file_path);
+            return Status(5, "not able to open ready flag for write!");
+        }
+    }
+    String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
+    LOG_INFO(log, "{}, length{}", all_string_together, all_string_together.length());
+    ready_flag_writer.seekp(0, seekdir::end);
+    ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
+    ready_flag_writer.close();
+    return Status();
+}
+
+Status VectorSegmentExecutor::writePart(bool final, int segment_count, uint8_t * index_segment_offset, size_t index_segment_size)
+{
+    std::string part_id = segment_id.getFullPath() + "_" + ItoS(segment_count) + VECTOR_INDEX_FILE_SUFFIX;
+    BinaryPtr index_binary_compressed = std::make_shared<Binary>();
+    LOG_INFO(log, "Size of binary before compress: {}", index_segment_size);
+    compressWithCheckSum(index_segment_offset, index_segment_size, index_binary_compressed);
+    LOG_INFO(log, "Size of binary after compress: {}", index_binary_compressed->size);
+    DiskIOWriter writer;
+    if (!writer.open(part_id, false))
+    {
+        LOG_ERROR(log, "fail to open {}", part_id);
+        return Status(5, "not able to open file!");
+    }
+    int64_t final_mark = final ? 1 : 0;
+    int64_t binary_length_compressed = index_binary_compressed->size;
+    int64_t binary_length_original = index_segment_size;
+    ///when this is the last part to write, the mark will be 1, else 0.
+    writer.write(&final_mark, sizeof(final_mark));
+    ///compressed size of binaries of index
+    writer.write(&binary_length_compressed, sizeof(binary_length_compressed));
+    ///uncompressed size of binaries of index
+    writer.write(&binary_length_original, sizeof(binary_length_original));
+    ///total vector
+    writer.write(&total_vec, sizeof(total_vec));
+    ///compressed binaries of index
+    writer.write(index_binary_compressed->data, binary_length_compressed);
+    /// writer.write(index_segment_offset, index_segment_size);
+    writer.close();
+    ///after serializing the index, we write a ready flag to mark future
+    ///TODO with checksum, we can possiblly drop this
+    return Status();
+}
+
+Status VectorSegmentExecutor::finishWrite(int64_t binary_total_size)
+{
+    DiskIOWriter ready_flag_writer;
+    String ready_file_path = segment_id.getVectorReadyFilePath();
+    String index_type;
+    index_type = VectorIndexFactory::typeToString(type);
+    String paras;
+    for (auto & s : des)
+    {
+        LOG_INFO(log, "{}", s.first);
+        LOG_INFO(log, "{}", s.second);
+        LOG_INFO(log, "{}", paras);
+        paras = paras + s.first + ",";
+        paras = paras + s.second + ",";
+    }
+    String index_name = segment_id.getIndexNameWithColumn();
+    String binary_total_size_str = ItoS(binary_total_size);
+    String nextline = "\n";
+    ///TODO,This is hacky, as our segment_id is like store/12345/all_1_1_0//v1, the extra / before v1 gives a delimeter.
+    ///need to find a better way to handle this
+    if (!ready_flag_writer.open(ready_file_path + VECTOR_INDEX_FILE_SUFFIX, true))
+    {
+        if (!ready_flag_writer.open(ready_file_path, true))
+        {
+            LOG_ERROR(log, "fail to open {}", ready_file_path);
+            return Status(5, "not able to open ready flag for write!");
+        }
+    }
+    String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
+    LOG_INFO(log, "{}, length {}", all_string_together, all_string_together.length());
+    ready_flag_writer.seekp(0, seekdir::end);
+    ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
+    ready_flag_writer.close();
+    return Status();
+}
+
+void VectorSegmentExecutor::handleMergedMaps()
+{
+    /// not from merge or have already loaded related row ids maps
+    if (!segment_id.fromMergedParts() || !inverted_row_ids_map.empty())
+    {
+        return;
+    }
+    auto row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getRowIdsMapFilePath()));
+    auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowIdsMapFilePath()));
+    auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowSourcesMapFilePath()));
+
+    while (!inverted_row_sources_map_buf->eof())
+    {
+        uint8_t * row_source_pos = reinterpret_cast<uint8_t *>(inverted_row_sources_map_buf->position());
+        uint8_t * row_sources_end = reinterpret_cast<uint8_t *>(inverted_row_sources_map_buf->buffer().end());
+        LOG_DEBUG(log, "[generateRowIdsMap]: read from rows_sources_file: size {}", row_sources_end - row_source_pos);
+
+        while (row_source_pos < row_sources_end)
+        {
+            inverted_row_sources_map.push_back(*row_source_pos);
+            ++row_source_pos;
+        }
+
+        inverted_row_sources_map_buf->position() = reinterpret_cast<char *>(row_source_pos);
+    }
+
+    LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} inverted row sources map entries", inverted_row_sources_map.size());
+
+    UInt64 row_id;
+    
+    while (!row_ids_map_buf->eof())
+    {
+        readIntText(row_id, *row_ids_map_buf);
+        row_ids_map_buf->ignore();
+        row_ids_map.push_back(row_id);
+    }
+
+    LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} row ids map entries", row_ids_map.size());
+
+    while (!inverted_row_ids_map_buf->eof())
+    {
+        readIntText(row_id, *inverted_row_ids_map_buf);
+        inverted_row_ids_map_buf->ignore();
+        inverted_row_ids_map.push_back(row_id);
+    }
+
+    LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} inverted row ids map entries", inverted_row_ids_map.size());
+}
+
+Status VectorSegmentExecutor::load()
+{
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+    IndexWithMetaPtr new_index = mgr->get(cache_key);
+    if (new_index == nullptr)
+    {
+        ///we don't want many execution engine reading disk and preserving multiple copies of index, so we use a unique lock to
+        ///ensure that only one execution engine may read from disk at any time.
+        LOG_INFO(log, "[load] num of item before cache {}", mgr->countItem());
+        mgr->startLoading(cache_key);
+        std::shared_ptr<std::mutex> this_segment_mutex = mgr->getMutex(cache_key);
+        if (this_segment_mutex != nullptr)
+        {
+            LOG_TRACE(log, "entering critical area");
+            const std::lock_guard<std::mutex> lock(*this_segment_mutex);
+            LOG_TRACE(log, "acquired lock");
+            /// when it acquires the lock, it has to double check if the index was cached by its previous execution engine
+            IndexWithMetaPtr new_index = mgr->get(cache_key);
+            if (new_index != nullptr)
+            {
+                index = new_index->index;
+                total_vec = new_index->total_vec;
+                op_points = new_index->op_points;
+                delete_bitMap = new_index->delete_bitMap;
+                des = new_index->des;
+                if (auto_tune && getOps().getCode() != 0)
+                {
+                    LOG_WARNING(log, "Index not autotuned");
+                }
+                return Status();
+            }
+
+            DiskIOReader reader;
+            ///TODO this is really funky... have to change it later
+            String ready_file_path = segment_id.getVectorReadyFilePath();
+            String index_name = segment_id.getIndexNameWithColumn();
+            std::vector<String> index_names{index_name};
+            std::unordered_map<std::string, Parameters> params;
+            std::unordered_map<String, int64_t> original_binary_sizes
+                = readVectorIndexReadyFile(reader, ready_file_path, index_names, params);
+            if (original_binary_sizes.find(index_name) == original_binary_sizes.end())
+            {
+                return Status(5, "unable to parse the original index size " + ready_file_path);
+            }
+            int64_t original_binary_size = original_binary_sizes.find(index_name)->second;
+            if (original_binary_size < 0)
+            {
+                return Status(5, "unable to parse the original index size " + ready_file_path);
+            }
+            des = params.at(index_name);
+            BinaryPtr index_binary = std::make_shared<Binary>();
+            index_binary->size = original_binary_size;
+            LOG_INFO(log, "[load] original_binary_size: {}", original_binary_size);
+            index_binary->data = new uint8_t[original_binary_size];
+            bool next = true;
+            int part_count = 0;
+            int64_t current_loaded_size = 0;
+            while (next)
+            {
+                Status stat = readPart(next, part_count, index_binary->data + current_loaded_size, current_loaded_size);
+                if (!stat.fine())
+                {
+                    return stat;
+                }
+                part_count++;
+            }
+            LOG_DEBUG(log, "[load] after read part");
+
+            if (current_loaded_size != original_binary_size)
+            {
+                LOG_ERROR(log, "vector index binary size not matching size recorded in metadata, this might be corrupted data.");
+                return Status(5, "corrupted data: " + segment_id.getFullPath());
+            }
+
+            if (!readBitMap())
+            {
+                LOG_WARNING(log, "vector bitMap file not readable !");
+                return Status(5, "corrupted data: " + segment_id.getFullPath());
+            }
+
+            if (des.contains("metric_type"))
+            {
+                me = VectorIndexFactory::createIndexMetrics(des.at("metric_type"));
+                des.erase("metric_type");
+            }
+            Parameters place_holder;
+            index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
+            //        if(total_vec < MAX_BRUTE_FORCE_SEARCH_SIZE){
+            //            type = IndexType::FLAT;
+            //        }
+            LOG_INFO(log, "[load] start loading index: total_vec: {}", total_vec);
+            try
+            {
+                index->load(index_binary, total_vec);
+            }
+            catch (IndexException & e)
+            {
+                return Status(e.code(), e.message());
+            }
+            index->setTrained();
+            index->parseParameter(des);
+            LOG_INFO(log, "[load] finish loading index");
+            if (auto_tune && getOps().getCode() != 0)
+            {
+                LOG_WARNING(log, "Index not autotuned");
+            }
+            handleMergedMaps();
+            return cache();
+        }
+        else
+        {
+            return Status(4, "can't lock this segment, aborting: " + segment_id.getCacheKey().toString());
+        }
+    }
+    else
+    {
+        index = new_index->index;
+        total_vec = new_index->total_vec;
+        op_points = new_index->op_points;
+        delete_bitMap = new_index->delete_bitMap;
+        des = new_index->des;
+        if (!new_index->row_ids_map.empty())
+        {
+            row_ids_map = new_index->row_ids_map;
+            inverted_row_ids_map = new_index->inverted_row_ids_map;
+            inverted_row_sources_map = new_index->inverted_row_sources_map;
+        }
+        else
+        {
+            updateCacheValueWithRowIdsMaps();
+        }
+
+        if (auto_tune && getOps().getCode() != 0)
+        {
+            LOG_WARNING(log, "Index not autotuned");
+        }
+        return Status();
+    }
+}
+
+Status VectorSegmentExecutor::readPart(bool & next, int part_count, uint8_t* index_binary, int64_t & current_loaded_size)
+{
+    DiskIOReader reader;
+    if (!reader.open(segment_id.getFullPath() + "_" + ItoS(part_count) + VECTOR_INDEX_FILE_SUFFIX))
+    {
+        if (!reader.open(segment_id.getFullPath() + "_" + ItoS(part_count)))
+        {
+            return Status(5, "unable to open file" + segment_id.getFullPath() + "_" + ItoS(part_count));
+        }
+    }
+    BinaryPtr index_binary_compressed = std::make_shared<Binary>();
+    /// first 8 bytes is final mark, deciding if this is the last segment
+    int64_t final_mark;
+    reader.read(&final_mark, sizeof(final_mark));
+    if (final_mark)
+    {
+        next = false;
+    }
+
+    /// second 8 bytes are meta recording compressed binary size of index
+    reader.seekg(sizeof(int64_t));
+    int64_t binary_length;
+    reader.read(&binary_length, sizeof(binary_length));
+    LOG_INFO(log, "binary length in meta {}", binary_length);
+
+    /// third 8 bytes are meta recording uncompressed binary size of index
+    reader.seekg(sizeof(int64_t) * 2);
+    int64_t binary_length_original;
+    reader.read(&binary_length_original, sizeof(binary_length_original));
+    LOG_INFO(log, "binary length originally in meta {}", binary_length_original);
+
+    /// fourth 8 bytes records total vectors stored, this is repeated many times. Could be d, or not.
+    reader.seekg(sizeof(int64_t) * 3);
+    int64_t total_vec_bin;
+    reader.read(&total_vec_bin, sizeof(total_vec_bin));
+    LOG_INFO(log, "total vectors read: {}", total_vec_bin);
+    total_vec = total_vec_bin;
+
+    /// finally we have the compressed binaries
+    reader.seekg(sizeof(int64_t) * 4);
+    index_binary_compressed->data = new uint8_t[binary_length];
+    index_binary_compressed->size = binary_length;
+    reader.read(index_binary_compressed->data, binary_length);
+    /// reader.read(index_binary, binary_length_original);
+    
+    validateAndDecompress(index_binary_compressed, binary_length_original, index_binary);
+    
+    current_loaded_size += binary_length_original;
+    LOG_INFO(log, "current_loaded_size: {}", current_loaded_size);
+
+    return Status();
+}
+
+Status VectorSegmentExecutor::addVectors(VectorDatasetPtr dataset)
+{
+    LOG_TRACE(log, "adding {} vectors", dataset->getVectorNum());
+    index->addWithoutId(dataset);
+    total_vec += dataset->getVectorNum();
+    index->setTrained();
+    ///index is only searchable after the first call to addVector.
+    ///this bypassed some concurrency problem.
+    return Status();
+}
+
+Status VectorSegmentExecutor::search(
+    VectorDatasetPtr dataset, int32_t k, float *& distances, int64_t *& labels, GeneralBitMapPtr filter, Parameters parameters)
+{
+    bool added = false;
+    try
+    {
+        if (index == nullptr)
+        {
+            return Status(3, "index not initialized before searching!");
+        }
+        if (!index->trainStatus())
+        {
+            return Status(7, "index not trained before searching!");
+        }
+        if (dataset->getDimension() != dimension)
+        {
+            return Status(10, "the dimension of searched index and input doesn't match.");
+        }
+        LOG_INFO(log, "{} vectors in engine {}", this->total_vec, this->segment_id.getFullPath());
+        Parameters params = parameters;
+        if (op_points != nullptr)
+        {
+            ///TODO pass acc_req in from user
+            float acc_req = 0.9;
+            bool satisfied = false;
+            for (auto & acc_parameters : *op_points)
+            {
+                LOG_DEBUG(log, "op point tested with acc {},", acc_parameters.first);
+                if (acc_parameters.first >= acc_req)
+                {
+                    params = acc_parameters.second->op_point;
+                    satisfied = true;
+                    break;
+                }
+            }
+            if (!satisfied)
+            {
+                LOG_WARNING(log, "index can't satisfy the required accuracy, switching to brute force search.");
+                return Status(200);
+            }
+        }
+
+        //filter = mergeBitMap(filter, this->getDeleteBitMap());
+
+        std::shared_lock<std::shared_mutex> lock(mu);
+        cv.wait(lock, [] { return count.load() <= num_thread_for_vector; });
+        count.fetch_add(1);
+        added = true;
+        LOG_INFO(log, "[search] index search, num threads: {}", omp_get_max_threads());
+        /// a shared lock on a small number of concurrent threads, like 16. this is not hard limit so race is not a problem.
+        index->search(dataset, k, distances, labels, params, filter);
+
+        transferToNewRowIds(labels, k * dataset->getVectorNum());
+        LOG_INFO(log, "[search] after transfer row ids");
+    }
+    catch (const IndexException & e)
+    {
+        std::cerr << "IndexException: " << e.message();
+        if (added)
+            count.fetch_sub(1);
+        cv.notify_one();
+        return Status(e.code(), e.message());
+    }
+    if (added)
+        count.fetch_sub(1);
+    cv.notify_one();
+    LOG_INFO(log, "[search] before return status");
+    return Status();
+}
+
+Status VectorSegmentExecutor::searchWithoutIndex(
+    VectorDatasetPtr query_data, VectorDatasetPtr base_data, int32_t k, float *& distances, int64_t *& labels, const Metrics& metrics)
+{
+    LOG_DEBUG(&Poco::Logger::get("VectorSegmentExecutor"), "[searchWithoutIndex] query_data {}", query_data->printVectors());
+    omp_set_num_threads(1);
+    return tryBruteForceSearch(
+        query_data->getData(),
+        base_data->getData(),
+        query_data->getDimension(),
+        k,
+        query_data->getVectorNum(),
+        base_data->getVectorNum(),
+        labels,
+        distances,
+        metrics);
+}
+
+float * VectorSegmentExecutor::getDataInMem()
+{
+    if (index->inMemVectors())
+    {
+        return index->getInMemVectors()->getData();
+    }
+    return nullptr;
+}
+
+Status VectorSegmentExecutor::copyToCpu()
+{
+    //TODO
+    return Status();
+}
+
+// Status VectorSegmentExecutor::copyToGpu(int32_t device_id, bool hybrid)
+// {
+//TODO
+//     return Status();
+// }
+
+IndexType VectorSegmentExecutor::indexType()
+{
+    return index->indexType();
+}
+
+Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
+{
+    CacheManager * mgr = CacheManager::getInstance();
+    LOG_INFO(&Poco::Logger::get("VectorSegmentExecutor"), "[removeFromCache] num of item before cache{}", mgr->countItem());
+    mgr->forceExpire(cache_key);
+    LOG_INFO(&Poco::Logger::get("VectorSegmentExecutor"), "[removeFromCache] num of item after cache{}", mgr->countItem());
+    return Status();
+}
+
+int64_t VectorSegmentExecutor::getRawDataSize()
+{
+    return total_vec;
+}
+
+void VectorSegmentExecutor::setIndexParameters(Parameters p)
+{
+    index->getMyParameters(p);
+}
+
+
+Status VectorSegmentExecutor::dispathAutoTuneTask(VectorDatasetPtr base)
+{
+    if (base->getDimension() != dimension)
+    {
+        return Status(10, "dimension of base vector no matching index");
+    }
+    if (base->getVectorNum() < MAX_BRUTE_FORCE_SEARCH_SIZE)
+    {
+        return Status(0, "base too small, no need to tune, just brute force.");
+    }
+    ///TODO make this user-defined
+    int default_topk = 50;
+    int default_query_size = 1000 < base->getVectorNum() ? 1000 : base->getVectorNum();
+    Metrics default_metrics = me;
+    ///These two vectors are deconstrcuted by Autotuner
+    std::vector<float> * query = new std::vector<float>(default_query_size * dimension);
+    /// gt_dis here is just a place holder, we don't need the data.
+    std::vector<float> gt_dis(default_topk * default_query_size);
+    std::vector<int64_t> * gt = new std::vector<int64_t>(default_topk * default_query_size);
+    getQueryandGt(base, gt_dis.data(), gt->data(), query->data(), default_topk, default_query_size, default_metrics);
+    TuningPackPtr pack = std::make_shared<TuningPack>(index, query, gt, default_topk, default_query_size, false);
+    Autotuner * tuner = Autotuner::getInstance();
+    tuner->addTask(segment_id.getFullPath(), pack);
+    return Status();
+}
+
+/// base here is just used as query, not search base.
+Status VectorSegmentExecutor::tune(VectorDatasetPtr base, std::vector<int64_t> & empty_ids, size_t current_round_start_row)
+{
+    if (auto * ivfflat = dynamic_cast<IVFFlatIndex *>(index.get()))
+    {
+        int default_query_size = std::min(base->getVectorNum(), (int64_t)2000);
+        int default_topk = 50;
+        int dimension = base->getDimension();
+        if (default_query_size < 2000)
+        {
+            LOG_WARNING(log, "Not enough data points to train this datapart.");
+            return Status();
+        }
+        std::vector<float> remove_empty;
+        size_t non_empty_size = 0;
+        auto empty_id = empty_ids.begin();
+        /// we need to filter out empty data because there are just 0.
+        for (int i = 0; i < default_query_size; i++)
+        {
+            if (empty_id != empty_ids.end() && i == *empty_id - current_round_start_row)
+            {
+                empty_id++;
+                continue;
+            }
+            remove_empty.insert(remove_empty.end(), base->getData() + i * dimension, base->getData() + (i + 1) * dimension);
+            non_empty_size++;
+        }
+
+        VectorDatasetPtr non_empty = std::make_shared<VectorDataset>(non_empty_size, dimension, remove_empty.data());
+        ivfflat->tune(non_empty, default_topk);
+    }
+    return Status();
+}
+
+
+///if the autoTuning has finished, we try to get the points from the disk
+///and load them into op_points
+Status VectorSegmentExecutor::getOps()
+{
+    if (op_points == nullptr)
+    {
+        DiskIOReader reader;
+        ///TODO this should be changed to checking hash of file
+        if (reader.open(segment_id.getFullPath() + PARAMETER_PACK_NAME))
+        {
+            op_points = std::make_shared<std::vector<std::pair<float, OperatingPointPtr>>>();
+            LOG_INFO(log, "{} successfully found the parameters pack", segment_id.getFullPath());
+            int64_t bin_size;
+            reader.read(&bin_size, sizeof(bin_size));
+            reader.seekg(sizeof(bin_size));
+            BinaryPtr ops_bin = std::make_shared<Binary>();
+            ops_bin->data = new uint8_t[bin_size];
+            ops_bin->size = bin_size;
+            reader.read(ops_bin->data, bin_size);
+            std::string params(reinterpret_cast<const char *>(ops_bin->data));
+            LOG_TRACE(log, "param: {}", params);
+            AccParametersPack pack = StringToAccParametersPack(params, log);
+            for (auto & m : pack)
+            {
+                OperatingPointPtr op = std::make_shared<OperatingPoint>();
+                for (auto & one_parameter : m.second)
+                {
+                    op->insertPoint(one_parameter.first, one_parameter.second);
+                }
+                LOG_INFO(log, "{} added op point {}", segment_id.getFullPath(), m.first);
+                op_points->emplace_back(std::make_pair(m.first, op));
+            }
+            std::sort(
+                op_points->begin(),
+                op_points->end(),
+                [](const std::pair<float, OperatingPointPtr> & a, const std::pair<float, OperatingPointPtr> & b) {
+                    return a.first < b.first;
+                });
+        }
+        else
+        {
+            LOG_WARNING(log, "The tuning for this index haven't finished.");
+        }
+    }
+    else
+    {
+        LOG_INFO(log, "op points already exist");
+    }
+    return Status();
+}
+
+uint32_t VectorSegmentExecutor::compressWithCheckSum(uint8_t * source, size_t size, BinaryPtr des)
+{
+    //DB::WriteBuffer out(des,size);
+    DB::CompressionCodecPtr codec = DB::CompressionCodecFactory::instance().get(cmb);
+    size_t decompressed_size = size;
+    des->data = new uint8_t[codec->getCompressedReserveSize(decompressed_size)];
+    uint32_t size_compressed
+        = codec->compress(reinterpret_cast<const char *>(source), decompressed_size, reinterpret_cast<char *>(des->data));
+    /// although we preallocated much more memory than needed, this is the amount actually need to get
+    /// serialized
+    des->size = size_compressed;
+    return size_compressed;
+}
+
+uint32_t VectorSegmentExecutor::validateAndDecompress(BinaryPtr source, size_t uncompressed_size, uint8_t * des)
+{
+    uint8_t method = DB::ICompressionCodec::readMethod(reinterpret_cast<const char *>(source->data));
+    //    if(method==static_cast<const UInt8>(DB::CompressionMethodByte::NONE)){
+    //        ///if no compression,don't decompress, just point des to source
+    //        des.swap(source);
+    //        des->data = &des->data[DB::ICompressionCodec::getHeaderSize()];
+    //        des->size-= DB::ICompressionCodec::getHeaderSize();
+    //        return des->size;
+    //    }
+    DB::CompressionCodecPtr codec = DB::CompressionCodecFactory::instance().get(method);
+    uint32_t size_decompressed
+        = codec->decompress(reinterpret_cast<const char *>(source->data), source->size, reinterpret_cast<char *>(des));
+
+    LOG_INFO(log, "[validateAndDecompress] decompressed size: {}", size_decompressed);
+    
+    if (uncompressed_size != size_decompressed)
+    {
+        LOG_ERROR(
+            log, "The binary is corrupted, decompressed size: {}, recorded decompressed sized: {}", size_decompressed, uncompressed_size);
+        throw IndexException(4, "disk vector index data corrupted");
+    }
+    return size_decompressed;
+}
+
+Status VectorSegmentExecutor::cancelBuild()
+{
+    ///TODO implement
+    return Status();
+}
+
+Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
+{
+    LOG_INFO(log, "need to remove {} ids", n);
+    int64_t removed = index->removeWithIds(n, ids);
+    LOG_INFO(log, "removed {} ids", removed);
+    if (removed == n)
+    {
+        return Status();
+    }
+    else
+    {
+        return Status(10, "error during remove by id, removed item num: " + ItoS(removed) + ", needed to remove num:" + ItoS(n));
+    }
+}
+
+GeneralBitMapPtr VectorSegmentExecutor::getDeleteBitMapCopy()
+{
+    if (delete_bitMap != nullptr)
+    {
+        GeneralBitMapPtr copy = std::make_shared<GeneralBitMap>();
+        char * bits = new char[total_vec];
+        memcpy(bits, delete_bitMap->bitmap, (total_vec >> 3) + 1);
+        copy->bitmap = bits;
+        copy->size = total_vec;
+        return copy;
+    }
+    else
+    {
+        GeneralBitMapPtr copy = std::make_shared<GeneralBitMap>(total_vec);
+        memset(copy->bitmap, 255, (total_vec / 8) + 1);
+        return copy;
+    }
+}
+
+bool VectorSegmentExecutor::writeBitMap()
+{
+    DiskIOWriter bit_map_writer;
+    String bitMap_path = segment_id.getBitMapFilePath() + VECTOR_INDEX_FILE_SUFFIX;
+    bit_map_writer.open(bitMap_path, false);
+
+    int64_t total_vec = delete_bitMap->size;
+    int64_t byte_count = (total_vec >> 3) + 1;
+    bit_map_writer.write(&byte_count, sizeof(int64_t));
+
+    bit_map_writer.write(delete_bitMap->bitmap, byte_count);
+    bit_map_writer.close();
+
+    return true;
+}
+
+bool VectorSegmentExecutor::readBitMap()
+{
+    DiskIOReader bit_map_reader;
+    String read_file_path = segment_id.getBitMapFilePath();
+    if (delete_bitMap == nullptr)
+    {
+        delete_bitMap = std::make_shared<GeneralBitMap>(total_vec);
+    }
+
+    if (!bit_map_reader.open(read_file_path + VECTOR_INDEX_FILE_SUFFIX))
+    {
+        if (!bit_map_reader.open(read_file_path))
+        {
+            memset(delete_bitMap->bitmap, 255, (total_vec / 8) + 1);
+            return false;
+        }
+    }
+
+    int64_t bit_map_size;
+    bit_map_reader.read(&bit_map_size, sizeof(int64_t));
+    bit_map_reader.seekg(sizeof(int64_t));
+    bit_map_reader.read(delete_bitMap->bitmap, bit_map_size);
+
+    delete_bitMap->size = total_vec;
+
+    return true;
+}
+
+void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
+{
+    CacheManager::setCacheSize(size);
+}
+
+void VectorSegmentExecutor::setSerializeSegmentSize(size_t size)
+{
+    optimal_segment_size = size > MIN_SEGMENT_SIZE ? size : MIN_SEGMENT_SIZE;
+}
+
+bool VectorSegmentExecutor::compareVectorIndexParameters(IndexType t1, Parameters p1, IndexType t2, Parameters p2)
+{
+    Metrics me = L2;
+    IndexMode mode = CPU;
+    char cmb = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
+    if (p1.contains("metric_type"))
+    {
+        me = VectorIndexFactory::createIndexMetrics(p1.at("metric_type"));
+        p1.erase("metric_type");
+    }
+    if (p1.contains("mode"))
+    {
+        mode = VectorIndexFactory::createIndexMode(p1.at("mode"));
+        p1.erase("mode");
+    }
+    if (p1.contains("compression_scheme"))
+    {
+        cmb = DB::CompressionCodecFactory::instance().get(p1.at("compression_scheme"), {})->getMethodByte();
+        p1.erase("compression_scheme");
+    }
+
+    Metrics me2 = L2;
+    IndexMode mode2 = CPU;
+    char cmb2 = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
+    if (p2.contains("metric_type"))
+    {
+        me2 = VectorIndexFactory::createIndexMetrics(p2.at("metric_type"));
+        p2.erase("metric_type");
+    }
+    if (p2.contains("mode"))
+    {
+        mode2 = VectorIndexFactory::createIndexMode(p2.at("mode"));
+        p2.erase("mode");
+    }
+    if (p2.contains("compression_scheme"))
+    {
+        cmb2 = DB::CompressionCodecFactory::instance().get(p2.at("compression_scheme"), {})->getMethodByte();
+        p2.erase("compression_scheme");
+    }
+
+    if (cmb != cmb2)
+    {
+        return false;
+    }
+    int dimension = 1;
+    if (VectorIndexFactory::typeToString(t1).find("PQ") != -1 || VectorIndexFactory::typeToString(t2).find("PQ") != -1)
+    {
+        dimension = -1;
+    }
+    VectorIndexPtr index1 = VectorIndexFactory::createIndex(t1, mode, me, dimension, p1);
+    VectorIndexPtr index2 = VectorIndexFactory::createIndex(t2, mode2, me2, dimension, p2);
+    return (index1->compare(*index2));
+}
+
+std::list<std::pair<CacheKey, Parameters>> VectorSegmentExecutor::getAllCacheNames()
+{
+    ///from this list, we get <segment_id, vectorindex description> pair
+    return CacheManager::getInstance()->getAllItems();
+}
+
+}

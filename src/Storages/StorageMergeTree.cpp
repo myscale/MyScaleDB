@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include "StorageMergeTree.h"
 #include "Core/QueryProcessingStage.h"
 #include "Storages/MergeTree/IMergeTreeDataPart.h"
@@ -41,6 +45,8 @@
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
+#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/MergeUtils.h>
 
 namespace DB
 {
@@ -106,6 +112,7 @@ StorageMergeTree::StorageMergeTree(
     , reader(*this)
     , writer(*this)
     , merger_mutator(*this)
+    , vec_index_builder_updater(*this)
 {
     initializeDirectoriesAndFormatVersion(relative_data_path_, attach, date_column_name);
 
@@ -259,6 +266,8 @@ void StorageMergeTree::read(
     /// reset them to avoid holding them.
     auto & snapshot_data = assert_cast<MergeTreeData::SnapshotData &>(*storage_snapshot->data);
     snapshot_data.parts = {};
+    LOG_DEBUG(log, "[StorageMergeTree::read] after QueryPlan MergeTree read");
+
 }
 
 std::optional<UInt64> StorageMergeTree::totalRows(const Settings &) const
@@ -315,13 +324,15 @@ void StorageMergeTree::alter(
     StorageInMemoryMetadata old_metadata = getInMemoryMetadata();
     auto maybe_mutation_commands = commands.getMutationCommands(new_metadata, local_context->getSettingsRef().materialize_ttl_after_modify, local_context);
     Int64 mutation_version = -1;
+
+    auto maybe_vec_index_commands = commands.getVectorIndexCommands(new_metadata, local_context);
     commands.apply(new_metadata, local_context);
+    LOG_DEBUG(log, "[alter] get vec index commands: {}", maybe_vec_index_commands.size());
 
     /// This alter can be performed at new_metadata level only
     if (commands.isSettingsAlter())
     {
         changeSettings(new_metadata.settings_changes, table_lock_holder);
-
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
     }
     else
@@ -330,12 +341,18 @@ void StorageMergeTree::alter(
             changeSettings(new_metadata.settings_changes, table_lock_holder);
             checkTTLExpressions(new_metadata, old_metadata);
             /// Reinitialize primary key because primary key column types might have changed.
-            setProperties(new_metadata, old_metadata);
+            if (!maybe_vec_index_commands.empty())
+            {
+                LOG_DEBUG(log, "[alter] start vector index job");
+                startVectorIndexJob(maybe_vec_index_commands,new_metadata);
+            }
 
+            setProperties(new_metadata, old_metadata);
             DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
 
             if (!maybe_mutation_commands.empty())
                 mutation_version = startMutation(maybe_mutation_commands, local_context);
+
         }
 
         {
@@ -475,6 +492,34 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
     }
     background_operations_assignee.trigger();
     return version;
+}
+
+void StorageMergeTree::startVectorIndexJob(VectorIndexCommands vector_index_commands,StorageInMemoryMetadata& metadata)
+{
+    if (vector_index_commands.size() == 1 && vector_index_commands.back().drop_command)
+    {
+        ///nothing to do
+        for(auto& part:getDataPartsForInternalUsage())
+        {
+            LOG_INFO(log,"supposed to erase:{}",vector_index_commands.back().index_name);
+            LOG_INFO(log,"queue length {},",metadata.vec_indices_drop_queue.size());
+            for(const auto& vec_index_desc :metadata.vec_indices_drop_queue)
+            {
+                if(vec_index_desc.name==vector_index_commands.back().index_name)
+                {
+                    size_t erased = part->vector_indexed.erase(vec_index_desc.name+"_"+vec_index_desc.column);
+                    part->vector_index_build_error = false;
+                    LOG_INFO(log,"erased number:{}",erased);
+                }
+            }
+        }
+        metadata.vec_indices_drop_queue.clear();
+    }
+    else
+    {
+        /// handle add vector index command
+        background_operations_assignee.trigger();
+    }
 }
 
 
@@ -805,6 +850,25 @@ void StorageMergeTree::loadMutations()
         increment.value = std::max(increment.value.load(), current_mutations_by_version.rbegin()->first);
 }
 
+bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right)
+{
+    bool can_merge = true;
+    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    {
+        if ((left->containVectorIndex(vec_index.name, vec_index.column) && right->containVectorIndex(vec_index.name, vec_index.column)) 
+            || (!left->containVectorIndex(vec_index.name, vec_index.column) && !right->containVectorIndex(vec_index.name, vec_index.column)))
+        {
+            /// can merge case
+        }
+        else
+        {
+            can_merge = false;
+        }
+        
+    }
+    return can_merge;
+}
+
 MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
     const StorageMetadataPtr & metadata_snapshot,
     bool aggressive,
@@ -828,7 +892,7 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
     CurrentlyMergingPartsTaggerPtr merging_tagger;
     MergeList::EntryPtr merge_entry;
 
-    auto can_merge = [this, &lock](const DataPartPtr & left, const DataPartPtr & right, const MergeTreeTransaction * tx, String * disable_reason) -> bool
+    auto can_merge = [this, &lock, &metadata_snapshot](const DataPartPtr & left, const DataPartPtr & right, const MergeTreeTransaction * tx, String * disable_reason) -> bool
     {
         if (tx)
         {
@@ -895,7 +959,9 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
             return false;
         }
 
-        return true;
+        return !currently_vector_indexing_parts.contains(left) && !currently_vector_indexing_parts.contains(right)
+            && !VectorIndex::containRowIdsMaps(left) && !VectorIndex::containRowIdsMaps(right)
+            && canMergeForVectorIndex(metadata_snapshot, left, right);
     };
 
     SelectPartsDecision select_decision = SelectPartsDecision::CANNOT_SELECT;
@@ -1199,6 +1265,15 @@ UInt32 StorageMergeTree::getMaxLevelInBetween(const DataPartPtr & left, const Da
     return level;
 }
 
+void StorageMergeTree::finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr>& processed_parts)
+{
+    std::unique_lock lock(currently_processing_in_background_mutex);
+    for (auto & part : processed_parts)
+    {
+        currently_vector_indexing_parts.erase(part);
+    }
+}
+
 bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assignee)
 {
     if (shutdown_called)
@@ -1208,6 +1283,7 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
     auto metadata_snapshot = getInMemoryMetadataPtr();
     MergeMutateSelectedEntryPtr merge_entry, mutate_entry;
+    std::shared_ptr<VectorIndexEntry> vector_index_entry;
 
     auto shared_lock = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
 
@@ -1232,6 +1308,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
             mutate_entry = selectPartsToMutate(metadata_snapshot, nullptr, shared_lock, lock);
 
         has_mutations = !current_mutations_by_version.empty();
+        vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+        vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+            metadata_snapshot, currently_vector_indexing_parts, getContext()->getConfigRef().getUInt64("background_vector_pool_size", 4));
     }
 
     if (merge_entry)
@@ -1249,6 +1328,19 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     {
         auto task = std::make_shared<MutatePlainMergeTreeTask>(*this, metadata_snapshot, mutate_entry, shared_lock, common_assignee_trigger);
         assignee.scheduleMergeMutateTask(task);
+        return true;
+    }
+    if (vector_index_entry)
+    {
+        LOG_DEBUG(log, "create build vector index job");
+        /// std::unique_lock lock(currently_processing_in_background_mutex);
+        for (auto & part : vector_index_entry->data_parts)
+        {
+            currently_vector_indexing_parts.insert(part);
+        }
+        auto task = std::make_shared<VectorIndexMergeTreeTask>(
+            *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger);
+        assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (has_mutations)

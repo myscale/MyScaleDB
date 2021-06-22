@@ -5,6 +5,9 @@
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
 #include <Common/ProfileEventsScope.h>
 
+#include <Common/logger_useful.h>
+#include <base/sleep.h>
+
 namespace DB
 {
 
@@ -36,6 +39,8 @@ bool MergePlainMergeTreeTask::executeStep()
     if (merge_list_entry)
         switcher = std::make_unique<MemoryTrackerThreadSwitcher>(*merge_list_entry);
 
+    /// auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
+
     switch (state)
     {
         case State::NEED_PREPARE :
@@ -48,6 +53,14 @@ bool MergePlainMergeTreeTask::executeStep()
         {
             try
             {
+                /*
+                auto table_name = storage.getStorageID().getTableName();
+                if (table_name != "asynchronous_metric_log" && table_name != "trace_log" && table_name != "metric_log")
+                {
+                    LOG_INFO(logger, "{} Merge Execute now", storage.getStorageID().getTableName());
+                    sleepForSeconds(300);
+                }
+                */
                 if (merge_task->execute())
                     return true;
 
@@ -121,6 +134,12 @@ void MergePlainMergeTreeTask::prepare()
 
 void MergePlainMergeTreeTask::finish()
 {
+    /* auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
+
+    auto table_name = storage.getStorageID().getTableName();
+    if (table_name != "asynchronous_metric_log" && table_name != "trace_log" && table_name != "metric_log")
+        LOG_INFO(logger, "{} Merge Finish here", storage.getStorageID().getTableName());
+    */
     new_part = merge_task->getFuture().get();
 
     MergeTreeData::Transaction transaction(storage, txn.get());

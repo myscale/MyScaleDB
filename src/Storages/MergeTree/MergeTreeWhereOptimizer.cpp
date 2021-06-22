@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
@@ -14,6 +18,7 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/ActionsDAG.h>
 #include <base/map.h>
+#include <Common/VectorScanUtils.h>
 
 namespace DB
 {
@@ -215,6 +220,28 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 
         cond.columns_size = getColumnsSize(cond.table_columns);
 
+        auto containVectorScanFunc = [&]()
+        {
+            if (function_node_optional.has_value() && function_node_optional->getASTNode()
+                && function_node_optional->getASTNode()->as<ASTFunction>())
+            {
+                auto func = function_node_optional->getASTNode()->as<ASTFunction>();
+                if (!func->arguments->children.empty())
+                {
+                    for (auto & argu : func->arguments->children)
+                    {
+                        if (isVectorScanFunc(argu->getColumnName()))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+
+        LOG_DEBUG(log, "[MergeTreeWhereOptimizer] containVectorScanFunc(cond.node): {}", containVectorScanFunc());
+
         cond.viable =
             !has_invalid_column &&
             /// Condition depend on some column. Constant expressions are not moved.
@@ -226,7 +253,8 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             /// Some identifiers can unable to support PREWHERE (usually because of different types in Merge engine)
             && columnsSupportPrewhere(cond.table_columns)
             /// Do not move conditions involving all queried columns.
-            && cond.table_columns.size() < queried_columns.size();
+            && cond.table_columns.size() < queried_columns.size()
+            && !containVectorScanFunc();
 
         if (cond.viable)
             cond.good = isConditionGood(node, table_columns);
@@ -311,6 +339,8 @@ std::optional<MergeTreeWhereOptimizer::OptimizeResult> MergeTreeWhereOptimizer::
         /// Move the best condition to PREWHERE if it is viable.
 
         auto it = std::min_element(where_conditions.begin(), where_conditions.end());
+
+        LOG_DEBUG(log, "MergeTreeWhereOptimizer: viable is {}", it->viable);
 
         if (!it->viable)
             break;

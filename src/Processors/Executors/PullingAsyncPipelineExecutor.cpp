@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/Executors/PipelineExecutor.h>
 #include <Processors/Formats/LazyOutputFormat.h>
@@ -130,7 +134,9 @@ bool PullingAsyncPipelineExecutor::pull(Chunk & chunk, uint64_t milliseconds)
 
     if (lazy_format)
     {
+        LOG_DEBUG(log, "[pull] call lazy format getChunk: time: {}", milliseconds);
         chunk = lazy_format->getChunk(milliseconds);
+        LOG_DEBUG(log, "[pull] after call lazy format getChunk");
         data->rethrowExceptionIfHas();
         return true;
     }
@@ -148,6 +154,8 @@ bool PullingAsyncPipelineExecutor::pull(Chunk & chunk, uint64_t milliseconds)
 bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
 {
     Chunk chunk;
+
+    auto pull_start_time = std::chrono::system_clock::now();
 
     if (!pull(chunk, milliseconds))
         return false;
@@ -169,6 +177,9 @@ bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
             block.info.is_overflows = agg_info->is_overflows;
         }
     }
+    auto pull_end_time = std::chrono::system_clock::now();
+    LOG_DEBUG(log, "[pull] pull time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(pull_end_time - pull_start_time).count());
+
 
     return true;
 }

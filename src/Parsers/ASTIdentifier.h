@@ -47,6 +47,8 @@ public:
     const String & shortName() const { return name_parts.back(); }
     const String & name() const;
 
+    bool isIgnored() const { return ignored; }
+
     void restoreTable();  // TODO(ilezhankin): get rid of this
     std::shared_ptr<ASTTableIdentifier> createTable() const;  // returns |nullptr| if identifier is not table.
 
@@ -55,6 +57,7 @@ public:
 
 protected:
     std::shared_ptr<IdentifierSemanticImpl> semantic; /// pimpl
+    bool ignored = false; /// used for distance and batch_distance function
 
     void formatImplWithoutAlias(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
     void appendColumnNameImpl(WriteBuffer & ostr) const override;
@@ -66,6 +69,7 @@ private:
     friend class ReplaceQueryParameterVisitor;
     friend struct IdentifierSemantic;
     friend void setIdentifierSpecial(ASTPtr & ast);
+    friend void setIdentifierIgnored(ASTPtr & ast);
 
     void resetFullName();
 };
@@ -93,5 +97,8 @@ public:
 
     void updateTreeHashImpl(SipHash & hash_state) const override;
 };
+
+/// add back setIdentifierIgnored declaration here, because we need to use it in ExpressionElementParser.cpp
+void setIdentifierIgnored(ASTPtr & ast);
 
 }

@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include "Storages/MergeTree/MergeTreeDataPartBuilder.h"
 #include <Storages/MergeTree/MergeTreeData.h>
 
@@ -88,6 +92,11 @@
 
 #include <fmt/format.h>
 #include <Poco/Logger.h>
+
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/DiskIOReader.h>
+#include <VectorIndex/MergeUtils.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -1126,6 +1135,8 @@ static void preparePartForRemoval(const MergeTreeMutableDataPartPtr & part)
                         part->name, part->version.creation_tid, creation_csn);
     }
 
+    part->cancelBuild();
+
     /// Explicitly set removal_tid_lock for parts w/o transaction (i.e. w/o txn_version.txt)
     /// to avoid keeping part forever (see VersionMetadata::canBeRemoved())
     if (!part->version.isRemovalTIDLocked())
@@ -1765,6 +1776,8 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks)
         for (auto & part : broken_parts_to_detach)
             part->renameToDetached("broken-on-start"); /// detached parts must not have '_' in prefixes
 
+    verifyVectorIndex();
+
     resetObjectColumnsFromActiveParts(part_lock);
     calculateColumnAndSecondaryIndexSizesImpl();
 
@@ -2240,6 +2253,46 @@ size_t MergeTreeData::clearOldPartsFromFilesystem(bool force)
     return parts_to_remove.size();
 }
 
+void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
+{
+    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
+    if(meta_snapshot->getVectorIndices().empty())
+    {
+        return;
+    }
+
+    /// TODO: how to remove old parts' caches
+    for (const auto & part : parts)
+    {
+        for(const auto& vec_index_desc : meta_snapshot->vec_indices)
+        {
+            auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column);
+            for (auto& segment_id : segment_ids)
+            {
+                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+            }
+        }
+    }
+}
+
+void MergeTreeData::regularClearCachedIndex(const DataPartsVector & parts)
+{
+    //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
+    //    for (const auto & part : parts)
+    //    {
+    //        for(const auto& vec_index_desc :meta_snapshot->vec_indices)
+    //        {
+    //            if(std::vector<std::string>::iterator place=std::find(cached_item_list.begin(),cached_item_list.end(),part->getDataPartStorage().getFullPath() + "/" + vec_index_desc.name+"_"+vec_index_desc.column);
+    //                place!=cached_item_list.end()){
+    //                cached_item_list.erase(place);
+    //            }
+    //        }
+    //    }
+    //    for(const auto& str:cached_item_list){
+    //        VectorIndex::ExecutionEngine vec = VectorIndex::ExecutionEngine(str);
+    //        vec.removeFromCache();
+    //    }
+}
 
 void MergeTreeData::clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error, NameSet * parts_failed_to_delete)
 {
@@ -2280,6 +2333,8 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 {
     if (parts_to_remove.empty())
         return;
+
+    clearCachedVectorIndex(parts_to_remove);
 
     const auto settings = getSettings();
 
@@ -3663,7 +3718,10 @@ void MergeTreeData::removePartsFromWorkingSet(MergeTreeTransaction * txn, const 
             part->remove_time.store(remove_time, std::memory_order_relaxed);
 
         if (part->getState() != MergeTreeDataPartState::Outdated)
+        {
             modifyPartState(part, MergeTreeDataPartState::Outdated);
+            part->cancelBuild();
+        }
 
         if (isInMemoryPart(part) && getSettings()->in_memory_parts_enable_wal)
             getWriteAheadLog()->dropPart(part->name);
@@ -5993,6 +6051,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
 
                     part->remove_time.store(0, std::memory_order_relaxed); /// The part will be removed without waiting for old_parts_lifetime seconds.
                     data.modifyPartState(part, DataPartState::Outdated);
+                    part->cancelBuild();
                 }
                 else
                 {
@@ -8119,9 +8178,9 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
     VolumePtr data_part_volume = createVolumeFromReservation(reservation, volume);
 
     auto new_data_part = getDataPartBuilder(new_part_name, data_part_volume, EMPTY_PART_TMP_PREFIX + new_part_name)
-        .withBytesAndRowsOnDisk(0, 0)
-        .withPartInfo(new_part_info)
-        .build();
+                             .withBytesAndRowsOnDisk(0, 0)
+                             .withPartInfo(new_part_info)
+                             .build();
 
     if (settings->assign_part_uuids)
         new_data_part->uuid = UUIDHelpers::generateV4();
@@ -8145,11 +8204,13 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
         {
             /// The path has to be unique, all tmp directories are deleted at startup in case of stale files from previous runs.
             /// New part have to capture its name, therefore there is no concurrentcy in directory creation
-            throw Exception(ErrorCodes::LOGICAL_ERROR,
-                            "New empty part is about to matirialize but the dirrectory already exist"
-                            ", new part {}"
-                            ", directory {}",
-                            new_part_name, new_data_part_storage->getFullPath());
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "New empty part is about to matirialize but the dirrectory already exist"
+                ", new part {}"
+                ", directory {}",
+                new_part_name,
+                new_data_part_storage->getFullPath());
         }
 
         new_data_part_storage->createDirectories();
@@ -8163,8 +8224,8 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
     auto compression_codec = getContext()->chooseCompressionCodec(0, 0);
 
     const auto & index_factory = MergeTreeIndexFactory::instance();
-    MergedBlockOutputStream out(new_data_part, metadata_snapshot, columns,
-        index_factory.getMany(metadata_snapshot->getSecondaryIndices()), compression_codec, txn);
+    MergedBlockOutputStream out(
+        new_data_part, metadata_snapshot, columns, index_factory.getMany(metadata_snapshot->getSecondaryIndices()), compression_codec, txn);
 
     bool sync_on_insert = settings->fsync_after_insert;
 
@@ -8174,6 +8235,101 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
 
     new_data_part_storage->precommitTransaction();
     return new_data_part;
+}
+
+void MergeTreeData::verifyVectorIndex()
+{
+    LOG_TRACE(log, "verify vector index");
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    if (metadata_snapshot->getVectorIndices().empty())
+    {
+        LOG_DEBUG(log, "no vector index declared");
+        return;
+    }
+    VectorIndex::DiskIOReader reader;
+    for (const auto & part : data_parts_indexes)
+    {
+        auto col_name = part->getColumns().getNames();
+        String read_file_path = part->getDataPartStorage().getFullPath() + "vector_index_ready";
+        LOG_TRACE(log, "ready file path :{}", read_file_path);
+        std::vector<String> index_name_to_verify;
+        ///first loop through metadata, this loop we find all vector index needed to verify, and read them in one disk IO
+        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+        {
+            for (const auto & col : col_name)
+            {
+                ///we check every column of every datapart and see if they need building vector index
+                if (vec_index_desc.column == col)
+                {
+                    String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+                    index_name_to_verify.emplace_back(index_name);
+                }
+            }
+        }
+        std::unordered_map<std::string, VectorIndex::Parameters> para;
+        LOG_TRACE(log, "before read ready");
+        std::unordered_map<String, int64_t> sizes
+            = VectorIndex::readVectorIndexReadyFile(reader, read_file_path, index_name_to_verify, para);
+        for (auto & a : para)
+        {
+            LOG_TRACE(log, "name,{}", a.first);
+            for (auto & b : a.second)
+            {
+                LOG_TRACE(log, "parameter,{},{}", b.first, b.second);
+            }
+        }
+        ///second loop, this loop we compare vector index recorded in vector_index_ready to metadata to make sure the correct version of
+        ///vector index is built
+        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+        {
+            for (const auto & col : col_name)
+            {
+                ///we check every column of every datapart and see if they need building vector index
+                if (vec_index_desc.column == col)
+                {
+                    String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+                    if(sizes.find(index_name)!=sizes.end())
+                    {
+                        int64_t size = sizes.find(index_name)->second;
+                        ///this index is in metadata and found in vector_inex_ready
+                        if (size != -1)
+                        {
+                            LOG_TRACE(log, "read from vector_index_ready:{},{}", index_name, size);
+                            VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
+                            ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
+                            if (!single_params_from_record.empty())
+                            {
+                                VectorIndex::IndexType t
+                                    = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
+                                single_params_from_record.erase("type");
+                                if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
+                                        t,
+                                        single_params_from_record,
+                                        VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
+                                        VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
+                                {
+                                    LOG_INFO(log, "the index is built for part:{},{}", part->name, index_name);
+                                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                                }
+                            }
+                            ///second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
+                            else
+                            {
+                                LOG_INFO(log, "the index is built for part:{},{}", part->name, index_name);
+                                part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ///we check if a index is built already, if not, create job for it.
+        ///TODO we can have server load all the index into memory at startup
+        //                    VectorIndex::ExecutionEnginePtr temp = std::make_shared<VectorIndex::ExecutionEngine>
+        //                        (part->getFullRelativePath()+ "/" + vec_index_desc->name);
+        //                    temp->load();
+        //                    temp->cache();
+    }
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

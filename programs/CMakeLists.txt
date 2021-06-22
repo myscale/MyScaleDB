@@ -4,6 +4,11 @@ endif ()
 
 include(${ClickHouse_SOURCE_DIR}/cmake/split_debug_symbols.cmake)
 
+option(ENABLE_LICENSE_CHECK "Enable license check" ON)
+if (ENABLE_LICENSE_CHECK)
+    add_definitions(-DENABLE_LICENSE_CHECK)
+endif (ENABLE_LICENSE_CHECK)
+
 # The `clickhouse` binary is a multi purpose tool that contains multiple execution modes (client, server, etc.),
 # each of them may be built and linked as a separate library.
 # If you do not know what modes you need, turn this option OFF and enable SERVER and CLIENT only.

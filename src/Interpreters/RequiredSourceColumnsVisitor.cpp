@@ -9,6 +9,8 @@
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTInterpolateElement.h>
 
+#include <Common/logger_useful.h>
+
 namespace DB
 {
 

@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <IO/WriteBufferFromString.h>
 #include <Common/CurrentThread.h>
 #include <Common/setThreadName.h>
@@ -12,6 +16,7 @@
 #include <Common/scope_guard_safe.h>
 #include <Common/Exception.h>
 #include <Common/OpenTelemetryTraceContext.h>
+#include <Common/logger_useful.h>
 
 #ifndef NDEBUG
     #include <Common/Stopwatch.h>
@@ -62,6 +67,7 @@ PipelineExecutor::~PipelineExecutor()
 {
     if (process_list_element)
         process_list_element->removePipelineExecutor(this);
+
 }
 
 const Processors & PipelineExecutor::getProcessors() const
@@ -101,6 +107,8 @@ void PipelineExecutor::execute(size_t num_threads)
 
     try
     {
+        // txh added
+        LOG_DEBUG(log, "[execute] pipeline executor executeImpl {}", num_threads);
         executeImpl(num_threads);
 
         /// Execution can be stopped because of exception. Check and rethrow if any.

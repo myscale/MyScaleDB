@@ -9,9 +9,11 @@
 #include <Parsers/Access/ASTRolesOrUsersSet.h>
 #include <Parsers/Access/ASTSettingsProfileElement.h>
 #include <Parsers/Access/ASTRowPolicyName.h>
+#include <Parsers/ASTLiteral.h>
 #include <Parsers/ExpressionListParsers.h>
 #include <Parsers/formatAST.h>
 #include <Parsers/parseQuery.h>
+#include <Parsers/ASTCreateConnectionQuery.h>
 #include <Access/AccessControl.h>
 #include <Access/EnabledQuota.h>
 #include <Access/Quota.h>
@@ -20,6 +22,7 @@
 #include <Access/RowPolicy.h>
 #include <Access/SettingsProfile.h>
 #include <Access/User.h>
+#include <Access/AWSConnection.h>
 #include <Columns/ColumnString.h>
 #include <Common/StringUtils/StringUtils.h>
 #include <Core/Defines.h>
@@ -28,6 +31,7 @@
 #include <Processors/Sources/SourceFromSingleChunk.h>
 #include <base/range.h>
 #include <base/sort.h>
+#pragma GCC diagnostic ignored "-Wunused-function"
 
 
 namespace DB
@@ -211,6 +215,28 @@ namespace
 
         return query;
     }
+
+    ASTPtr getCreateQueryImpl(const AWSConnection & conn, const AccessControl *, bool attach_mode)
+    {
+        auto query = std::make_shared<ASTCreateConnectionQuery>();
+        query->name = conn.getName();
+        query->attach = attach_mode;
+
+        if (!conn.provider_name.empty())
+            query->provider_name_value = conn.provider_name;
+
+        if (!conn.aws_role_arn.empty())
+            query->role_arn_value = conn.aws_role_arn;
+
+        if (!conn.aws_role_external_id.empty())
+            query->external_id_value = conn.aws_role_external_id;
+
+        if (conn.aws_role_credential_duration > 0)
+            query->duration_value = conn.aws_role_credential_duration;
+
+        return query;
+    }
+
 
     ASTPtr getCreateQueryImpl(
         const IAccessEntity & entity,
@@ -404,6 +430,11 @@ AccessRightsElements InterpreterShowCreateAccessEntityQuery::getRequiredAccess()
         case AccessEntityType::QUOTA:
         {
             res.emplace_back(AccessType::SHOW_QUOTAS);
+            return res;
+        }
+        case AccessEntityType::CONNECTION: 
+        {
+            res.emplace_back(AccessType::SHOW_CONNECTIONS);
             return res;
         }
         case AccessEntityType::MAX:

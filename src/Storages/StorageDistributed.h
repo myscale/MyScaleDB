@@ -157,6 +157,7 @@ public:
     /// Used by ClusterCopier
     size_t getShardCount() const;
 
+    std::string getClusterName() const { return cluster_name.empty() ? "<remote>" : cluster_name; }
 private:
     void renameOnDisk(const String & new_path_to_table_data);
 
@@ -207,7 +208,6 @@ private:
     std::optional<QueryProcessingStage::Enum> getOptimizedQueryProcessingStage(const SelectQueryInfo & query_info, const Settings & settings) const;
 
     size_t getRandomShardIndex(const Cluster::ShardsInfo & shards);
-    std::string getClusterName() const { return cluster_name.empty() ? "<remote>" : cluster_name; }
 
     const DistributedSettings & getDistributedSettingsRef() const { return distributed_settings; }
 

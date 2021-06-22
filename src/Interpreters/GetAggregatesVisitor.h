@@ -72,7 +72,6 @@ private:
             String column_name = node.getColumnName();
             if (data.uniq_names.count(column_name))
                 return;
-
             data.uniq_names.insert(column_name);
             data.aggregates.push_back(&node);
         }

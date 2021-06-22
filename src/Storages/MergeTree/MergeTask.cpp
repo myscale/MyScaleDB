@@ -30,6 +30,8 @@
 #include <Processors/Transforms/TTLCalcTransform.h>
 #include <Processors/Transforms/DistinctSortedTransform.h>
 #include <Processors/Transforms/DistinctTransform.h>
+#include <VectorIndex/MergeUtils.h>
+#include <IO/WriteIntText.h>
 
 namespace DB
 {
@@ -309,6 +311,49 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
     assert(global_ctx->gathering_columns.size() == global_ctx->gathering_column_names.size());
     assert(global_ctx->merging_columns.size() == global_ctx->merging_column_names.size());
 
+    /// whether we have data parts containing vector index.
+    bool has_vector_index = false;
+
+    if (global_ctx->data->getSettings()->enable_decouple_vector_index_rebuild_from_merge)
+    {
+        for (auto& part : global_ctx->future_part->parts)
+        {
+            if (part->containAnyVectorIndex())
+                has_vector_index = true;
+        }
+    }
+
+    if (has_vector_index)
+    {
+        /// we need rows_sources info for vector index case
+        /// TODO: duplicate code optimize
+        if (!ctx->rows_sources_write_buf)
+        {
+            ctx->rows_sources_file = createTemporaryFile(ctx->tmp_disk->getPath());
+            ctx->rows_sources_uncompressed_write_buf = ctx->tmp_disk->writeFile(fileName(ctx->rows_sources_file->path()));
+            ctx->rows_sources_write_buf = std::make_unique<CompressedWriteBuffer>(*ctx->rows_sources_uncompressed_write_buf);
+        }
+
+        /// keep this file
+        ctx->rows_sources_file->keep();
+
+        /// create inverted row ids map
+        global_ctx->inverted_row_ids_map_file = createTemporaryFile(ctx->tmp_disk->getPath());
+        global_ctx->inverted_row_ids_map_uncompressed_buf = ctx->tmp_disk->writeFile(fileName(global_ctx->inverted_row_ids_map_file->path()));
+        global_ctx->inverted_row_ids_map_buf = std::make_unique<CompressedWriteBuffer>(*global_ctx->inverted_row_ids_map_uncompressed_buf);
+
+        /// create row ids map for each old part
+        for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
+        {
+            auto row_ids_map_file = createTemporaryFile(ctx->tmp_disk->getPath());
+            auto row_ids_map_uncompressed_buf = ctx->tmp_disk->writeFile(fileName(row_ids_map_file->path()));
+            global_ctx->row_ids_map_bufs.emplace_back(std::make_unique<CompressedWriteBuffer>(*row_ids_map_uncompressed_buf));
+            global_ctx->row_ids_map_files.emplace_back(std::move(row_ids_map_file));
+            global_ctx->row_ids_map_uncompressed_bufs.emplace_back(std::move(row_ids_map_uncompressed_buf));
+        }
+        global_ctx->inverted_row_sources_map_file_path = ctx->rows_sources_file->path();
+    }
+
     /// If merge is vertical we cannot calculate it
     ctx->blocks_are_granules_size = (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Vertical);
 
@@ -464,6 +509,72 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::executeImpl()
     return false;
 }
 
+bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
+{
+    if (!global_ctx->inverted_row_ids_map_file)
+        return false;
+    
+    ctx->rows_sources_write_buf->next();
+    ctx->rows_sources_uncompressed_write_buf->next();
+    /// Ensure data has written to disk.
+    ctx->rows_sources_uncompressed_write_buf->finalize();
+
+    size_t rows_sources_count = ctx->rows_sources_write_buf->count();
+    /// get rows sources info from local file
+    auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
+    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
+    rows_sources_read_buf->seek(0, 0);
+    
+    /// read data into buffer
+    uint64_t new_part_row_id = 0;
+    std::vector<uint64_t> source_row_ids(global_ctx->future_part->parts.size(), 0);
+    /// TODO: confirm read all in one round?
+    while (!rows_sources_read_buf->eof())
+    {
+        RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
+        RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
+        LOG_DEBUG(ctx->log, "[generateRowIdsMap]: read from rows_sources_file: size {}", row_sources_end - row_source_pos);
+
+        while (row_source_pos < row_sources_end)
+        {
+            RowSourcePart row_source = *row_source_pos;
+            size_t source_num = row_source.getSourceNum();
+            writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+            writeIntText(source_row_ids[source_num], *global_ctx->inverted_row_ids_map_buf);
+            /// need to add this, or we cannot correctly read uint64 value
+            writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+            writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
+
+            ++new_part_row_id;
+            ++source_row_ids[source_num];
+
+            ++row_source_pos;
+        }
+
+        rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+    }
+    
+    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: after write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
+
+    if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
+    {
+        ctx->rows_sources_file.release();
+        ctx->rows_sources_write_buf.release();
+        ctx->rows_sources_uncompressed_write_buf.release();
+    }
+
+    for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
+    {
+        global_ctx->row_ids_map_bufs[i]->next();
+        global_ctx->row_ids_map_uncompressed_bufs[i]->next();
+        global_ctx->row_ids_map_uncompressed_bufs[i]->finalize();
+    }
+    global_ctx->inverted_row_ids_map_buf->next();
+    global_ctx->inverted_row_ids_map_uncompressed_buf->next();
+    global_ctx->inverted_row_ids_map_uncompressed_buf->finalize();
+    
+    return false;
+}
 
 bool MergeTask::VerticalMergeStage::prepareVerticalMergeForAllColumns() const
 {
@@ -758,6 +869,27 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         global_ctx->to->finalizePart(global_ctx->new_data_part, ctx->need_sync);
     else
         global_ctx->to->finalizePart(global_ctx->new_data_part, ctx->need_sync, &global_ctx->storage_columns, &global_ctx->checksums_gathered_columns);
+
+    /// finalize row ids map info to new data part dir
+    if (!global_ctx->row_ids_map_files.empty())
+    {
+        for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
+        {
+            auto& row_ids_map_tmp_file = global_ctx->row_ids_map_files[i]->path();
+            /// move and rename row ids map file to new dir
+            String row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+            LOG_DEBUG(ctx->log, "row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
+            std::filesystem::rename(row_ids_map_tmp_file, row_ids_map_file_path);
+            /// move and rename vector index files to new dir
+            VectorIndex::renameVectorIndexFiles(toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i]->getDataPartStorage().getFullPath(), global_ctx->new_data_part->getDataPartStorage().getFullPath());
+        }
+
+        String inverted_row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+        std::filesystem::rename(global_ctx->inverted_row_ids_map_file->path(), inverted_row_ids_map_file_path);
+
+        String inverted_row_sources_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
+        std::filesystem::rename(global_ctx->inverted_row_sources_map_file_path, inverted_row_sources_file_path);
+    }
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
     global_ctx->promise.set_value(global_ctx->new_data_part);

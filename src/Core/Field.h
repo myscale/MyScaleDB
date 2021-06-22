@@ -50,6 +50,9 @@ struct X : public FieldVector \
 DEFINE_FIELD_VECTOR(Array);
 DEFINE_FIELD_VECTOR(Tuple);
 
+/// ObjectToFetch is same as Tuple
+DEFINE_FIELD_VECTOR(ObjectToFetch);
+
 /// An array with the following structure: [(key1, value1), (key2, value2), ...]
 DEFINE_FIELD_VECTOR(Map); /// TODO: use map instead of vector.
 
@@ -260,6 +263,7 @@ template <> struct NearestFieldTypeImpl<std::string_view> { using Type = String;
 template <> struct NearestFieldTypeImpl<String> { using Type = String; };
 template <> struct NearestFieldTypeImpl<Array> { using Type = Array; };
 template <> struct NearestFieldTypeImpl<Tuple> { using Type = Tuple; };
+template <> struct NearestFieldTypeImpl<ObjectToFetch> { using Type = ObjectToFetch; };
 template <> struct NearestFieldTypeImpl<Map> { using Type = Map; };
 template <> struct NearestFieldTypeImpl<Object> { using Type = Object; };
 template <> struct NearestFieldTypeImpl<bool> { using Type = UInt64; };
@@ -332,6 +336,7 @@ public:
             IPv4 = 30,
             IPv6 = 31,
             CustomType = 32,
+            ObjectToFetch = 33,
         };
     };
 
@@ -514,6 +519,7 @@ public:
             case Types::String:  return get<String>()  < rhs.get<String>();
             case Types::Array:   return get<Array>()   < rhs.get<Array>();
             case Types::Tuple:   return get<Tuple>()   < rhs.get<Tuple>();
+            case Types::ObjectToFetch: return get<ObjectToFetch>()   < rhs.get<ObjectToFetch>();
             case Types::Map:     return get<Map>()     < rhs.get<Map>();
             case Types::Object:  return get<Object>()  < rhs.get<Object>();
             case Types::Decimal32:  return get<DecimalField<Decimal32>>()  < rhs.get<DecimalField<Decimal32>>();
@@ -556,6 +562,7 @@ public:
             case Types::String:  return get<String>()  <= rhs.get<String>();
             case Types::Array:   return get<Array>()   <= rhs.get<Array>();
             case Types::Tuple:   return get<Tuple>()   <= rhs.get<Tuple>();
+            case Types::ObjectToFetch: return get<ObjectToFetch>()   <= rhs.get<ObjectToFetch>();
             case Types::Map:     return get<Map>()     <= rhs.get<Map>();
             case Types::Object:  return get<Object>()  <= rhs.get<Object>();
             case Types::Decimal32:  return get<DecimalField<Decimal32>>()  <= rhs.get<DecimalField<Decimal32>>();
@@ -598,6 +605,7 @@ public:
             case Types::String:  return get<String>()  == rhs.get<String>();
             case Types::Array:   return get<Array>()   == rhs.get<Array>();
             case Types::Tuple:   return get<Tuple>()   == rhs.get<Tuple>();
+            case Types::ObjectToFetch: return get<ObjectToFetch>()   == rhs.get<ObjectToFetch>();
             case Types::Map:     return get<Map>()     == rhs.get<Map>();
             case Types::Object:  return get<Object>()  == rhs.get<Object>();
             case Types::UInt128: return get<UInt128>() == rhs.get<UInt128>();
@@ -641,6 +649,7 @@ public:
             case Types::String:  return f(field.template get<String>());
             case Types::Array:   return f(field.template get<Array>());
             case Types::Tuple:   return f(field.template get<Tuple>());
+            case Types::ObjectToFetch:   return f(field.template get<ObjectToFetch>());
             case Types::Map:     return f(field.template get<Map>());
             case Types::Bool:
             {
@@ -664,7 +673,7 @@ public:
 
 private:
     std::aligned_union_t<DBMS_MIN_FIELD_SIZE - sizeof(Types::Which),
-        Null, UInt64, UInt128, UInt256, Int64, Int128, Int256, UUID, IPv4, IPv6, Float64, String, Array, Tuple, Map,
+        Null, UInt64, UInt128, UInt256, Int64, Int128, Int256, UUID, IPv4, IPv6, Float64, String, Array, Tuple, ObjectToFetch, Map,
         DecimalField<Decimal32>, DecimalField<Decimal64>, DecimalField<Decimal128>, DecimalField<Decimal256>,
         AggregateFunctionStateData, CustomType
         > storage;
@@ -761,6 +770,9 @@ private:
             case Types::Tuple:
                 destroy<Tuple>();
                 break;
+            case Types::ObjectToFetch:
+                destroy<ObjectToFetch>();
+                break;
             case Types::Map:
                 destroy<Map>();
                 break;
@@ -808,6 +820,7 @@ template <> struct Field::TypeToEnum<Float64> { static constexpr Types::Which va
 template <> struct Field::TypeToEnum<String>  { static constexpr Types::Which value = Types::String; };
 template <> struct Field::TypeToEnum<Array>   { static constexpr Types::Which value = Types::Array; };
 template <> struct Field::TypeToEnum<Tuple>   { static constexpr Types::Which value = Types::Tuple; };
+template <> struct Field::TypeToEnum<ObjectToFetch>   { static constexpr Types::Which value = Types::ObjectToFetch; };
 template <> struct Field::TypeToEnum<Map>     { static constexpr Types::Which value = Types::Map; };
 template <> struct Field::TypeToEnum<Object>  { static constexpr Types::Which value = Types::Object; };
 template <> struct Field::TypeToEnum<DecimalField<Decimal32>>{ static constexpr Types::Which value = Types::Decimal32; };
@@ -833,6 +846,7 @@ template <> struct Field::EnumToType<Field::Types::Float64> { using Type = Float
 template <> struct Field::EnumToType<Field::Types::String>  { using Type = String; };
 template <> struct Field::EnumToType<Field::Types::Array>   { using Type = Array; };
 template <> struct Field::EnumToType<Field::Types::Tuple>   { using Type = Tuple; };
+template <> struct Field::EnumToType<Field::Types::ObjectToFetch>   { using Type = ObjectToFetch; };
 template <> struct Field::EnumToType<Field::Types::Map>     { using Type = Map; };
 template <> struct Field::EnumToType<Field::Types::Object>  { using Type = Object; };
 template <> struct Field::EnumToType<Field::Types::Decimal32> { using Type = DecimalField<Decimal32>; };
@@ -965,6 +979,15 @@ void writeBinary(const Tuple & x, WriteBuffer & buf);
 void writeText(const Tuple & x, WriteBuffer & buf);
 [[noreturn]] inline void writeQuoted(const Tuple &, WriteBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot write Tuple quoted."); }
 
+void readBinary(ObjectToFetch & x, ReadBuffer & buf);
+
+[[noreturn]] inline void readText(ObjectToFetch &, ReadBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot read ObjectToFetch."); }
+[[noreturn]] inline void readQuoted(ObjectToFetch &, ReadBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot read ObjectToFetch."); }
+
+void writeBinary(const ObjectToFetch & x, WriteBuffer & buf);
+
+void writeText(const ObjectToFetch & x, WriteBuffer & buf);
+
 void readBinary(Map & x, ReadBuffer & buf);
 [[noreturn]] inline void readText(Map &, ReadBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot read Map."); }
 [[noreturn]] inline void readQuoted(Map &, ReadBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot read Map."); }
@@ -1002,6 +1025,8 @@ template <typename T>
 void readQuoted(DecimalField<T> & x, ReadBuffer & buf);
 
 void writeFieldText(const Field & x, WriteBuffer & buf);
+
+[[noreturn]] inline void writeQuoted(const ObjectToFetch &, WriteBuffer &) { throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Cannot write ObjectToFetch quoted."); }
 
 String toString(const Field & x);
 

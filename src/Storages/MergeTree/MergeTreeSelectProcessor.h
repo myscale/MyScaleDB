@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 #include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
 #include <Storages/MergeTree/MergeTreeData.h>
@@ -33,7 +37,8 @@ public:
         MergeTreeInOrderReadPoolParallelReplicasPtr pool_,
         const Names & virt_column_names = {},
         size_t part_index_in_query_ = 0,
-        bool has_limit_below_one_block_ = false);
+        bool has_limit_below_one_block_ = false,
+        MergeTreeVectorScanManagerPtr vector_scan_mamanger_ = nullptr);
 
     ~MergeTreeSelectAlgorithm() override;
 
@@ -69,6 +74,8 @@ protected:
     MergeTreeInOrderReadPoolParallelReplicasPtr pool;
 
     size_t total_rows = 0;
+
+    MergeTreeVectorScanManagerPtr vector_scan_manager = nullptr;
 };
 
 }

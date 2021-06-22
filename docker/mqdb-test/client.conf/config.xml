@@ -1,0 +1,7 @@
+<config>
+    <prompt_by_server_display_name>
+        <default>{display_name} :) </default>
+        <test>{display_name} \x01\e[1;32m\x02:)\x01\e[0m\x02 </test>
+        <production>{display_name} \x01\e[1;31m\x02:)\x01\e[0m\x02 </production>
+    </prompt_by_server_display_name>
+</config>

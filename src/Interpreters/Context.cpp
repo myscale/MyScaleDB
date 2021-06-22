@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <map>
 #include <set>
 #include <optional>
@@ -151,6 +155,9 @@ namespace CurrentMetrics
     extern const Metric IOPrefetchThreadsActive;
     extern const Metric IOWriterThreads;
     extern const Metric IOWriterThreadsActive;
+    extern const Metric BackgroundVectorIndexPoolTask;
+    extern const Metric BackgroundVectorIndexPoolSize;
+
 }
 
 namespace DB
@@ -303,6 +310,7 @@ struct ContextSharedPart : boost::noncopyable
     OrdinaryBackgroundExecutorPtr moves_executor;
     OrdinaryBackgroundExecutorPtr fetch_executor;
     OrdinaryBackgroundExecutorPtr common_executor;
+    MergeMutateBackgroundExecutorPtr vector_index_executor;
 
     RemoteHostFilter remote_host_filter; /// Allowed URL from config.xml
 
@@ -494,6 +502,8 @@ struct ContextSharedPart : boost::noncopyable
             moves_executor->wait();
         if (common_executor)
             common_executor->wait();
+        if (vector_index_executor)
+            vector_index_executor->wait();
 
         TransactionLog::shutdownIfAny();
 
@@ -3824,6 +3834,7 @@ void Context::initializeBackgroundExecutorsIfNeeded()
     size_t background_move_pool_size = server_settings.background_move_pool_size;
     size_t background_fetches_pool_size = server_settings.background_fetches_pool_size;
     size_t background_common_pool_size = server_settings.background_common_pool_size;
+    size_t background_vector_pool_size = server_settings.background_vector_pool_size;
 
     /// With this executor we can execute more tasks than threads we have
     shared->merge_mutate_executor = std::make_shared<MergeMutateBackgroundExecutor>
@@ -3867,6 +3878,21 @@ void Context::initializeBackgroundExecutorsIfNeeded()
         CurrentMetrics::BackgroundCommonPoolSize
     );
     LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}", background_common_pool_size, background_common_pool_size);
+
+    LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}",
+             background_common_pool_size, background_common_pool_size);
+
+    shared->vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "VectorIndex",
+        background_vector_pool_size,
+        background_vector_pool_size,
+        CurrentMetrics::BackgroundVectorIndexPoolTask,
+        CurrentMetrics::BackgroundVectorIndexPoolSize
+    );
+
+    LOG_INFO(shared->log, "Initialized background executor for vector index operations with num_threads={}, num_tasks={}",
+             background_vector_pool_size, background_vector_pool_size);
 
     shared->are_background_executors_initialized = true;
 }
@@ -3980,6 +4006,12 @@ ThreadPool & Context::getThreadPoolWriter() const
     }
 
     return *shared->threadpool_writer;
+}
+
+/// reuse common executor
+MergeMutateBackgroundExecutorPtr Context::getVectorIndexExecutor() const
+{
+    return shared->vector_index_executor;
 }
 
 ReadSettings Context::getReadSettings() const

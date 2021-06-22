@@ -161,6 +161,7 @@ QueryPlanPtr MergeTreeDataSelectExecutor::read(
 
     const auto & parts = snapshot_data.parts;
 
+
     if (!query_info.projection)
     {
         auto step = readFromParts(

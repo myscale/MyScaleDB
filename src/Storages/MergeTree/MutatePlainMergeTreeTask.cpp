@@ -71,7 +71,6 @@ bool MutatePlainMergeTreeTask::executeStep()
     MemoryTrackerThreadSwitcherPtr switcher;
     if (merge_list_entry)
         switcher = std::make_unique<MemoryTrackerThreadSwitcher>(*merge_list_entry);
-
     switch (state)
     {
         case State::NEED_PREPARE:

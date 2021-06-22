@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Common/CurrentMetrics.h>
@@ -81,6 +85,14 @@ void BackgroundJobsAssignee::scheduleCommonTask(ExecutableTaskPtr common_task, b
 }
 
 
+void BackgroundJobsAssignee::scheduleVectorIndexTask(ExecutableTaskPtr vector_index_task)
+{
+    bool res = getContext()->getVectorIndexExecutor()->trySchedule(vector_index_task);
+    LOG_TRACE(&Poco::Logger::get("assign"),"vector try schedule response: {}",res);
+    res ? trigger() : postpone();
+}
+
+
 String BackgroundJobsAssignee::toString(Type type)
 {
     switch (type)
@@ -115,6 +127,7 @@ void BackgroundJobsAssignee::finish()
         getContext()->getFetchesExecutor()->removeTasksCorrespondingToStorage(storage_id);
         getContext()->getMergeMutateExecutor()->removeTasksCorrespondingToStorage(storage_id);
         getContext()->getCommonExecutor()->removeTasksCorrespondingToStorage(storage_id);
+        getContext()->getVectorIndexExecutor()->removeTasksCorrespondingToStorage(storage_id);
     }
 }
 

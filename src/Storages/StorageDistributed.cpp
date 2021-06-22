@@ -523,6 +523,8 @@ std::optional<QueryProcessingStage::Enum> StorageDistributed::getOptimizedQueryP
 
     const auto & select = query_info.query->as<ASTSelectQuery &>();
 
+    LOG_DEBUG(log, "select query: {}", select.dumpTree());
+
     auto expr_contains_sharding_key = [&](const auto & exprs) -> bool
     {
         std::unordered_set<std::string> expr_columns;

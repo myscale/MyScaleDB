@@ -69,7 +69,24 @@ NamesAndTypesList StorageSnapshot::getColumnsByNames(const GetColumnsOptions & o
 {
     NamesAndTypesList res;
     for (const auto & name : names)
-        res.push_back(getColumn(options, name));
+    {
+        if (isDistance(name))
+        {
+            res.emplace_back(name, std::make_shared<DataTypeUInt32>());
+        }
+        else if (isBatchDistance(name))
+        {
+            auto id_type = std::make_shared<DataTypeUInt32>();
+            auto distance_type = std::make_shared<DataTypeFloat32>();
+            DataTypes types;
+            types.emplace_back(id_type);
+            types.emplace_back(distance_type);
+            auto type = std::make_shared<DataTypeTuple>(types);
+            res.emplace_back(name, type);
+        }
+        else
+            res.push_back(getColumn(options, name));
+    }
     return res;
 }
 
@@ -144,6 +161,21 @@ Block StorageSnapshot::getSampleBlockForColumns(const Names & column_names, cons
             const auto & type = it->second;
             res.insert({type->createColumn(), type, column_name});
         }
+        else if (isDistance(column_name)) /// allow distance function
+        {
+            auto type = std::make_shared<DataTypeFloat32>();
+            res.insert({type->createColumn(), type, column_name});
+        }
+        else if (isBatchDistance(column_name))
+        {
+            auto id_type = std::make_shared<DataTypeUInt32>();
+            auto distance_type = std::make_shared<DataTypeFloat32>();
+            DataTypes types;
+            types.emplace_back(id_type);
+            types.emplace_back(distance_type);
+            auto type = std::make_shared<DataTypeTuple>(types);
+            res.insert({type->createColumn(), type, column_name});
+        }
         else
         {
             throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK,
@@ -174,6 +206,20 @@ ColumnsDescription StorageSnapshot::getDescriptionForColumns(const Names & colum
             /// Virtual columns must be appended after ordinary, because user can
             /// override them.
             const auto & type = it->second;
+            res.add({name, type});
+        }
+        else if (isDistance(name)) /// allow distance function
+        {
+            res.add({name, std::make_shared<DataTypeFloat32>()});
+        }
+        else if (isBatchDistance(name))
+        {
+            auto id_type = std::make_shared<DataTypeUInt32>();
+            auto distance_type = std::make_shared<DataTypeFloat32>();
+            DataTypes types;
+            types.emplace_back(id_type);
+            types.emplace_back(distance_type);
+            auto type = std::make_shared<DataTypeTuple>(types);
             res.add({name, type});
         }
         else

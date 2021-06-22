@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
@@ -132,6 +136,8 @@ ASTPtr ASTColumns::clone() const
         res->set(res->columns, columns->clone());
     if (indices)
         res->set(res->indices, indices->clone());
+    if (vec_indices)
+        res->set(res->vec_indices, vec_indices->clone());
     if (constraints)
         res->set(res->constraints, constraints->clone());
     if (projections)
@@ -163,6 +169,16 @@ void ASTColumns::formatImpl(const FormatSettings & s, FormatState & state, Forma
             auto elem = std::make_shared<ASTColumnsElement>();
             elem->prefix = "INDEX";
             elem->set(elem->elem, index->clone());
+            list.children.push_back(elem);
+        }
+    }
+    if (vec_indices)
+    {
+        for (const auto & vec_index : vec_indices->children)
+        {
+            auto elem = std::make_shared<ASTColumnsElement>();
+            elem->prefix = "VECTOR INDEX";
+            elem->set(elem->elem, vec_index->clone());
             list.children.push_back(elem);
         }
     }

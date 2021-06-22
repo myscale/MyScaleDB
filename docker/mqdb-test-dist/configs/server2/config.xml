@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <log>/var/log/clickhouse-server2/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server2/clickhouse-server.err.log</errorlog>
+        <size>1000M</size>
+        <count>10</count>
+    </logger>
+    <http_port>18123</http_port>
+    <tcp_port>19000</tcp_port>
+    <mysql_port>19004</mysql_port>
+    <postgresql_port>19005</postgresql_port>
+    <interserver_http_port>19009</interserver_http_port>
+    <max_connections>4096</max_connections>
+    <keep_alive_timeout>3</keep_alive_timeout>
+    <max_concurrent_queries>100</max_concurrent_queries>
+    <max_server_memory_usage>0</max_server_memory_usage>
+    <max_thread_pool_size>10000</max_thread_pool_size>
+    <max_server_memory_usage_to_ram_ratio>0.85</max_server_memory_usage_to_ram_ratio>
+    <total_memory_profiler_step>4194304</total_memory_profiler_step>
+    <total_memory_tracker_sample_probability>0</total_memory_tracker_sample_probability>
+    <uncompressed_cache_size>8589934592</uncompressed_cache_size>
+    <mark_cache_size>5368709120</mark_cache_size>
+    <mmap_cache_size>1000</mmap_cache_size>
+    <compiled_expression_cache_size>134217728</compiled_expression_cache_size>
+    <compiled_expression_cache_elements_size>10000</compiled_expression_cache_elements_size>
+
+    <path>/var/lib/clickhouse2/</path>
+    <tmp_path>/var/lib/clickhouse2/tmp/</tmp_path>
+    <user_files_path>/var/lib/clickhouse2/user_files/</user_files_path>
+
+    <default_profile>default</default_profile>
+    <custom_settings_prefixes></custom_settings_prefixes>
+    <default_database>default</default_database>
+    <mlock_executable>true</mlock_executable>
+    <remap_executable>false</remap_executable>
+    <builtin_dictionaries_reload_interval>3600</builtin_dictionaries_reload_interval>
+    <max_session_timeout>3600</max_session_timeout>
+    <default_session_timeout>60</default_session_timeout>
+
+    <dictionaries_config>*_dictionary.xml</dictionaries_config>
+    <user_defined_executable_functions_config>*_function.xml</user_defined_executable_functions_config>
+
+    <format_schema_path>/var/lib/clickhouse2/format_schemas/</format_schema_path>
+</clickhouse>

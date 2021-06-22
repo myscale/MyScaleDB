@@ -7,7 +7,6 @@
 #include <Storages/MergeTree/PartitionPruner.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 
-
 namespace DB
 {
 

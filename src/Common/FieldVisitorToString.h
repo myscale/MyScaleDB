@@ -23,6 +23,7 @@ public:
     String operator() (const String & x) const;
     String operator() (const Array & x) const;
     String operator() (const Tuple & x) const;
+    String operator() (const ObjectToFetch & x) const;
     String operator() (const Map & x) const;
     String operator() (const Object & x) const;
     String operator() (const DecimalField<Decimal32> & x) const;

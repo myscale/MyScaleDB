@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/NamesAndAliases.h>
@@ -8,6 +12,7 @@
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/IStorage_fwd.h>
 #include <Storages/StorageInMemoryMetadata.h>
+#include <Common/logger_useful.h>
 
 
 namespace DB
@@ -38,6 +43,7 @@ public:
     static ASTPtr formatColumns(const NamesAndTypesList & columns, const NamesAndAliases & alias_columns);
     static ASTPtr formatColumns(const ColumnsDescription & columns);
     static ASTPtr formatIndices(const IndicesDescription & indices);
+    static ASTPtr formatVectorIndices(const VectorIndicesDescription & vec_indices);
     static ASTPtr formatConstraints(const ConstraintsDescription & constraints);
     static ASTPtr formatProjections(const ProjectionsDescription & projections);
 
@@ -80,6 +86,7 @@ private:
     {
         ColumnsDescription columns;
         IndicesDescription indices;
+        VectorIndicesDescription vec_indices;
         ConstraintsDescription constraints;
         ProjectionsDescription projections;
     };
@@ -121,5 +128,7 @@ private:
 
     mutable String as_database_saved;
     mutable String as_table_saved;
+
+    Poco::Logger * log = &Poco::Logger::get("InterpreterCreateQuery");
 };
 }

@@ -912,6 +912,13 @@ void MutationsInterpreter::prepareMutationStages(std::vector<Stage> & prepared_s
     if (source.hasLightweightDeleteMask())
         all_columns.push_back({LightweightDeleteDescription::FILTER_COLUMN});
 
+    /// Add _row_exists column if it is present in the part
+    if (auto part_storage = dynamic_pointer_cast<DB::StorageFromMergeTreeDataPart>(source.getStorage()))
+    {
+        if (part_storage->hasLightweightDeletedMask())
+            all_columns.push_back({LightweightDeleteDescription::FILTER_COLUMN});
+    }
+
     /// Next, for each stage calculate columns changed by this and previous stages.
     for (size_t i = 0; i < prepared_stages.size(); ++i)
     {

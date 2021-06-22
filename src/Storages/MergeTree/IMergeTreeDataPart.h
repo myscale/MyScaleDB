@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <IO/WriteSettings.h>
@@ -304,6 +308,33 @@ public:
     MinMaxIndexPtr minmax_idx;
 
     Checksums checksums;
+
+    /// TODO: move vector index related structures out of data part class
+    mutable std::set<String> vector_indexed;
+
+    mutable bool vector_index_build_error = false;
+
+    mutable bool vector_index_tuned = false;
+
+    mutable bool vector_index_build_cancelled = false;
+
+    mutable bool small_part = false;
+
+    bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
+
+    bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
+
+    void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
+
+    void removeVectorIndex(String index_name, String col_name) const { vector_indexed.erase(index_name + "_" + col_name); }
+
+    void setBuildError() const { vector_index_build_error = true; }
+
+    void setTuned() const { vector_index_tuned = true; }
+
+    void cancelBuild() const {vector_index_build_cancelled = true;}
+
+    bool isSmallPart(size_t min_rows_to_build_vector_index) const { return this->rows_count < min_rows_to_build_vector_index; }
 
     /// Columns with values, that all have been zeroed by expired ttl
     NameSet expired_columns;

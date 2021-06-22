@@ -9,6 +9,16 @@
 
 namespace DB
 {
+namespace ErrorCodes
+{
+    extern const int UNKNOWN_USER;
+    extern const int UNKNOWN_ROLE;
+    extern const int UNKNOWN_ROW_POLICY;
+    extern const int UNKNOWN_QUOTA;
+    extern const int THERE_IS_NO_PROFILE;
+    extern const int UNKNOWN_CONNECTION;
+    extern const int LOGICAL_ERROR;
+}
 
 /// Access entity is a set of data which have a name and a type. Access entity control something related to the access control.
 /// Entities can be stored to a file or another storage, see IAccessStorage.

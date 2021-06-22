@@ -78,6 +78,11 @@ AccessRightsElements InterpreterDropAccessEntityQuery::getRequiredAccess() const
             res.emplace_back(AccessType::DROP_QUOTA);
             return res;
         }
+        case AccessEntityType::CONNECTION: 
+        {
+            res.emplace_back(AccessType::DROP_CONNECTION); 
+            return res;
+        }
         case AccessEntityType::MAX:
             break;
     }

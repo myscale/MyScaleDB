@@ -11,6 +11,7 @@ namespace DB
   * DROP QUOTA [IF EXISTS] name [,...]
   * DROP [SETTINGS] PROFILE [IF EXISTS] name [,...]
   * DROP [ROW] POLICY [IF EXISTS] name [,...] ON [database.]table [,...]
+  * DROP CONNECTION [IF EXISTS] name [,...]
   */
 class ParserDropAccessEntityQuery : public IParserBase
 {

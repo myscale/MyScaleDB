@@ -34,6 +34,7 @@ public:
     DataTypePtr operator() (const String & x) const;
     DataTypePtr operator() (const Array & x) const;
     DataTypePtr operator() (const Tuple & tuple) const;
+    DataTypePtr operator() (const ObjectToFetch & objecttofetch) const;
     DataTypePtr operator() (const Map & map) const;
     DataTypePtr operator() (const Object & map) const;
     DataTypePtr operator() (const DecimalField<Decimal32> & x) const;

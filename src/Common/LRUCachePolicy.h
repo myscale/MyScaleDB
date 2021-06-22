@@ -7,6 +7,11 @@
 
 #include <Common/logger_useful.h>
 
+namespace VectorIndex
+{
+class VectorIndexCache;
+}
+
 namespace DB
 {
 /// Cache policy LRU evicts entries which are not used for a long time.
@@ -140,6 +145,8 @@ public:
 private:
     using LRUQueue = std::list<Key>;
     using LRUQueueIterator = typename LRUQueue::iterator;
+
+    friend class VectorIndex::VectorIndexCache;
 
     LRUQueue queue;
 
