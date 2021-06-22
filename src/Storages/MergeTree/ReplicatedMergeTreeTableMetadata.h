@@ -37,6 +37,7 @@ struct ReplicatedMergeTreeTableMetadata
     String partition_key;
     String sorting_key;
     String skip_indices;
+    String vector_indices;
     String projections;
     String constraints;
     String ttl_table;
@@ -71,10 +72,13 @@ struct ReplicatedMergeTreeTableMetadata
         bool ttl_table_changed = false;
         String new_ttl_table;
 
+        bool vector_indices_changed = false;
+        String new_vector_indices;
+
         bool empty() const
         {
             return !sorting_key_changed && !sampling_expression_changed && !skip_indices_changed && !projections_changed
-                && !ttl_table_changed && !constraints_changed;
+                && !ttl_table_changed && !constraints_changed && !vector_indices_changed;
         }
 
         StorageInMemoryMetadata getNewMetadata(const ColumnsDescription & new_columns, ContextPtr context, const StorageInMemoryMetadata & old_metadata) const;

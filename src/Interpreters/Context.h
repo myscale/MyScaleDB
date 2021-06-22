@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <base/types.h>
@@ -1306,6 +1310,8 @@ public:
     OrdinaryBackgroundExecutorPtr getMovesExecutor() const;
     OrdinaryBackgroundExecutorPtr getFetchesExecutor() const;
     OrdinaryBackgroundExecutorPtr getCommonExecutor() const;
+    MergeMutateBackgroundExecutorPtr getVectorIndexExecutor() const;
+    MergeMutateBackgroundExecutorPtr getSlowModeVectorIndexExecutor() const;
 
     IAsynchronousReader & getThreadPoolReader(FilesystemReaderType type) const;
 #if USE_LIBURING

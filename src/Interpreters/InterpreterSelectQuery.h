@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <memory>
@@ -172,6 +176,8 @@ private:
     void executeImpl(QueryPlan & query_plan, std::optional<Pipe> prepared_pipe);
 
     /// Different stages of query execution.
+
+    // add storage related step and SettingQuotaAndLimitsStep
     void executeFetchColumns(QueryProcessingStage::Enum processing_stage, QueryPlan & query_plan);
     void executeWhere(QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression, bool remove_filter);
     void executeAggregation(

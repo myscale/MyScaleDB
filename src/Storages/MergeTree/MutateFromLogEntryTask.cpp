@@ -285,6 +285,10 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     mutate_task->updateProfileEvents();
     write_part_log({});
 
+    /// Update vector index bitmap after mutations with lightweight delete.
+    if (new_part->lightweight_delete_mask_updated)
+        new_part->onLightweightDelete();
+
     return true;
 }
 

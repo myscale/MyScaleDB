@@ -105,6 +105,18 @@ bool MutatePlainMergeTreeTask::executeStep()
                 mutate_task->updateProfileEvents();
                 write_part_log({});
 
+                /// Safe here, the source part status is Outdated, vector index move cannot find it.
+                future_part->parts[0]->setPartIsMutating(false);
+
+                /// Update vector index bitmap after mutations with lightweight delete.
+                if (new_part->lightweight_delete_mask_updated)
+                {
+                   if (new_part->containAnyVectorIndex())
+                       new_part->onLightweightDelete();
+                   else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
+                       new_part->onDecoupledLightWeightDelete();
+                }
+
                 state = State::NEED_FINISH;
                 return true;
             }

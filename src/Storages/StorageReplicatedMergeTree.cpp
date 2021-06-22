@@ -70,6 +70,10 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/queryToString.h>
+#include <Parsers/ASTCheckQuery.h>
+#include <Parsers/ExpressionListParsers.h>
+#include <Parsers/parseQuery.h>
+#include <Parsers/formatAST.h>
 
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/Sources/RemoteSource.h>
@@ -116,6 +120,8 @@
 #include <thread>
 #include <future>
 
+#include <Storages/MergeTree/VectorIndexEntry.h>
+#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
 
 namespace fs = std::filesystem;
 
@@ -324,6 +330,7 @@ StorageReplicatedMergeTree::StorageReplicatedMergeTree(
     , writer(*this)
     , merger_mutator(*this)
     , merge_strategy_picker(*this)
+    , vec_index_builder_updater(*this)
     , queue(*this, merge_strategy_picker)
     , fetcher(*this)
     , cleanup_thread(*this)
@@ -3693,7 +3700,43 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
     ReplicatedMergeTreeQueue::SelectedEntryPtr selected_entry = selectQueueEntry();
 
     if (!selected_entry)
-        return false;
+    {
+        auto metadata_snapshot = getInMemoryMetadataPtr();
+
+        /// remove dropped vector indices
+        vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+        {
+            std::unique_lock lock(currently_processing_in_background_mutex);
+            auto vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+                metadata_snapshot, 1, false);
+
+            if (vector_index_entry)
+            {
+                auto & parts = vector_index_entry->data_part_names;
+                LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+                auto task = std::make_shared<VectorIndexMergeTreeTask>(
+                    *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
+                assignee.scheduleVectorIndexTask(task);
+                return true;
+            }
+            else
+            {
+                auto slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+                    metadata_snapshot, 1, true);
+                if (slow_mode_vector_index_entry)
+                {
+                    auto & parts = slow_mode_vector_index_entry->data_part_names;
+                    LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+                    auto task = std::make_shared<VectorIndexMergeTreeTask>(
+                        *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+                    assignee.scheduleSlowModeVectorIndexTask(task);
+                    return true;
+                }
+                return false;   
+            }
+        }
+    }
+
 
     auto job_type = selected_entry->log_entry->type;
 
@@ -3947,7 +3990,6 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
         merge_selecting_task->scheduleAfter(merge_selecting_sleep_ms);
     }
 }
-
 
 void StorageReplicatedMergeTree::mutationsFinalizingTask()
 {
@@ -6027,6 +6069,11 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
 
         current_metadata = getInMemoryMetadataPtr();
         LOG_INFO(log, "Applied changes to the metadata of the table. Current metadata version: {}", current_metadata->getMetadataVersion());
+        if (metadata_diff.vector_indices_changed)
+        {
+            LOG_INFO(log, "Get vector index change, start background job immediately");
+            background_operations_assignee.trigger();
+        }
     }
 
     {
@@ -6190,6 +6237,10 @@ void StorageReplicatedMergeTree::alter(
         if (new_indices_str != current_metadata->secondary_indices.toString())
             future_metadata_in_zk.skip_indices = new_indices_str;
 
+        String new_vec_indices_str = future_metadata.vec_indices.toString();
+        if (new_vec_indices_str != current_metadata->vec_indices.toString())
+            future_metadata_in_zk.vector_indices = new_vec_indices_str;
+
         String new_projections_str = future_metadata.projections.toString();
         if (new_projections_str != current_metadata->projections.toString())
             future_metadata_in_zk.projections = new_projections_str;
@@ -6201,6 +6252,7 @@ void StorageReplicatedMergeTree::alter(
         Coordination::Requests ops;
         size_t alter_path_idx = std::numeric_limits<size_t>::max();
         size_t mutation_path_idx = std::numeric_limits<size_t>::max();
+        /// size_t vector_index_path_idx = std::numeric_limits<size_t>::max();
 
         String new_metadata_str = future_metadata_in_zk.toString();
         ops.emplace_back(zkutil::makeSetRequest(fs::path(zookeeper_path) / "metadata", new_metadata_str, current_metadata->getMetadataVersion()));
@@ -6250,6 +6302,8 @@ void StorageReplicatedMergeTree::alter(
 
         bool have_mutation = !maybe_mutation_commands.empty();
         alter_entry->have_mutation = have_mutation;
+
+        auto maybe_vec_index_commands = commands.getVectorIndexCommands(*current_metadata, query_context);
 
         alter_path_idx = ops.size();
         ops.emplace_back(zkutil::makeCreateRequest(
@@ -9227,6 +9281,16 @@ std::unique_ptr<MergeTreeSettings> StorageReplicatedMergeTree::getDefaultSetting
 {
     return std::make_unique<MergeTreeSettings>(getContext()->getReplicatedMergeTreeSettings());
 }
+
+void StorageReplicatedMergeTree::finishVectorIndexJob(const std::vector<String> & processed_parts)
+{
+    std::unique_lock lock(currently_processing_in_background_mutex);
+    for (auto & part : processed_parts)
+    {
+        currently_vector_indexing_parts.erase(part);
+    }
+}
+
 
 String StorageReplicatedMergeTree::getTableSharedID() const
 {

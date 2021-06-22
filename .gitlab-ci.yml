@@ -1,0 +1,169 @@
+image: harbor.internal.moqi.ai/mqdb/builder:2.8
+
+include:
+  - '/.gitlab-ci-build.yml'
+  - '/.gitlab-ci-functional-test.yml'
+  - '/.gitlab-ci-integration-test.yml'
+  - '/.gitlab-ci-memory-leak-test.yml'
+  - '/.gitlab-ci-performance-test.yml'
+
+stages:
+  - build
+  - functional-test
+  - performance-test
+  - failover-test
+  - memory-leak-test
+  - package
+  - image
+  - deploy
+  - benchmark
+
+style_check:
+  stage: build
+  image: harbor.internal.moqi.ai/mqdb/style-check
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - test_output/*
+  script:
+    - docker/builder/tools/run-style-check.sh
+
+build_package:
+  stage: package
+  dependencies: []
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  only:
+    - mqdb-master
+    - mqdb-staging
+    - mqdb-dev
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --profile release --arch linux-x86_64 --package --compiler "clang-15"
+    # - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15"
+
+build_package_with_license:
+  stage: package
+  dependencies: []
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  only:
+    - mqdb-master
+    - mqdb-staging
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-license"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
+    # - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
+
+build_image:
+  stage: image
+  dependencies: ["build_package"]
+  only:
+    - mqdb-master
+    - mqdb-staging
+    - mqdb-dev
+  before_script:
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/image.sh
+upload_performance_file_to_s3:
+  stage: deploy
+  dependencies: ["build_binary"]
+  image:
+    name: minio/mc
+    entrypoint: [""]
+  only:
+    - mqdb-dev
+  before_script:
+    - mkdir -pv ~/.mc
+    - cp -fv $mc_config ~/.mc/config.json
+  script:
+    # - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
+    - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
+# deploy_to_staging:
+#   stage: deploy
+#   dependencies: ["build_x86_64_package"]
+#   only:
+#     - mqdb-master
+#     - mqdb-staging
+#   variables:
+#     deploy_to_host: 10.10.1.48
+#   script:
+#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+#     - scp artifacts/clickhouse-*.tgz root@$deploy_to_host:/moqi.ai/mqdb-deploy/packages/mqdb/x86_64/
+#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && git fetch --all && git reset --hard origin/master'
+#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy/environment && git fetch --all && git reset --hard origin/master'
+#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && ./start.sh'
+#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/init.yaml -l deploy'
+#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/mqdb.yaml'
+
+# deploy_to_s3:
+#   stage: deploy
+#   image:
+#     name: minio/mc
+#     entrypoint: [""]
+#   only:
+#     - mqdb-master
+#     - mqdb-staging
+#   before_script:
+#     - mkdir -pv ~/.mc
+#     - cp -fv $mc_config ~/.mc/config.json
+#   script:
+#     - mc cp artifacts/* cos/mqdb-release-1253802058/packages/mqdb/x86_64/$CI_COMMIT_SHORT_SHA/
+
+# benchmark_staging:
+#   stage: benchmark
+#   dependencies: []
+#   only:
+#     - schedules
+#   variables:
+#     deploy_to_host: 10.10.1.48
+#   before_script:
+#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
+#     - sleep 10
+#   after_script:
+#     - ssh root@$deploy_to_host 'supervisorctl restart mqdb'
+#   script:
+#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
+#     - scp tests/vector_search/benchmark.py root@$deploy_to_host:~/benchmark
+#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 benchmark.py"'
+# generate_report:
+#   stage: benchmark
+#   dependencies: []
+#   only:
+#     - schedules
+#   artifacts:
+#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-report"
+#     paths:
+#       - ./*.png
+#   variables:
+#     deploy_to_host: 10.10.1.48
+#   before_script:
+#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
+#     - sleep 10
+#   script:
+#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
+#     - scp tests/vector_search/plot.py root@$deploy_to_host:~/benchmark
+#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 plot.py"'
+#     - scp "root@10.10.1.48:~/benchmark/*.png" ./

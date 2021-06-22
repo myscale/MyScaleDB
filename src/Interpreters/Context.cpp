@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <map>
 #include <set>
 #include <optional>
@@ -168,6 +172,11 @@ namespace CurrentMetrics
     extern const Metric AttachedDictionary;
     extern const Metric AttachedDatabase;
     extern const Metric PartsActive;
+    extern const Metric BackgroundVectorIndexPoolTask;
+    extern const Metric BackgroundVectorIndexPoolSize;
+
+    extern const Metric BackgroundSlowModeVectorIndexPoolTask;
+    extern const Metric BackgroundSlowModeVectorIndexPoolSize;
 }
 
 
@@ -395,6 +404,8 @@ struct ContextSharedPart : boost::noncopyable
     OrdinaryBackgroundExecutorPtr moves_executor TSA_GUARDED_BY(background_executors_mutex);
     OrdinaryBackgroundExecutorPtr fetch_executor TSA_GUARDED_BY(background_executors_mutex);
     OrdinaryBackgroundExecutorPtr common_executor TSA_GUARDED_BY(background_executors_mutex);
+    MergeMutateBackgroundExecutorPtr vector_index_executor;
+    MergeMutateBackgroundExecutorPtr slow_mode_vector_index_executor;
 
     RemoteHostFilter remote_host_filter;                    /// Allowed URL from config.xml
     HTTPHeaderFilter http_header_filter;                    /// Forbidden HTTP headers from config.xml
@@ -632,6 +643,7 @@ struct ContextSharedPart : boost::noncopyable
         SHUTDOWN(log, "fetches executor", fetch_executor, wait());
         SHUTDOWN(log, "moves executor", moves_executor, wait());
         SHUTDOWN(log, "common executor", common_executor, wait());
+        SHUTDOWN(log, "vector index executor", vector_index_executor, wait());
 
         TransactionLog::shutdownIfAny();
 
@@ -5382,6 +5394,8 @@ void Context::initializeBackgroundExecutorsIfNeeded()
     size_t background_move_pool_size = server_settings.background_move_pool_size;
     size_t background_fetches_pool_size = server_settings.background_fetches_pool_size;
     size_t background_common_pool_size = server_settings.background_common_pool_size;
+    size_t background_vector_pool_size = server_settings.background_vector_pool_size;
+    size_t background_slow_mode_vector_pool_size = server_settings.background_slow_mode_vector_pool_size;
 
     /// With this executor we can execute more tasks than threads we have
     shared->merge_mutate_executor = std::make_shared<MergeMutateBackgroundExecutor>
@@ -5425,6 +5439,27 @@ void Context::initializeBackgroundExecutorsIfNeeded()
         CurrentMetrics::BackgroundCommonPoolSize
     );
     LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}", background_common_pool_size, background_common_pool_size);
+
+    shared->vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "VectorIndex",
+        background_vector_pool_size,
+        background_vector_pool_size,
+        CurrentMetrics::BackgroundVectorIndexPoolTask,
+        CurrentMetrics::BackgroundVectorIndexPoolSize
+    );
+
+    shared->slow_mode_vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "SlowVecIndex",
+        background_slow_mode_vector_pool_size,
+        background_slow_mode_vector_pool_size,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolSize
+    );
+
+    LOG_INFO(shared->log, "Initialized background executor for vector index operations with num_threads={}, num_tasks={}",
+             background_vector_pool_size, background_vector_pool_size);
 
     shared->are_background_executors_initialized = true;
 }
@@ -5502,6 +5537,17 @@ ThreadPool & Context::getThreadPoolWriter() const
     });
 
     return *shared->threadpool_writer;
+}
+
+/// reuse common executor
+MergeMutateBackgroundExecutorPtr Context::getVectorIndexExecutor() const
+{
+    return shared->vector_index_executor;
+}
+
+MergeMutateBackgroundExecutorPtr Context::getSlowModeVectorIndexExecutor() const
+{
+    return shared->slow_mode_vector_index_executor;
 }
 
 ReadSettings Context::getReadSettings() const

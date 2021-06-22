@@ -500,6 +500,22 @@ void ASTAlterCommand::formatImpl(const FormatSettings & settings, FormatState & 
             partition->formatImpl(settings, state, frame);
         }
     }
+    else if (type == ASTAlterCommand::ADD_VECTOR_INDEX)
+    {
+        settings.ostr << (settings.hilite ? hilite_keyword : "") << "ADD VECTOR INDEX " << (if_not_exists ? "IF NOT EXISTS " : "") << (settings.hilite ? hilite_none : "");
+        vec_index_decl->formatImpl(settings, state, frame);
+    }
+    else if (type == ASTAlterCommand::DROP_VECTOR_INDEX)
+    {
+        settings.ostr << (settings.hilite ? hilite_keyword : "")
+                      << (clear_index ? "CLEAR " : "DROP ") << "VECTOR INDEX " << (if_exists ? "IF EXISTS " : "") << (settings.hilite ? hilite_none : "");
+        vec_index->formatImpl(settings, state, frame);
+        if (partition)
+        {
+            settings.ostr << (settings.hilite ? hilite_keyword : "") << " IN PARTITION " << (settings.hilite ? hilite_none : "");
+            partition->formatImpl(settings, state, frame);
+        }
+    }
     else
         throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "Unexpected type of ALTER");
 }

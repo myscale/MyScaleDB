@@ -28,6 +28,7 @@
 #include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
 #include <Storages/MergeTree/checkDataPart.h>
 #include <Storages/MergeTree/Backup.h>
+#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <base/JSON.h>
 #include <boost/algorithm/string/join.hpp>
@@ -40,6 +41,10 @@
 #include <Common/logger_useful.h>
 
 #include <Disks/IO/CachedOnDiskReadBufferFromFile.h>
+
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/CacheManager.h>
+#include <VectorIndex/DiskIOReader.h>
 
 
 namespace CurrentMetrics
@@ -741,6 +746,7 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             checkConsistency(require_columns_checksums);
 
         loadDefaultCompressionCodec();
+        loadVectorIndexMetadata();
     }
     catch (...)
     {
@@ -1655,6 +1661,168 @@ void IMergeTreeDataPart::loadColumns(bool require)
     setColumns(loaded_columns, infos, loaded_metadata_version);
 }
 
+void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
+{
+    /// No need to check metadata of table, because for drop index, the metadata has erased it.
+    /// Remove all the files which end with .vidx
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+            continue;
+
+        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+        part_storage.removeFileIfExists(file_name);
+    }
+
+    /// Clear from metadata
+    if (containVectorIndex(index_name, col_name))
+        vector_indexed.erase(index_name + "_" + col_name);
+    else if (index_name.empty()) /// Empty index name will clear all vector indices.
+        vector_indexed.clear();
+
+    /// Clear vector index build flags
+    vector_index_build_error = false;
+    vector_index_build_cancelled = false;
+}
+
+void IMergeTreeDataPart::loadVectorIndexMetadata() const
+{
+    if (!isStoredOnDisk())
+        return;
+
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (metadata_snapshot->vec_indices.empty())
+        return;
+
+    /// Check if single vector index is ready. If not, check decoupled many old vector indices.
+    if (getDataPartStorage().exists(toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX))
+        loadSimpleVectorIndexMetadata();
+    else
+        loadDecoupledVectorIndexMetadata();
+}
+
+void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
+{
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+
+    /// first loop through metadata, this loop we find all vector index needed to verify, and read them in one disk IO
+    std::vector<String> index_name_to_verify;
+    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+        index_name_to_verify.emplace_back(vec_index_desc.name + "_" + vec_index_desc.column);
+
+    String read_file_path = getDataPartStorage().getFullPath() + "vector_index_ready" + VECTOR_INDEX_FILE_SUFFIX;
+
+    VectorIndex::DiskIOReader reader;
+    std::unordered_map<std::string, VectorIndex::Parameters> para;
+    std::unordered_map<String, int64_t> sizes = VectorIndex::readVectorIndexReadyFile(reader, read_file_path, index_name_to_verify, para);
+
+    if (sizes.empty())
+        return;
+
+    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+    {
+        String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+        auto index_size = sizes.find(index_name);
+        if (index_size != sizes.end())
+        {
+            int64_t size = index_size->second;
+            // this index is in metadata and found in vector_index_ready
+            if (size != -1)
+            {
+                LOG_TRACE(storage.log, "read from vector_index_ready:{},{}", index_name, size);
+                VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
+                ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
+                if (!single_params_from_record.empty())
+                {
+                    VectorIndex::IndexType t
+                            = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
+                    single_params_from_record.erase("type");
+
+                    if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
+                            t,
+                            single_params_from_record,
+                            VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
+                            VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
+                    {
+                        LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                        addVectorIndex(index_name);
+                    }
+                }
+                // second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
+                else
+                {
+                    LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                    addVectorIndex(index_name);
+                }
+            }
+        }
+    }
+}
+
+void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
+{
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (metadata_snapshot->vec_indices.empty())
+        return;
+
+    if (!getDataPartStorage().exists(toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_SUFFIX))
+        return;
+
+    /// Find source part names based on vector_index_ready.
+    std::vector<MergedPartNameAndId> old_part_names;
+    String ready_file_name = toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        if (!endsWith(file_name, ready_file_name))
+            continue;
+
+        /// Found merged files, merged-0-<part name>-vector_index_ready.vidx
+        Strings tokens;
+        boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
+        if (tokens.size() != 4)
+        {
+            LOG_INFO(storage.log, "merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
+            removeAllRowIdsMaps(true);
+            return;
+        }
+
+        old_part_names.emplace_back(tokens[2], std::stoi(tokens[1]));
+    }
+
+    /// Initilize the decoupled metadata
+    if (!old_part_names.empty())
+    {
+        std::lock_guard lock(decouple_mutex);
+        merged_source_parts = old_part_names;
+    }
+}
+
+void IMergeTreeDataPart::removeAllRowIdsMaps(const bool force) const
+{
+    /// We force to remove all row ids maps when incompleted files found.
+    if (!containRowIdsMaps() && !force)
+        return;
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX) || !startsWith(file_name, "merged-"))
+            continue;
+
+        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+        part_storage.removeFileIfExists(file_name);
+    }
+
+    std::lock_guard lock(decouple_mutex);
+    merged_source_parts.clear();
+}
 
 /// Project part / part with project parts / compact part doesn't support LWD.
 bool IMergeTreeDataPart::supportLightweightDeleteMutate() const
@@ -1666,6 +1834,194 @@ bool IMergeTreeDataPart::supportLightweightDeleteMutate() const
 bool IMergeTreeDataPart::hasLightweightDelete() const
 {
     return columns.contains(RowExistsColumn::name);
+}
+
+std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
+        return std::nullopt;
+
+    NamesAndTypesList cols;
+    cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
+
+    MutableColumns buffered_columns;
+    buffered_columns.resize(1);
+    buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
+
+    StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
+    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshotWithoutParts(metadata_ptr);
+
+    MergeTreeReaderSettings reader_settings;
+
+    MergeTreeReaderPtr reader = getReader(
+            cols,
+            storage_snapshot_ptr->metadata,
+            MarkRanges{MarkRange(0, getMarksCount())},
+            nullptr,
+            storage.getContext()->getMarkCache().get(),
+            reader_settings,
+            ValueSizeMap{},
+            ReadBufferFromFileBase::ProfileCallback{});
+
+    if (!reader)
+    {
+        LOG_ERROR(storage.log, "[readRowExistsColumn] create reader failed");
+        return std::nullopt;
+    }
+
+    size_t current_mark = 0;
+    const size_t total_mark = getMarksCount();
+
+    size_t num_rows_read = 0;
+    const size_t num_rows_total = rows_count;
+
+    LOG_DEBUG(storage.log, "[readRowExistsColumn] total_mark = {}", total_mark);
+    LOG_DEBUG(storage.log, "[readRowExistsColumn] num_rows_total = {}", num_rows_total);
+
+    bool continue_read = false;
+    while (num_rows_read < num_rows_total)
+    {
+        const size_t remaining_size = num_rows_total - num_rows_read;
+
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: num_rows_read = {}", num_rows_read);
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: remaining_size = {}", remaining_size);
+
+        Columns result;
+        result.resize(1);
+
+        size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop, count rows have be read = {}", num_rows);
+
+        continue_read = true;
+        num_rows_read += num_rows;
+
+        buffered_columns[0]->insertRangeFrom(*result[0], 0, result[0]->size());
+
+        /// calculate next mark
+        for (size_t mark = 0; mark < total_mark - 1; ++mark)
+        {
+            if (index_granularity.getMarkStartingRow(mark) >= num_rows_read
+                && index_granularity.getMarkStartingRow(mark + 1) < num_rows_read)
+            {
+                current_mark = mark;
+            }
+        }
+    }
+
+    buffered_columns[0]->protect();
+
+    Columns ret;
+    ret.assign(
+            std::make_move_iterator(buffered_columns.begin()),
+            std::make_move_iterator(buffered_columns.end())
+    );
+
+    return std::optional<ColumnPtr>(ret[0]);
+}
+
+void IMergeTreeDataPart::onLightweightDelete() const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
+        return;
+
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (metadata_snapshot->vec_indices.empty() || !containAnyVectorIndex())
+        return;
+
+    std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
+    if (!row_exists_column_opt.has_value())
+    {
+        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column is empty in part {}", name);
+        return;
+    }
+
+    const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
+    if (row_exists_col == nullptr)
+    {
+        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column type is not UInt8 in part {}", name);
+        return;
+    }
+
+    std::vector<UInt64> del_row_ids; /// Store deleted row ids
+
+    const ColumnUInt8::Container & vec_res = row_exists_col->getData();
+    for (size_t pos = 0; pos < vec_res.size(); pos++)
+    {
+        if (!vec_res[pos])
+            del_row_ids.push_back(static_cast<UInt64>(pos));
+    }
+
+    if (del_row_ids.empty())
+    {
+        LOG_DEBUG(storage.log, "[onLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
+        return;
+    }
+    /// currently only consider one vector index
+    auto vec_index_desc = metadata_snapshot->vec_indices[0];
+
+    VectorIndex::SegmentId segment_id(getDataPartStorage().getFullPath(), name, name, vec_index_desc.name, vec_index_desc.column, 0);
+    VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+
+    /// Update vector index deleted bitmap for the part on disk and cache if exists.
+    vec_executor.updateBitMap(del_row_ids);
+}
+
+void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
+        return;
+
+    /// Quick return if no vector index defined or no merged old parts' index files
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (metadata_snapshot->vec_indices.empty() || !containRowIdsMaps())
+        return;
+
+    /// Load _row_exists column
+    std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
+    if (!row_exists_column_opt.has_value())
+    {
+        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column is empty in part {}", name);
+        return;
+    }
+
+    const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
+    if (row_exists_col == nullptr)
+    {
+        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column type is not UInt8 in part {}", name);
+        return;
+    }
+
+    /// Collect deleted ids. Loop through _row_exists column to find row ids (position) with value 0.
+    std::vector<UInt64> new_del_ids;
+
+    const ColumnUInt8::Container & vec_res = row_exists_col->getData();
+    for (size_t pos = 0; pos < vec_res.size(); pos++)
+    {
+        if (!vec_res[pos])
+            new_del_ids.push_back(static_cast<UInt64>(pos));
+    }
+
+    if (new_del_ids.empty())
+    {
+        LOG_DEBUG(storage.log, "[onDecoupledLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
+        return;
+    }
+
+    /// currently only consider one vector index
+    auto vec_index_desc = metadata_snapshot->vec_indices[0];
+
+    /// In decoupled part, need to map new delete row ids to old parts' row ids and update their delete bitmaps.
+    String data_path = getDataPartStorage().getFullPath();
+
+    const auto old_parts = getMergedSourceParts();
+    for (const auto & old_part : old_parts)
+    {
+        VectorIndex::SegmentId segment_id(data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, old_part.id);
+        VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+        /// Update merged deleted bitmap for the old part on disk and cache if exists.
+        vec_executor.updateMergedBitMap(new_del_ids);
+    }
 }
 
 void IMergeTreeDataPart::assertHasVersionMetadata(MergeTreeTransaction * txn) const

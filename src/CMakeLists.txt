@@ -159,6 +159,9 @@ endif ()
 
 list(APPEND clickhouse_common_io_sources ${CONFIG_INCLUDE_PATH}/config_version.cpp)
 
+add_headers_and_sources(dbms VectorIndex)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
+
 if (NOT ENABLE_SSL)
     list (REMOVE_ITEM clickhouse_common_io_sources Common/OpenSSLHelpers.cpp)
     list (REMOVE_ITEM clickhouse_common_io_headers Common/OpenSSLHelpers.h)
@@ -486,7 +489,6 @@ if (TARGET ch_contrib::hivemetastore)
     dbms_target_link_libraries(PRIVATE ch_contrib::hivemetastore)
 endif()
 
-
 if (TARGET ch_contrib::aws_s3)
     target_link_libraries (clickhouse_common_io PUBLIC ch_contrib::aws_s3)
 endif()
@@ -553,6 +555,10 @@ if (TARGET ch_contrib::datasketches)
 endif ()
 
 target_link_libraries (clickhouse_common_io PRIVATE ch_contrib::lz4)
+dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/faiss")
+dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/hnswlib")
+dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/rapidjson/include")
+dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/lz4/lib")
 
 if (TARGET ch_contrib::qpl)
     dbms_target_link_libraries(PUBLIC ch_contrib::qpl)
@@ -568,6 +574,7 @@ endif ()
 
 target_link_libraries(clickhouse_common_io PUBLIC boost::context)
 dbms_target_link_libraries(PUBLIC boost::context)
+dbms_target_link_libraries(PUBLIC faiss)
 
 if (ENABLE_NLP)
     dbms_target_link_libraries (PUBLIC ch_contrib::stemmer)
@@ -613,6 +620,8 @@ if (TARGET ch_rust::skim)
     dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::skim,INTERFACE_INCLUDE_DIRECTORIES>)
     dbms_target_link_libraries(PUBLIC ch_rust::skim)
 endif()
+find_package(OpenMP REQUIRED)
+dbms_target_link_libraries(PUBLIC OpenMP::OpenMP_CXX)
 
 if (ENABLE_TESTS)
     macro (grep_gtest_sources BASE_DIR DST_VAR)

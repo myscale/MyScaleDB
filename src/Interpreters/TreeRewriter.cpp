@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -22,6 +26,7 @@
 #include <Interpreters/QueryNormalizer.h>
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Interpreters/RewriteOrderByVisitor.hpp>
+#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
@@ -39,6 +44,7 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
@@ -59,7 +65,14 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageView.h>
 
+#include <DataTypes/DataTypesNumber.h>
+#include <DataTypes/DataTypeTuple.h>
+
+#include <Storages/MergeTree/MergeTreeData.h>
+
 #include <AggregateFunctions/AggregateFunctionFactory.h>
+#include <Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/VectorIndexCommon.h>
 
 #include <boost/algorithm/string.hpp>
 
@@ -967,7 +980,123 @@ struct RewriteShardNum
     }
 };
 using RewriteShardNumVisitor = InDepthNodeVisitor<RewriteShardNum, true>;
+/// Get all distance functions, remove duplicated functions
+std::vector<const ASTFunction *> getVectorScanFunctions(ASTPtr & query, const ASTSelectQuery &)
+{
+    GetVectorScanVisitor::Data data;
+    GetVectorScanVisitor(data).visit(query);
 
+    /// There can not be other aggregate functions within the aggregate functions.
+    return data.vector_scan_funcs;
+}
+
+void optimizeVectorScan(
+    ASTSelectQuery * select_query,
+    const VectorIndicesDescription & vector_indices_description,
+    std::vector<const ASTFunction *> & vector_scan_funcs,
+    ContextPtr context,
+    String & vector_scan_metric_type)
+{
+    /// only consider one distance function case
+    if (vector_scan_funcs.size() == 1)
+    {
+        const auto * vector_scan_func_node = vector_scan_funcs[0];
+        if (isDistance(vector_scan_func_node->getColumnName()))
+        {
+            String param_str = parseVectorScanParameters(vector_scan_func_node, context);
+            VectorIndex::Parameters vec_parameters;
+            if (!param_str.empty())
+            {
+                try
+                {
+                    Poco::JSON::Parser json_parser;
+                    auto object = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
+                    vec_parameters = VectorIndex::convertPocoJsonToMap(object);
+                }
+                catch ([[maybe_unused]] const std::exception & e)
+                {
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
+                }
+            }
+
+            if (!select_query->orderBy())
+            {
+                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
+                auto order_by_elem = std::make_shared<ASTOrderByElement>();
+                auto order_by_col = std::make_shared<ASTIdentifier>(vector_scan_func_node->getColumnName());
+
+                /// Basically copy-and-paste from ExpressionAnalyzer, dirty
+                if (!vector_scan_func_node->arguments || vector_scan_func_node->arguments->children.size() != 2)
+                {
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
+                }
+                const auto search_column_name = vector_scan_func_node->arguments->children[0]->getColumnName();
+
+                /// Empty is ok, l2 as default
+                String metric_type = vec_parameters["metric_type"];
+                for (const auto & vector_index_description : vector_indices_description)
+                {
+                    /// index metric_type has higher priority
+                    if (vector_index_description.column == search_column_name)
+                    {
+                        const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_description.parameters);
+                        if(index_parameter.contains("metric_type")){
+                            metric_type = index_parameter.at("metric_type");
+                            break;
+                        }
+                    }
+                }
+                Poco::toUpperInPlace(metric_type);
+
+                order_by_elem->children.emplace_back(order_by_col);
+                order_by_elem->direction = metric_type == "IP" ? -1 : 1;
+                order_by_elem->nulls_direction = 1;
+
+                order_by_exp_ast->children.emplace_back(order_by_elem);
+                select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
+
+                /// Stored in TreeRewriterResult, pass such info to ExpressionAnalyzer
+                vector_scan_metric_type = metric_type;
+            }
+
+            if (!select_query->limitBy() && !select_query->limitLength() && !select_query->limitOffset() && !select_query->limitByOffset()
+                && !select_query->limitByLength())
+            {
+                if (vec_parameters.contains("topK"))
+                {
+                    auto limit_by_ast = std::make_shared<ASTLiteral>(VectorIndex::StoI(vec_parameters.at("topK")));
+                    select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, limit_by_ast);
+                }
+            }
+        }
+        else if (isBatchDistance(vector_scan_funcs[0]->getColumnName()))
+        {
+            if (!select_query->orderBy())
+            {
+                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
+                auto order_by_elem_a = std::make_shared<ASTOrderByElement>();
+                auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
+                auto order_by_literal_a = std::make_shared<ASTLiteral>(1u);
+                auto tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
+                order_by_elem_a->children.emplace_back(tuple_function_a);
+                order_by_elem_a->direction = 1;
+                order_by_elem_a->nulls_direction = 1;
+
+                auto order_by_elem_b = std::make_shared<ASTOrderByElement>();
+                auto order_by_col_b = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
+                auto order_by_literal_b = std::make_shared<ASTLiteral>(2u);
+                auto tuple_function_b = makeASTFunction("tupleElement", order_by_col_b, order_by_literal_b);
+                order_by_elem_b->children.emplace_back(tuple_function_b);
+                order_by_elem_b->direction = 1;
+                order_by_elem_b->nulls_direction = 1;
+
+                order_by_exp_ast->children.emplace_back(order_by_elem_a);
+                order_by_exp_ast->children.emplace_back(order_by_elem_b);
+                select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
+            }
+        }
+    }
+}
 }
 
 TreeRewriterResult::TreeRewriterResult(
@@ -1216,6 +1345,38 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         }
     }
 
+    /// insert distance func columns into source columns here
+    if (!vector_scan_funcs.empty())
+    {
+        for (auto node : vector_scan_funcs)
+        {
+            if (isDistance(node->getColumnName()))
+            {
+                if (!source_columns.contains(node->getColumnName())) /* consider second analysis round */
+                {
+                    NameAndTypePair new_name_pair(node->getColumnName(), std::make_shared<DataTypeFloat32>());
+                    source_columns.push_back(new_name_pair);
+                    unknown_required_source_columns.erase(node->getColumnName());
+                }
+            }
+            else if (isBatchDistance(node->getColumnName()))
+            {
+                if (!source_columns.contains(node->getColumnName())) /* consider second analysis round */
+                {
+                    auto id_type = std::make_shared<DataTypeUInt32>();
+                    auto distance_type = std::make_shared<DataTypeFloat32>();
+                    DataTypes types;
+                    types.emplace_back(id_type);
+                    types.emplace_back(distance_type);
+                    auto type = std::make_shared<DataTypeTuple>(types);
+                    NameAndTypePair new_name_pair(node->getColumnName(), type);
+                    source_columns.push_back(new_name_pair);
+                    unknown_required_source_columns.erase(node->getColumnName());
+                }
+            }
+        }
+    }
+
     if (!unknown_required_source_columns.empty())
     {
         constexpr auto format_string = "Missing columns: {} while processing query: '{}', required columns:{}{}";
@@ -1304,6 +1465,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     const Names & required_result_columns,
     std::shared_ptr<TableJoin> table_join) const
 {
+    DB::OpenTelemetry::SpanHolder span("TreeRewriter::analyzeSelect");
     auto * select_query = query->as<ASTSelectQuery>();
     if (!select_query)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Select analyze for not select asts.");
@@ -1419,6 +1581,8 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     result.window_function_asts = getWindowFunctions(query, *select_query);
     result.expressions_with_window_function = getExpressionsWithWindowFunctions(query);
 
+    result.vector_scan_funcs = getVectorScanFunctions(query, *select_query);
+
     result.collectUsedColumns(query, true);
 
     if (!result.missed_subcolumns.empty())
@@ -1478,6 +1642,15 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     // remove outer braces in order by
     RewriteOrderByVisitor::Data data;
     RewriteOrderByVisitor(data).visit(query);
+    if (result.storage)
+    {
+        optimizeVectorScan(
+            select_query,
+            result.storage->getInMemoryMetadataPtr()->getVectorIndices(),
+            result.vector_scan_funcs,
+            getContext(),
+            result.vector_scan_metric_type);
+    }
 
     return std::make_shared<const TreeRewriterResult>(result);
 }

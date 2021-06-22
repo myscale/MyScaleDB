@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/BackgroundSchedulePool.h>
@@ -71,6 +75,8 @@ public:
     bool scheduleFetchTask(ExecutableTaskPtr fetch_task);
     bool scheduleMoveTask(ExecutableTaskPtr move_task);
     bool scheduleCommonTask(ExecutableTaskPtr common_task, bool need_trigger);
+    void scheduleVectorIndexTask(ExecutableTaskPtr vector_index_task);    
+    void scheduleSlowModeVectorIndexTask(ExecutableTaskPtr vector_index_task);
 
     /// Just call finish
     ~BackgroundJobsAssignee();

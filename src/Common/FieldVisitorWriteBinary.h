@@ -22,6 +22,7 @@ public:
     void operator() (const String & x, WriteBuffer & buf) const;
     void operator() (const Array & x, WriteBuffer & buf) const;
     void operator() (const Tuple & x, WriteBuffer & buf) const;
+    void operator() (const ObjectToFetch & x, WriteBuffer & buf) const;
     void operator() (const Map & x, WriteBuffer & buf) const;
     void operator() (const Object & x, WriteBuffer & buf) const;
     void operator() (const DecimalField<Decimal32> & x, WriteBuffer & buf) const;

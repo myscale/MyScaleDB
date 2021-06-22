@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Compression/CompressionFactory.h>
 #include <Core/Settings.h>
 #include <DataTypes/DataTypeArray.h>
@@ -28,6 +32,7 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
+#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTStatisticsDeclaration.h>
 #include <Parsers/ASTLiteral.h>
@@ -40,6 +45,7 @@
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Common/typeid_cast.h>
 #include <Common/randomSeed.h>
+#include <Common/logger_useful.h>
 
 #include <ranges>
 
@@ -468,6 +474,39 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         command.sql_security = command_ast->sql_security->clone();
         return command;
     }
+    else if (command_ast->type == ASTAlterCommand::ADD_VECTOR_INDEX)
+    {
+        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        AlterCommand command;
+        command.ast = command_ast->clone();
+        command.vec_index_decl = command_ast->vec_index_decl;
+        command.type = AlterCommand::ADD_VECTOR_INDEX;
+
+        const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVectorIndexDeclaration &>();
+
+        command.vec_index_name = ast_vec_index_decl.name;
+        command.column_name = ast_vec_index_decl.column;
+
+        command.if_not_exists = command_ast->if_not_exists;
+        LOG_DEBUG(log, "vector index name: {}", command.vec_index_name);
+
+        return command;
+    }
+    else if (command_ast->type == ASTAlterCommand::DROP_VECTOR_INDEX)
+    {
+        AlterCommand command;
+        command.ast = command_ast->clone();
+        command.type = AlterCommand::DROP_VECTOR_INDEX;
+        command.vec_index_name = command_ast->vec_index->as<ASTIdentifier &>().name();
+        command.if_exists = command_ast->if_exists;
+        if (command_ast->clear_index)
+            command.clear = true;
+
+        if (command_ast->partition)
+            command.partition = command_ast->partition;
+
+        return command;
+    }
     else
         return {};
 }
@@ -590,6 +629,7 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
                     column.default_desc.kind = default_kind;
                     column.default_desc.expression = default_expression;
                 }
+
             }
         });
 
@@ -665,7 +705,6 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong index name. Cannot find index {} to insert after{}",
                     backQuote(after_index_name), hints_string);
             }
-
             ++insert_it;
         }
 
@@ -897,6 +936,75 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
     }
     else if (type == MODIFY_SQL_SECURITY)
         metadata.setSQLSecurity(sql_security->as<ASTSQLSecurity &>());
+    else if (type == ADD_VECTOR_INDEX)
+    {
+        if (std::any_of(
+            metadata.vec_indices.cbegin(),
+            metadata.vec_indices.cend(),
+            [this](const auto & vec_index)
+            {
+                return vec_index.name == vec_index_name;
+            }))
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot add vector index {}: this name is used", vec_index_name);
+        }
+        if (std::any_of(
+                metadata.vec_indices.cbegin(),
+                metadata.vec_indices.cend(),
+                [this](const auto & vec_index)
+                {
+                    return vec_index.column == column_name;
+                }))
+        {
+            if (if_not_exists)
+                return;
+            else
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: this column already has a vector index definition", vec_index_name);
+        }
+
+        if (!metadata.columns.has(column_name))
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column {} does not exist", vec_index_name, column_name);
+
+        auto column_desc = metadata.columns.get(column_name);
+
+        auto col_data_type = column_desc.type;
+
+        if (col_data_type->getTypeId() != TypeIndex::Array)
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not array", vec_index_name);
+        else
+        {
+            const auto * array_type = typeid_cast<const DataTypeArray *>(col_data_type.get());
+            auto nested_type = array_type->getNestedType()->getTypeId();
+            if (nested_type != TypeIndex::Float32 && nested_type != TypeIndex::Float64)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not float array", vec_index_name);
+        }
+
+        auto insert_it = metadata.vec_indices.end();
+
+        metadata.vec_indices.emplace(insert_it, VectorIndexDescription::getVectorIndexFromAST(vec_index_decl, metadata.columns));
+    }
+    else if (type == DROP_VECTOR_INDEX)
+    {
+        if (!partition && !clear)
+        {
+            auto erase_it = std::find_if(
+                metadata.vec_indices.begin(),
+                metadata.vec_indices.end(),
+                [this](const auto & vec_index)
+                {
+                    return vec_index.name == vec_index_name;
+                });
+
+            if (erase_it == metadata.vec_indices.end())
+            {
+                if (if_exists)
+                    return;
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong vector index name. Cannot find vector index {} to drop", backQuote(vec_index_name));
+            }
+
+            metadata.vec_indices.erase(erase_it);
+        }
+    }
     else
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong parameter type in ALTER query");
 }
@@ -1155,6 +1263,42 @@ bool AlterCommands::hasLegacyInvertedIndex(const StorageInMemoryMetadata & metad
     return false;
 }
 
+std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
+{
+    VectorIndexCommand result;
+    if (type == ADD_VECTOR_INDEX)
+    {
+        result.drop_command = false;
+        result.column_name = column_name;
+        result.index_name = vec_index_name;
+        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
+        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
+    } 
+    else if (type == DROP_VECTOR_INDEX) 
+    {
+        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
+        result.drop_command = true;
+        result.index_name = vec_index_name;
+
+        /// Get column name of the dropped vector index from metadata
+        for (auto & vec_index : metadata.vec_indices)
+        {
+            if (vec_index_name == vec_index.name)
+                result.column_name = vec_index.column;
+        }
+    }
+    else 
+    {
+        return {};
+    }
+    
+    result.ast = ast->clone();
+    apply(metadata, context);
+    return result;
+}
+
 void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context) const
 {
     if (!prepared)
@@ -1209,6 +1353,19 @@ void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context
         catch (Exception & exception)
         {
             exception.addMessage("Cannot apply mutation because it breaks skip index " + index.name);
+            throw;
+        }
+    }
+
+    for (auto & vec_index : metadata_copy.vec_indices)
+    {
+        try
+        {
+            vec_index = VectorIndexDescription::getVectorIndexFromAST(vec_index.definition_ast, metadata_copy.columns);
+        }
+        catch (Exception & exception)
+        {
+            exception.addMessage("Cannot apply mutation because it breaks vector index " + vec_index.name);
             throw;
         }
     }
@@ -1315,7 +1472,9 @@ void AlterCommands::validate(const StoragePtr & table, ContextPtr context) const
         const auto & column_name = command.column_name;
         if (command.type == AlterCommand::ADD_COLUMN)
         {
-            if (all_columns.has(column_name) || all_columns.hasNested(column_name))
+            if (all_columns.has(command.column_name) ||
+                all_columns.hasNested(command.column_name) ||
+                (command.clear && column_name == LightweightDeleteDescription::FILTER_COLUMN.name))
             {
                 if (!command.if_not_exists)
                     throw Exception(ErrorCodes::DUPLICATE_COLUMN,
@@ -1707,6 +1866,16 @@ MutationCommands AlterCommands::getMutationCommands(StorageInMemoryMetadata meta
             }
         }
     }
+
+    return result;
+}
+/// currently only support one add vector index command in one alter query
+VectorIndexCommands AlterCommands::getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const
+{
+    VectorIndexCommands result;
+    for (const auto & alter_cmd : *this)
+        if (auto vec_index_cmd = alter_cmd.tryConvertToVectorIndexCommand(metadata, context); vec_index_cmd)
+            result.push_back(*vec_index_cmd);
 
     return result;
 }

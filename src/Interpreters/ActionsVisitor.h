@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <deque>
@@ -11,6 +15,9 @@
 #include <Parsers/IAST.h>
 #include <QueryPipeline/SizeLimits.h>
 #include <Interpreters/ActionsDAG.h>
+
+#include <Common/VectorScanUtils.h>
+
 
 namespace DB
 {

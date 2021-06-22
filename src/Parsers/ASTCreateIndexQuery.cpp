@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Common/quoteString.h>
 #include <IO/Operators.h>
 #include <Parsers/ASTCreateIndexQuery.h>
@@ -38,7 +43,7 @@ void ASTCreateIndexQuery::formatQueryImpl(const FormatSettings & settings, Forma
 
     settings.ostr << (settings.hilite ? hilite_keyword : "") << indent_str;
 
-    settings.ostr << "CREATE " << (unique ? "UNIQUE " : "") << "INDEX " << (if_not_exists ? "IF NOT EXISTS " : "");
+    settings.ostr << "CREATE " << (unique ? "UNIQUE " : "") << (is_vector_index ? "VECTOR " : "") << "INDEX " << (if_not_exists ? "IF NOT EXISTS " : "");
     index_name->formatImpl(settings, state, frame);
     settings.ostr << " ON ";
 
@@ -67,11 +72,20 @@ ASTPtr ASTCreateIndexQuery::convertToASTAlterCommand() const
 {
     auto command = std::make_shared<ASTAlterCommand>();
 
-    command->type = ASTAlterCommand::ADD_INDEX;
     command->if_not_exists = if_not_exists;
 
-    command->index = command->children.emplace_back(index_name).get();
-    command->index_decl = command->children.emplace_back(index_decl).get();
+    if (is_vector_index)
+    {
+        command->type = ASTAlterCommand::ADD_VECTOR_INDEX;
+        command->vec_index = command->children.emplace_back(index_name).get();
+        command->vec_index_decl = command->children.emplace_back(index_decl).get();
+    }
+    else
+    {
+        command->type = ASTAlterCommand::ADD_INDEX;
+        command->index = command->children.emplace_back(index_name).get();
+        command->index_decl = command->children.emplace_back(index_decl).get();
+    }
 
     return command;
 }

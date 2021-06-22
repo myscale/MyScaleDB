@@ -161,7 +161,6 @@ String getObjectDefinitionFromCreateQuery(const ASTPtr & query)
     return statement_buf.str();
 }
 
-
 DatabaseOnDisk::DatabaseOnDisk(
     const String & name,
     const String & metadata_path_,

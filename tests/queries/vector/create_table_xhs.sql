@@ -1,0 +1,1 @@
+CREATE TABLE test_xhs(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector FixedArray(Float32, 1280)) engine MergeTree primary key docId

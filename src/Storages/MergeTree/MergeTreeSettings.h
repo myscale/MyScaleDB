@@ -217,6 +217,14 @@ struct Settings;
     /** Projection settings. */ \
     M(UInt64, max_projections, 25, "The maximum number of merge tree projections.", 0) \
     M(DeduplicateMergeProjectionMode, deduplicate_merge_projection_mode, DeduplicateMergeProjectionMode::THROW, "Whether to allow create projection for the table with non-classic MergeTree, if allowed, what is the action when merge, drop or rebuild.", 0) \
+    \
+    /** Vector Search */ \
+    M(Bool, enable_primary_key_cache, false, "Enable primary key cache when do vector search.", 0) \
+    M(Bool, enable_decouple_vector_index_rebuild_from_merge, true, "Enable use old vector indices during merge.", 0) \
+    M(Bool, distable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
+    M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
+    M(String, vector_search_metric_type, "L2", "default metric type for brute force search", 0) \
+    M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
 
 #define MAKE_OBSOLETE_MERGE_TREE_SETTING(M, TYPE, NAME, DEFAULT) \
     M(TYPE, NAME, DEFAULT, "Obsolete setting, does nothing.", BaseSettingsHelpers::Flags::OBSOLETE)

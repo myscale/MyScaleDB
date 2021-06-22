@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Analyzer/IQueryTreeNode.h>
@@ -9,6 +13,8 @@
 #include <Interpreters/PreparedSets.h>
 #include <Planner/PlannerContext.h>
 #include <QueryPipeline/StreamLocalLimits.h>
+#include <Interpreters/VectorScanDescription.h>
+#include <Common/VectorScanUtils.h>
 
 #include <memory>
 
@@ -29,6 +35,9 @@ using FilterDAGInfoPtr = std::shared_ptr<FilterDAGInfo>;
 
 struct InputOrderInfo;
 using InputOrderInfoPtr = std::shared_ptr<const InputOrderInfo>;
+
+struct VectorScanInfo;
+using VectorScanInfoPtr = std::shared_ptr<const VectorScanInfo>;
 
 struct TreeRewriterResult;
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;
@@ -132,6 +141,17 @@ struct InputOrderInfo
     bool operator==(const InputOrderInfo &) const = default;
 };
 
+struct VectorScanInfo
+{
+    VectorScanDescriptions vector_scan_descs;
+    bool is_batch;
+
+    VectorScanInfo(const VectorScanDescriptions & vector_scan_descs_) 
+        : vector_scan_descs(vector_scan_descs_) {
+        is_batch = !vector_scan_descs.empty() && isBatchDistance(vector_scan_descs[0].column_name);
+    }
+};
+
 class IMergeTreeDataPart;
 
 using ManyExpressionActions = std::vector<ExpressionActionsPtr>;
@@ -203,6 +223,8 @@ struct SelectQueryInfo
     ReadInOrderOptimizerPtr order_optimizer;
     /// Can be modified while reading from storage
     InputOrderInfoPtr input_order_info;
+
+    VectorScanInfoPtr vector_scan_info;
 
     /// Prepared sets are used for indices by storage engine.
     /// Example: x IN (1, 2, 3)

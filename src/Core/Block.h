@@ -52,6 +52,8 @@ public:
     /// remove the column with the specified name
     void erase(const String & name);
 
+    bool equal(const Block & other) const { return data == other.data && index_by_name == other.index_by_name; }
+
     /// References are invalidated after calling functions above.
 
     ColumnWithTypeAndName & getByPosition(size_t position) { return data[position]; }

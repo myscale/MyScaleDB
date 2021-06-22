@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include "MergeTreeDataMergerMutator.h"
 
 #include <Storages/MergeTree/MergedBlockOutputStream.h>
@@ -42,6 +46,8 @@
 #include <numeric>
 
 #include <boost/algorithm/string/replace.hpp>
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+
 
 namespace CurrentMetrics
 {

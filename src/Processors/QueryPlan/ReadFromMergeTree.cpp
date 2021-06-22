@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+* Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+* Co., Ltd. */
+
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 
 #include <IO/Operators.h>
@@ -117,6 +121,8 @@ bool restorePrewhereInputs(PrewhereInfo & info, const NameSet & inputs)
 }
 
 }
+
+#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 
 namespace ProfileEvents
 {
@@ -648,6 +654,8 @@ Pipe ReadFromMergeTree::read(
 
     auto pipe = readInOrder(parts_with_range, required_columns, pool_settings, read_type, /*limit=*/ 0);
 
+    LOG_DEBUG(log, "[read] pipe header: {}", pipe.getHeader().dumpStructure());
+
     /// Use ConcatProcessor to concat sources together.
     /// It is needed to read in parts order (and so in PK order) if single thread is used.
     if (read_type == ReadType::Default && pipe.numOutputPorts() > 1)
@@ -765,6 +773,8 @@ Pipe ReadFromMergeTree::spreadMarkRangesAmongStreams(RangesInDataParts && parts_
                 num_streams = parts_with_ranges.size();
         }
     }
+    LOG_DEBUG(log, "parts_with_ranges marks: {}, rows: {}, num_streams: {}, info.sum_marks: {}, nfo.min_marks_for_concurrent_read: {}",
+        parts_with_ranges[0].getMarksCount(), parts_with_ranges[0].getRowsCount(), num_streams, info.sum_marks, info.min_marks_for_concurrent_read);
 
     auto read_type = is_parallel_reading_from_replicas ? ReadType::ParallelReplicas : ReadType::Default;
 
@@ -1983,6 +1993,49 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     selected_marks = result.selected_marks;
     selected_rows = result.selected_rows;
     selected_parts = result.selected_parts;
+
+    auto vector_scan_info_ptr = query_info.vector_scan_info;
+
+    if (vector_scan_info_ptr)
+    {
+        LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
+        for (auto & part : result.parts_with_ranges)
+        {
+            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr);
+            /// no prewhere info, first perform vector scan
+            if (!prewhere_info)
+            {
+                /// TODO: we can use vector scan result to further decrease mark range size
+                part.vector_scan_manager->executeBeforeRead(part.data_part->getDataPartStorage().getFullPath(), part.data_part);
+            }
+        }
+
+        if (!prewhere_info)
+        {
+            LOG_DEBUG(log, "[initializePipeline] try to filter mark ranges by vector scan result");
+            filterMarkRangesByVectorScanResult(result.parts_with_ranges,
+                                               vector_scan_info_ptr->vector_scan_descs, context->getSettingsRef());
+
+            size_t sum_marks = 0;
+            size_t sum_ranges = 0;
+            size_t sum_rows = 0;
+
+            for (const auto & part : result.parts_with_ranges)
+            {
+                sum_ranges += part.ranges.size();
+                sum_marks += part.getMarksCount();
+                sum_rows += part.getRowsCount();
+            }
+            LOG_DEBUG(
+                log,
+                "After filterByVectorScan: {} parts, {} marks to read from {} ranges, read {} rows",
+                result.parts_with_ranges.size(),
+                sum_marks,
+                sum_ranges,
+                sum_rows);
+        }
+    }
+
     /// Projection, that needed to drop columns, which have appeared by execution
     /// of some extra expressions, and to allow execute the same expressions later.
     /// NOTE: It may lead to double computation of expressions.
@@ -2067,7 +2120,10 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     }
 
     for (const auto & processor : pipe.getProcessors())
+    {
+        LOG_DEBUG(log, "[initializePipeline] add processor: {}", processor->getName());
         processors.emplace_back(processor);
+    }
 
     pipeline.init(std::move(pipe));
     pipeline.addContext(context);

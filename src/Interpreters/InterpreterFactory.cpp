@@ -1,8 +1,14 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTBackupQuery.h>
 #include <Parsers/ASTCheckQuery.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTCreateFunctionQuery.h>
+#include <Parsers/ASTCreateConnectionQuery.h>
 #include <Parsers/ASTCreateIndexQuery.h>
 #include <Parsers/ASTDeleteQuery.h>
 #include <Parsers/ASTDropFunctionQuery.h>
@@ -32,6 +38,8 @@
 #include <Parsers/ASTAlterNamedCollectionQuery.h>
 #include <Parsers/ASTTransactionControl.h>
 #include <Parsers/TablePropertiesQueriesASTs.h>
+#include <Parsers/ASTCreateIndexQuery.h>
+#include <Parsers/ASTDropIndexQuery.h>
 
 #include <Parsers/Access/ASTCreateQuotaQuery.h>
 #include <Parsers/Access/ASTCreateRoleQuery.h>
@@ -50,6 +58,7 @@
 #include <Parsers/ASTDescribeCacheQuery.h>
 
 #include <Interpreters/InterpreterFactory.h>
+#include <Interpreters/InterpreterCreateConnectionQuery.h>
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
@@ -273,6 +282,10 @@ InterpreterFactory::InterpreterPtr InterpreterFactory::get(ASTPtr & query, Conte
     else if (query->as<ASTCreateSettingsProfileQuery>())
     {
         interpreter_name = "InterpreterCreateSettingsProfileQuery";
+    }
+    else if (query->as<ASTCreateConnectionQuery>())
+    {
+        return std::make_unique<InterpreterCreateConnectionQuery>(query, context);
     }
     else if (query->as<ASTDropAccessEntityQuery>())
     {

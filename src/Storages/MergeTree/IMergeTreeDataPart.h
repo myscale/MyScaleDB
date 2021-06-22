@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <unordered_map>
@@ -358,6 +362,92 @@ public:
 
     Checksums checksums;
 
+    /// TODO: move vector index related structures out of data part class
+    mutable std::set<String> vector_indexed;
+
+    /// Used for decouple part
+    mutable std::mutex decouple_mutex;
+
+    struct MergedPartNameAndId
+    {
+        String name;
+        int id;
+
+        MergedPartNameAndId(const String & name_, const int & id_) : name(name_), id(id_) {}
+    };
+
+    /// Source part names which were merged to this decouple part, used to locate their vector index files.
+    mutable std::vector<MergedPartNameAndId> merged_source_parts;
+
+    mutable bool vector_index_build_error = false;
+
+    mutable bool vector_index_tuned = false;
+
+    mutable bool vector_index_build_cancelled = false;
+
+    mutable bool small_part = false;
+
+    /// Used when vector index built is finished but the active part is under mutating.
+    /// Note: this is for StorageMergeTree engine only.
+    /// Move index files to active part OR new active part after mutation to pick up.
+    /// TODO: Remove when build vector index is handled by log entry for replciated MergeTree
+    mutable std::mutex vector_index_move_and_mutate_mutex;
+    mutable bool part_is_currently_mutating = false;
+
+    mutable bool lightweight_delete_mask_updated = false;
+
+    bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
+
+    bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
+
+    void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
+
+    /// remove specified vector index from part, both disk and metadata.
+    void removeVectorIndex(const String & index_name, const String & col_name) const;
+
+    void setBuildError() const { vector_index_build_error = true; }
+
+    void setTuned() const { vector_index_tuned = true; }
+
+    void cancelBuild() const {vector_index_build_cancelled = true;}
+
+    bool isSmallPart(size_t min_rows_to_build_vector_index) const
+    {
+        return this->rows_count == 0 || this->rows_count < min_rows_to_build_vector_index;
+    }
+
+    void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
+
+    bool getPartIsMutating() const
+    {
+        std::lock_guard lock(vector_index_move_and_mutate_mutex);
+        return part_is_currently_mutating;
+    }
+
+    void setPartIsMutating(const bool & new_value) const
+    {
+        std::lock_guard lock(vector_index_move_and_mutate_mutex);
+        part_is_currently_mutating = new_value;
+    }
+
+    /// Read vector_index_ready file to initialize vector_indxed if exists.
+    /// Otherwise, try to read merged vector_index_ready file if exists.
+    void loadVectorIndexMetadata() const;
+
+    bool containRowIdsMaps() const
+    {
+        std::lock_guard lock(decouple_mutex);
+        return !merged_source_parts.empty();
+    }
+
+    void removeAllRowIdsMaps(const bool force = false) const;
+
+    const std::vector<MergedPartNameAndId> getMergedSourceParts() const
+    {
+        std::lock_guard lock(decouple_mutex);
+        return merged_source_parts;
+    }
+
     /// Columns with values, that all have been zeroed by expired ttl
     NameSet expired_columns;
 
@@ -591,6 +681,14 @@ public:
 
     mutable std::atomic<time_t> last_removal_attempt_time = 0;
 
+    std::optional<ColumnPtr> readRowExistsColumn() const;
+
+    /// when lightweight delete mutation complete, this function will be called.
+    void onLightweightDelete() const;
+
+    /// Decoupled part support lightweight delete
+    void onDecoupledLightWeightDelete() const;
+
 protected:
     /// Primary key (correspond to primary.idx file).
     /// Lazily loaded in RAM. Contains each index_granularity-th value of primary key tuple.
@@ -723,6 +821,12 @@ private:
     /// if it not exists tries to deduce codec from compressed column without
     /// any specifial compression.
     void loadDefaultCompressionCodec();
+
+    /// Load simple single vector index metadata
+    void loadSimpleVectorIndexMetadata() const;
+
+    /// Load decoulped part with many old vector indecies
+    void loadDecoupledVectorIndexMetadata() const;
 
     void writeColumns(const NamesAndTypesList & columns_, const WriteSettings & settings);
     void writeVersionMetadata(const VersionMetadata & version_, bool fsync_part_dir) const;

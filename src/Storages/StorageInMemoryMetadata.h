@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Parsers/Access/ASTUserNameWithHost.h>
@@ -7,6 +11,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/IndicesDescription.h>
+#include <Storages/VectorIndicesDescription.h>
 #include <Storages/ProjectionsDescription.h>
 #include <Storages/KeyDescription.h>
 #include <Storages/SelectQueryDescription.h>
@@ -14,6 +19,7 @@
 #include <Storages/MaterializedView/RefreshSchedule.h>
 
 #include <Common/MultiVersion.h>
+#include <Common/VectorScanUtils.h>
 
 namespace DB
 {
@@ -27,6 +33,8 @@ struct StorageInMemoryMetadata
     ColumnsDescription columns;
     /// Table indices. Currently supported for MergeTree only.
     IndicesDescription secondary_indices;
+    /// Vector indices.
+    VectorIndicesDescription vec_indices;
     /// Table constraints. Currently supported for MergeTree only.
     ConstraintsDescription constraints;
     /// Table projections. Currently supported for MergeTree only.
@@ -88,6 +96,8 @@ struct StorageInMemoryMetadata
     /// Sets secondary indices
     void setSecondaryIndices(IndicesDescription secondary_indices_);
 
+    void setVectorIndices(VectorIndicesDescription vec_indices_);
+
     /// Sets constraints
     void setConstraints(ConstraintsDescription constraints_);
 
@@ -132,6 +142,13 @@ struct StorageInMemoryMetadata
 
     /// Has at least one non primary index
     bool hasSecondaryIndices() const;
+
+    /// Returns vector indices
+    const VectorIndicesDescription & getVectorIndices() const;
+
+    /// Has at least one vector index
+    bool hasVectorIndices() const;
+
 
     /// Return table constraints
     const ConstraintsDescription & getConstraints() const;

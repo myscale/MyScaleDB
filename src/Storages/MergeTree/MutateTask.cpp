@@ -978,6 +978,10 @@ void finalizeMutatedPart(
     new_data_part->calculateColumnsAndSecondaryIndicesSizesOnDisk();
 
     new_data_part->default_codec = codec;
+
+    ///Origin part is decoupled with merged vector indices or has simple built vector index
+    if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
+        new_data_part->loadVectorIndexMetadata();
 }
 
 }
@@ -1737,6 +1741,25 @@ private:
         static_pointer_cast<MergedBlockOutputStream>(ctx->out)->finalizePart(
             ctx->new_data_part, ctx->need_sync, nullptr, &ctx->existing_indices_stats_checksums);
         ctx->out.reset();
+
+        /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
+        if (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps())
+        {
+            bool vector_files_found = false;
+            for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
+            {
+                String file_name = it->name();
+                if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                    continue;
+
+                ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
+                vector_files_found = true;
+            }
+
+            /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
+            if (vector_files_found)
+                ctx->new_data_part->loadVectorIndexMetadata();
+        }
     }
 
     enum class State : uint8_t
@@ -2160,6 +2183,9 @@ bool MutateTask::prepare()
 
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
+    /// Used for vector index move and mutating confict
+    ctx->source_part->setPartIsMutating(true);
+
     auto context_for_reading = Context::createCopy(ctx->context);
 
     /// Allow mutations to work when force_index_by_date or force_primary_key is on.
@@ -2302,6 +2328,12 @@ bool MutateTask::prepare()
         /// This mutation contains lightweight delete and we need to count the deleted rows,
         /// Reset existing_rows_count of new data part to 0 and it will be updated while writing _row_exists column
         ctx->count_lightweight_deleted_rows = true;
+
+        /// Check if lightweight delete mask column is updated.
+        /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
+        /// Support part with simple built index and decoupled part with merged old parts' built index files
+        /// TODO: Should not use vector index when any normal delete command exists.
+        ctx->new_data_part->setDeletedMaskUpdate();
     }
     else
     {

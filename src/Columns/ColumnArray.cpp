@@ -31,6 +31,7 @@ namespace ErrorCodes
     extern const int SIZES_OF_COLUMNS_DOESNT_MATCH;
     extern const int LOGICAL_ERROR;
     extern const int TOO_LARGE_ARRAY_SIZE;
+    extern const int INCORRECT_DATA;
 }
 
 /** Obtaining array as Field can be slow for large arrays and consume vast amount of memory.
@@ -83,6 +84,7 @@ std::string ColumnArray::getName() const { return "Array(" + getData().getName()
 MutableColumnPtr ColumnArray::cloneResized(size_t to_size) const
 {
     auto res = ColumnArray::create(getData().cloneEmpty());
+    res->setDim(this->dim);
 
     if (to_size == 0)
         return res;
@@ -311,6 +313,9 @@ void ColumnArray::insert(const Field & x)
 {
     const Array & array = x.safeGet<const Array &>();
     size_t size = array.size();
+    if (dim > 0 && dim != size)
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Array size does not equal to dim: ({} vs {})", size, dim);
+
     for (size_t i = 0; i < size; ++i)
         getData().insert(array[i]);
     getOffsets().push_back(getOffsets().back() + size);

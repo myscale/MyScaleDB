@@ -9,6 +9,11 @@ include(../cmake/limit_jobs.cmake)
 
 include(${ClickHouse_SOURCE_DIR}/cmake/split_debug_symbols.cmake)
 
+option(ENABLE_LICENSE_CHECK "Enable license check" ON)
+if (ENABLE_LICENSE_CHECK)
+    add_definitions(-DENABLE_LICENSE_CHECK)
+endif (ENABLE_LICENSE_CHECK)
+
 # The `clickhouse` binary is a multi purpose tool that contains multiple execution modes (client, server, etc.),
 # So client/server/... is just a symlink to `clickhouse` binary.
 #

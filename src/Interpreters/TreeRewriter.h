@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/Block.h>
@@ -49,6 +53,9 @@ struct TreeRewriterResult
     ASTs aggregates;
     ASTs window_function_asts;
     ASTs expressions_with_window_function;
+    std::vector<const ASTFunction *> vector_scan_funcs;
+
+    String vector_scan_metric_type;
 
     /// Which column is needed to be ARRAY-JOIN'ed to get the specified.
     /// For example, for `SELECT s.v ... ARRAY JOIN a AS s` will get "s.v" -> "a.v".

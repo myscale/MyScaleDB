@@ -1,8 +1,14 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/NamesAndTypes.h>
 #include <Storages/MergeTree/MergeTreeReadTask.h>
 
+#include <Common/VectorScanUtils.h>
+#include <Storages/MergeTree/VectorScanResult.h>
 
 namespace DB
 {

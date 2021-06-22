@@ -73,13 +73,29 @@ class IColumn;
     M(Milliseconds, hedged_connection_timeout_ms, 50, "Connection timeout for establishing connection with replica for Hedged requests", 0) \
     M(Milliseconds, receive_data_timeout_ms, 2000, "Connection timeout for receiving first packet of data or packet with positive progress from replica", 0) \
     M(Bool, use_hedged_requests, true, "Use hedged requests for distributed queries", 0) \
-    M(Bool, allow_changing_replica_until_first_data_packet, false, "Allow HedgedConnections to change replica until receiving first data packet", 0) \
-    M(Milliseconds, queue_max_wait_ms, 0, "The wait time in the request queue, if the number of concurrent requests exceeds the maximum.", 0) \
+    M(Bool, \
+      allow_changing_replica_until_first_data_packet, \
+      false, \
+      "Allow HedgedConnections to change replica until receiving first data packet", \
+      0) \
+    M(Milliseconds, \
+      queue_max_wait_ms, \
+      0, \
+      "The wait time in the request queue, if the number of concurrent requests exceeds the maximum.", \
+      0) \
     M(Milliseconds, connection_pool_max_wait_ms, 0, "The wait time when the connection pool is full.", 0) \
-    M(Milliseconds, replace_running_query_max_wait_ms, 5000, "The wait time for running query with the same query_id to finish when setting 'replace_running_query' is active.", 0) \
+    M(Milliseconds, \
+      replace_running_query_max_wait_ms, \
+      5000, \
+      "The wait time for running query with the same query_id to finish when setting 'replace_running_query' is active.", \
+      0) \
     M(Milliseconds, kafka_max_wait_ms, 5000, "The wait time for reading from Kafka before retry.", 0) \
     M(Milliseconds, rabbitmq_max_wait_ms, 5000, "The wait time for reading from RabbitMQ before retry.", 0) \
-    M(UInt64, poll_interval, DBMS_DEFAULT_POLL_INTERVAL, "Block at the query wait loop on the server for the specified number of seconds.", 0) \
+    M(UInt64, \
+      poll_interval, \
+      DBMS_DEFAULT_POLL_INTERVAL, \
+      "Block at the query wait loop on the server for the specified number of seconds.", \
+      0) \
     M(UInt64, idle_connection_timeout, 3600, "Close idle TCP connections after specified number of seconds.", 0) \
     M(UInt64, distributed_connections_pool_size, 1024, "Maximum number of connections with one remote server in the pool.", 0) \
     M(UInt64, connections_with_failover_max_tries, 3, "The maximum number of attempts to connect to replicas.", 0) \
@@ -153,6 +169,11 @@ class IColumn;
     M(UInt64, max_local_read_bandwidth, 0, "The maximum speed of local reads in bytes per second.", 0) \
     M(UInt64, max_local_write_bandwidth, 0, "The maximum speed of local writes in bytes per second.", 0) \
     M(Bool, stream_like_engine_allow_direct_select, false, "Allow direct SELECT query for Kafka, RabbitMQ, FileLog, Redis Streams, and NATS engines. In case there are attached materialized views, SELECT query is not allowed even if this setting is enabled.", 0) \
+    M(Float, incremental_build_index_ratio, 0.1, "the ratio which data in a datapart is being added to vector index, also is the ratio of data being used for training index", 0)   \
+    M(UInt64, max_build_index_block, 100000, "number of rows to build index in one round", 0)     \
+    M(UInt64, max_build_index_block_size_rows, 160000, "number of rows to build index in one round", 0) \
+    M(UInt64, max_build_index_block_size_bytes, 512 * 1024 * 1024, "bytes to build index in one round", 0) \
+    M(UInt64, serialized_index_segment_max_byte, 1000000000,"the number of bytes each segment of a vector index can occupy. lower value generate more segments, resulting in longer build index time but smaller memory consumption.",0)        \
     M(String, stream_like_engine_insert_queue, "", "When stream like engine reads from multiple queues, user will need to select one queue to insert into when writing. Used by Redis Streams and NATS.", 0) \
     M(Bool, dictionary_validate_primary_key_type, false, "Validate primary key type for dictionaries. By default id type for simple layouts will be implicitly converted to UInt64.", 0) \
     M(Bool, distributed_insert_skip_read_only_replicas, false, "If true, INSERT into Distributed will skip read-only replicas.", 0) \
@@ -221,7 +242,11 @@ class IColumn;
     M(UInt64, force_optimize_skip_unused_shards_nesting, 0, "Same as force_optimize_skip_unused_shards, but accept nesting level until which it will work.", 0) \
     \
     M(Bool, input_format_parallel_parsing, true, "Enable parallel parsing for some data formats.", 0) \
-    M(UInt64, min_chunk_bytes_for_parallel_parsing, (10 * 1024 * 1024), "The minimum chunk size in bytes, which each thread will parse in parallel.", 0) \
+    M(UInt64, \
+      min_chunk_bytes_for_parallel_parsing, \
+      (10 * 1024 * 1024), \
+      "The minimum chunk size in bytes, which each thread will parse in parallel.", \
+      0) \
     M(Bool, output_format_parallel_formatting, true, "Enable parallel formatting for some data formats.", 0) \
     M(UInt64, output_format_compression_level, 3, "Default compression level if query output is compressed. The setting is applied when `SELECT` query has `INTO OUTFILE` or when inserting to table function `file`, `url`, `hdfs`, `s3`, and `azureBlobStorage`.", 0) \
     M(UInt64, output_format_compression_zstd_window_log, 0, "Can be used when the output compression method is `zstd`. If greater than `0`, this setting explicitly sets compression window size (power of `2`) and enables a long-range mode for zstd compression.", 0) \
@@ -262,14 +287,18 @@ class IColumn;
     M(Float, max_streams_multiplier_for_merge_tables, 5, "Ask more streams when reading from Merge table. Streams will be spread across tables that Merge table will use. This allows more even distribution of work across threads and especially helpful when merged tables differ in size.", 0) \
     \
     M(String, network_compression_method, "LZ4", "Allows you to select the method of data compression when writing.", 0) \
-    \
+\
     M(Int64, network_zstd_compression_level, 1, "Allows you to select the level of ZSTD compression.", 0) \
     \
     M(Int64, zstd_window_log_max, 0, "Allows you to select the max window log of ZSTD (it will not be used for MergeTree family)", 0) \
     \
     M(UInt64, priority, 0, "Priority of the query. 1 - the highest, higher value - lower priority; 0 - do not use priorities.", 0) \
-    M(Int64, os_thread_priority, 0, "If non zero - set corresponding 'nice' value for query processing threads. Can be used to adjust query priority for OS scheduler.", 0) \
-    \
+    M(Int64, \
+      os_thread_priority, \
+      0, \
+      "If non zero - set corresponding 'nice' value for query processing threads. Can be used to adjust query priority for OS scheduler.", \
+      0) \
+\
     M(Bool, log_queries, true, "Log requests and write the log to the system table.", 0) \
     M(Bool, log_formatted_queries, false, "Log formatted queries and write the log to the system table.", 0) \
     M(LogQueriesType, log_queries_min_type, QueryLogElementType::QUERY_START, "Minimal type in query_log to log, possible values (from low to high): QUERY_START, QUERY_FINISH, EXCEPTION_BEFORE_START, EXCEPTION_WHILE_PROCESSING.", 0) \
@@ -289,13 +318,41 @@ class IColumn;
     M(UInt64Auto, insert_quorum, 0, "For INSERT queries in the replicated table, wait writing for the specified number of replicas and linearize the addition of the data. 0 - disabled, 'auto' - use majority", 0) \
     M(Milliseconds, insert_quorum_timeout, 600000, "If the quorum of replicas did not meet in specified time (in milliseconds), exception will be thrown and insertion is aborted.", 0) \
     M(Bool, insert_quorum_parallel, true, "For quorum INSERT queries - enable to make parallel inserts without linearizability", 0) \
-    M(UInt64, select_sequential_consistency, 0, "For SELECT queries from the replicated table, throw an exception if the replica does not have a chunk written with the quorum; do not read the parts that have not yet been written with the quorum.", 0) \
-    M(UInt64, table_function_remote_max_addresses, 1000, "The maximum number of different shards and the maximum number of replicas of one shard in the `remote` function.", 0) \
-    M(Milliseconds, read_backoff_min_latency_ms, 1000, "Setting to reduce the number of threads in case of slow reads. Pay attention only to reads that took at least that much time.", 0) \
-    M(UInt64, read_backoff_max_throughput, 1048576, "Settings to reduce the number of threads in case of slow reads. Count events when the read bandwidth is less than that many bytes per second.", 0) \
-    M(Milliseconds, read_backoff_min_interval_between_events_ms, 1000, "Settings to reduce the number of threads in case of slow reads. Do not pay attention to the event, if the previous one has passed less than a certain amount of time.", 0) \
-    M(UInt64, read_backoff_min_events, 2, "Settings to reduce the number of threads in case of slow reads. The number of events after which the number of threads will be reduced.", 0) \
-    \
+    M(UInt64, \
+      select_sequential_consistency, \
+      0, \
+      "For SELECT queries from the replicated table, throw an exception if the replica does not have a chunk written with the quorum; do " \
+      "not read the parts that have not yet been written with the quorum.", \
+      0) \
+    M(UInt64, \
+      table_function_remote_max_addresses, \
+      1000, \
+      "The maximum number of different shards and the maximum number of replicas of one shard in the `remote` function.", \
+      0) \
+    M(Milliseconds, \
+      read_backoff_min_latency_ms, \
+      1000, \
+      "Setting to reduce the number of threads in case of slow reads. Pay attention only to reads that took at least that much time.", \
+      0) \
+    M(UInt64, \
+      read_backoff_max_throughput, \
+      1048576, \
+      "Settings to reduce the number of threads in case of slow reads. Count events when the read bandwidth is less than that many bytes " \
+      "per second.", \
+      0) \
+    M(Milliseconds, \
+      read_backoff_min_interval_between_events_ms, \
+      1000, \
+      "Settings to reduce the number of threads in case of slow reads. Do not pay attention to the event, if the previous one has passed " \
+      "less than a certain amount of time.", \
+      0) \
+    M(UInt64, \
+      read_backoff_min_events, \
+      2, \
+      "Settings to reduce the number of threads in case of slow reads. The number of events after which the number of threads will be " \
+      "reduced.", \
+      0) \
+\
     M(UInt64, read_backoff_min_concurrency, 1, "Settings to try keeping the minimal number of threads in case of slow reads.", 0) \
     \
     M(Float, memory_tracker_fault_probability, 0., "For testing of `exception safety` - throw an exception every time you allocate memory with the specified probability.", 0) \
@@ -307,7 +364,7 @@ class IColumn;
     M(Bool, http_native_compression_disable_checksumming_on_decompress, false, "If you uncompress the POST data from the client compressed by the native format, do not check the checksum.", 0) \
     \
     M(String, count_distinct_implementation, "uniqExact", "What aggregate function to use for implementation of count(DISTINCT ...)", 0) \
-    \
+\
     M(Bool, add_http_cors_header, false, "Write add http CORS header.", 0) \
     \
     M(UInt64, max_http_get_redirects, 0, "Max number of http GET redirects hops allowed. Ensures additional security measures are in place to prevent a malicious server to redirect your requests to unexpected services.\n\nIt is the case when an external server redirects to another address, but that address appears to be internal to the company's infrastructure, and by sending an HTTP request to an internal server, you could request an internal API from the internal network, bypassing the auth, or even query other services, such as Redis or Memcached. When you don't have an internal infrastructure (including something running on your localhost), or you trust the server, it is safe to allow redirects. Although keep in mind, that if the URL uses HTTP instead of HTTPS, and you will have to trust not only the remote server but also your ISP and every network in the middle.", 0) \
@@ -372,7 +429,11 @@ class IColumn;
     M(Bool, analyze_index_with_space_filling_curves, true, "If a table has a space-filling curve in its index, e.g. `ORDER BY mortonEncode(x, y)`, and the query has conditions on its arguments, e.g. `x >= 10 AND x <= 20 AND y >= 20 AND y <= 30`, use the space-filling curve for index analysis.", 0) \
     M(Bool, joined_subquery_requires_alias, true, "Force joined subqueries and table functions to have aliases for correct name qualification.", 0) \
     M(Bool, empty_result_for_aggregation_by_empty_set, false, "Return empty result when aggregating without keys on empty set.", 0) \
-    M(Bool, empty_result_for_aggregation_by_constant_keys_on_empty_set, true, "Return empty result when aggregating by constant keys on empty set.", 0) \
+    M(Bool, \
+      empty_result_for_aggregation_by_constant_keys_on_empty_set, \
+      true, \
+      "Return empty result when aggregating by constant keys on empty set.", \
+      0) \
     M(Bool, allow_distributed_ddl, true, "If it is set to true, then a user is allowed to executed distributed DDL queries.", 0) \
     M(Bool, allow_suspicious_codecs, false, "If it is set to true, allow to specify meaningless compression codecs.", 0) \
     M(Bool, enable_deflate_qpl_codec, false, "Enable/disable the DEFLATE_QPL codec.", 0) \
@@ -380,7 +441,12 @@ class IColumn;
     M(UInt64, query_profiler_real_time_period_ns, QUERY_PROFILER_DEFAULT_SAMPLE_RATE_NS, "Period for real clock timer of query profiler (in nanoseconds). Set 0 value to turn off the real clock query profiler. Recommended value is at least 10000000 (100 times a second) for single queries or 1000000000 (once a second) for cluster-wide profiling.", 0) \
     M(UInt64, query_profiler_cpu_time_period_ns, QUERY_PROFILER_DEFAULT_SAMPLE_RATE_NS, "Period for CPU clock timer of query profiler (in nanoseconds). Set 0 value to turn off the CPU clock query profiler. Recommended value is at least 10000000 (100 times a second) for single queries or 1000000000 (once a second) for cluster-wide profiling.", 0) \
     M(Bool, metrics_perf_events_enabled, false, "If enabled, some of the perf events will be measured throughout queries' execution.", 0) \
-    M(String, metrics_perf_events_list, "", "Comma separated list of perf metrics that will be measured throughout queries' execution. Empty means all events. See PerfEventInfo in sources for the available events.", 0) \
+    M(String, \
+      metrics_perf_events_list, \
+      "", \
+      "Comma separated list of perf metrics that will be measured throughout queries' execution. Empty means all events. See " \
+      "PerfEventInfo in sources for the available events.", \
+      0) \
     M(Float, opentelemetry_start_trace_probability, 0., "Probability to start an OpenTelemetry trace for an incoming query.", 0) \
     M(Bool, opentelemetry_trace_processors, false, "Collect OpenTelemetry spans for processors.", 0) \
     M(Bool, prefer_column_name_to_alias, false, "Prefer using column names instead of aliases if possible.", 0) \
@@ -395,9 +461,19 @@ class IColumn;
       * Almost all limits apply only to SELECTs. \
       * Almost all limits apply to each stream individually. \
       */ \
-    \
-    M(UInt64, max_rows_to_read, 0, "Limit on read rows from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is only checked on a remote server.", 0) \
-    M(UInt64, max_bytes_to_read, 0, "Limit on read bytes (after decompression) from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is only checked on a remote server.", 0) \
+\
+    M(UInt64, \
+      max_rows_to_read, \
+      0, \
+      "Limit on read rows from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is " \
+      "only checked on a remote server.", \
+      0) \
+    M(UInt64, \
+      max_bytes_to_read, \
+      0, \
+      "Limit on read bytes (after decompression) from the most 'deep' sources. That is, only in the deepest subquery. When reading from " \
+      "a remote server, it is only checked on a remote server.", \
+      0) \
     M(OverflowMode, read_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
     \
     M(UInt64, max_rows_to_read_leaf, 0, "Limit on read rows on the leaf nodes for distributed queries. Limit is applied for local reads only, excluding the final merge stage on the root node. Note, the setting is unstable with prefer_localhost_replica=1.", 0) \
@@ -419,7 +495,7 @@ class IColumn;
     M(UInt64, max_result_rows, 0, "Limit on result size in rows. The query will stop after processing a block of data if the threshold is met, but it will not cut the last block of the result, therefore the result size can be larger than the threshold.", 0) \
     M(UInt64, max_result_bytes, 0, "Limit on result size in bytes (uncompressed).  The query will stop after processing a block of data if the threshold is met, but it will not cut the last block of the result, therefore the result size can be larger than the threshold. Caveats: the result size in memory is taken into account for this threshold. Even if the result size is small, it can reference larger data structures in memory, representing dictionaries of LowCardinality columns, and Arenas of AggregateFunction columns, so the threshold can be exceeded despite the small result size. The setting is fairly low level and should be used with caution.", 0) \
     M(OverflowMode, result_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
-    \
+\
     /* TODO: Check also when merging and finalizing aggregate functions. */ \
     M(Seconds, max_execution_time, 0, "If query runtime exceeds the specified number of seconds, the behavior will be determined by the 'timeout_overflow_mode', which by default is - throw an exception. Note that the timeout is checked and query can stop only in designated places during data processing. It currently cannot stop during merging of aggregation states or during query analysis, and the actual run time will be higher than the value of this setting.", 0) \
     M(OverflowMode, timeout_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
@@ -450,7 +526,7 @@ class IColumn;
     M(UInt64, max_rows_in_set, 0, "Maximum size of the set (in number of elements) resulting from the execution of the IN section.", 0) \
     M(UInt64, max_bytes_in_set, 0, "Maximum size of the set (in bytes in memory) resulting from the execution of the IN section.", 0) \
     M(OverflowMode, set_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
-    \
+\
     M(UInt64, max_rows_in_join, 0, "Maximum size of the hash table for JOIN (in number of rows).", 0) \
     M(UInt64, max_bytes_in_join, 0, "Maximum size of the hash table for JOIN (in number of bytes in memory).", 0) \
     M(OverflowMode, join_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
@@ -471,11 +547,11 @@ class IColumn;
     M(UInt64, max_rows_to_transfer, 0, "Maximum size (in rows) of the transmitted external table obtained when the GLOBAL IN/JOIN section is executed.", 0) \
     M(UInt64, max_bytes_to_transfer, 0, "Maximum size (in uncompressed bytes) of the transmitted external table obtained when the GLOBAL IN/JOIN section is executed.", 0) \
     M(OverflowMode, transfer_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
-    \
+\
     M(UInt64, max_rows_in_distinct, 0, "Maximum number of elements during execution of DISTINCT.", 0) \
     M(UInt64, max_bytes_in_distinct, 0, "Maximum total size of state (in uncompressed bytes) in memory for the execution of DISTINCT.", 0) \
     M(OverflowMode, distinct_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
-    \
+\
     M(UInt64, max_memory_usage, 0, "Maximum memory usage for processing of single query. Zero means unlimited.", 0) \
     M(UInt64, memory_overcommit_ratio_denominator, 1_GiB, "It represents soft memory limit on the user level. This value is used to compute query overcommit ratio.", 0) \
     M(UInt64, max_memory_usage_for_user, 0, "Maximum memory usage for processing all concurrently running queries for the user. Zero means unlimited.", 0) \
@@ -518,9 +594,14 @@ class IColumn;
     M(Bool, enable_optimize_predicate_expression, true, "If it is set to true, optimize predicates to subqueries.", 0) \
     M(Bool, enable_optimize_predicate_expression_to_final_subquery, true, "Allow push predicate to final subquery.", 0) \
     M(Bool, allow_push_predicate_when_subquery_contains_with, true, "Allows push predicate when subquery contains WITH clause", 0) \
-    \
+\
     M(UInt64, low_cardinality_max_dictionary_size, 8192, "Maximum size (in rows) of shared global dictionary for LowCardinality type.", 0) \
-    M(Bool, low_cardinality_use_single_dictionary_for_part, false, "LowCardinality type serialization setting. If is true, than will use additional keys when global dictionary overflows. Otherwise, will create several shared dictionaries.", 0) \
+    M(Bool, \
+      low_cardinality_use_single_dictionary_for_part, \
+      false, \
+      "LowCardinality type serialization setting. If is true, than will use additional keys when global dictionary overflows. Otherwise, " \
+      "will create several shared dictionaries.", \
+      0) \
     M(Bool, decimal_check_overflow, true, "Check overflow of decimal arithmetic/comparison operations", 0) \
     M(Bool, allow_custom_error_code_in_throwif, false, "Enable custom error code in function throwIf(). If true, thrown exceptions may have unexpected error codes.", 0) \
     \
@@ -531,7 +612,12 @@ class IColumn;
     M(Bool, enable_job_stack_trace, false, "Output stack trace of a job creator when job results in exception", 0) \
     M(Bool, allow_ddl, true, "If it is set to true, then a user is allowed to executed DDL queries.", 0) \
     M(Bool, parallel_view_processing, false, "Enables pushing to attached views concurrently instead of sequentially.", 0) \
-    M(Bool, enable_unaligned_array_join, false, "Allow ARRAY JOIN with multiple arrays that have different sizes. When this settings is enabled, arrays will be resized to the longest one.", 0) \
+    M(Bool, \
+      enable_unaligned_array_join, \
+      false, \
+      "Allow ARRAY JOIN with multiple arrays that have different sizes. When this settings is enabled, arrays will be resized to the " \
+      "longest one.", \
+      0) \
     M(Bool, optimize_read_in_order, true, "Enable ORDER BY optimization for reading data in corresponding order in MergeTree tables.", 0) \
     M(Bool, optimize_read_in_window_order, true, "Enable ORDER BY optimization in window clause for reading data in corresponding order in MergeTree tables.", 0) \
     M(Bool, optimize_aggregation_in_order, false, "Enable GROUP BY optimization for aggregating data in corresponding order in MergeTree tables.", 0) \

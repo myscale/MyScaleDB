@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Common/typeid_cast.h>
 #include <Parsers/ParserStringAndSubstitution.h>
 #include <Parsers/ParserAlterQuery.h>
@@ -11,6 +15,7 @@
 #include <Parsers/ParserSetQuery.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/parseDatabaseAndTableName.h>
 
 
@@ -119,6 +124,12 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
     ParserToken parser_opening_round_bracket(TokenType::OpeningRoundBracket);
     ParserToken parser_closing_round_bracket(TokenType::ClosingRoundBracket);
 
+    // vector index related
+    ParserKeyword s_add_vec_index("ADD VECTOR INDEX");
+    ParserKeyword s_drop_vec_index("DROP VECTOR INDEX");
+    ASTPtr command_vector_index_decl;
+    ASTPtr command_vector_index;
+
     ParserCompoundIdentifier parser_name;
     ParserStringLiteral parser_string_literal;
     ParserStringAndSubstitution parser_string_and_substituion;
@@ -143,6 +154,7 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
     ParserSQLSecurity sql_security_p;
     ParserRefreshStrategy refresh_p;
     ParserTTLExpressionList parser_ttl_list;
+    ParserVectorIndexDeclaration parser_vec_idx_decl;
 
     ASTPtr command_col_decl;
     ASTPtr command_column;
@@ -907,6 +919,27 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
                         return false;
                 }
             }
+            else if (s_add_vec_index.ignore(pos, expected))
+            {
+                if (s_if_not_exists.ignore(pos, expected))
+                    command->if_not_exists = true;
+
+                if (!parser_vec_idx_decl.parse(pos, command_vector_index_decl, expected))
+                    return false;
+
+                command->type = ASTAlterCommand::ADD_VECTOR_INDEX;
+            }
+            else if (s_drop_vec_index.ignore(pos, expected))
+            {
+                if (s_if_exists.ignore(pos, expected))
+                    command->if_exists = true;
+
+                if (!parser_name.parse(pos, command_vector_index, expected))
+                    return false;
+
+                command->type = ASTAlterCommand::DROP_VECTOR_INDEX;
+                command->detach = false;
+            }
             else
                 return false;
         }
@@ -960,6 +993,11 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
         command->sql_security = command->children.emplace_back(std::move(command_sql_security)).get();
     if (command_rename_to)
         command->rename_to = command->children.emplace_back(std::move(command_rename_to)).get();
+
+    if (command_vector_index_decl)
+        command->vec_index_decl = command->children.emplace_back(std::move(command_vector_index_decl)).get();
+    if (command_vector_index)
+        command->vec_index = command->children.emplace_back(std::move(command_vector_index)).get();
 
     return true;
 }

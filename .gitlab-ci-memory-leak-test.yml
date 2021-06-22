@@ -1,0 +1,252 @@
+########## STRESS TESTS ##########
+# TODO build test image for arm64
+stress_test_asan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_asanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressasan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+stress_test_tsan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_tsanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stresstsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'  # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+stress_test_ubsan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_ubsanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressubsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+stress_test_msan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_msanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressmsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+vector-test-asan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_asanbinary
+      artifacts: true
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectorasan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+    when: always
+  before_script:
+    - docker/builder/tools/docker-info.sh
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/vector-search-test.sh
+    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+# vector-test-tsan:
+#   stage: test
+#   needs: 
+#    - job: build_with_sanitizer_tsanbinary
+#      artifacts: true
+#   parallel:
+#     matrix:
+#       - ARCH: amd64
+#       # - ARCH: arm64
+#   tags:
+#     - ${ARCH}
+#   artifacts:
+#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectortsan"
+#     paths:
+#       - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+#     when: always
+#   before_script:
+#     - docker/builder/tools/docker-info.sh
+#   script:
+#     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+#     - docker/builder/tools/vector-search-test.sh
+#     - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+#     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+vector-test-msan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_msanbinary
+      artifacts: true
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectormsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+    when: always
+  before_script:
+    - docker/builder/tools/docker-info.sh
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/vector-search-test.sh
+    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+vector-test-ubsan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_ubsanbinary
+      artifacts: true
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectorubsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+    when: always
+  before_script:
+    - docker/builder/tools/docker-info.sh
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/vector-search-test.sh
+    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+fuzzer_test-asan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_asanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzzasan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_fuzzer/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+fuzzer_test-ubsan:
+  stage: memory-leak-test
+  needs: 
+    - job: build_with_sanitizer_ubsanbinary
+      artifacts: true
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+  parallel:
+    matrix:
+      - ARCH: amd64
+      # - ARCH: arm64
+  tags:
+    - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzzubsan"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_fuzzer/test_output
+    when: always
+  script:
+    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+    - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"

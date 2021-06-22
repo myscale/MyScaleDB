@@ -109,6 +109,10 @@ struct MergeTreePartInfo
     String getPartNameForLogs() const;
     String getPartNameV1() const;
     String getPartNameV0(DayNum left_date, DayNum right_date) const;
+
+    /// Referenced from getPartName, but not include mutation.
+    String getPartNameWithoutMutation() const;
+
     UInt64 getBlocksCount() const
     {
         return static_cast<UInt64>(max_block - min_block + 1);

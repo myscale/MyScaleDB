@@ -29,6 +29,7 @@ public:
     void operator() (const String & x) const;
     void operator() (const Array & x) const;
     void operator() (const Tuple & x) const;
+    void operator() (const ObjectToFetch & x) const;
     void operator() (const Map & x) const;
     void operator() (const Object & x) const;
     void operator() (const DecimalField<Decimal32> & x) const;

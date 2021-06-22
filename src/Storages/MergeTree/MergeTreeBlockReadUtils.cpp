@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/IMergeTreeDataPartInfoForReader.h>
@@ -111,6 +115,10 @@ NameSet injectRequiredColumns(
 
     for (size_t i = 0; i < columns.size(); ++i)
     {
+        /// skip distance columns
+        if (isVectorScanFunc(columns[i]))
+            continue;
+
         /// We are going to fetch physical columns and system columns first
         if (!storage_snapshot->tryGetColumn(options, columns[i]))
             throw Exception(ErrorCodes::NO_SUCH_COLUMN_IN_TABLE, "There is no column or subcolumn {} in table", columns[i]);

@@ -53,3 +53,10 @@ We are a globally diverse and distributed team, united behind a common goal of c
 Check out our **current openings** here: https://clickhouse.com/company/careers 
   
 Can't find what you are looking for, but want to let us know you are interested in joining ClickHouse? Email careers@clickhouse.com! 
+
+## Other Useful Links for MQDB
+* [Build on Mac OS X](https://clickhouse.tech/docs/en/development/build-osx/) provides infomation about building and running Clickhouse on Mac OS.
+* [Build On Linux](https://clickhouse.tech/docs/en/development/cmake-in-clickhouse/#tl-dr-how-to-make-clickhouse-compile-and-link-faster) there is a complete list of flags to compile with which might boost your compilation speed. Generally, On dev21 a debug build should take about 10 mins.
+
+## How to Build MQDB
+Refer to this doc: https://moqi.quip.com/fYK8AQlR0A6Q#temp:C:GDe591fb7630ca7434ca7c296929

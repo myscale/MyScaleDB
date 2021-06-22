@@ -512,6 +512,9 @@ static ReturnType deserializeTextImpl(IColumn & column, ReadBuffer & istr, Reade
         return ReturnType(false);
     }
 
+    if (size != 0 && column_array.getDim() != 0 && size != column_array.getDim())
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Array size does not equal to dim: ({} vs {})", size, column_array.getDim());
+
     offsets.push_back(offsets.back() + size);
     return ReturnType(true);
 }

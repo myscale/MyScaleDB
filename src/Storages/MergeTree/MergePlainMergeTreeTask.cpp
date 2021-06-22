@@ -9,6 +9,9 @@
 #include <Common/ThreadFuzzer.h>
 
 
+#include <Common/logger_useful.h>
+#include <base/sleep.h>
+
 namespace DB
 {
 
@@ -42,6 +45,8 @@ bool MergePlainMergeTreeTask::executeStep()
         switcher.emplace((*merge_list_entry)->thread_group);
     }
 
+    /// auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
+
     switch (state)
     {
         case State::NEED_PREPARE :
@@ -54,6 +59,14 @@ bool MergePlainMergeTreeTask::executeStep()
         {
             try
             {
+                /*
+                auto table_name = storage.getStorageID().getTableName();
+                if (table_name != "asynchronous_metric_log" && table_name != "trace_log" && table_name != "metric_log")
+                {
+                    LOG_INFO(logger, "{} Merge Execute now", storage.getStorageID().getTableName());
+                    sleepForSeconds(300);
+                }
+                */
                 if (merge_task->execute())
                     return true;
 
@@ -143,6 +156,25 @@ void MergePlainMergeTreeTask::finish()
 
     MergeTreeData::Transaction transaction(storage, txn.get());
     storage.merger_mutator.renameMergedTemporaryPart(new_part, future_part->parts, txn, transaction);
+    /// Check latest metadata if vector index has been dropped.
+    if (new_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+    {
+        if (new_part->containAnyVectorIndex())
+        {
+            /// Pass empty string for index_name and column name, all vector index will be removed from this part.
+            String dummy_name;
+            new_part->removeVectorIndex(dummy_name, dummy_name);
+
+            LOG_DEBUG(storage.log, "Remove vector index from part {} due to dropped in metadata", new_part->name);
+        }
+        else if (new_part->containRowIdsMaps())
+        {
+            new_part->removeAllRowIdsMaps(true);
+            LOG_DEBUG(storage.log, "Remove old parts' vector index from decouple part {} due to dropped in metadata", new_part->name);
+        }
+
+        /// Unable to get vector index name so wait to be removed by backgound removeDroppedVectorIndices()
+    }
     transaction.commit();
 
     ThreadFuzzer::maybeInjectSleep();

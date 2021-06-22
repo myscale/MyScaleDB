@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <Access/AccessControl.h>
@@ -17,6 +21,8 @@
 #include <IO/ReadHelpers.h>
 #include <IO/Operators.h>
 
+#include <Common/VectorScanUtils.h>
+
 
 namespace DB
 {
@@ -35,6 +41,7 @@ namespace ErrorCodes
 StorageInMemoryMetadata::StorageInMemoryMetadata(const StorageInMemoryMetadata & other)
     : columns(other.columns)
     , secondary_indices(other.secondary_indices)
+    , vec_indices(other.vec_indices)
     , constraints(other.constraints)
     , projections(other.projections.clone())
     , minmax_count_projection(
@@ -62,6 +69,7 @@ StorageInMemoryMetadata & StorageInMemoryMetadata::operator=(const StorageInMemo
 
     columns = other.columns;
     secondary_indices = other.secondary_indices;
+    vec_indices = other.vec_indices;
     constraints = other.constraints;
     projections = other.projections.clone();
     if (other.minmax_count_projection)
@@ -169,6 +177,11 @@ void StorageInMemoryMetadata::setSecondaryIndices(IndicesDescription secondary_i
     secondary_indices = std::move(secondary_indices_);
 }
 
+void StorageInMemoryMetadata::setVectorIndices(VectorIndicesDescription vec_indices_)
+{
+    vec_indices = std::move(vec_indices_);
+}
+
 void StorageInMemoryMetadata::setConstraints(ConstraintsDescription constraints_)
 {
     constraints = std::move(constraints_);
@@ -232,6 +245,16 @@ const IndicesDescription & StorageInMemoryMetadata::getSecondaryIndices() const
 bool StorageInMemoryMetadata::hasSecondaryIndices() const
 {
     return !secondary_indices.empty();
+}
+
+const VectorIndicesDescription & StorageInMemoryMetadata::getVectorIndices() const
+{
+    return vec_indices;
+}
+
+bool StorageInMemoryMetadata::hasVectorIndices() const
+{
+    return !vec_indices.empty();
 }
 
 const ConstraintsDescription & StorageInMemoryMetadata::getConstraints() const

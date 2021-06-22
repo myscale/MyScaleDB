@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #pragma once
 
 #include <Parsers/IAST.h>
@@ -8,6 +13,7 @@ namespace DB
 class ASTFunction;
 
 /** name BY expr TYPE typename(args) GRANULARITY int in create query
+ * expr TYPE typename(args) GRANULARITY int in create index query
   */
 class ASTIndexDeclaration : public IAST
 {

@@ -12,6 +12,8 @@
 #include <Processors/Transforms/CheckSortedTransform.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Compression/CompressedWriteBuffer.h>
+#include <Storages/MergeTree/MergeTreeSource.h>
+
 #include <DataTypes/ObjectUtils.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <IO/IReadableWriteBuffer.h>
@@ -21,6 +23,7 @@
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
+#include <Storages/MergeTree/MergeTreeInOrderSelectProcessor.h>
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Transforms/MaterializingTransform.h>
 #include <Processors/Transforms/FilterTransform.h>
@@ -39,6 +42,9 @@
 #include <Interpreters/PreparedSets.h>
 #include <Interpreters/MergeTreeTransaction.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
+
+#include <VectorIndex/MergeUtils.h>
+#include <IO/WriteIntText.h>
 
 namespace ProfileEvents
 {
@@ -367,6 +373,9 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Merge algorithm must be chosen");
     }
 
+    assert(global_ctx->gathering_columns.size() == global_ctx->gathering_column_names.size());
+    assert(global_ctx->merging_columns.size() == global_ctx->merging_column_names.size());
+
     /// If merge is vertical we cannot calculate it
     ctx->blocks_are_granules_size = (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Vertical);
 
@@ -573,6 +582,7 @@ void MergeTask::ExecuteAndFinalizeHorizontalPart::finalize() const
     ctx->need_sync = needSyncPart(ctx->sum_input_rows_upper_bound, sum_compressed_bytes_upper_bound, *global_ctx->data->getSettings());
 }
 
+
 bool MergeTask::VerticalMergeStage::prepareVerticalMergeForAllColumns() const
 {
     /// No need to execute this part if it is horizontal merge.
@@ -595,10 +605,9 @@ bool MergeTask::VerticalMergeStage::prepareVerticalMergeForAllColumns() const
     /// number of input rows.
     if ((rows_sources_count > 0 || global_ctx->future_part->parts.size() > 1) && sum_input_rows_exact != rows_sources_count + input_rows_filtered)
         throw Exception(
-                        ErrorCodes::LOGICAL_ERROR,
-                        "Number of rows in source parts ({}) excluding filtered rows ({}) differs from number "
-                        "of bytes written to rows_sources file ({}). It is a bug.",
-                        sum_input_rows_exact, input_rows_filtered, rows_sources_count);
+            ErrorCodes::LOGICAL_ERROR,
+            "Number of rows in source parts ({}) excluding filtered rows ({}) differs from number of bytes written to rows_sources file ({}). It is a bug.",
+            sum_input_rows_exact, input_rows_filtered, rows_sources_count);
 
     /// TemporaryDataOnDisk::createRawStream returns WriteBufferFromFile implementing IReadableWriteBuffer
     /// and we expect to get ReadBufferFromFile here.
@@ -950,6 +959,30 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         global_ctx->to->finalizePart(global_ctx->new_data_part, ctx->need_sync);
     else
         global_ctx->to->finalizePart(global_ctx->new_data_part, ctx->need_sync, &global_ctx->storage_columns, &global_ctx->checksums_gathered_columns);
+
+    /// finalize row ids map info to new data part dir
+    if (!global_ctx->row_ids_map_files.empty())
+    {
+        for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
+        {
+            auto& row_ids_map_tmp_file = global_ctx->row_ids_map_files[i]->path();
+            /// move and rename row ids map file to new dir
+            String row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+            LOG_DEBUG(ctx->log, "row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
+            std::filesystem::rename(row_ids_map_tmp_file, row_ids_map_file_path);
+            /// move and rename vector index files to new dir
+            VectorIndex::renameVectorIndexFiles(toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i]->getDataPartStorage().getFullPath(), global_ctx->new_data_part->getDataPartStorage().getFullPath());
+        }
+
+        String inverted_row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+        std::filesystem::rename(global_ctx->inverted_row_ids_map_file->path(), inverted_row_ids_map_file_path);
+
+        String inverted_row_sources_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
+        std::filesystem::rename(global_ctx->inverted_row_sources_map_file_path, inverted_row_sources_file_path);
+
+        /// Initialize the vector index metadata for the new part
+        global_ctx->new_data_part->loadVectorIndexMetadata();
+    }
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
     global_ctx->promise.set_value(global_ctx->new_data_part);

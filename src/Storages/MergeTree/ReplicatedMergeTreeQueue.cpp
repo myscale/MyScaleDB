@@ -833,6 +833,7 @@ QueueRepresentation getQueueRepresentation(const std::list<ReplicatedMergeTreeLo
             case LogEntryType::CLEAR_COLUMN:
             case LogEntryType::SYNC_PINNED_PART_UUIDS:
             case LogEntryType::CLONE_PART_FROM_SHARD:
+            case LogEntryType::BUILD_VECTOR_INDEX:
             {
                 break;
             }
@@ -1038,7 +1039,6 @@ int32_t ReplicatedMergeTreeQueue::updateMutations(zkutil::ZooKeeperPtr zookeeper
     }
     return mutations_stat.version;
 }
-
 
 ReplicatedMergeTreeMutationEntryPtr ReplicatedMergeTreeQueue::removeMutation(
     zkutil::ZooKeeperPtr zookeeper, const String & mutation_id)
@@ -1643,6 +1643,10 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
                 }
             }
         }
+    }
+    if (entry.type == LogEntry::BUILD_VECTOR_INDEX)
+    {
+        LOG_TRACE(log, "Get vector index build log entry {} of type {}", entry.znode_name, entry.typeToString());
     }
 
     return true;

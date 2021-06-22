@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <IO/WriteBufferFromString.h>
 #include <Common/ThreadPool.h>
 #include <Common/CurrentThread.h>
@@ -70,6 +74,7 @@ PipelineExecutor::~PipelineExecutor()
 {
     if (process_list_element)
         process_list_element->removePipelineExecutor(this);
+
 }
 
 const Processors & PipelineExecutor::getProcessors() const

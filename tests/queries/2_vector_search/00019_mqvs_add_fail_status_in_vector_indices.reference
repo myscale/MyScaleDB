@@ -1,0 +1,4 @@
+0
+test_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = cosine\', \'ef_c=256\')	NoVectorIndexData	all_1_1_0	 [VectorIndex] unsupported metric_type COSINE. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+test_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	NoVectorIndexData	all_1_1_0	 [VectorIndex] These parameters are not supported in Index type IVFFLAT : metric : IP, . (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+test_success_vector	v1_success	v1_success vector TYPE HNSWFLAT	Built		

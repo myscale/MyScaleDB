@@ -25,6 +25,7 @@ public:
     bool operator() (String &) const;
     bool operator() (Array &) const;
     bool operator() (Tuple &) const;
+    bool operator() (ObjectToFetch &) const;
     bool operator() (Map &) const;
     bool operator() (Object &) const;
     bool operator() (UUID &) const;

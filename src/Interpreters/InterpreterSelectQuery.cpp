@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+
 #include <Access/AccessControl.h>
 
 #include <DataTypes/DataTypeAggregateFunction.h>
@@ -98,12 +103,18 @@
 #include <Common/scope_guard_safe.h>
 #include <Common/typeid_cast.h>
 
+<<<<<<< HEAD
 
 namespace ProfileEvents
 {
     extern const Event SelectQueriesWithSubqueries;
     extern const Event QueriesWithSubqueries;
 }
+=======
+#include "config_version.h"
+#include <Interpreters/Context.h>
+
+>>>>>>> f87df602ff6... squash of 1-664
 
 namespace DB
 {
@@ -645,6 +656,9 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             query_info.is_parameterized_view = view->isParameterizedView();
             StorageView::replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot, view->isParameterizedView());
         }
+
+        /// LOG_DEBUG(log, "[analyze] before analyze: source header: {}, required_result_column_names size: {}",
+        ///     source_header.getNamesAndTypesList().toString(), required_result_column_names.size());
 
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
@@ -1638,6 +1652,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
 
         if (expressions.first_stage)
         {
+            LOG_DEBUG(log, "[executeImpl] first stage");
             // If there is a storage that supports prewhere, this will always be nullptr
             // Thus, we don't actually need to check if projection is active.
             if (expressions.filter_info)
@@ -1804,8 +1819,11 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                 executeWhere(query_plan, expressions.before_where, expressions.remove_where_filter);
 
             if (expressions.need_aggregate)
+            {
+                LOG_DEBUG(log, "[executeImpl] execute aggregation, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
                 executeAggregation(
                     query_plan, expressions.before_aggregation, aggregate_overflow_row, aggregate_final, query_info.input_order_info);
+            }
 
             // Now we must execute:
             // 1) expressions before window functions,
@@ -1838,6 +1856,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                     // expressions before ORDER BY and the preliminary DISTINCT
                     // now, on shards (first_stage).
                     assert(!expressions.before_window);
+                    LOG_DEBUG(log, "[executeImpl] add expression Before ORDER BY and distinct");
                     executeExpression(query_plan, expressions.before_order_by, "Before ORDER BY");
                     executeDistinct(query_plan, true, expressions.selected_columns, true);
                 }
@@ -1851,6 +1870,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
             if (from_aggregation_stage)
             {
                 /// No need to aggregate anything, since this was done on remote shards.
+                LOG_DEBUG(log, "[executeImpl] from aggregation stage");
             }
             else if (expressions.need_aggregate)
             {
@@ -1926,7 +1946,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                   * (distributed_group_by_no_merge=2 or optimize_distributed_group_by_sharding_key=1 takes place),
                   * then merge the sorted streams is enough, since remote servers already did full ORDER BY.
                   */
-
+                LOG_DEBUG(log, "[executeImpl] expressions has order by");
                 if (from_aggregation_stage)
                     executeMergeSorted(query_plan, "after aggregation stage for ORDER BY");
                 else if (!expressions.first_stage
@@ -1996,6 +2016,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                 /// We must do projection after DISTINCT because projection may remove some columns.
                 executeProjection(query_plan, expressions.final_projection);
             }
+            LOG_DEBUG(log, "[executeImpl] after execute projection, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
             /// Extremes are calculated before LIMIT, but after LIMIT BY. This is Ok.
             executeExtremes(query_plan);
@@ -2548,6 +2569,12 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
 
         bool optimize_read_in_order = analysis_result.optimize_read_in_order;
         bool optimize_aggregation_in_order = analysis_result.optimize_aggregation_in_order && !query_analyzer->useGroupingSetKey();
+         if (analysis_result.need_vector_scan)
+        {
+            query_info.vector_scan_info
+                = std::make_shared<VectorScanInfo>(
+                    query_analyzer->vectorScanDescs());
+        }
 
         /// Create optimizer with prepared actions.
         /// Maybe we will need to calc input_order_info later, e.g. while reading from StorageMerge.
@@ -2719,6 +2746,7 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         : static_cast<size_t>(settings.max_threads);
 
     bool storage_has_evenly_distributed_read = storage && storage->hasEvenlyDistributedRead();
+    LOG_DEBUG(log, "[executeAggregation] before add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
     const bool should_produce_results_in_order_of_bucket_number = options.to_stage == QueryProcessingStage::WithMergeableState
         && (settings.distributed_aggregation_memory_efficient || settings.enable_memory_bound_merging_of_aggregation_results);
@@ -2740,6 +2768,7 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         settings.enable_memory_bound_merging_of_aggregation_results,
         !group_by_info && settings.force_aggregation_in_order);
     query_plan.addStep(std::move(aggregating_step));
+    LOG_DEBUG(log, "[executeAggregation] after add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 }
 
 void InterpreterSelectQuery::executeMergeAggregated(QueryPlan & query_plan, bool overflow_row, bool final, bool has_grouping_sets)

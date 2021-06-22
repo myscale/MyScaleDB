@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <chrono>
@@ -608,6 +612,9 @@
     M(727, UNEXPECTED_TABLE_ENGINE) \
     M(728, UNEXPECTED_DATA_TYPE) \
     M(729, ILLEGAL_TIME_SERIES_TAGS) \
+    M(730, UNKNOWN_VECTOR_INDEX_COMMAND) \
+    M(731, ILLEGAL_VECTOR_SCAN) \
+    M(732, UNKNOWN_CONNECTION) \
     \
     M(900, DISTRIBUTED_CACHE_ERROR) \
     M(901, CANNOT_USE_DISTRIBUTED_CACHE) \
@@ -615,7 +622,9 @@
     M(999, KEEPER_EXCEPTION) \
     M(1000, POCO_EXCEPTION) \
     M(1001, STD_EXCEPTION) \
-    M(1002, UNKNOWN_EXCEPTION) \
+    M(1002, LICENSE_ERROR) \
+    M(1003, UNKNOWN_EXCEPTION) \
+
 /* See END */
 
 #ifdef APPLY_FOR_EXTERNAL_ERROR_CODES

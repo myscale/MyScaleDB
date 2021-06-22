@@ -32,7 +32,8 @@
     M(Seek, "Number of times the 'lseek' function was called.") \
     M(ReadBufferFromFileDescriptorRead, "Number of reads (read/pread) from a file descriptor. Does not include sockets.") \
     M(ReadBufferFromFileDescriptorReadFailed, "Number of times the read (read/pread) from a file descriptor have failed.") \
-    M(ReadBufferFromFileDescriptorReadBytes, "Number of bytes read from file descriptors. If the file is compressed, this will show the compressed data size.") \
+    M(ReadBufferFromFileDescriptorReadBytes, \
+      "Number of bytes read from file descriptors. If the file is compressed, this will show the compressed data size.") \
     M(WriteBufferFromFileDescriptorWrite, "Number of writes (write/pwrite) to a file descriptor. Does not include sockets.") \
     M(WriteBufferFromFileDescriptorWriteFailed, "Number of times the write (write/pwrite) to a file descriptor have failed.") \
     M(WriteBufferFromFileDescriptorWriteBytes, "Number of bytes written to file descriptors. If the file is compressed, this will show compressed data size.") \
@@ -107,7 +108,7 @@
     M(MutationsAppliedOnFlyInAllParts, "The sum of number of applied mutations on-fly for part among all read parts") \
     \
     M(QueryMaskingRulesMatch, "Number of times query masking rules was successfully matched.") \
-    \
+\
     M(ReplicatedPartFetches, "Number of times a data part was downloaded from replica of a ReplicatedMergeTree table.") \
     M(ReplicatedPartFailedFetches, "Number of times a data part was failed to download from replica of a ReplicatedMergeTree table.") \
     M(ObsoleteReplicatedParts, "Number of times a data part was covered by another data part that has been fetched from a replica (so, we have marked a covered data part as obsolete and no longer needed).") \
@@ -189,9 +190,11 @@
     \
     M(SlowRead, "Number of reads from a file that were slow. This indicate system overload. Thresholds are controlled by read_backoff_* settings.") \
     M(ReadBackoff, "Number of times the number of query processing threads was lowered due to slow reads.") \
-    \
-    M(ReplicaPartialShutdown, "How many times Replicated table has to deinitialize its state due to session expiration in ZooKeeper. The state is reinitialized every time when ZooKeeper is available again.") \
-    \
+\
+    M(ReplicaPartialShutdown, \
+      "How many times Replicated table has to deinitialize its state due to session expiration in ZooKeeper. The state is reinitialized " \
+      "every time when ZooKeeper is available again.") \
+\
     M(SelectedParts, "Number of data parts selected to read from a MergeTree table.") \
     M(SelectedPartsTotal, "Number of total data parts before selecting which ones to read from a MergeTree table.") \
     M(SelectedRanges, "Number of (non-adjacent) ranges in all data parts selected to read from a MergeTree table.") \
@@ -259,7 +262,8 @@
     M(MergedIntoCompactParts, "Number of parts merged into Compact format.") \
     \
     M(MergeTreeDataProjectionWriterRows, "Number of rows INSERTed to MergeTree tables projection.") \
-    M(MergeTreeDataProjectionWriterUncompressedBytes, "Uncompressed bytes (for columns as they stored in memory) INSERTed to MergeTree tables projection.") \
+    M(MergeTreeDataProjectionWriterUncompressedBytes, \
+      "Uncompressed bytes (for columns as they stored in memory) INSERTed to MergeTree tables projection.") \
     M(MergeTreeDataProjectionWriterCompressedBytes, "Bytes written to filesystem for data INSERTed to MergeTree tables projection.") \
     M(MergeTreeDataProjectionWriterBlocks, "Number of blocks INSERTed to MergeTree tables projection. Each block forms a data part of level zero.") \
     M(MergeTreeDataProjectionWriterBlocksAlreadySorted, "Number of blocks INSERTed to MergeTree tables projection that appeared to be already sorted.") \
@@ -344,8 +348,12 @@ The server successfully detected this situation and will download merged part fr
     M(OSIOWaitMicroseconds, "Total time a thread spent waiting for a result of IO operation, from the OS point of view. This is real IO that doesn't include page cache.") \
     M(OSCPUWaitMicroseconds, "Total time a thread was ready for execution but waiting to be scheduled by OS, from the OS point of view.") \
     M(OSCPUVirtualTimeMicroseconds, "CPU time spent seen by OS. Does not include involuntary waits due to virtualization.") \
-    M(OSReadBytes, "Number of bytes read from disks or block devices. Doesn't include bytes read from page cache. May include excessive data due to block size, readahead, etc.") \
-    M(OSWriteBytes, "Number of bytes written to disks or block devices. Doesn't include bytes that are in page cache dirty pages. May not include data that was written by OS asynchronously.") \
+    M(OSReadBytes, \
+      "Number of bytes read from disks or block devices. Doesn't include bytes read from page cache. May include excessive data due to " \
+      "block size, readahead, etc.") \
+    M(OSWriteBytes, \
+      "Number of bytes written to disks or block devices. Doesn't include bytes that are in page cache dirty pages. May not include data " \
+      "that was written by OS asynchronously.") \
     M(OSReadChars, "Number of bytes read from filesystem, including page cache.") \
     M(OSWriteChars, "Number of bytes written to filesystem, including page cache.") \
     \
@@ -400,16 +408,18 @@ The server successfully detected this situation and will download merged part fr
     M(QueryProfilerErrors, "Invalid memory accesses during asynchronous stack unwinding.") \
     \
     M(CreatedLogEntryForMerge, "Successfully created log entry to merge parts in ReplicatedMergeTree.") \
-    M(NotCreatedLogEntryForMerge, "Log entry to merge parts in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
+    M(NotCreatedLogEntryForMerge, \
+      "Log entry to merge parts in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
     M(CreatedLogEntryForMutation, "Successfully created log entry to mutate parts in ReplicatedMergeTree.") \
-    M(NotCreatedLogEntryForMutation, "Log entry to mutate parts in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
-    \
+    M(NotCreatedLogEntryForMutation, \
+      "Log entry to mutate parts in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
+\
     M(S3ReadMicroseconds, "Time of GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsCount, "Number of GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsErrors, "Number of non-throttling errors in GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsThrottling, "Number of 429 and 503 errors in GET and HEAD requests to S3 storage.") \
     M(S3ReadRequestsRedirects, "Number of redirects in GET and HEAD requests to S3 storage.") \
-    \
+\
     M(S3WriteMicroseconds, "Time of POST, DELETE, PUT and PATCH requests to S3 storage.") \
     M(S3WriteRequestsCount, "Number of POST, DELETE, PUT and PATCH requests to S3 storage.") \
     M(S3WriteRequestsErrors, "Number of non-throttling errors in POST, DELETE, PUT and PATCH requests to S3 storage.") \
@@ -806,7 +816,9 @@ The server successfully detected this situation and will download merged part fr
     M(GWPAsanAllocateSuccess, "Number of successful allocations done by GWPAsan") \
     M(GWPAsanAllocateFailed, "Number of failed allocations done by GWPAsan (i.e. filled pool)") \
     M(GWPAsanFree, "Number of free operations done by GWPAsan") \
-
+    \
+    M(VectorIndexBuildFailEvents, "Number of vector index build fail events.") \
+    M(VectorIndexLoadFailEvents, "Number of vector index load fail events") \
 
 #ifdef APPLY_FOR_EXTERNAL_EVENTS
     #define APPLY_FOR_EVENTS(M) APPLY_FOR_BUILTIN_EVENTS(M) APPLY_FOR_EXTERNAL_EVENTS(M)

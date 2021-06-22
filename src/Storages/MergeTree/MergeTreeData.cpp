@@ -1,3 +1,8 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
+#include "Storages/MergeTree/MergeTreeDataPartBuilder.h"
 #include <Storages/MergeTree/MergeTreeData.h>
 
 #include <AggregateFunctions/AggregateFunctionCount.h>
@@ -109,6 +114,11 @@
 #if USE_AZURE_BLOB_STORAGE
 #include <azure/core/http/http.hpp>
 #endif
+
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/DiskIOReader.h>
+#include <VectorIndex/MergeUtils.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -1322,6 +1332,8 @@ static void preparePartForRemoval(const MergeTreeMutableDataPartPtr & part)
                         part->name, part->version.creation_tid, creation_csn);
     }
 
+    part->cancelBuild();
+
     /// Explicitly set removal_tid_lock for parts w/o transaction (i.e. w/o txn_version.txt)
     /// to avoid keeping part forever (see VersionMetadata::canBeRemoved())
     if (!part->version.isRemovalTIDLocked())
@@ -2395,10 +2407,57 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::asMutableDeletingPart(const Dat
 {
     auto state = part->getState();
     if (state != DataPartState::Deleting && state != DataPartState::DeleteOnDestroy)
-        throw Exception(ErrorCodes::LOGICAL_ERROR,
-            "Cannot remove part {}, because it has state: {}", part->name, magic_enum::enum_name(state));
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR, "Cannot remove part {}, because it has state: {}", part->name, magic_enum::enum_name(state));
 
     return std::const_pointer_cast<IMergeTreeDataPart>(part);
+}
+
+void MergeTreeData::clearTemporaryIndexBuildDirectories()
+{
+    for (const auto & disk : getDisks())
+    {
+        if (disk->isBroken())
+            continue;
+
+        for (auto it = disk->iterateDirectory(relative_data_path); it->isValid(); it->next())
+        {
+            const std::string & basename = it->name();
+            if (!startsWith(basename, "vector_tmp_"))
+            {
+                continue;
+            }
+            const std::string & full_path = fullPath(disk, it->path());
+
+            try
+            {
+                if (disk->isDirectory(it->path()))
+                {
+                    LOG_INFO(log, "Removing temporary directory for vector index build {}", full_path);
+                    disk->removeRecursive(it->path());
+                }
+            }
+            /// see getModificationTime()
+            catch (const ErrnoException & e)
+            {
+                if (e.getErrno() == ENOENT)
+                {
+                    /// If the file is already deleted, do nothing.
+                }
+                else
+                    throw;
+            }
+            catch (const fs::filesystem_error & e)
+            {
+                if (e.code() == std::errc::no_such_file_or_directory)
+                {
+                    /// If the file is already deleted, do nothing.
+                }
+                else
+                    throw;
+            }
+        }
+    }
 }
 
 MergeTreeData::DataPartsVector MergeTreeData::grabOldParts(bool force)
@@ -2617,6 +2676,43 @@ size_t MergeTreeData::clearOldPartsFromFilesystem(bool force)
     return parts_to_remove.size();
 }
 
+void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
+{
+    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
+    if(meta_snapshot->getVectorIndices().empty())
+        return;
+
+    /// TODO: how to remove old parts' caches
+    for (const auto & part : parts)
+    {
+        for(const auto & vec_index_desc : meta_snapshot->vec_indices)
+        {
+            auto segment_ids
+                = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+            for (auto & segment_id : segment_ids)
+                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+        }
+    }
+}
+
+void MergeTreeData::regularClearCachedIndex(const DataPartsVector & parts)
+{
+    //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
+    //    for (const auto & part : parts)
+    //    {
+    //        for(const auto& vec_index_desc :meta_snapshot->vec_indices)
+    //        {
+    //            if(std::vector<std::string>::iterator place=std::find(cached_item_list.begin(),cached_item_list.end(),part->getDataPartStorage().getFullPath() + "/" + vec_index_desc.name+"_"+vec_index_desc.column);
+    //                place!=cached_item_list.end()){
+    //                cached_item_list.erase(place);
+    //            }
+    //        }
+    //    }
+    //    for(const auto& str:cached_item_list){
+    //        VectorIndex::ExecutionEngine vec = VectorIndex::ExecutionEngine(str);
+    //        vec.removeFromCache();
+    //    }
+}
 
 void MergeTreeData::clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error, NameSet * parts_failed_to_delete)
 {
@@ -2657,6 +2753,9 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 {
     if (parts_to_remove.empty())
         return;
+
+    /// The old part's vector index is reused by new part, no need to clear cache.
+    /// clearCachedVectorIndex(parts_to_remove);
 
     const auto settings = getSettings();
 
@@ -4115,7 +4214,10 @@ void MergeTreeData::removePartsFromWorkingSet(MergeTreeTransaction * txn, const 
             part->remove_time.store(remove_time, std::memory_order_relaxed);
 
         if (part->getState() != MergeTreeDataPartState::Outdated)
+        {
             modifyPartState(part, MergeTreeDataPartState::Outdated);
+            part->cancelBuild();
+        }
     }
 
     if (removed_active_part)
@@ -6799,6 +6901,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(DataPartsLock 
 
                     part->remove_time.store(0, std::memory_order_relaxed); /// The part will be removed without waiting for old_parts_lifetime seconds.
                     data.modifyPartState(part, DataPartState::Outdated);
+                    part->cancelBuild();
                 }
                 else
                 {
@@ -8578,9 +8681,9 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createE
 
     auto tmp_dir_holder = getTemporaryPartDirectoryHolder(EMPTY_PART_TMP_PREFIX + new_part_name);
     auto new_data_part = getDataPartBuilder(new_part_name, data_part_volume, EMPTY_PART_TMP_PREFIX + new_part_name)
-        .withBytesAndRowsOnDisk(0, 0)
-        .withPartInfo(new_part_info)
-        .build();
+                             .withBytesAndRowsOnDisk(0, 0)
+                             .withPartInfo(new_part_info)
+                             .build();
 
     if (settings->assign_part_uuids)
         new_data_part->uuid = UUIDHelpers::generateV4();
@@ -8609,11 +8712,13 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createE
         {
             /// The path has to be unique, all tmp directories are deleted at startup in case of stale files from previous runs.
             /// New part have to capture its name, therefore there is no concurrentcy in directory creation
-            throw Exception(ErrorCodes::LOGICAL_ERROR,
-                            "New empty part is about to matirialize but the dirrectory already exist"
-                            ", new part {}"
-                            ", directory {}",
-                            new_part_name, new_data_part_storage->getFullPath());
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "New empty part is about to matirialize but the dirrectory already exist"
+                ", new part {}"
+                ", directory {}",
+                new_part_name,
+                new_data_part_storage->getFullPath());
         }
 
         new_data_part_storage->createDirectories();
@@ -8645,6 +8750,35 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createE
 bool MergeTreeData::allowRemoveStaleMovingParts() const
 {
     return ConfigHelper::getBool(getContext()->getConfigRef(), "allow_remove_stale_moving_parts", /* default_ = */ true);
+}
+
+MergeTreeData::MergeTreeVectorIndexStatus MergeTreeData::getVectorIndexBuildStatus() const
+{
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    return vector_index_status;
+}
+
+void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message)
+{
+    /// Update the information about failed parts in the system.vector_indices table.
+
+    auto part_info = MergeTreePartInfo::fromPartName(part_name, format_version);
+
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    if (is_successful)
+    {
+        /// If last failed part has been successfully built (in the part_info), clear the fail info.
+        if (!vector_index_status.latest_failed_part.empty() && part_info.contains(vector_index_status.latest_failed_part_info))
+        {
+            vector_index_status.clear();
+        }
+    }
+    else
+    {
+        vector_index_status.latest_failed_part = part_name;
+        vector_index_status.latest_failed_part_info = part_info;
+        vector_index_status.latest_fail_reason = exception_message;
+    }
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

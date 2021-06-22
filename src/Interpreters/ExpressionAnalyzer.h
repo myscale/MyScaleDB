@@ -1,9 +1,14 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Core/ColumnNumbers.h>
 #include <Columns/FilterDescription.h>
 #include <Interpreters/ActionsVisitor.h>
 #include <Interpreters/AggregateDescription.h>
+#include <Interpreters/VectorScanDescription.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/TreeRewriter.h>
 #include <Interpreters/WindowDescription.h>
@@ -11,6 +16,8 @@
 #include <Parsers/IAST_fwd.h>
 #include <Storages/IStorage_fwd.h>
 #include <Storages/SelectQueryInfo.h>
+
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -38,6 +45,8 @@ using StorageMetadataPtr = std::shared_ptr<const StorageInMemoryMetadata>;
 class ArrayJoinAction;
 using ArrayJoinActionPtr = std::shared_ptr<ArrayJoinAction>;
 
+using String = std::string;
+
 /// Create columns in block or return false if not possible
 bool sanitizeBlock(Block & block, bool throw_if_cannot_create_column = false);
 
@@ -61,12 +70,17 @@ struct ExpressionAnalyzerData
     /// Keys of ORDER BY
     NameSet order_by_keys;
 
+    NamesAndTypesList vector_scan_columns;
+
     bool has_aggregation = false;
     NamesAndTypesList aggregation_keys;
     NamesAndTypesLists aggregation_keys_list;
     ColumnNumbersList aggregation_keys_indexes_list;
     bool has_const_aggregation_keys = false;
     AggregateDescriptions aggregate_descriptions;
+
+    bool has_vector_scan = false;
+    VectorScanDescriptions vector_scan_descriptions;
 
     WindowDescriptions window_descriptions;
     NamesAndTypesList window_columns;
@@ -159,6 +173,8 @@ protected:
         bool is_explain_,
         PreparedSetsPtr prepared_sets_,
         bool is_create_parameterized_view_ = false);
+    // txh added
+    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalyzer");
 
     ASTPtr query;
     const ExtractedSettings settings;
@@ -171,6 +187,8 @@ protected:
     const TableJoin & analyzedJoin() const { return *syntax->analyzed_join; }
     const NamesAndTypesList & sourceColumns() const { return syntax->required_source_columns; }
     const ASTs & aggregates() const { return syntax->aggregates; }
+
+    const std::vector<const ASTFunction *> & vector_scan_funcs() const { return syntax->vector_scan_funcs; }
     /// Find global subqueries in the GLOBAL IN/JOIN sections. Fills in external_tables.
     void initGlobalSubqueriesAndExternalTables(bool do_global, bool is_explain);
 
@@ -195,6 +213,9 @@ protected:
       */
     void analyzeAggregation(ActionsDAG & temp_actions);
     void makeAggregateDescriptions(ActionsDAG & actions, AggregateDescriptions & descriptions);
+
+    void analyzeVectorScan();
+    bool makeVectorScanDescriptions(ActionsDAGPtr & actions);
 
     const ASTSelectQuery * getSelectQuery() const;
 
@@ -222,6 +243,7 @@ struct ExpressionAnalysisResult
     bool second_stage = false;
 
     bool need_aggregate = false;
+    bool need_vector_scan = false;
     bool has_order_by   = false;
     bool has_window = false;
 
@@ -265,6 +287,8 @@ struct ExpressionAnalysisResult
     /// Actions by every element of ORDER BY
     ManyExpressionActions order_by_elements_actions;
     ManyExpressionActions group_by_elements_actions;
+    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalysisResult");
+
 
     ExpressionAnalysisResult() = default;
 
@@ -329,6 +353,7 @@ public:
 
     /// Does the expression have aggregate functions or a GROUP BY or HAVING section.
     bool hasAggregation() const { return has_aggregation; }
+    bool hasVectorScan() const { return has_vector_scan; }
     bool hasWindow() const { return !syntax->window_function_asts.empty(); }
     bool hasGlobalSubqueries() { return has_global_subqueries; }
     bool hasTableJoin() const { return syntax->ast_join; }
@@ -347,6 +372,7 @@ public:
     bool hasConstAggregationKeys() const { return has_const_aggregation_keys; }
     const NamesAndTypesLists & aggregationKeysList() const { return aggregation_keys_list; }
     const AggregateDescriptions & aggregates() const { return aggregate_descriptions; }
+    VectorScanDescriptions & vectorScanDescs() { return vector_scan_descriptions; }
 
     std::unique_ptr<QueryPlan> getJoinedPlan();
 
@@ -373,6 +399,8 @@ private:
 
     const ASTSelectQuery * getAggregatingQuery() const;
 
+    const ASTSelectQuery * getVectorScanQuery() const;
+
     /** These methods allow you to build a chain of transformations over a block, that receives values in the desired sections of the query.
       *
       * Example usage:
@@ -397,6 +425,7 @@ private:
     ActionsAndProjectInputsFlagPtr appendPrewhere(ExpressionActionsChain & chain, bool only_types);
     bool appendWhere(ExpressionActionsChain & chain, bool only_types);
     bool appendGroupBy(ExpressionActionsChain & chain, bool only_types, bool optimize_aggregation_in_order, ManyExpressionActions &);
+    void appendVectorScanFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
     void appendAggregateFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
     void appendWindowFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
 
@@ -410,6 +439,8 @@ private:
     ///  appendSelect
     ActionsAndProjectInputsFlagPtr appendOrderBy(ExpressionActionsChain & chain, bool only_types, bool optimize_read_in_order, ManyExpressionActions &);
     bool appendLimitBy(ExpressionActionsChain & chain, bool only_types);
+
+    void appendVectorScan();
     ///  appendProjectResult
 };
 

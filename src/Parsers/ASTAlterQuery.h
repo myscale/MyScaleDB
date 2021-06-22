@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #pragma once
 
 #include <Parsers/ASTExpressionList.h>
@@ -82,6 +86,9 @@ public:
 
         MODIFY_COMMENT,
         MODIFY_SQL_SECURITY,
+        // vector index related
+        ADD_VECTOR_INDEX,
+        DROP_VECTOR_INDEX,
     };
 
     Type type = NO_TYPE;
@@ -172,6 +179,19 @@ public:
 
     /// For MODIFY REFRESH
     ASTPtr refresh;
+
+    /** The ADD VECTOR INDEX query stores the IndexDeclaration there.
+     */
+    ASTPtr vec_index_decl;
+
+    /** The ADD VECTOR INDEX query stores the name of the index following AFTER.
+     *  The DROP VECTOR INDEX query stores the name for deletion.
+     */
+    ASTPtr vec_index;
+
+    /** In ALTER CHANNEL, ADD, DROP, SUSPEND, RESUME, REFRESH, MODIFY queries, the list of live views is stored here
+     */
+    ASTPtr values;
 
     bool detach = false;        /// true for DETACH PARTITION
 

@@ -1,0 +1,159 @@
+######################################## BUILDS #########################################
+# TODO 编译 deb with sanitizer 参数的 aarch64 版本文件
+build_binary:
+  stage: build
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - artifacts/*.deb
+      - build/programs/clickhouse 
+      - artifacts/performance_pack_*
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - apt-get update -y && apt-get install rsync -y
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-x86_64 --package
+    - docker/builder/tools/package_performance.sh all
+    - tar -zcf performance_pack_amd64.tar.gz performance_pack
+    # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
+    # - docker/builder/tools/package_performance.sh all
+    # - tar -zcf performance_pack_arm64.tar.gz performance_pack
+    - mv performance_pack_amd64.tar.gz artifacts/.
+    # - mv performance_pack_arm64.tar.gz artifacts/.
+    - ls -al artifacts
+  rules:
+    - if: '$CI_TEST_VECTOR_DB != "true"'
+build_with_sanitizer_asanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKAsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+build_with_sanitizer_tsanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKTsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+build_with_sanitizer_ubsanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKUBsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+build_with_sanitizer_msanbinary:
+  stage: build
+  parallel:
+    matrix:
+      - ARCH: x86_64
+      # - ARCH: aarch64
+  tags:
+    - ${ARCH}
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKMsan"
+    paths:
+      - artifacts/*.deb
+      - artifacts/clickhouse
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
+    - mv build/programs/clickhouse artifacts/.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+build_for_integration_test:
+  stage: build
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/programs/*
+  retry: 2
+  script:
+    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+    - apt-get update -y && apt-get install rsync -y
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --arch linux-x86_64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"

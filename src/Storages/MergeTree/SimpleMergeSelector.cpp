@@ -1,6 +1,9 @@
+
 #include <Storages/MergeTree/SimpleMergeSelector.h>
 
 #include <base/interpolate.h>
+
+#include <Common/logger_useful.h>
 
 #include <cmath>
 #include <cassert>
@@ -199,12 +202,14 @@ void selectWithinPartition(
                 break;
 
             if (allow(sum_size, max_size, min_age, end - begin, parts_count, min_size_to_lower_base_log, max_size_to_lower_base_log, settings))
+            {
                 estimator.consider(
                     parts.begin() + begin,
                     parts.begin() + end,
                     sum_size,
                     begin == 0 ? 0 : parts[begin - 1].size,
                     settings);
+            }
         }
     }
 }

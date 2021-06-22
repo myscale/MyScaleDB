@@ -1,3 +1,7 @@
+/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
+ * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
+ * Co., Ltd. */
+
 #include <memory>
 
 #include <filesystem>
@@ -509,6 +513,16 @@ ASTPtr InterpreterCreateQuery::formatIndices(const IndicesDescription & indices)
     return res;
 }
 
+ASTPtr InterpreterCreateQuery::formatVectorIndices(const VectorIndicesDescription & vec_indices)
+{
+    auto res = std::make_shared<ASTExpressionList>();
+
+    for (const auto & vec_index : vec_indices)
+        res->children.push_back(vec_index.definition_ast->clone());
+
+    return res;
+}
+
 ASTPtr InterpreterCreateQuery::formatConstraints(const ConstraintsDescription & constraints)
 {
     auto res = std::make_shared<ASTExpressionList>();
@@ -793,6 +807,11 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 properties.indices.push_back(index_desc);
             }
 
+        if (create.columns_list->vec_indices)
+            for (const auto & vec_index : create.columns_list->vec_indices->children)
+                properties.vec_indices.push_back(
+                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns));
+
         if (create.columns_list->projections)
             for (const auto & projection_ast : create.columns_list->projections->children)
             {
@@ -821,6 +840,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
         {
             properties.indices = as_storage_metadata->getSecondaryIndices();
             properties.projections = as_storage_metadata->getProjections().clone();
+            properties.vec_indices = as_storage_metadata->getVectorIndices();
         }
         else
         {
@@ -880,11 +900,13 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
     ASTPtr new_columns = formatColumns(properties.columns);
     ASTPtr new_indices = formatIndices(properties.indices);
+    ASTPtr new_vec_indices = formatVectorIndices(properties.vec_indices);
     ASTPtr new_constraints = formatConstraints(properties.constraints);
     ASTPtr new_projections = formatProjections(properties.projections);
 
     create.columns_list->setOrReplace(create.columns_list->columns, new_columns);
     create.columns_list->setOrReplace(create.columns_list->indices, new_indices);
+    create.columns_list->setOrReplace(create.columns_list->vec_indices, new_vec_indices);
     create.columns_list->setOrReplace(create.columns_list->constraints, new_constraints);
     create.columns_list->setOrReplace(create.columns_list->projections, new_projections);
 
@@ -1946,7 +1968,7 @@ BlockIO InterpreterCreateQuery::execute()
 {
     FunctionNameNormalizer::visit(query_ptr.get());
     auto & create = query_ptr->as<ASTCreateQuery &>();
-
+    LOG_DEBUG(log, "[create] query: {}", create.dumpTree());
     bool is_create_database = create.database && !create.table;
     if (!create.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {

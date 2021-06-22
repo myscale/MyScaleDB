@@ -149,6 +149,17 @@ bool ParserShowCreateAccessEntityQuery::parseImpl(Pos & pos, ASTPtr & node, Expe
                 current_quota = true;
             break;
         }
+        case AccessEntityType::CONNECTION:
+        {
+            if (parseIdentifiersOrStringLiterals(pos, expected, names))
+            {
+            }
+            else if (plural)
+                all = true;
+            else
+                return false;
+            break;
+        }
         case AccessEntityType::MAX:
             throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Type {} is not implemented in SHOW CREATE query", toString(type));
     }

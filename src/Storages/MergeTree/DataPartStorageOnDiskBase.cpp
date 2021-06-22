@@ -16,6 +16,7 @@
 #include <Disks/SingleDiskVolume.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
+#include <VectorIndex/VectorIndexCommon.h>
 
 namespace DB
 {
@@ -885,6 +886,17 @@ void DataPartStorageOnDiskBase::clearDirectory(
         request.emplace_back(fs::path(dir) / "delete-on-destroy.txt", true);
         request.emplace_back(fs::path(dir) / "txn_version.txt", true);
         request.emplace_back(fs::path(dir) / "metadata_version.txt", true);
+
+        /// Add files for vector index
+        Names files;
+        disk->listFiles(dir, files);
+        for (const auto & file : files)
+        {
+            if (!endsWith(file, VECTOR_INDEX_FILE_SUFFIX))
+                continue;
+
+            request.emplace_back(fs::path(dir) / file);
+        }
 
         disk->removeSharedFiles(request, !can_remove_shared_data, names_not_to_remove);
         disk->removeDirectory(dir);
