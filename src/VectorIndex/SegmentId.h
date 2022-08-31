@@ -10,6 +10,8 @@ namespace fs = std::filesystem;
 namespace VectorIndex
 {
 
+String cutMutVer(const String & part_name);
+
 struct CacheKey
 {
     String table_path;
@@ -18,15 +20,15 @@ struct CacheKey
     String column_name;
 
     bool operator==(const CacheKey& other) const {
-        return (table_path == other.table_path) 
-        && (part_name == other.part_name) 
-        && (vector_index_name == other.vector_index_name) 
+        return (table_path == other.table_path)
+        && (cutMutVer(part_name) == cutMutVer(other.part_name))
+        && (vector_index_name == other.vector_index_name)
         && (column_name == other.column_name);
     }
 
     String toString() const
     {
-        return table_path + "/" + part_name + "/" + vector_index_name + "_" + column_name;
+        return table_path + "/" + cutMutVer(part_name) + "/" + vector_index_name + "_" + column_name;
     }
 };
 
@@ -55,11 +57,11 @@ struct SegmentId
         /// normal vector index
         if (owner_part_name == current_part_name)
         {
-            return data_part_path + "/";
+            return data_part_path;
         }
         else
         {
-            return data_part_path + "/merged-" + DB::toString(owner_part_id) + "-" + owner_part_name + "-";
+            return data_part_path + "merged-" + DB::toString(owner_part_id) + "-" + owner_part_name + "-";
         }
     }
 

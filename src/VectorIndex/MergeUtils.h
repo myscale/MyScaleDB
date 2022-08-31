@@ -30,9 +30,13 @@ static inline void renameVectorIndexFiles(const String& part_id, const String& p
     }   
 }
 
-static std::vector<SegmentId> getAllSegmentIds(const String& data_path, const String& data_part, const String& index_name, const String& index_column)
+static std::vector<SegmentId> getAllSegmentIds(const String & data_path, const DB::MergeTreeDataPartPtr & data_part, const String & index_name, const String & index_column)
 {
     std::vector<SegmentId> segment_ids;
+
+    if (!data_part)
+        return segment_ids;
+
     /// decide whether we have merged old data parts‘ index files
     for (auto &p : fs::recursive_directory_iterator(data_path))
     {
@@ -45,13 +49,13 @@ static std::vector<SegmentId> getAllSegmentIds(const String& data_path, const St
 
             LOG_DEBUG(&Poco::Logger::get("getAllSegmentIds"), "segments: {} {}", strs[0], strs[1]);
 
-            SegmentId segment_id(data_path, data_part, strs[2], index_name, index_column, std::stoi(strs[1]));
+            SegmentId segment_id(data_path, data_part->name, strs[2], index_name, index_column, std::stoi(strs[1]));
             segment_ids.emplace_back(std::move(segment_id));
         }
     }
     if (segment_ids.empty())
     {
-        SegmentId segment_id(data_path, data_part, data_part, index_name, index_column, 0);
+        SegmentId segment_id(data_path, data_part->name, data_part->name, index_name, index_column, 0);
         segment_ids.emplace_back(std::move(segment_id));
     }
     return segment_ids;

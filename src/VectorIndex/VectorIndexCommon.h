@@ -6,6 +6,7 @@
 #include <Poco/JSON/JSON.h>
 #include <Poco/JSON/Object.h>
 
+#include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/CompressedWriteBuffer.h>
 
@@ -207,6 +208,7 @@ static inline std::unordered_map<String, int64_t> readVectorIndexReadyFile(
 
 static inline GeneralBitMapPtr mergeBitMap(GeneralBitMapPtr left, GeneralBitMapPtr right)
 {
+    DB::OpenTelemetry::SpanHolder span("mergeBitMap");
     int64_t vector_count = left->get_size();
     GeneralBitMapPtr after_merge = std::make_shared<GeneralBitMap>();
     char * bits = new char[(vector_count >> 3) + 1]; // size/8 = bytes

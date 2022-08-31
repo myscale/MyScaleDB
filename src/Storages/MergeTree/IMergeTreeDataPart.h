@@ -320,6 +320,11 @@ public:
 
     mutable bool small_part = false;
 
+    mutable bool lightweight_delete_mask_updated = false;
+
+    /// Used for vector index building and mutation. True if original source part doesn't have vindex when mutation starts.
+    mutable bool vector_index_in_origin_part = false;
+
     bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
 
     bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
@@ -335,6 +340,13 @@ public:
     void cancelBuild() const {vector_index_build_cancelled = true;}
 
     bool isSmallPart(size_t min_rows_to_build_vector_index) const { return this->rows_count < min_rows_to_build_vector_index; }
+
+    void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
+
+    void setOriginPartHasVectorIndex() const { vector_index_in_origin_part = true; }
+
+    /// Read vector_index_ready file to initialize vector_indxed
+    void loadVectorIndexMetadata() const;
 
     /// Columns with values, that all have been zeroed by expired ttl
     NameSet expired_columns;
@@ -483,6 +495,11 @@ public:
     mutable std::atomic<DataPartRemovalState> removal_state = DataPartRemovalState::NOT_ATTEMPTED;
 
     mutable std::atomic<time_t> last_removal_attemp_time = 0;
+
+    std::optional<ColumnPtr> readRowExistsColumn() const;
+
+    /// when lightweight delete mutation complete, this function will be called.
+    virtual void onLightweightDelete() const;
 
 protected:
 

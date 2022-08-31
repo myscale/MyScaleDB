@@ -174,8 +174,10 @@ struct Settings;
     /** Vector Search */ \
     M(Bool, enable_primary_key_cache, false, "Enable primary key cache when do vector search.", 0) \
     M(Bool, enable_decouple_vector_index_rebuild_from_merge, true, "Enable use old vector indices during merge.", 0) \
-    M(UInt64, min_rows_to_build_vector_index, 10000, "The minimum row size of data part to build vector index", 0) \
+    M(Bool, distable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
+    M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
     M(String, vector_search_metric_type, "L2", "default metric type for brute force search", 0) \
+    M(UInt64, min_rows_for_slow_mode_vector_index_build, 100000, "The minimum row size of data part to build vector index using slow mode", 0) \
     \
     /** Obsolete settings. Kept for backward compatibility only. */ \
     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \

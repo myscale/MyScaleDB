@@ -41,7 +41,8 @@ public:
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const FilterWithCachedCount & filter,
+        const ColumnUInt64 * part_offset);
 
     bool preComputed() { return vector_scan_result != nullptr; }
 
@@ -87,14 +88,16 @@ private:
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         VectorScanResultPtr vector_scan_result = nullptr,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const ColumnUInt64 * part_offset = nullptr);
 
     void mergeVectorScanResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         VectorScanResultPtr vector_scan_result = nullptr,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const ColumnUInt64 * part_offset = nullptr);
 
     void searchWrapper(
         bool prewhere,

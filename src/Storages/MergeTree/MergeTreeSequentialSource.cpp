@@ -112,7 +112,7 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
 
     /// Note, that we don't check setting collaborate_with_coordinator presence, because this source
     /// is only used in background merges.
-    addTotalRowsApprox(data_part->rows_count);
+    /// addTotalRowsApprox(data_part->rows_count);
 
     /// Add columns because we don't want to read empty blocks
     injectRequiredColumns(LoadedMergeTreeDataPartInfoForReader(data_part), storage_snapshot, /*with_subcolumns=*/ false, columns_to_read);

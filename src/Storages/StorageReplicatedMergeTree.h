@@ -883,11 +883,8 @@ private:
     /// If no connection to zookeeper, shutdown, readonly -- return std::nullopt.
     /// If somebody already holding the lock -- return unlocked ZeroCopyLock object (not std::nullopt).
     std::optional<ZeroCopyLock> tryCreateZeroCopyExclusiveLock(const String & part_name, const DiskPtr & disk) override;
-    void finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr> & processed_parts) override;
-
-    DataParts currently_vector_indexing_parts;
-
-    mutable std::mutex currently_processing_in_background_mutex;
+    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
+    /// mutable std::mutex currently_processing_in_background_mutex;
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

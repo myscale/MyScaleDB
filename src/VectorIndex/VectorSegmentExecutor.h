@@ -33,20 +33,36 @@ struct IndexWithMeta
     IndexWithMeta() = default;
     IndexWithMeta(VectorIndexPtr & index_, uint64_t total_vec_, OPsPtr op_points_, GeneralBitMapPtr delete_bitMap_,
             Parameters des_)
-        : index(index_), total_vec(total_vec_), op_points(op_points_), delete_bitMap(delete_bitMap_), des(des_) {};
+        : index(index_), total_vec(total_vec_), op_points(op_points_), delete_bitmap(delete_bitMap_), des(des_) {};
     
     IndexWithMeta(VectorIndexPtr & index_, uint64_t total_vec_, OPsPtr op_points_, GeneralBitMapPtr delete_bitMap_,
-            Parameters des_, std::vector<UInt64> row_ids_map_, std::vector<UInt64> inverted_row_ids_map_, std::vector<uint8_t> inverted_row_sources_map_)
-        : index(index_), total_vec(total_vec_), op_points(op_points_), delete_bitMap(delete_bitMap_), des(des_),
+            Parameters des_, std::shared_ptr<std::vector<UInt64>> row_ids_map_, std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
+            std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_)
+        : index(index_), total_vec(total_vec_), op_points(op_points_), delete_bitmap(delete_bitMap_), des(des_),
           row_ids_map(row_ids_map_), inverted_row_ids_map(inverted_row_ids_map_), inverted_row_sources_map(inverted_row_sources_map_){};
     VectorIndexPtr index;
     uint64_t total_vec;
     OPsPtr op_points;
-    GeneralBitMapPtr delete_bitMap;
+private:
+    GeneralBitMapPtr delete_bitmap;
+    mutable std::mutex mutex_of_delete_bitmap;
+public:
     Parameters des;
-    std::vector<UInt64> row_ids_map;
-    std::vector<UInt64> inverted_row_ids_map;
-    std::vector<uint8_t> inverted_row_sources_map;
+    std::shared_ptr<std::vector<UInt64>> row_ids_map;
+    std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map;
+    std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
+
+    void setDeleteBitmap(GeneralBitMapPtr delete_bitmap_)
+    {
+        std::lock_guard<std::mutex> lg(mutex_of_delete_bitmap);
+        delete_bitmap = delete_bitmap_;
+    }
+
+    GeneralBitMapPtr getDeleteBitmap() const
+    {
+        std::lock_guard<std::mutex> lg(mutex_of_delete_bitmap);
+        return delete_bitmap;
+    }
 };
 using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
 
@@ -82,7 +98,7 @@ public:
 
     /// buildIndex method use data to train an index, does not add data for search.
     /// it'll call index's train(), but does not write to file io.
-    Status buildIndex(VectorDatasetPtr data_set, int64_t total_vectors_expected);
+    Status buildIndex(VectorDatasetPtr data_set, int64_t total_vectors_expected, bool slow_mode);
 
     ///put the index stored in VectorSegmentExecutor into cache.
     Status cache();
@@ -97,11 +113,11 @@ public:
 
     GeneralBitMapPtr getDeleteBitMapCopy();
 
-    GeneralBitMapPtr getDeleteBitMap() { return this->delete_bitMap; }
+    GeneralBitMapPtr getDeleteBitMap() { return this->delete_bitmap; }
 
-    ///if index is flat，that the index has uncompressed vectors，
-    ///we can read all vectors directly from memory and use them to build new index。
-    ///if vectors in mem is compressed, this methods does nothing.
+    /// If index is flat, then the index has uncompressed vectors.
+    /// We can read all vectors directly from memory and use them to build new index.
+    /// If vectors in mem is compressed, this methods does nothing.
     float * getDataInMem();
 
     ///return total number of vectors.
@@ -154,9 +170,9 @@ public:
             /// need to transfer merged row id to real row id of this old data part.
             for (auto & new_row_id : selected_row_ids)
             {
-                if (segment_id.getOwnPartId() == inverted_row_sources_map[new_row_id])
+                if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
                 {
-                    bits->set(inverted_row_ids_map[new_row_id]);
+                    bits->set((*inverted_row_ids_map)[new_row_id]);
                 }
             }
         }
@@ -168,6 +184,12 @@ public:
             }
         }
         return bits;
+    }
+
+    /// Update SegmentId
+    void updateSegmentId(const SegmentId & new_segment_id)
+    {
+        segment_id = new_segment_id;
     }
 
 private:
@@ -195,7 +217,7 @@ private:
 
     void transferToNewRowIds(int64_t *& labels, int size)
     {
-        if (row_ids_map.empty())
+        if (row_ids_map->empty())
         {
             return;
         }
@@ -204,11 +226,11 @@ private:
 
         for (int i = 0; i < size; i++)
         {
-            if (labels[i] > row_ids_map.size())
+            if (labels[i] > row_ids_map->size())
             {
                 LOG_DEBUG(log, "[transferToNewRowIds] overflow: label: {}", labels[i]);
             }
-            labels[i] = row_ids_map[labels[i]];
+            labels[i] = (*row_ids_map)[labels[i]];
         }
     }
 
@@ -223,12 +245,22 @@ private:
     Poco::Logger * log;
     UInt64 total_vec = 0;
     OPsPtr op_points = nullptr; //operating points precomputed as an <accuracy,parameter> map,ordered by acc.
-    GeneralBitMapPtr delete_bitMap = nullptr; //manage deletion from database
+    GeneralBitMapPtr delete_bitmap = nullptr; //manage deletion from database
     Parameters des;
-    std::vector<UInt64> row_ids_map;
-    std::vector<UInt64> inverted_row_ids_map;
-    std::vector<uint8_t> inverted_row_sources_map;
+    std::shared_ptr<std::vector<UInt64>> row_ids_map = std::make_shared<std::vector<UInt64>>();
+    std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map = std::make_shared<std::vector<UInt64>>();
+    std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map = std::make_shared<std::vector<uint8_t>>();
 };
 
 using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;
+
+
+class VectorIndexUtil
+{
+public:
+    static GeneralBitMapPtr readDeleteBitmap(const String & bitmap_path, UInt64 total_vec);
+    static bool writeDeleteBitmap(const String & bitmap_path, GeneralBitMapPtr delete_bitmap);
+    static bool writeDeleteBitmap(const SegmentId & segment_id, GeneralBitMapPtr delete_bitmap);
+};
+
 }

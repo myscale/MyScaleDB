@@ -1776,8 +1776,6 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks)
         for (auto & part : broken_parts_to_detach)
             part->renameToDetached("broken-on-start"); /// detached parts must not have '_' in prefixes
 
-    verifyVectorIndex();
-
     resetObjectColumnsFromActiveParts(part_lock);
     calculateColumnAndSecondaryIndexSizesImpl();
 
@@ -2024,10 +2022,57 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::asMutableDeletingPart(const Dat
 {
     auto state = part->getState();
     if (state != DataPartState::Deleting && state != DataPartState::DeleteOnDestroy)
-        throw Exception(ErrorCodes::LOGICAL_ERROR,
-            "Cannot remove part {}, because it has state: {}", part->name, magic_enum::enum_name(state));
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR, "Cannot remove part {}, because it has state: {}", part->name, magic_enum::enum_name(state));
 
     return std::const_pointer_cast<IMergeTreeDataPart>(part);
+}
+
+void MergeTreeData::clearTemporaryIndexBuildDirectories()
+{
+    for (const auto & disk : getDisks())
+    {
+        if (disk->isBroken())
+            continue;
+
+        for (auto it = disk->iterateDirectory(relative_data_path); it->isValid(); it->next())
+        {
+            const std::string & basename = it->name();
+            if (!startsWith(basename, "vector_tmp_"))
+            {
+                continue;
+            }
+            const std::string & full_path = fullPath(disk, it->path());
+
+            try
+            {
+                if (disk->isDirectory(it->path()))
+                {
+                    LOG_INFO(log, "Removing temporary directory for vector index build {}", full_path);
+                    disk->removeRecursive(it->path());
+                }
+            }
+            /// see getModificationTime()
+            catch (const ErrnoException & e)
+            {
+                if (e.getErrno() == ENOENT)
+                {
+                    /// If the file is already deleted, do nothing.
+                }
+                else
+                    throw;
+            }
+            catch (const fs::filesystem_error & e)
+            {
+                if (e.code() == std::errc::no_such_file_or_directory)
+                {
+                    /// If the file is already deleted, do nothing.
+                }
+                else
+                    throw;
+            }
+        }
+    }
 }
 
 MergeTreeData::DataPartsVector MergeTreeData::grabOldParts(bool force)
@@ -2266,8 +2311,9 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
     {
         for(const auto& vec_index_desc : meta_snapshot->vec_indices)
         {
-            auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column);
-            for (auto& segment_id : segment_ids)
+            auto segment_ids
+                = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+            for (auto & segment_id : segment_ids)
             {
                 VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
             }
@@ -8235,101 +8281,6 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
 
     new_data_part_storage->precommitTransaction();
     return new_data_part;
-}
-
-void MergeTreeData::verifyVectorIndex()
-{
-    LOG_TRACE(log, "verify vector index");
-    auto metadata_snapshot = getInMemoryMetadataPtr();
-    if (metadata_snapshot->getVectorIndices().empty())
-    {
-        LOG_DEBUG(log, "no vector index declared");
-        return;
-    }
-    VectorIndex::DiskIOReader reader;
-    for (const auto & part : data_parts_indexes)
-    {
-        auto col_name = part->getColumns().getNames();
-        String read_file_path = part->getDataPartStorage().getFullPath() + "vector_index_ready";
-        LOG_TRACE(log, "ready file path :{}", read_file_path);
-        std::vector<String> index_name_to_verify;
-        ///first loop through metadata, this loop we find all vector index needed to verify, and read them in one disk IO
-        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
-        {
-            for (const auto & col : col_name)
-            {
-                ///we check every column of every datapart and see if they need building vector index
-                if (vec_index_desc.column == col)
-                {
-                    String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-                    index_name_to_verify.emplace_back(index_name);
-                }
-            }
-        }
-        std::unordered_map<std::string, VectorIndex::Parameters> para;
-        LOG_TRACE(log, "before read ready");
-        std::unordered_map<String, int64_t> sizes
-            = VectorIndex::readVectorIndexReadyFile(reader, read_file_path, index_name_to_verify, para);
-        for (auto & a : para)
-        {
-            LOG_TRACE(log, "name,{}", a.first);
-            for (auto & b : a.second)
-            {
-                LOG_TRACE(log, "parameter,{},{}", b.first, b.second);
-            }
-        }
-        ///second loop, this loop we compare vector index recorded in vector_index_ready to metadata to make sure the correct version of
-        ///vector index is built
-        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
-        {
-            for (const auto & col : col_name)
-            {
-                ///we check every column of every datapart and see if they need building vector index
-                if (vec_index_desc.column == col)
-                {
-                    String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-                    if(sizes.find(index_name)!=sizes.end())
-                    {
-                        int64_t size = sizes.find(index_name)->second;
-                        ///this index is in metadata and found in vector_inex_ready
-                        if (size != -1)
-                        {
-                            LOG_TRACE(log, "read from vector_index_ready:{},{}", index_name, size);
-                            VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
-                            ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
-                            if (!single_params_from_record.empty())
-                            {
-                                VectorIndex::IndexType t
-                                    = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
-                                single_params_from_record.erase("type");
-                                if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
-                                        t,
-                                        single_params_from_record,
-                                        VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
-                                        VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
-                                {
-                                    LOG_INFO(log, "the index is built for part:{},{}", part->name, index_name);
-                                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                                }
-                            }
-                            ///second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
-                            else
-                            {
-                                LOG_INFO(log, "the index is built for part:{},{}", part->name, index_name);
-                                part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        ///we check if a index is built already, if not, create job for it.
-        ///TODO we can have server load all the index into memory at startup
-        //                    VectorIndex::ExecutionEnginePtr temp = std::make_shared<VectorIndex::ExecutionEngine>
-        //                        (part->getFullRelativePath()+ "/" + vec_index_desc->name);
-        //                    temp->load();
-        //                    temp->cache();
-    }
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

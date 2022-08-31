@@ -679,6 +679,10 @@ public:
 
     size_t clearEmptyParts();
 
+    /// Delete all directories which names begin with "vector_tmp", used for vecor index build.
+    /// Do this when shut down and start up.
+    void clearTemporaryIndexBuildDirectories();
+
     /// After the call to dropAllData() no method can be called.
     /// Deletes the data directory and flushes the uncompressed blocks cache and the marks cache.
     void dropAllData();
@@ -977,8 +981,6 @@ public:
     void removeQueryId(const String & query_id) const;
     void removeQueryIdNoLock(const String & query_id) const TSA_REQUIRES(query_id_set_mutex);
 
-    void verifyVectorIndex();
-
     /// Return the partition expression types as a Tuple type. Return DataTypeUInt8 if partition expression is empty.
     DataTypePtr getPartitionValueType() const;
 
@@ -1046,7 +1048,7 @@ public:
     /// Store metadata for replicated tables
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
-    virtual void finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr> & processed_parts) = 0;
+    virtual void finishVectorIndexJob(const std::vector<String> & processed_parts) = 0;
 
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
@@ -1055,6 +1057,11 @@ public:
     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
     /// Mutex for currently_submerging_parts and currently_emerging_parts
     mutable std::mutex currently_submerging_emerging_mutex;
+    std::set<String> currently_vector_indexing_parts;
+
+    /// Mutex for parts currently processing in background
+    /// merging (also with TTL), mutating or moving.
+    mutable std::mutex currently_processing_in_background_mutex;
 
     /// Used for freezePartitionsByMatcher and unfreezePartitionsByMatcher
     using MatcherFn = std::function<bool(const String &)>;

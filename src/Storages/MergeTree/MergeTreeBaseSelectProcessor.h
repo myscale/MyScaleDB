@@ -214,6 +214,12 @@ private:
 
     /// used in vector scan;
    ColumnPtr tmp_filter;
+
+    /// True if _part_offset column is added for vector scan, but should not exist in select result.
+    bool need_remove_part_offset = false;
+
+    /// Logic row id for rows, used for vector index scan.
+    const ColumnUInt64 * part_offset = nullptr;
 };
 
 using MergeTreeSelectAlgorithmPtr = std::unique_ptr<IMergeTreeSelectAlgorithm>;

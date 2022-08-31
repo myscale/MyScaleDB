@@ -35,6 +35,8 @@
 #include <Interpreters/MergeTreeTransaction.h>
 #include <Interpreters/TransactionLog.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/CacheManager.h>
+#include <VectorIndex/DiskIOReader.h>
 
 
 namespace CurrentMetrics
@@ -638,6 +640,7 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             checkConsistency(require_columns_checksums);
 
         loadDefaultCompressionCodec();
+        loadVectorIndexMetadata();
     }
     catch (...)
     {
@@ -1334,11 +1337,269 @@ void IMergeTreeDataPart::loadColumns(bool require)
     setColumns(loaded_columns, infos);
 }
 
+void IMergeTreeDataPart::loadVectorIndexMetadata() const
+{
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (metadata_snapshot->getVectorIndices().empty())
+    {
+        LOG_DEBUG(storage.log, "[loadVectorIndexMetadata] no vector index declared");
+        return;
+    }
+
+    /// first loop through metadata, this loop we find all vector index needed to verify, and read them in one disk IO
+    std::vector<String> index_name_to_verify;
+    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+    {
+        index_name_to_verify.emplace_back(vec_index_desc.name + "_" + vec_index_desc.column);
+    }
+
+    String read_file_path = getDataPartStorage().getFullPath() + "vector_index_ready";
+    LOG_DEBUG(storage.log, "[loadVectorIndexMetadata] ready file path :{}", read_file_path);
+
+    VectorIndex::DiskIOReader reader;
+    std::unordered_map<std::string, VectorIndex::Parameters> para;
+    std::unordered_map<String, int64_t> sizes = VectorIndex::readVectorIndexReadyFile(reader, read_file_path, index_name_to_verify, para);
+
+    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+    {
+        String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+        auto index_size = sizes.find(index_name);
+        if (index_size != sizes.end())
+        {
+            int64_t size = index_size->second;
+            // this index is in metadata and found in vector_index_ready
+            if (size != -1)
+            {
+                LOG_TRACE(storage.log, "read from vector_index_ready:{},{}", index_name, size);
+                VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
+                ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
+                if (!single_params_from_record.empty())
+                {
+                    VectorIndex::IndexType t
+                            = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
+                    single_params_from_record.erase("type");
+
+                    if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
+                            t,
+                            single_params_from_record,
+                            VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
+                            VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
+                    {
+                        LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                        addVectorIndex(index_name);
+                    }
+                }
+                // second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
+                else
+                {
+                    LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                    addVectorIndex(index_name);
+                }
+            }
+        }
+    }
+}
+
 /// Project part / part with project parts / compact part doesn't support LWD.
 bool IMergeTreeDataPart::supportLightweightDeleteMutate() const
 {
     return (part_type == MergeTreeDataPartType::Wide || part_type == MergeTreeDataPartType::Compact) &&
         parent_part == nullptr && projection_parts.empty();
+}
+
+std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
+        return std::nullopt;
+
+    NamesAndTypesList cols;
+    cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
+
+    MutableColumns buffered_columns;
+    buffered_columns.resize(1);
+    buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
+
+    StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
+    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshotWithoutParts(metadata_ptr);
+
+    MergeTreeReaderSettings reader_settings;
+
+    MergeTreeReaderPtr reader = getReader(
+            cols,
+            storage_snapshot_ptr->metadata,
+            MarkRanges{MarkRange(0, getMarksCount())},
+            nullptr,
+            storage.getContext()->getMarkCache().get(),
+            reader_settings,
+            ValueSizeMap{},
+            ReadBufferFromFileBase::ProfileCallback{});
+
+    if (!reader)
+    {
+        LOG_ERROR(storage.log, "[readRowExistsColumn] create reader failed");
+        return std::nullopt;
+    }
+
+    size_t current_mark = 0;
+    const size_t total_mark = getMarksCount();
+
+    size_t num_rows_read = 0;
+    const size_t num_rows_total = rows_count;
+
+    LOG_DEBUG(storage.log, "[readRowExistsColumn] total_mark = {}", total_mark);
+    LOG_DEBUG(storage.log, "[readRowExistsColumn] num_rows_total = {}", num_rows_total);
+
+    bool continue_read = false;
+    while (num_rows_read < num_rows_total)
+    {
+        const size_t remaining_size = num_rows_total - num_rows_read;
+
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: num_rows_read = {}", num_rows_read);
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: remaining_size = {}", remaining_size);
+
+        Columns result;
+        result.resize(1);
+
+        size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+
+        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop, count rows have be read = {}", num_rows);
+
+        continue_read = true;
+        num_rows_read += num_rows;
+
+        buffered_columns[0]->insertRangeFrom(*result[0], 0, result[0]->size());
+
+        /// calculate next mark
+        for (size_t mark = 0; mark < total_mark - 1; ++mark)
+        {
+            if (index_granularity.getMarkStartingRow(mark) >= num_rows_read
+                && index_granularity.getMarkStartingRow(mark + 1) < num_rows_read)
+            {
+                current_mark = mark;
+            }
+        }
+    }
+
+    buffered_columns[0]->protect();
+
+    Columns ret;
+    ret.assign(
+            std::make_move_iterator(buffered_columns.begin()),
+            std::make_move_iterator(buffered_columns.end())
+    );
+
+    return std::optional<ColumnPtr>(ret[0]);
+}
+
+void IMergeTreeDataPart::onLightweightDelete() const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
+        return;
+
+    if (!containAnyVectorIndex())
+        return;
+
+    std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
+    if (!row_exists_column_opt.has_value())
+    {
+        LOG_ERROR(storage.log, "[onLightweightDelete] row_exists column is empty");
+        return;
+    }
+
+    ColumnPtr row_exists_column_ptr = row_exists_column_opt.value();
+
+    const ColumnUInt8 * col = typeid_cast<const ColumnUInt8 *>(row_exists_column_ptr.get());
+    if (col == nullptr)
+    {
+        LOG_ERROR(storage.log, "[onLightweightDelete] row_exists column type error");
+        return;
+    }
+
+    std::vector<Int64> del_ids; // update cache bitmap
+
+    const ColumnUInt8::Container & vec_in = col->getData();
+    for (size_t i = 0; i < vec_in.size(); ++i)
+    {
+        const UInt8 re = vec_in[i];
+        if (re == 0)
+            del_ids.push_back(static_cast<Int64>(i));
+    }
+    if (del_ids.empty())
+    {
+        LOG_DEBUG(storage.log, "[onLightweightDelete] the value of row exists column is all 1, nothing to do");
+        return;
+    }
+
+    LOG_DEBUG(storage.log, "[onLightweightDelete] Printing the first 10 deleted ids");
+    for (size_t i = 0; i < 10 && i < del_ids.size(); ++i)
+        LOG_DEBUG(storage.log, "[onLightweightDelete] del_ids[{}] = {}", i, del_ids[i]);
+
+    VectorIndex::CacheManager * const mgr = VectorIndex::CacheManager::getInstance();
+
+    std::list<std::pair<VectorIndex::CacheKey, VectorIndex::Parameters>> cache_items = mgr->getAllItems();
+    std::vector<VectorIndex::CacheKey> cache_keys;
+
+    LOG_DEBUG(storage.log, "[onLightweightDelete] Printing all cache keys");
+    for (auto it = cache_items.begin(); it != cache_items.cend(); ++it)
+    {
+        LOG_DEBUG(storage.log, "[onLightweightDelete] {}", it->first.toString());
+        cache_keys.push_back(it->first);
+    }
+
+    std::filesystem::path fs_full_path(getDataPartStorage().getFullPath());
+    const String table_path = fs_full_path.parent_path().parent_path().string();
+
+    bool delete_bitmap_found_in_cache = false;
+    for (size_t i = 0; i < cache_keys.size(); ++i)
+    {
+        VectorIndex::CacheKey ck = cache_keys[i];
+
+        if (ck.table_path != table_path || VectorIndex::cutMutVer(ck.part_name) != VectorIndex::cutMutVer(name))
+            continue;
+
+        LOG_DEBUG(storage.log, "[onLightweightDelete] The matched key with current data part in cache = {}", ck.toString());
+
+        VectorIndex::IndexWithMetaPtr index_with_meta_ptr = mgr->get(ck);
+        if (index_with_meta_ptr == nullptr)
+            continue;
+
+        delete_bitmap_found_in_cache = true;
+
+        if (auto delete_bitmap = index_with_meta_ptr->getDeleteBitmap())
+        {
+            for (size_t j = 0; j < del_ids.size(); ++j)
+            {
+                delete_bitmap->unset(del_ids[j]);
+            }
+
+            String delete_bitmap_path = getDataPartStorage().getFullPath() + VECTOR_INDEX_BITMAP + VECTOR_INDEX_FILE_SUFFIX;
+            VectorIndex::VectorIndexUtil::writeDeleteBitmap(delete_bitmap_path, delete_bitmap);
+
+            break;
+        }
+        else
+        {
+            LOG_ERROR(storage.log, "[onLightweightDelete] The cache doesn't have delete_bitmap");
+        }
+    }
+
+    if (!delete_bitmap_found_in_cache)
+    {
+        const String delete_bitmap_path = getDataPartStorage().getFullPath() + VECTOR_INDEX_BITMAP + VECTOR_INDEX_FILE_SUFFIX;
+        VectorIndex::GeneralBitMapPtr delete_bitmap = VectorIndex::VectorIndexUtil::readDeleteBitmap(delete_bitmap_path, row_exists_column_ptr->size());
+        if (delete_bitmap == nullptr)
+        {
+            LOG_DEBUG(storage.log, "[onLightweightDelete] read delete bitmap from disk failed");
+        }
+        else
+        {
+            for (size_t j = 0; j < del_ids.size(); ++j)
+            {
+                delete_bitmap->unset(del_ids[j]);
+            }
+            VectorIndex::VectorIndexUtil::writeDeleteBitmap(delete_bitmap_path, delete_bitmap);
+        }
+    }
 }
 
 void IMergeTreeDataPart::assertHasVersionMetadata(MergeTreeTransaction * txn) const

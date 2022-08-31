@@ -121,7 +121,7 @@ public:
 
     MergeTreeDeduplicationLog * getDeduplicationLog() { return deduplication_log.get(); }
 
-    void finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr> & processed_parts) override;
+    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
 private:
 
     /// Mutex and condvar for synchronous mutations wait
@@ -145,9 +145,6 @@ private:
     /// For clearOldBrokenDetachedParts
     AtomicStopwatch time_after_previous_cleanup_broken_detached_parts;
 
-    /// Mutex for parts currently processing in background
-    /// merging (also with TTL), mutating or moving.
-    mutable std::mutex currently_processing_in_background_mutex;
     mutable std::condition_variable currently_processing_in_background_condition;
 
     /// Parts that currently participate in merge or mutation.
@@ -160,9 +157,6 @@ private:
     /// The value is a maximum version for a part which will be the same as his current version,
     /// that is, to which version it can be upgraded without any change.
     std::map<std::pair<Int64, Int64>, UInt64> updated_version_by_block_range;
-
-    DataParts currently_vector_indexing_parts;
-
 
     std::atomic<bool> shutdown_called {false};
     std::atomic<bool> flush_called {false};

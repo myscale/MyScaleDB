@@ -88,10 +88,17 @@ void BackgroundJobsAssignee::scheduleCommonTask(ExecutableTaskPtr common_task, b
 void BackgroundJobsAssignee::scheduleVectorIndexTask(ExecutableTaskPtr vector_index_task)
 {
     bool res = getContext()->getVectorIndexExecutor()->trySchedule(vector_index_task);
-    LOG_TRACE(&Poco::Logger::get("assign"),"vector try schedule response: {}",res);
+    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"vector try schedule response: {}", res);
     res ? trigger() : postpone();
 }
 
+
+void BackgroundJobsAssignee::scheduleSlowModeVectorIndexTask(ExecutableTaskPtr vector_index_task)
+{
+    bool res = getContext()->getSlowModeVectorIndexExecutor()->trySchedule(vector_index_task);
+    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"vector try schedule response: {}", res);
+    res ? trigger() : postpone();
+}
 
 String BackgroundJobsAssignee::toString(Type type)
 {
@@ -127,7 +134,8 @@ void BackgroundJobsAssignee::finish()
         getContext()->getFetchesExecutor()->removeTasksCorrespondingToStorage(storage_id);
         getContext()->getMergeMutateExecutor()->removeTasksCorrespondingToStorage(storage_id);
         getContext()->getCommonExecutor()->removeTasksCorrespondingToStorage(storage_id);
-        getContext()->getVectorIndexExecutor()->removeTasksCorrespondingToStorage(storage_id);
+        getContext()->getVectorIndexExecutor()->removeTasksCorrespondingToStorage(storage_id);       
+        getContext()->getSlowModeVectorIndexExecutor()->removeTasksCorrespondingToStorage(storage_id);
     }
 }
 

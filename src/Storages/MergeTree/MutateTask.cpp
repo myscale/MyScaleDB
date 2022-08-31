@@ -751,6 +751,32 @@ void finalizeMutatedPart(
     new_data_part->calculateColumnsAndSecondaryIndicesSizesOnDisk();
 
     new_data_part->default_codec = codec;
+
+    if (new_data_part->vector_index_in_origin_part)
+        new_data_part->vector_indexed = source_part->vector_indexed;
+    else if (source_part->containAnyVectorIndex()) /// origin part doesn't have vector index before create hardlink.
+    {
+        bool vector_files_found = false;
+        /// The vector index is built and copy to source part during mutation.
+        for (auto it = source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
+        {
+            String file_name = it->name();
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                continue;
+
+            if (!new_data_part->getDataPartStorage().exists(file_name))
+                new_data_part->getDataPartStorage().createHardLinkFrom(source_part->getDataPartStorage(), file_name, file_name);
+
+            if (!vector_files_found)
+                vector_files_found = true;
+        }
+
+        if (vector_files_found)
+        {
+            new_data_part->vector_indexed = source_part->vector_indexed;
+            new_data_part->setOriginPartHasVectorIndex();
+        }
+    }
 }
 
 }
@@ -1277,6 +1303,27 @@ private:
 
         static_pointer_cast<MergedBlockOutputStream>(ctx->out)->finalizePart(ctx->new_data_part, ctx->need_sync);
         ctx->out.reset();
+
+        /// Create hardlinks for vector index files
+        if (ctx->source_part->containAnyVectorIndex())
+        {
+            bool vector_files_found = false;
+            for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
+            {
+                String file_name = it->name();
+                if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                    continue;
+
+                ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
+                vector_files_found = true;
+            }
+
+            if (vector_files_found)
+            {
+                ctx->new_data_part->vector_indexed = ctx->source_part->vector_indexed;
+                ctx->new_data_part->setOriginPartHasVectorIndex();
+            }
+        }
     }
 
     enum class State
@@ -1346,6 +1393,9 @@ private:
             ctx->files_to_skip.insert("ttl.txt");
 
         ctx->new_data_part->getDataPartStorage().createDirectories();
+
+        if (ctx->source_part->containAnyVectorIndex())
+            ctx->new_data_part->setOriginPartHasVectorIndex();
 
         /// We should write version metadata on part creation to distinguish it from parts that were created without transaction.
         TransactionID tid = ctx->txn ? ctx->txn->tid : Tx::PrehistoricTID;
@@ -1737,6 +1787,22 @@ bool MutateTask::prepare()
 
     if (ctx->mutating_pipeline_builder.initialized())
         ctx->execute_ttl_type = MutationHelpers::shouldExecuteTTL(ctx->metadata_snapshot, ctx->interpreter->getColumnDependencies());
+
+    /// Check if lightweight delete mask column is updated.
+    /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
+    /// TODO: Should not use vector index when any normal delete command exists.
+    if (ctx->source_part->containAnyVectorIndex())
+    {
+        ctx->new_data_part->setOriginPartHasVectorIndex();
+        for (const auto & name_type : ctx->updated_header.getNamesAndTypesList())
+        {
+            if (name_type.name == LightweightDeleteDescription::FILTER_COLUMN.name)
+            {
+                ctx->new_data_part->setDeletedMaskUpdate();
+                break;
+            }
+        }
+    }
 
     /// All columns from part are changed and may be some more that were missing before in part
     /// TODO We can materialize compact part without copying data

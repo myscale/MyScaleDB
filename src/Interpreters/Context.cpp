@@ -158,6 +158,8 @@ namespace CurrentMetrics
     extern const Metric BackgroundVectorIndexPoolTask;
     extern const Metric BackgroundVectorIndexPoolSize;
 
+    extern const Metric BackgroundSlowModeVectorIndexPoolTask;
+    extern const Metric BackgroundSlowModeVectorIndexPoolSize;
 }
 
 namespace DB
@@ -311,6 +313,7 @@ struct ContextSharedPart : boost::noncopyable
     OrdinaryBackgroundExecutorPtr fetch_executor;
     OrdinaryBackgroundExecutorPtr common_executor;
     MergeMutateBackgroundExecutorPtr vector_index_executor;
+    MergeMutateBackgroundExecutorPtr slow_mode_vector_index_executor;
 
     RemoteHostFilter remote_host_filter; /// Allowed URL from config.xml
 
@@ -3835,6 +3838,7 @@ void Context::initializeBackgroundExecutorsIfNeeded()
     size_t background_fetches_pool_size = server_settings.background_fetches_pool_size;
     size_t background_common_pool_size = server_settings.background_common_pool_size;
     size_t background_vector_pool_size = server_settings.background_vector_pool_size;
+    size_t background_slow_mode_vector_pool_size = server_settings.background_slow_mode_vector_pool_size;
 
     /// With this executor we can execute more tasks than threads we have
     shared->merge_mutate_executor = std::make_shared<MergeMutateBackgroundExecutor>
@@ -3879,9 +3883,6 @@ void Context::initializeBackgroundExecutorsIfNeeded()
     );
     LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}", background_common_pool_size, background_common_pool_size);
 
-    LOG_INFO(shared->log, "Initialized background executor for common operations (e.g. clearing old parts) with num_threads={}, num_tasks={}",
-             background_common_pool_size, background_common_pool_size);
-
     shared->vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
     (
         "VectorIndex",
@@ -3889,6 +3890,15 @@ void Context::initializeBackgroundExecutorsIfNeeded()
         background_vector_pool_size,
         CurrentMetrics::BackgroundVectorIndexPoolTask,
         CurrentMetrics::BackgroundVectorIndexPoolSize
+    );
+
+    shared->slow_mode_vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
+    (
+        "SlowVectorIndex",
+        background_slow_mode_vector_pool_size,
+        background_slow_mode_vector_pool_size,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask,
+        CurrentMetrics::BackgroundSlowModeVectorIndexPoolSize
     );
 
     LOG_INFO(shared->log, "Initialized background executor for vector index operations with num_threads={}, num_tasks={}",
@@ -4012,6 +4022,11 @@ ThreadPool & Context::getThreadPoolWriter() const
 MergeMutateBackgroundExecutorPtr Context::getVectorIndexExecutor() const
 {
     return shared->vector_index_executor;
+}
+
+MergeMutateBackgroundExecutorPtr Context::getSlowModeVectorIndexExecutor() const
+{
+    return shared->slow_mode_vector_index_executor;
 }
 
 ReadSettings Context::getReadSettings() const

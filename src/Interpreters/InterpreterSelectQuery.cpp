@@ -2485,9 +2485,6 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
                 required_columns,
                 query_info.projection ? query_info.projection->desc->name : "",
                 view_name);
-
-            LOG_INFO(log, "[txh] analyzeAggregation again!");
-            // query_analyzer->analyzeAggregation();
         }
 
         /// Create step which reads from empty source if storage has no data.

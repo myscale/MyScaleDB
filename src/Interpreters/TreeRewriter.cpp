@@ -1322,6 +1322,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     const NameToNameMap parameter_values,
     const NameToNameMap parameter_types) const
 {
+    DB::OpenTelemetry::SpanHolder span("TreeRewriter::analyzeSelect");
     auto * select_query = query->as<ASTSelectQuery>();
     if (!select_query)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Select analyze for not select asts.");

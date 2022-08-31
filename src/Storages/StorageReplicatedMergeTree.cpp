@@ -3128,26 +3128,35 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
 
         /// remove dropped vector indices
         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
-
-        auto vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
-            metadata_snapshot, currently_vector_indexing_parts, getContext()->getConfigRef().getUInt64("background_vector_pool_size", 4));
-
-        if (vector_index_entry)
         {
-            auto & parts = vector_index_entry->data_parts;
-            for (auto & part : parts)
+            std::unique_lock lock(currently_processing_in_background_mutex);
+            auto vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+                metadata_snapshot, 1, false);
+
+            if (vector_index_entry)
             {
-                currently_vector_indexing_parts.insert(part);
+                auto & parts = vector_index_entry->data_part_names;
+                LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+                auto task = std::make_shared<VectorIndexMergeTreeTask>(
+                    *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
+                assignee.scheduleVectorIndexTask(task);
+                return true;
             }
-            LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
-            auto task = std::make_shared<VectorIndexMergeTreeTask>(
-                *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger);
-            assignee.scheduleVectorIndexTask(task);
-            return true;
-        }
-        else
-        {
-            return false;
+            else
+            {
+                auto slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
+                    metadata_snapshot, 1, true);
+                if (slow_mode_vector_index_entry)
+                {
+                    auto & parts = vector_index_entry->data_part_names;
+                    LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
+                    auto task = std::make_shared<VectorIndexMergeTreeTask>(
+                        *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+                    assignee.scheduleSlowModeVectorIndexTask(task);
+                    return true;
+                }
+                return false;   
+            }
         }
     }
 
@@ -8037,7 +8046,7 @@ std::unique_ptr<MergeTreeSettings> StorageReplicatedMergeTree::getDefaultSetting
     return std::make_unique<MergeTreeSettings>(getContext()->getReplicatedMergeTreeSettings());
 }
 
-void StorageReplicatedMergeTree::finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr> & processed_parts)
+void StorageReplicatedMergeTree::finishVectorIndexJob(const std::vector<String> & processed_parts)
 {
     std::unique_lock lock(currently_processing_in_background_mutex);
     for (auto & part : processed_parts)

@@ -21,6 +21,7 @@
 #include <VectorIndex/Status.h>
 #include <VectorIndex/VectorIndexFactory.h>
 #include <Common/logger_useful.h>
+#include <VectorIndex/MergeUtils.h>
 #include <Common/ActionBlocker.h>
 
 namespace DB
@@ -43,14 +44,15 @@ public:
     /// select parts which vector_indexed not containing index names to build vector index
     VectorIndexEntryPtr selectPartsToBuildVectorIndex(
         const StorageMetadataPtr & metadata_snapshot,
-        const MergeTreeData::DataParts & currently_vector_indexing_parts,
-        size_t background_vector_pool_size);
+        size_t max_parts_number,
+        bool select_slow_mode_parts,
+        const MergeTreeData::DataParts & currently_merging_mutating_parts = {});
 
     void removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot);
 
     /// handle build index task
     BuildVectorIndexStatus
-    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<MergeTreeDataPartPtr> & parts, bool tune);
+    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode);
 
 private:
     class Counter
@@ -73,9 +75,16 @@ private:
     Poco::Logger * log;
 
     BuildVectorIndexStatus
-    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune);
+    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode);
+
+    bool moveVectorIndexFilesToFuturePart(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part);
 
     void undoBuildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part);
+
+    bool isSlowModePart(const MergeTreeDataPartPtr & part)
+    {
+        return VectorIndex::containRowIdsMaps(part) || part->rows_count < data.getSettings()->min_rows_for_slow_mode_vector_index_build;
+    }
 };
 
 }

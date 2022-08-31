@@ -150,7 +150,7 @@ void IVFFlatIndex::search(
             ivf_params.parallel_mode = 0;
         }
         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
-        LOG_INFO(
+        LOG_DEBUG(
             &Poco::Logger::get("IVFFlatIndex"),
             "[search] nprobe: {}, parallel mode: {}, num_t: {}",
             nprobe,
@@ -163,7 +163,7 @@ void IVFFlatIndex::search(
         /// this is acc bounded search route
         ivf_params.acc = acc;
         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
-        LOG_INFO(
+        LOG_DEBUG(
             &Poco::Logger::get("IVFFlatIndex"),
             "[search] acc requirement: {}, parallel mode: {}, num_t: {}",
             acc,

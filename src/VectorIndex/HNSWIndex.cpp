@@ -69,7 +69,7 @@ void HNSWIndex::search(
     hnswlib::bitMapPtr inner_bit_map = std::shared_ptr<hnswlib::bitMap>();
     inner_bit_map.reset(reinterpret_cast<hnswlib::bitMap *>(convertInnerBitMap(filter)));
     //TODO add omp resource control
-    LOG_INFO(log, "searching in HNSW, current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
+    LOG_DEBUG(log, "searching in HNSW, current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
     int ef_s = 50;
     if (params.contains("ef_s"))
     {
@@ -137,6 +137,7 @@ void HNSWIndex::load(BinaryPtr & bi, int64_t total_vec)
             space = new hnswlib::InnerProductSpace(dimension);
             break;
         case (Metrics::Cosine):
+            LOG_INFO(log, "searching in HNSW, metric type: Cosine");
             space = new hnswlib::CosineSpace(dimension);
             break;
     }

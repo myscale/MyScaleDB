@@ -1,10 +1,10 @@
 #include <DataTypes/DataTypeArray.h>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/VectorIndexCommon.h>
-#include <VectorIndex/MergeUtils.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
 
@@ -21,6 +21,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int MEMORY_LIMIT_EXCEEDED;
+    extern const int BAD_ARGUMENTS;
 }
 
 MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
@@ -83,54 +84,91 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
 
 VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVectorIndex(
     const StorageMetadataPtr & metadata_snapshot,
-    const MergeTreeData::DataParts & currently_vector_indexing_parts,
-    size_t background_vector_pool_size)
+    size_t max_parts_number,
+    bool select_slow_mode_parts,
+    const MergeTreeData::DataParts & currently_merging_mutating_parts)
 {
     if (metadata_snapshot->vec_indices.empty())
     {
         return {};
     }
 
-    MergeTreeData::DataPartsVector parts;
+    std::vector<String> part_names;
+
     size_t min_rows_to_build_vector_index = data.getSettings()->min_rows_to_build_vector_index;
     for (const auto & part : data.getDataPartsForInternalUsage())
     {
+        /// LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] part name: {}, count: {}", part->name, currently_vector_indexing_parts.count(part->name));
         /// need to check currently_vector_indexing_parts.count(part) > 0
-        if (currently_vector_indexing_parts.count(part) > 0 || part->vector_index_build_error)
-        {
+        if (data.currently_vector_indexing_parts.count(part->name) > 0 || part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
             continue;
+
+        if (VectorIndex::containRowIdsMaps(part) && data.getSettings()->distable_rebuild_for_decouple)
+            continue;
+
+        /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
+        /// The new part already blocked merge to select it, hence it's safe here. all_1_1_0 can avoid index build selection for future parts all_1_1_0_*
+        bool skip_build_index = false;
+        for (const auto & part_name : data.currently_vector_indexing_parts)
+        {
+            auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
+            if (part->info.contains(info))
+            {
+                LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
+                skip_build_index = true;
+                break;
+            }
         }
+
+        if (skip_build_index)
+            continue;
 
         for (const auto & vec_index : metadata_snapshot->vec_indices)
         {
             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
             {
-                parts.emplace_back(part);
+                if (select_slow_mode_parts)
+                {
+                    if (!isSlowModePart(part))
+                        continue;
+
+                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
+                    part_names.emplace_back(part->name);
+                }
+                else /// normal fast mode
+                {
+                    if (isSlowModePart(part))
+                        continue;
+
+                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
+                    part_names.emplace_back(part->name);
+                }
+
                 LOG_TRACE(log, "this part will get built index: {}", part->name);
                 ///since each index building task is time-consuming, it's pointless to have a long list
-                if (parts.size() >= background_vector_pool_size)
+                if (part_names.size() >= max_parts_number)
                 {
-                    return std::make_shared<VectorIndexEntry>(parts);
+                    return std::make_shared<VectorIndexEntry>(part_names, data);
                 }
                 break;
             }
         }
     }
 
-    if (parts.empty())
+    if (part_names.empty())
     {
         return {};
     }
     else
     {
-        return std::make_shared<VectorIndexEntry>(parts);
+        return std::make_shared<VectorIndexEntry>(part_names, data);
     }
 }
 
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
-    const StorageMetadataPtr & metadata_snapshot, const std::vector<MergeTreeDataPartPtr> & parts, bool tune)
+    const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode)
 {
-    if (parts.empty())
+    if (part_names.empty())
     {
         LOG_INFO(log, "no data");
         return BuildVectorIndexStatus::NO_DATA_PART;
@@ -145,17 +183,31 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
     Stopwatch watch;
     /// build vector index part by part
     /// we may consider building vector index in parallel in the future.
-    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask start.");
-    for (auto & part : parts)
+    if (!part_names.empty())
+        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_names[0], slow_mode);
+    for (auto & part_name : part_names)
     {
+        MergeTreeDataPartPtr part = data.getActiveContainingPart(part_name);
+        if (!part)
+        {
+            continue;
+        }
+
         if (part->vector_index_build_cancelled)
         {
             LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled.", part->name);
             continue;
         }
 
+        const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
+        if (part_storage == nullptr)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+        String vector_tmp_full_path = data.getFullPathOnDisk(part_storage->getDisk()) + "vector_tmp_" + part->info.getPartNameWithoutMutation() + "/";
         constexpr int maxBuildRetryCount = 3;
-        int failed_count = counter.get(part->getDataPartStorage().getRelativePath());
+        int failed_count = counter.get(vector_tmp_full_path);
         if (failed_count >= maxBuildRetryCount)
         {
             part->setBuildError();
@@ -167,8 +219,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
         BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
         try
         {
-            LOG_DEBUG(log, "[buildVectorIndex] begin to build vector index of one part");
-            status = buildVectorIndexForOnePart(metadata_snapshot, part, tune);
+            LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
+            status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
         }
         catch (Exception & e)
         {
@@ -195,27 +247,14 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
             {
                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
             }
-        } 
-        else
-        {
-            if (VectorIndex::containRowIdsMaps(part->getDataPartStorage().getFullPath()))
-            {
-                auto lock = data.lockParts();
-                LOG_INFO(log, "[buildVectorIndex] try to remove row ids maps files in {}", part->getDataPartStorage().getFullPath());
-                /// currently only consider one vector index
-                auto vec_index_desc = metadata_snapshot->vec_indices[0];
-                auto old_segments = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column);
-                for (auto& old_segment : old_segments)
-                {
-                    VectorIndex::VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
-                }
-                VectorIndex::removeAllRowIdsMaps(part->getDataPartStorage().getFullPath());
-            }
         }
+
+        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask finished for part {}, status {}", part->name, status);
     }
 
     watch.stop();
-    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask finished in {} sec.", watch.elapsedSeconds());
+    if (!part_names.empty())
+        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_names[0], watch.elapsedSeconds(), slow_mode);
 
 #ifdef build_fail_test
     LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask increment VectorIndexBuildFailEvents.");
@@ -226,7 +265,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
 }
 
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOnePart(
-    const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune)
+    const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
 {
     MergeTreeReaderSettings reader_settings;
 
@@ -297,29 +336,94 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
         /// below is a horror to test whether a moved part need to rebuild its index. basially is reads from vector_index_ready if there is one,
         /// creates a pesudo vector index using parameters recorded in vector_index_ready and compare with the new index to see if they are the same.
+        const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
+        if (part_storage == nullptr)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+        auto disk = part_storage->getDisk();
+        String read_file_path;
+        String vector_index_ready_file_name = DB::toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
+        bool from_part = true; // false from temporary directory
+
+        /// Create temporary directory to store built vector index files.
+        /// The director name starts with prefix "vector_tmp_" + part_name w/o_mutation, e.g. part all_1_1_0_5: vector_tmp_all_1_1_0
+        String part_name_prefix = part->info.getPartNameWithoutMutation();
+        String vector_tmp_relative_path = data.getRelativeDataPath() + "vector_tmp_" + part_name_prefix + "/";
+        String vector_tmp_full_path = data.getFullPathOnDisk(disk) + "vector_tmp_" + part_name_prefix + "/";
+
+        /// Since the vector index is stored in a temporary directory, add check for it too.
+        if (disk->exists(part->getDataPartStorage().getRelativePath() + vector_index_ready_file_name))
+            read_file_path = part->getDataPartStorage().getFullPath() + vector_index_ready_file_name;
+        else
+        {
+            /// Loop through the relative_data_path to check if any directory with vector_tmp_<part_name_without_mutation> exists
+            if (disk->exists(vector_tmp_relative_path))
+            {
+                if (disk->exists(vector_tmp_relative_path + "/" + vector_index_ready_file_name))
+                {
+                    read_file_path = vector_tmp_full_path + vector_index_ready_file_name;
+                    from_part = false;
+                }
+                else
+                {
+                    disk->removeRecursive(vector_tmp_relative_path);
+                    LOG_DEBUG(log, "[buildVectorIndex] remove incomplete temporary directory {}", vector_tmp_relative_path);
+                }
+            }
+        }
+
         VectorIndex::Parameters parameters = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
         std::unordered_map<std::string, VectorIndex::Parameters> params_from_record;
         VectorIndex::DiskIOReader disk_reader;
-        String read_file_path = part->getDataPartStorage().getFullPath() + "vector_index_ready";
         std::vector<String> index_names;
         std::string index_name = vec_index_desc.name + "_" + vec_index_desc.column;
         index_names.emplace_back(index_name);
-        std::unordered_map<String, int64_t> original_binary_sizes
-            = readVectorIndexReadyFile(disk_reader, read_file_path, index_names, params_from_record);
 
-        if (!original_binary_sizes.empty())
+        if (!read_file_path.empty())
         {
-            VectorIndex::Parameters & single_params_from_record = params_from_record.find(index_name)->second;
-            if (!single_params_from_record.empty() && original_binary_sizes.find(index_name)->second != -1)
+            std::unordered_map<String, int64_t> original_binary_sizes
+                    = readVectorIndexReadyFile(disk_reader, read_file_path, index_names, params_from_record);
+
+            if (!original_binary_sizes.empty())
             {
-                VectorIndex::IndexType t = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
-                single_params_from_record.erase("type");
-                if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
-                        t, single_params_from_record, VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type), parameters))
+                VectorIndex::Parameters & single_params_from_record = params_from_record.find(index_name)->second;
+                if (!single_params_from_record.empty() && original_binary_sizes.find(index_name)->second != -1)
                 {
-                    LOG_INFO(log, "[buildVectorIndex] the index is built for part: {}", part->name);
-                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                    return BuildVectorIndexStatus::SUCCESS;
+                    VectorIndex::IndexType t = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
+                    single_params_from_record.erase("type");
+                    if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
+                            t, single_params_from_record, VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type), parameters))
+                    {
+                        if (from_part)
+                        {
+                            LOG_INFO(log, "[buildVectorIndex] the index is built for part: {}", part->name);
+                            part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                        }
+                        else /// Need to move built vector index files to the part.
+                        {
+                            LOG_INFO(log, "[buildVectorIndex] the index is built for part: {} and stored in temporary directory {}", part->name, vector_tmp_full_path);
+                            MergeTreeDataPartPtr future_part = nullptr;
+                            if (part->getState() == DB::MergeTreeDataPartState::Active)
+                                future_part = part;
+                            else
+                            {
+                                /// Find future active part
+                                future_part = data.getActiveContainingPart(part->name);
+                                if (!future_part)
+                                {
+                                    LOG_WARNING(log, "[buildVectorIndex] failed to find future part for part {}, leave the temporary directory", part->name);
+                                    return BuildVectorIndexStatus::SUCCESS;
+                                }
+                            }
+
+                            if (future_part)
+                                moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
+                        }
+
+                        return BuildVectorIndexStatus::SUCCESS;
+                    }
                 }
             }
         }
@@ -360,7 +464,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         {
             if (part->vector_index_build_cancelled)
             {
-                break;
+                return BuildVectorIndexStatus::BUILD_FAIL;
             }
             empty_ids.clear();
             size_t remaining_size = part->rows_count - num_rows_read;
@@ -459,16 +563,25 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     part->name,
                     num_rows,
                     vec_index_desc.name,
-                    part->getDataPartStorage().getFullPath() + "/" + index_name);
+                    vector_tmp_relative_path + index_name);
 
-                VectorIndex::SegmentId segment_id(part->getDataPartStorage().getFullPath(), part->name, part->name, vec_index_desc.name, vec_index_desc.column, 0);
+                /// Create temp directory before serialize.
+                if (disk->exists(vector_tmp_relative_path))
+                {
+                    LOG_DEBUG(log, "[buildVectorIndex] the temporary directory to store vector index files already exists, will be removed {}", vector_tmp_relative_path);
+                    disk->removeRecursive(vector_tmp_relative_path);
+                }
+
+                disk->createDirectories(vector_tmp_relative_path);
+
+                VectorIndex::SegmentId segment_id(vector_tmp_full_path, part->name, part->name, vec_index_desc.name, vec_index_desc.column, 0);
 
                 vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
                     VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
                     segment_id,
                     parameters,
                     dim);
-                VectorIndex::Status build_status = vec_index_builder->buildIndex(vec_data, part->rows_count);
+                VectorIndex::Status build_status = vec_index_builder->buildIndex(vec_data, part->rows_count, slow_mode);
 
                 if (build_status.getCode() == 11)
                 {
@@ -478,7 +591,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
                 if (!build_status.fine())
                 {
-                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                    disk->removeRecursive(vector_tmp_relative_path);
                     return BuildVectorIndexStatus::BUILD_FAIL;
                 }
                 training = false;
@@ -499,19 +612,49 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             }
             /// zili's profiler tuning logic
             vec_index_builder->tune(vec_data, empty_ids, current_round_start_row);
+
             /// remove empty vectors
             LOG_INFO(log, "[buildVectorIndex] index serialize");
             VectorIndex::Status seri_status = vec_index_builder->serialize();
             LOG_INFO(log, "[buildVectorIndex] after serialize status: {}", seri_status.getCode());
             if (!seri_status.fine())
             {
+                /// Remove temporay directory
+                disk->removeRecursive(vector_tmp_relative_path);
                 return BuildVectorIndexStatus::BUILD_FAIL;
             }
-            LOG_INFO(log, "[buildVectorIndex] index cache: status: {}", seri_status.getCode());
-            vec_index_builder->cache();
-            LOG_INFO(log, "[buildVectorIndex] index after cache: status: {}", seri_status.getCode());
+
+            /// Done with writing vector index files to temporary directory.
+            /// Decide to move index files to which part direcory.
+            MergeTreeDataPartPtr future_part = nullptr;
+            if (part->getState() == DB::MergeTreeDataPartState::Active)
+            {
+                future_part = part;
+            }
+            else
+            {
+                /// Find future active part
+                future_part = data.getActiveContainingPart(part->name);
+                if (!future_part)
+                {
+                    LOG_WARNING(log, "[buildVectorIndex] failed to find future part for part {}, leave the temporary directory", part->name);
+                    return BuildVectorIndexStatus::SUCCESS;
+                }
+            }
+
+            if (future_part)
+            {
+                moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
+
+                /// Update segment id with correct part name and path.
+                VectorIndex::SegmentId segment_id(future_part->getDataPartStorage().getFullPath(), future_part->name, future_part->name, vec_index_desc.name, vec_index_desc.column, 0);
+                vec_index_builder->updateSegmentId(segment_id);
+
+                LOG_INFO(log, "[buildVectorIndex] index cache: status: {}", seri_status.getCode());
+                vec_index_builder->cache();
+                LOG_INFO(log, "[buildVectorIndex] index after cache: status: {}", seri_status.getCode());
+            }
         }
-        part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
     }
 
     LOG_INFO(log, "[buildVectorIndex] index build complete");
@@ -567,6 +710,70 @@ int MergeTreeVectorIndexBuilderUpdater::Counter::increaseAndGet(const String & k
         counter_[key] = t;
         return t;
     }
+}
+
+bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const StorageMetadataPtr & metadata_snapshot, const String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part)
+{
+    if (!dest_part)
+        return false;
+
+    LOG_DEBUG(log, "[buildVectorIndex] current active part {} is selected to store vector index {}", dest_part->name, dest_part->getState());
+
+    const DataPartStorageOnDiskBase * dest_part_storage
+        = dynamic_cast<const DataPartStorageOnDiskBase *>(dest_part->getDataPartStoragePtr().get());
+    if (dest_part_storage == nullptr)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+    }
+    auto disk = dest_part_storage->getDisk();
+    String dest_relative_path = dest_part->getDataPartStorage().getRelativePath();
+
+    /// Move to current part which is active.
+    bool found_vector_file = false;
+    for (auto it = disk->iterateDirectory(vector_tmp_relative_path); it->isValid(); it->next())
+    {
+        if (!endsWith(it->name(), VECTOR_INDEX_FILE_SUFFIX))
+            continue;
+        disk->moveFile(vector_tmp_relative_path + it->name(), dest_relative_path + it->name());
+
+        if (!found_vector_file)
+            found_vector_file = true;
+    }
+
+    if (!found_vector_file)
+    {
+        LOG_DEBUG(log, "[buildVectorIndex] failed to find any vector index files in directory {}, will remove it", vector_tmp_relative_path);
+        disk->removeRecursive(vector_tmp_relative_path);
+
+        return false;
+    }
+
+    for (auto & vec_index_desc : metadata_snapshot->vec_indices)
+        dest_part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+
+    disk->removeRecursive(vector_tmp_relative_path);
+
+    LOG_INFO(log, "[buildVectorIndex] move vector index files to part {}", dest_part->name);
+
+    if (VectorIndex::containRowIdsMaps(dest_part->getDataPartStorage().getFullPath()))
+    {
+        auto lock = data.lockParts();
+        LOG_INFO(log, "[buildVectorIndex] try to remove row ids maps files in {}", dest_part->getDataPartStorage().getFullPath());
+        /// currently only consider one vector index
+        auto vec_index_desc = metadata_snapshot->vec_indices[0];
+        auto old_segments = VectorIndex::getAllSegmentIds(dest_part->getDataPartStorage().getFullPath(), dest_part, vec_index_desc.name, vec_index_desc.column);
+        for (auto& old_segment : old_segments)
+        {
+            VectorIndex::VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
+        }
+        VectorIndex::removeAllRowIdsMaps(dest_part->getDataPartStorage().getFullPath());
+    }
+
+    /// Apply lightweight delete bitmap to index's bitmap
+    if (dest_part->hasLightweightDelete())
+        dest_part->onLightweightDelete();
+
+    return true;
 }
 
 }

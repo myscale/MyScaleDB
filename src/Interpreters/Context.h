@@ -1102,6 +1102,7 @@ public:
     OrdinaryBackgroundExecutorPtr getFetchesExecutor() const;
     OrdinaryBackgroundExecutorPtr getCommonExecutor() const;
     MergeMutateBackgroundExecutorPtr getVectorIndexExecutor() const;
+    MergeMutateBackgroundExecutorPtr getSlowModeVectorIndexExecutor() const;
 
     enum class FilesystemReaderType
     {

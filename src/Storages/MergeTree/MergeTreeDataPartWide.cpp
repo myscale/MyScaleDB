@@ -6,7 +6,6 @@
 #include <DataTypes/NestedUtils.h>
 #include <Core/NamesAndTypes.h>
 
-
 namespace DB
 {
 

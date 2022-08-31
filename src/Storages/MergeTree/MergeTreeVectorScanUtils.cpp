@@ -89,6 +89,8 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
 
     pdqsort(all_result.begin(), all_result.end(), comparator);
 
+    LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] after sort");
+
     for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), all_result.size()); ++i)
     {
         RangesInDataPart & p = part_map[get<1>(all_result[i])];

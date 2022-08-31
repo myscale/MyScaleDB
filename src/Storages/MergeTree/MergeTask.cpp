@@ -8,6 +8,7 @@
 #include <Common/ActionBlocker.h>
 #include <Storages/LightweightDeleteDescription.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
+#include <Storages/MergeTree/MergeTreeSource.h>
 
 #include <DataTypes/ObjectUtils.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
@@ -16,6 +17,7 @@
 #include <Storages/MergeTree/MergeTreeSequentialSource.h>
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
+#include <Storages/MergeTree/MergeTreeInOrderSelectProcessor.h>
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Transforms/MaterializingTransform.h>
 #include <Processors/Transforms/FilterTransform.h>
@@ -513,6 +515,56 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
 {
     if (!global_ctx->inverted_row_ids_map_file)
         return false;
+
+    const auto & primary_key = global_ctx->metadata_snapshot->getPrimaryKey();
+    Names primary_key_columns = primary_key.column_names;
+
+    Names system_columns{"_part_offset"};
+    size_t old_parts_num = global_ctx->future_part->parts.size();
+    std::vector<std::vector<UInt64>> part_offsets(old_parts_num);
+
+    for (size_t part_num = 0; part_num < old_parts_num; ++part_num)
+    {
+        ExpressionActionsSettings actions_settings;
+        MergeTreeReaderSettings reader_settings;
+        MarkRanges ranges;
+        MarkRange range{0, global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount()};
+        ranges.emplace_back(range);
+
+        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
+            *global_ctx->data,
+            global_ctx->storage_snapshot,
+            global_ctx->future_part->parts[part_num],
+            global_ctx->context->getSettingsRef().max_block_size,
+            global_ctx->context->getSettingsRef().preferred_block_size_bytes,
+            global_ctx->context->getSettingsRef().preferred_max_column_in_block_size_bytes,
+            primary_key_columns,
+            ranges,
+            false,
+            nullptr,
+            actions_settings,
+            reader_settings,
+            nullptr,
+            system_columns);
+
+        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+
+        Pipe pipe(std::move(source));
+
+        QueryPipeline filter_pipeline(std::move(pipe));
+        PullingPipelineExecutor filter_executor(filter_pipeline);
+
+        Block block;
+        while (filter_executor.pull(block))
+        {
+            const PaddedPODArray<UInt64>& col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+            for (size_t i = 0; i < block.rows(); ++i)
+            {
+                part_offsets[part_num].emplace_back(col_data[i]);
+                /// LOG_DEBUG(ctx->log, "[generateRowIdsMap]: read old part {}, part_offset {}", part_num, col_data[i]);
+            }
+        }
+    }
     
     ctx->rows_sources_write_buf->next();
     ctx->rows_sources_uncompressed_write_buf->next();
@@ -528,21 +580,23 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
     /// read data into buffer
     uint64_t new_part_row_id = 0;
     std::vector<uint64_t> source_row_ids(global_ctx->future_part->parts.size(), 0);
+    /// used to store new row ids for each old part
+    std::vector<std::unordered_map<UInt64, UInt64>> parts_new_row_ids(global_ctx->future_part->parts.size());
     /// TODO: confirm read all in one round?
     while (!rows_sources_read_buf->eof())
     {
         RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
         RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
-        LOG_DEBUG(ctx->log, "[generateRowIdsMap]: read from rows_sources_file: size {}", row_sources_end - row_source_pos);
-
         while (row_source_pos < row_sources_end)
         {
             RowSourcePart row_source = *row_source_pos;
             size_t source_num = row_source.getSourceNum();
-            writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-            writeIntText(source_row_ids[source_num], *global_ctx->inverted_row_ids_map_buf);
+            auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
+            parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
+            /// writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+            writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
             /// need to add this, or we cannot correctly read uint64 value
-            writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+            /// writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
             writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
 
             ++new_part_row_id;
@@ -552,6 +606,23 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         }
 
         rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+    }
+
+    /// write row_ids_map_bufs
+    for (int source_num = 0; source_num < old_parts_num; source_num++)
+    {
+        UInt64 old_row_id = 0;
+        while (old_row_id < global_ctx->future_part->parts[source_num]->rows_count)
+        {
+            UInt64 new_row_id = -1;
+            if (parts_new_row_ids[source_num].count(old_row_id) > 0)
+            {
+                new_row_id = parts_new_row_ids[source_num][old_row_id];   
+            }
+            writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+            writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]); 
+            ++old_row_id;
+        }
     }
     
     LOG_DEBUG(ctx->log, "[generateRowIdsMap]: after write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
@@ -598,10 +669,9 @@ bool MergeTask::VerticalMergeStage::prepareVerticalMergeForAllColumns() const
     /// number of input rows.
     if ((rows_sources_count > 0 || global_ctx->future_part->parts.size() > 1) && sum_input_rows_exact != rows_sources_count + input_rows_filtered)
         throw Exception(
-                        ErrorCodes::LOGICAL_ERROR,
-                        "Number of rows in source parts ({}) excluding filtered rows ({}) differs from number "
-                        "of bytes written to rows_sources file ({}). It is a bug.",
-                        sum_input_rows_exact, input_rows_filtered, rows_sources_count);
+            ErrorCodes::LOGICAL_ERROR,
+            "Number of rows in source parts ({}) excluding filtered rows ({}) differs from number of bytes written to rows_sources file ({}). It is a bug.",
+            sum_input_rows_exact, input_rows_filtered, rows_sources_count);
 
     ctx->rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
 

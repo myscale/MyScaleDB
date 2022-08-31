@@ -217,6 +217,30 @@ String MergeTreePartInfo::getPartNameV1() const
 }
 
 
+String MergeTreePartInfo::getPartNameWithoutMutation() const
+{
+    WriteBufferFromOwnString wb;
+
+    writeString(partition_id, wb);
+    writeChar('_', wb);
+    writeIntText(min_block, wb);
+    writeChar('_', wb);
+    writeIntText(max_block, wb);
+    writeChar('_', wb);
+    if (use_leagcy_max_level)
+    {
+        assert(level == MAX_LEVEL);
+        writeIntText(LEGACY_MAX_LEVEL, wb);
+    }
+    else
+    {
+        writeIntText(level, wb);
+    }
+
+    return wb.str();
+}
+
+
 String MergeTreePartInfo::getPartNameV0(DayNum left_date, DayNum right_date) const
 {
     const auto & date_lut = DateLUT::instance();

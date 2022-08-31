@@ -1694,7 +1694,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
 
     if (vector_scan_info_ptr)
     {
-        LOG_INFO(log, "[initializePipeline] need to process vector scan");
+        LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
         for (auto & part : result.parts_with_ranges)
         {
             part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr);

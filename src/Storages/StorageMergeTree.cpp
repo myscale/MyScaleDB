@@ -141,6 +141,9 @@ void StorageMergeTree::startup()
     ///  and don't allow to reinitialize them, so delete each of them immediately
     clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_"});
 
+    /// Temporary directories contain incomplete results of vector index building.
+    clearTemporaryIndexBuildDirectories();
+
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();
     time_after_previous_cleanup_temporary_directories.restart();
@@ -203,6 +206,18 @@ void StorageMergeTree::shutdown()
 
     if (deduplication_log)
         deduplication_log->shutdown();
+
+    try
+    {
+        /// Temporary directories contain incomplete results of vector index building.
+        clearTemporaryIndexBuildDirectories();
+    }
+    catch (...)
+    {
+        /// Example: the case of readonly filesystem, we have failure removing old parts.
+        /// Should not prevent table shutdown.
+        tryLogCurrentException(log);
+    }
 }
 
 
@@ -852,6 +867,13 @@ void StorageMergeTree::loadMutations()
 
 bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right)
 {
+    for (const auto & part_name : currently_vector_indexing_parts)
+    {
+        auto info = MergeTreePartInfo::fromPartName(part_name, format_version);
+        if (left->info.contains(info) || right->info.contains(info))
+            return false;
+    }
+
     bool can_merge = true;
     for (const auto & vec_index : metadata_snapshot->vec_indices)
     {
@@ -959,7 +981,7 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
             return false;
         }
 
-        return !currently_vector_indexing_parts.contains(left) && !currently_vector_indexing_parts.contains(right)
+        return !currently_vector_indexing_parts.contains(left->name) && !currently_vector_indexing_parts.contains(right->name)
             && !VectorIndex::containRowIdsMaps(left) && !VectorIndex::containRowIdsMaps(right)
             && canMergeForVectorIndex(metadata_snapshot, left, right);
     };
@@ -1265,17 +1287,20 @@ UInt32 StorageMergeTree::getMaxLevelInBetween(const DataPartPtr & left, const Da
     return level;
 }
 
-void StorageMergeTree::finishVectorIndexJob(const std::vector<MergeTreeDataPartPtr>& processed_parts)
+void StorageMergeTree::finishVectorIndexJob(const std::vector<String>& processed_parts)
 {
     std::unique_lock lock(currently_processing_in_background_mutex);
     for (auto & part : processed_parts)
     {
+        LOG_DEBUG(log, "[finishVectorIndexJob] finish part: {}", part);
         currently_vector_indexing_parts.erase(part);
     }
 }
 
 bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assignee)
 {
+    Poco::Logger * const log = &Poco::Logger::get("StorageMergeTree");
+
     if (shutdown_called)
         return false;
 
@@ -1283,6 +1308,7 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
     auto metadata_snapshot = getInMemoryMetadataPtr();
     MergeMutateSelectedEntryPtr merge_entry, mutate_entry;
+    std::shared_ptr<VectorIndexEntry> slow_mode_vector_index_entry;
     std::shared_ptr<VectorIndexEntry> vector_index_entry;
 
     auto shared_lock = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
@@ -1309,8 +1335,14 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
         has_mutations = !current_mutations_by_version.empty();
         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
-        vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
-            metadata_snapshot, currently_vector_indexing_parts, getContext()->getConfigRef().getUInt64("background_vector_pool_size", 4));
+        if (!merge_entry && !mutate_entry)
+        {
+            /// first for new data parts, then for merged data parts   
+            /// only select one part for each build
+            vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, false, currently_merging_mutating_parts);
+            if (!vector_index_entry)
+                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, true, currently_merging_mutating_parts);
+        }
     }
 
     if (merge_entry)
@@ -1332,15 +1364,54 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     }
     if (vector_index_entry)
     {
-        LOG_DEBUG(log, "create build vector index job");
         /// std::unique_lock lock(currently_processing_in_background_mutex);
-        for (auto & part : vector_index_entry->data_parts)
         {
-            currently_vector_indexing_parts.insert(part);
+            for (auto & part_name : vector_index_entry->data_part_names)
+            {
+                LOG_DEBUG(log, "[scheduleDataProcessingJob] has part name {}", part_name);
+            }
         }
-        auto task = std::make_shared<VectorIndexMergeTreeTask>(
-            *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger);
+
+        LOG_INFO(log, "[scheduleDataProcessingJob] before calling constructor of VectorIndexMergeTreeTask");
+
+        std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
+            *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
+        if (task)
+        {
+            LOG_DEBUG(log, "[scheduleDataProcessingJob] task has been created");
+        }
+        else
+        {
+            LOG_ERROR(log, "[scheduleDataProcessingJob] create task failed");
+            return false;
+        }
         assignee.scheduleVectorIndexTask(task);
+        return true;
+    }
+    if (slow_mode_vector_index_entry)
+    {
+        /// std::unique_lock lock(currently_processing_in_background_mutex);
+        {
+            for (auto & part_name : slow_mode_vector_index_entry->data_part_names)
+            {
+                LOG_INFO(log, "[scheduleDataProcessingJob] slow mode build task has part name {}", part_name);
+            }
+        }
+
+        LOG_INFO(log, "[scheduleDataProcessingJob] before calling constructor of VectorIndexMergeTreeTask");
+
+        std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
+            *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+        if (task)
+        {
+            LOG_DEBUG(log, "[scheduleDataProcessingJob] task has been created");
+        }
+        else
+        {
+            LOG_ERROR(log, "[scheduleDataProcessingJob] create task failed");
+            return false;
+        }
+        assignee.scheduleSlowModeVectorIndexTask(task);
         return true;
     }
     if (has_mutations)
