@@ -1,5 +1,12 @@
 image: harbor.internal.moqi.ai/mqdb/builder:2.8
 
+include:
+  - '/.gitlab-ci-build.yml'
+  - '/.gitlab-ci-functional-test.yml'
+  - '/.gitlab-ci-integration-test.yml'
+  - '/.gitlab-ci-memory-leak-test.yml'
+  - '/.gitlab-ci-performance-test.yml'
+
 stages:
   - build
   - vs_test
@@ -18,78 +25,6 @@ style_check:
       - test_output/*
   script:
     - docker/builder/tools/run-style-check.sh
-
-build_binary:
-  stage: build
-  variables:
-    KUBERNETES_CPU_REQUEST: 8
-    KUBERNETES_CPU_LIMIT: 32
-    KUBERNETES_MEMORY_REQUEST: 16Gi
-    KUBERNETES_MEMORY_LIMIT: 32Gi
-  artifacts:
-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
-    paths:
-      - artifacts/*.deb
-  retry: 2
-  script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
-    - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --arch linux-x86_64 --package --compiler "clang-15"
-    # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package --compiler "clang-15"
-
-vector_search_test:
-  stage: vs_test
-  dependencies: ["build_binary"]
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
-  before_script:
-    - docker/builder/tools/docker-info.sh
-  script:
-    - docker/builder/tools/vector-search-test.sh
-
-stateless_test:
-  stage: test
-  dependencies: ["build_binary"]
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
-  artifacts:
-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateless-test"
-    paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
-    when: always
-  before_script:
-    - docker/builder/tools/docker-info.sh
-  script:
-    - docker/builder/tools/stateless-test.sh
-    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
-
-stateful_test:
-  stage: test
-  dependencies: ["build_binary"]
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
-  artifacts:
-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateful-test"
-    paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateful/test_output
-    when: always
-  before_script:
-    - docker/builder/tools/docker-info.sh
-  script:
-    - docker/builder/tools/stateful-test.sh
-    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
 
 build_package:
   stage: package
@@ -148,7 +83,19 @@ build_image:
     - docker/builder/tools/docker-buildx.sh
   script:
     - docker/builder/tools/image.sh
-#
+upload_performance_file_to_s3:
+  stage: deploy
+  dependencies: ["build_for_integration_test"]
+  image:
+    name: minio/mc
+    entrypoint: [""]
+  only:
+    - mqdb-dev
+  before_script:
+    - mkdir -pv ~/.mc
+    - cp -fv $mc_config ~/.mc/config.json
+  script:
+    - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
 # deploy_to_staging:
 #   stage: deploy
 #   dependencies: ["build_x86_64_package"]
@@ -197,7 +144,6 @@ build_image:
 #     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
 #     - scp tests/vector_search/benchmark.py root@$deploy_to_host:~/benchmark
 #     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 benchmark.py"'
-
 # generate_report:
 #   stage: benchmark
 #   dependencies: []

@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: process-vector-db-tests
+  namespace: vector-db-test
+  labels:
+    jobgroup: vector-db
+spec:
+  template:
+    metadata:
+      name: process-vector-db-tests
+      labels:
+        jobgroup: vector-db
+    spec:
+      containers:
+      - name: vector-test
+        image: harbor.internal.moqi.ai/mqdb/vector-db-test:1.0
+        imagePullPolicy: Always
+        command: ["sh", "-c", "bash job_run.sh HOST MQDB_VERSION TEST_PALTFORM"]
+        resources:
+          requests:
+            cpu: 16
+            memory: 8Gi
+          limits:
+            cpu: 16
+            memory: 8Gi
+      restartPolicy: Never

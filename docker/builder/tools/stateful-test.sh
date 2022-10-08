@@ -6,6 +6,7 @@ PROJECT_PATH=$CUR_DIR/../../..
 WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stateful
 
 cp -rfv artifacts/clickhouse-*.deb docker/test/mqdb_run_stateful/packages
+cp -rfv docker/test/mqdb_test_script/s3downloader docker/test/mqdb_run_stateful/s3downloader
 cp -rfv tests/queries docker/test/mqdb_run_stateful/tests/
 cp -rfv tests/performance docker/test/mqdb_run_stateful/tests/
 cp -rfv tests/config docker/test/mqdb_run_stateful/tests/

@@ -196,8 +196,8 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
-    else:
-        cmake["-DSANITIZE"] = "''"
+    # else:
+    #     cmake["-DSANITIZE"] = "''"
 
     if with_coverage:
         cmake["-DWITH_COVERAGE"] = "ON"
@@ -245,7 +245,7 @@ def build_diagnostics(arch: str, name: str):
     os.rename(f"{diagnostics_directory}/clickhouse-diagnostics", diagnostics)
 
 
-def build(arch: str, cmake: Dict[str, str]):
+def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
     target_os, target_arch = arch.split("-", maxsplit=1)
 
     warp = [
@@ -277,7 +277,10 @@ def build(arch: str, cmake: Dict[str, str]):
     build_target = "clickhouse-bundle"
     ninja = ""
     if cmake.get("-DENABLE_CLANG_TIDY") == "ON":
-        ninja = "-k0"
+        ninja = "-k0 "
+
+    if build_jobs > 0:
+        ninja += f"-j{build_jobs} "
 
     cmd = f"ninja {ninja} {build_target}"
     logging.info("Run command: %s", cmd)
@@ -396,7 +399,7 @@ if __name__ == "__main__":
             "clang-14",
             "clang-15",
         ),
-        default="clang-13",
+        default="clang-15",
     )
 
     parser.add_argument(
@@ -435,6 +438,12 @@ if __name__ == "__main__":
             "MinSizeRel",
         ),
         default="Release",
+    )
+
+    parser.add_argument(
+        "--build-jobs",
+        type=int,
+        default=0,
     )
 
     parser.add_argument(
@@ -538,5 +547,5 @@ if __name__ == "__main__":
 
     cmake = prepare_build(args.compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
 
-    build(args.arch, cmake)
+    build(args.arch, args.build_jobs, cmake)
     package(args.name, args.arch, args.package, args.with_sanitizer, args.build_type, args.output)
