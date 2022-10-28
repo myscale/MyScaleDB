@@ -740,6 +740,12 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
                 "Unknown identifier '{}' in distance function", arguments[1]->getColumnName());
         }
+
+        if (!dag_node->column)
+        {
+           throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
+                "Wrong query vector type in distance function"); 
+        }
         vector_scan_desc.query_column = dag_node->column;
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
         //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();

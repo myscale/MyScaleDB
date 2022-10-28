@@ -240,6 +240,17 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             return false;
         };
 
+//        bool require_distance_func = false;
+//        for (const auto & col : queried_columns)
+//        {
+//            LOG_DEBUG(log, "[MergeTreeWhereOptimizer] queried column: {}", col);
+//            if (isVectorScanFunc(col))
+//            {
+//                require_distance_func = true;
+//                break;
+//            }
+//        }
+
         LOG_DEBUG(log, "[MergeTreeWhereOptimizer] containVectorScanFunc(cond.node): {}", containVectorScanFunc());
 
         cond.viable =

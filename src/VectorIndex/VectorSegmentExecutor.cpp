@@ -649,7 +649,7 @@ Status VectorSegmentExecutor::addVectors(VectorDatasetPtr dataset)
 Status VectorSegmentExecutor::search(
     VectorDatasetPtr dataset, int32_t k, float *& distances, int64_t *& labels, GeneralBitMapPtr filter, Parameters parameters)
 {
-    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search");
+    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
     bool added = false;
     try
     {

@@ -20,11 +20,13 @@ namespace DB
 class MergeTreeVectorScanManager
 {
 public:
+    using ReadRange = MergeTreeRangeReader::ReadResult::ReadRangeInfo;
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     MergeTreeVectorScanManager(
         StorageMetadataPtr metadata_,
-        VectorScanInfoPtr vector_scan_info_) : metadata(metadata_), vector_scan_info(vector_scan_info_) {}
+        VectorScanInfoPtr vector_scan_info_,
+        ContextPtr context_) : metadata(metadata_), vector_scan_info(vector_scan_info_), context(context_) {}
 
     void executeBeforeRead(const String& data_path, const MergeTreeData::DataPartPtr & data_part);
 
@@ -37,12 +39,18 @@ public:
         bool has_prewhere = false,
         const FilterWithCachedCount & filter = FilterWithCachedCount{});
 
+    void executeVectorScanWithFilter(
+        const String& data_path,
+        const MergeTreeData::DataPartPtr & data_part,
+        const ReadRanges & read_ranges,
+        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+
     void mergeResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges,
-        const FilterWithCachedCount & filter,
-        const ColumnUInt64 * part_offset);
+        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const ColumnUInt64 * part_offset = nullptr);
 
     bool preComputed() { return vector_scan_result != nullptr; }
 
@@ -50,10 +58,13 @@ public:
 
     void eraseResult();
 
+    Settings getSettings() { return context->getSettingsRef(); }
+
 private:
 
     StorageMetadataPtr metadata;
     VectorScanInfoPtr vector_scan_info;
+    ContextPtr context;
 
     /// lock vector scan result
     std::mutex mutex;

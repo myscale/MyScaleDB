@@ -40,6 +40,7 @@ build_package:
     - mqdb-master
     - mqdb-staging
     - mqdb-dev
+    - merge_requests
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
     paths:
@@ -80,6 +81,7 @@ build_image:
     - mqdb-master
     - mqdb-staging
     - mqdb-dev
+    - merge_requests
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh

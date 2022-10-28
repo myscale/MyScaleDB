@@ -10,7 +10,7 @@
             <!-- <mutations_sync>0</mutations_sync> -->
             <!-- <replication_alter_partitions_sync>1</replication_alter_partitions_sync> -->
             <!-- <insert_distributed_sync>1</insert_distributed_sync> -->
-            <optimize_move_to_prewhere>0</optimize_move_to_prewhere>
+            <optimize_move_to_prewhere>1</optimize_move_to_prewhere>
             <max_query_size>262144000</max_query_size>
             <connect_timeout_with_failover_ms>5000</connect_timeout_with_failover_ms>
             <distributed_directory_monitor_batch_inserts>1</distributed_directory_monitor_batch_inserts>

@@ -837,9 +837,8 @@ class TestSuite:
         if 'stateful' in suite and args.no_stateful:
             print("Won't run stateful tests because they were manually disabled.")
             return None
-        # if 'vector_search' in suite or 'bugs' in suite or 'ai_core_support' in suite or 'vector' in suite:
         if 'bugs' in suite or 'ai_core_support' in suite:
-            print("only run statless test")
+            print("Won't run bugs and ai_core_support test")
             return None
         return TestSuite(args, suite_path, suite_tmp_path, suite)
 

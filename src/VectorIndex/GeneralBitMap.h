@@ -17,7 +17,7 @@ public:
     explicit GeneralBitMap(int64_t size_)
     {
         size = size_;
-        int bytes_count = (size >> 3) + 1; // size/8 = bytes
+        int bytes_count = (size >> 3) + 1; /// size/8 = bytes
         bitmap = new char[bytes_count];
         memset(bitmap, 0, bytes_count);
     }
@@ -33,6 +33,17 @@ public:
     void set(int32_t id) { bitmap[id >> 3] |= (0x1 << (id & 0x7)); }
 
     void unset(int64_t id) { bitmap[id >> 3] &= ~(0x1 << (id & 0x7)); }
+
+    bool any()
+    {
+        int bytes_count = (size >> 3) + 1; /// size/8 = bytes
+        for(int i = 0; i < bytes_count; ++i)
+        {
+            if (bitmap[i])
+                return true;
+        }
+        return false;
+    }
 
     /// Set bit corresponding to a region, this is much faster than set(),
     /// but can introduce up to 14 items been wrongly set at the margins.

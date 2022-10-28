@@ -1,4 +1,5 @@
 #include <pdqsort.h>
+#include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
 
@@ -110,31 +111,31 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
 */
 }
 
-void filterMarkRangesByVectorScanResult(
-    RangesInDataParts & parts_with_ranges, const VectorScanDescriptions & vector_scan_descs, const Settings & settings)
+void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTreeVectorScanManagerPtr vector_scan_mgr, MarkRanges & mark_ranges)
 {
-    int top_k = parts_with_ranges.back().vector_scan_manager->getVectorScanResult()->top_k;
-    bool is_batch = parts_with_ranges.back().vector_scan_manager->getVectorScanResult()->is_batch;
+    OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
+    MarkRanges res;
+    // bool has_final_mark = part->index_granularity.hasFinalMark();
+    size_t marks_count = part->index_granularity.getMarksCount();
+    /// const auto & index = part->index;
+    /// marks_count should not be 0 if we reach here
 
-    if (is_batch)
-    {
-        mergeDataPartsBatchResult(parts_with_ranges, top_k, vector_scan_descs);
-    }
-    else
-    {
-        mergeDataPartsResult(parts_with_ranges, top_k, vector_scan_descs);
-    }
+    auto settings = vector_scan_mgr->getSettings();
 
-    auto need_this_range = [&](RangesInDataPart & part_with_ranges, MarkRange & range)
+    size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
+        settings.merge_tree_min_rows_for_seek,
+        settings.merge_tree_min_bytes_for_seek,
+        part->index_granularity_info.fixed_index_granularity,
+        part->index_granularity_info.index_granularity_bytes);
+
+    auto need_this_range = [&](MergeTreeData::DataPartPtr part, MergeTreeVectorScanManagerPtr vector_scan_mgr, MarkRanges & mark_ranges, MarkRange & range)
     {
-        auto part = part_with_ranges.data_part;
-        auto vector_scan_mgr = part_with_ranges.vector_scan_manager;
         auto begin = range.begin;
         auto end = range.end;
         auto start_row = part->index_granularity.getMarkStartingRow(begin);
         auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
 
-        auto result = part_with_ranges.vector_scan_manager->getVectorScanResult();
+        auto result = vector_scan_mgr->getVectorScanResult();
 
         const ColumnUInt32 * label_column
             = checkAndGetColumn<ColumnUInt32>(vector_scan_mgr->getVectorScanResult()->result_columns[0].get());
@@ -155,59 +156,63 @@ void filterMarkRangesByVectorScanResult(
         return false;
     };
 
+    std::vector<MarkRange> ranges_stack = {{0, marks_count}};
+
+    /// size_t steps = 0;
+
+    while (!ranges_stack.empty())
+    {
+        MarkRange range = ranges_stack.back();
+        ranges_stack.pop_back();
+
+        /// steps++;
+
+        if (!need_this_range(part, vector_scan_mgr, mark_ranges, range))
+            continue;
+
+        if (range.end == range.begin + 1)
+        {
+            if (res.empty() || range.begin - res.back().end > min_marks_for_seek)
+                res.push_back(range);
+            else
+                res.back().end = range.end;
+        }
+        else
+        {
+            /// Break the segment and put the result on the stack from right to left.
+            size_t step = (range.end - range.begin - 1) / settings.merge_tree_coarse_index_granularity + 1;
+            size_t end;
+
+            for (end = range.end; end > range.begin + step; end -= step)
+                ranges_stack.emplace_back(end - step, end);
+
+            ranges_stack.emplace_back(range.begin, end);
+        }
+    }
+
+    mark_ranges = res;
+}
+
+void filterPartsMarkRangesByVectorScanResult(
+    RangesInDataParts & parts_with_ranges, const VectorScanDescriptions & vector_scan_descs)
+{
+    int top_k = parts_with_ranges.back().vector_scan_manager->getVectorScanResult()->top_k;
+    bool is_batch = parts_with_ranges.back().vector_scan_manager->getVectorScanResult()->is_batch;
+
+    if (is_batch)
+    {
+        mergeDataPartsBatchResult(parts_with_ranges, top_k, vector_scan_descs);
+    }
+    else
+    {
+        mergeDataPartsResult(parts_with_ranges, top_k, vector_scan_descs);
+    }
+
     /// ref: MergeTreeDataSelectExecutor::markRangesFromPKRange
 
     for (size_t i = 0; i < parts_with_ranges.size(); ++i)
     {
-        auto & part_with_ranges = parts_with_ranges[i];
-        MarkRanges res;
-        auto part = part_with_ranges.data_part;
-        // bool has_final_mark = part->index_granularity.hasFinalMark();
-        size_t marks_count = part->index_granularity.getMarksCount();
-        /// const auto & index = part->index;
-        /// marks_count should not be 0 if we reach here
-
-        size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
-            settings.merge_tree_min_rows_for_seek,
-            settings.merge_tree_min_bytes_for_seek,
-            part->index_granularity_info.fixed_index_granularity,
-            part->index_granularity_info.index_granularity_bytes);
-
-        std::vector<MarkRange> ranges_stack = {{0, marks_count}};
-
-        /// size_t steps = 0;
-
-        while (!ranges_stack.empty())
-        {
-            MarkRange range = ranges_stack.back();
-            ranges_stack.pop_back();
-
-            /// steps++;
-
-            if (!need_this_range(part_with_ranges, range))
-                continue;
-
-            if (range.end == range.begin + 1)
-            {
-                if (res.empty() || range.begin - res.back().end > min_marks_for_seek)
-                    res.push_back(range);
-                else
-                    res.back().end = range.end;
-            }
-            else
-            {
-                /// Break the segment and put the result on the stack from right to left.
-                size_t step = (range.end - range.begin - 1) / settings.merge_tree_coarse_index_granularity + 1;
-                size_t end;
-
-                for (end = range.end; end > range.begin + step; end -= step)
-                    ranges_stack.emplace_back(end - step, end);
-
-                ranges_stack.emplace_back(range.begin, end);
-            }
-        }
-
-        part_with_ranges.ranges = res;
+        filterMarkRangesByVectorScanResult(parts_with_ranges[i].data_part, parts_with_ranges[i].vector_scan_manager, parts_with_ranges[i].ranges);
     }
 
     /// erase empty part

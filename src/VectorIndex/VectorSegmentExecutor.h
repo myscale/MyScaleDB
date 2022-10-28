@@ -173,6 +173,7 @@ public:
         {
             for (auto & row_id : selected_row_ids)
             {
+                /// LOG_DEBUG(log, "[getRealBitMap] set row id: {}", row_id);
                 bits->set(row_id);
             }
         }

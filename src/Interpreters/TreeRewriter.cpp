@@ -1424,6 +1424,10 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     }
 
     result.vector_scan_funcs = getVectorScanFunctions(query, *select_query);
+    
+    if (result.vector_scan_funcs.size() > 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Not support multiple distance funcs in one query now.");
+
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 
     result.required_source_columns_before_expanding_alias_columns = result.required_source_columns.getNames();

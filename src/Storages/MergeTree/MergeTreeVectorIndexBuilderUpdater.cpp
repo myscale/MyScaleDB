@@ -299,8 +299,23 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
             }
         }
-
-        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask finished for part {}, status {}", part->name, status);
+        else
+        {
+            if (part->containRowIdsMaps())
+            {
+                auto lock = data.lockParts();
+                LOG_INFO(log, "[buildVectorIndex] try to remove row ids maps files in {}", part->getDataPartStorage().getFullPath());
+                /// currently only consider one vector index
+                auto vec_index_desc = metadata_snapshot->vec_indices[0];
+                auto old_segments = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+                for (auto& old_segment : old_segments)
+                {
+                    VectorIndex::VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
+                }
+                part->removeAllRowIdsMaps();
+            }
+            LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask finished for part {}.", part->name);
+        }
     }
 
     watch.stop();
@@ -610,6 +625,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             vec_data = std::make_shared<VectorIndex::VectorDataset>(
                 static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
+
+            result.clear();
 
             /// only run in the first read round
             if (training)
