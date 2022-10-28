@@ -1,0 +1,14 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: one-failure
+  namespace: "CHAOS_NAMESPACE"
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - "CHAOS_NAMESPACE"
+    labelSelectors:
+      'clickhouse.altinity.com/app': 'chop'
+  duration: '3m'

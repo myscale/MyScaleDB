@@ -90,6 +90,64 @@ AlterCommand::RemoveProperty removePropertyFromString(const String & property)
     throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot remove unknown property '{}'", property);
 }
 
+/// Get column name if constraint is used to check column length
+String getColumnNameFromLengthCheck(const ASTPtr & constraint_decl)
+{
+    String res = "";
+    auto * constraint_ptr = constraint_decl->as<ASTConstraintDeclaration>();
+    if (constraint_ptr && constraint_ptr->type == ASTConstraintDeclaration::Type::CHECK)
+    {
+        auto * func_equal = constraint_ptr->expr->as<ASTFunction>();
+        if (func_equal && func_equal->name == "equals")
+        {
+            auto * expr_list = func_equal->arguments->as<ASTExpressionList>();
+            if (expr_list && expr_list->children.size() == 2)
+            {
+                auto * func_len = expr_list->children[0]->as<ASTFunction>();
+                auto * literal = expr_list->children[1]->as<ASTLiteral>();
+                if (func_len && literal && func_len->name == "length")
+                {
+                    auto * expr_list_ = func_len->arguments->as<ASTExpressionList>();
+                    if (expr_list_ && expr_list_->children.size() == 1 && expr_list_->children[0]->as<ASTIdentifier>())
+                    {
+                        res = expr_list_->children[0]->as<ASTIdentifier>()->name();
+                    }
+                }
+            }
+        }
+    }
+    return res;
+}
+
+}
+
+bool getParameterCheckStatus(StorageInMemoryMetadata & metadata, ContextPtr context)
+{
+std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
+bool use_parameter_check = storage_settings->vector_index_parameter_check;
+LOG_TRACE(
+    &Poco::Logger::get("AlterCommand"),
+    "[getParameterCheckStatus] vector_index_parameter_check value in MergeTreeSetting: {}",
+    use_parameter_check);
+if (metadata.hasSettingsChanges())
+{
+    const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
+    for (const auto & changed_setting : current_changes)
+    {
+        const auto & setting_name = changed_setting.name;
+        const auto & new_value = changed_setting.value;
+        if (setting_name == "vector_index_parameter_check")
+        {
+            use_parameter_check = new_value.get<bool>();
+            LOG_TRACE(
+                &Poco::Logger::get("AlterCommand"),
+                "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
+                use_parameter_check);
+            break;
+        }
+    }
+}
+return use_parameter_check;
 }
 
 std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_ast)
@@ -488,7 +546,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         command.column_name = ast_vec_index_decl.column;
 
         command.if_not_exists = command_ast->if_not_exists;
-        LOG_DEBUG(log, "vector index name: {}", command.vec_index_name);
+        LOG_DEBUG(log, "Vector index name: {}", command.vec_index_name);
 
         return command;
     }
@@ -803,6 +861,16 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
                         constraint_name);
         }
 
+        auto col_name = getColumnNameFromLengthCheck(constraint_decl);
+        if (!col_name.empty())
+        {
+            if (metadata.constraints.getArrayLengthByColumnName(col_name).second)
+                throw Exception(
+                    ErrorCodes::ILLEGAL_COLUMN,
+                    "Cannot add constraint {}: length check constraint for this column already exists",
+                    constraint_name);
+        }
+
         auto * insert_it = constraints.end();
         constraints.emplace(insert_it, constraint_decl);
         metadata.constraints = ConstraintsDescription(constraints);
@@ -822,6 +890,20 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong constraint name. Cannot find constraint `{}` to drop",
                     constraint_name);
         }
+
+        auto col_name = getColumnNameFromLengthCheck(*erase_it);
+        if (!col_name.empty())
+        {
+            if (!empty_table)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot drop constraint {}: the table is not empty", constraint_name);
+            if (std::any_of(
+                    metadata.vec_indices.cbegin(),
+                    metadata.vec_indices.cend(),
+                    [col_name](const auto & vec_index) { return vec_index.column == col_name; }))
+                throw Exception(
+                    ErrorCodes::ILLEGAL_COLUMN, "Cannot drop constraint {}: vector index exists on the column", constraint_name);
+        }
+
         constraints.erase(erase_it);
         metadata.constraints = ConstraintsDescription(constraints);
     }
@@ -979,9 +1061,15 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
                 throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not float array", vec_index_name);
         }
 
+        if (metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column has no length constraint", vec_index_name);
+
         auto insert_it = metadata.vec_indices.end();
 
-        metadata.vec_indices.emplace(insert_it, VectorIndexDescription::getVectorIndexFromAST(vec_index_decl, metadata.columns));
+        metadata.vec_indices.emplace(
+            insert_it,
+            VectorIndexDescription::getVectorIndexFromAST(
+                vec_index_decl, metadata.columns, metadata.constraints, getParameterCheckStatus(metadata, context)));
     }
     else if (type == DROP_VECTOR_INDEX)
     {
@@ -1278,7 +1366,7 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
     else if (type == DROP_VECTOR_INDEX) 
     {
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
-        LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
+        LOG_DEBUG(log, "Drop vector index name: {}", vec_index_name);
         result.drop_command = true;
         result.index_name = vec_index_name;
 
@@ -1361,7 +1449,11 @@ void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context
     {
         try
         {
-            vec_index = VectorIndexDescription::getVectorIndexFromAST(vec_index.definition_ast, metadata_copy.columns);
+            vec_index = VectorIndexDescription::getVectorIndexFromAST(
+                vec_index.definition_ast,
+                metadata_copy.columns,
+                metadata_copy.getConstraints(),
+                getParameterCheckStatus(metadata, context));
         }
         catch (Exception & exception)
         {
@@ -1828,6 +1920,13 @@ bool AlterCommands::isSettingsAlter() const
 bool AlterCommands::isCommentAlter() const
 {
     return std::all_of(begin(), end(), [](const AlterCommand & c) { return c.isCommentAlter(); });
+}
+
+void AlterCommands::setTableEmptyFlag(bool is_empty)
+{
+    if (is_empty)
+        for (auto & alter_cmd : *this)
+            alter_cmd.empty_table = is_empty;
 }
 
 static MutationCommand createMaterializeTTLCommand()

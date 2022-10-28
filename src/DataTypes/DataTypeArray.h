@@ -14,7 +14,6 @@ class DataTypeArray final : public IDataType
 private:
     /// The type of array elements.
     DataTypePtr nested;
-    uint64_t dim{0};
 
 public:
     using FieldType = Array;
@@ -23,20 +22,11 @@ public:
 
     explicit DataTypeArray(const DataTypePtr & nested_);
 
-    DataTypeArray(const DataTypePtr & nested_, const uint64_t dim_);
-
     TypeIndex getTypeId() const override { return TypeIndex::Array; }
 
     std::string doGetName() const override
     {
-        if (dim > 0)
-        {
-            return "FixedArray(" + nested->getName() + ", " + std::to_string(dim) + ")";
-        }
-        else
-        {
-            return "Array(" + nested->getName() + ")";
-        }
+        return "Array(" + nested->getName() + ")";
     }
 
     std::string doGetPrettyName(size_t indent) const override;
@@ -83,8 +73,6 @@ public:
 
     /// 1 for plain array, 2 for array of arrays and so on.
     size_t getNumberOfDimensions() const;
-
-    uint64_t getDim() const { return dim; }
 };
 
 }

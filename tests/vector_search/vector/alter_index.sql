@@ -1,0 +1,1 @@
+alter table test_vector add vector index v1 vector TYPE FLAT

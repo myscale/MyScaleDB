@@ -30,6 +30,7 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/ReadFromPreparedSource.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
+#include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/QueryPlan/UnionStep.h>
 #include <Processors/QueryPlan/QueryIdHolder.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
@@ -947,6 +948,23 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
     }
     else if (parts.empty())
         return {};
+
+    if (query_info.vector_scan_info)
+    {
+        return std::make_unique<ReadWithVectorScan>(
+            std::move(parts),
+            column_names_to_return,
+            data,
+            query_info,
+            storage_snapshot,
+            context,
+            max_block_size,
+            num_streams,
+            max_block_numbers_to_read,
+            log,
+            enable_parallel_reading
+        );
+    }
 
     return std::make_unique<ReadFromMergeTree>(
         std::move(parts),

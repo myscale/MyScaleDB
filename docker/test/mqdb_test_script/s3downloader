@@ -10,7 +10,7 @@ import requests
 import tempfile
 
 
-DEFAULT_URL = 'https://mqdb-release.moqi.com.cn/datasets'
+DEFAULT_URL = 'https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets'
 PROXIES = { "http": "http://clash.internal.moqi.ai:7890", "https": "http://clash.internal.moqi.ai:7890", }
 
 AVAILABLE_DATASETS = {

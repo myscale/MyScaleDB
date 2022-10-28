@@ -712,9 +712,6 @@ static StoragePtr create(const StorageFactory::Arguments & args)
             for (auto & index : args.query.columns_list->indices->children)
                 metadata.secondary_indices.push_back(IndexDescription::getIndexFromAST(index, columns, context));
         
-        if (args.query.columns_list && args.query.columns_list->vec_indices)
-            for (auto & vec_index : args.query.columns_list->vec_indices->children)
-                metadata.vec_indices.push_back(VectorIndexDescription::getVectorIndexFromAST(vec_index, args.columns));
 
         if (args.query.columns_list && args.query.columns_list->projections)
             for (auto & projection_ast : args.query.columns_list->projections->children)
@@ -723,6 +720,16 @@ static StoragePtr create(const StorageFactory::Arguments & args)
                 metadata.projections.add(std::move(projection));
             }
 
+
+        // Use SQL definition to update the storage_settings.
+        storage_settings->loadFromQuery(*args.storage_def, context);
+
+        if (args.query.columns_list && args.query.columns_list->vec_indices)
+        {
+            for (auto & vec_index : args.query.columns_list->vec_indices->children)
+                metadata.vec_indices.push_back(VectorIndexDescription::getVectorIndexFromAST(
+                    vec_index, args.columns, metadata.constraints, storage_settings->vector_index_parameter_check && !args.attach));
+        }
 
         auto column_ttl_asts = columns.getColumnTTLs();
         for (const auto & [name, ast] : column_ttl_asts)

@@ -164,6 +164,7 @@ void MergePlainMergeTreeTask::finish()
             /// Pass empty string for index_name and column name, all vector index will be removed from this part.
             String dummy_name;
             new_part->removeVectorIndex(dummy_name, dummy_name);
+            new_part->removeAllVectorIndexInfo();
 
             LOG_DEBUG(storage.log, "Remove vector index from part {} due to dropped in metadata", new_part->name);
         }

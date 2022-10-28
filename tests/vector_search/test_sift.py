@@ -45,7 +45,7 @@ def create_table():
     os.system('{} -q "DROP TABLE IF EXISTS {}"'.format(client, table_name))
 
     print("create table {}".format(table_name))
-    os.system('{} -q "CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id"'.format(client, table_name))
+    os.system('{} -q "CREATE TABLE {} (id UInt32, Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id"'.format(client, table_name))
 
 def insert_data():
    #base, query, train, truth = load_sift10M()

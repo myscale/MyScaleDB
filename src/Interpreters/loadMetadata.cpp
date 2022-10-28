@@ -49,6 +49,8 @@ namespace ActionLocks
     extern const StorageActionBlockType DistributedSend;
 }
 
+static bool is_create_for_replicated_db = false;
+
 static void executeCreateQuery(
     const String & query,
     ContextMutablePtr context,
@@ -95,12 +97,18 @@ static void loadDatabase(
 
     if (fs::exists(fs::path(database_metadata_file)))
     {
+        is_create_for_replicated_db = false;
         /// There is .sql file with database creation statement.
         ReadBufferFromFile in(database_metadata_file, 1024);
         readStringUntilEOF(database_attach_query, in);
     }
     else
     {
+        auto default_database_engine = context->getSettingsRef().default_database_engine.value;
+        if (default_database_engine == DefaultDatabaseEngine::Replicated)
+            is_create_for_replicated_db = true;
+        else
+            is_create_for_replicated_db = false;
         /// It's first server run and we need create default and system databases.
         /// .sql file with database engine will be written for CREATE query.
         database_attach_query = "CREATE DATABASE " + backQuoteIfNeed(database);
@@ -232,16 +240,33 @@ LoadTaskPtrs loadMetadata(ContextMutablePtr context, const String & default_data
     }
 
     TablesLoader::Databases loaded_databases;
+    TablesLoader::Databases loaded_databases_create;
     for (const auto & [name, db_path] : databases)
     {
         loadDatabase(context, name, db_path, has_force_restore_data_flag);
-        loaded_databases.insert({name, DatabaseCatalog::instance().getDatabase(name)});
+        if (!is_create_for_replicated_db)
+            loaded_databases.insert({name, DatabaseCatalog::instance().getDatabase(name)});
+        else
+            loaded_databases_create.insert({name, DatabaseCatalog::instance().getDatabase(name)});
     }
 
-    auto mode = getLoadingStrictnessLevel(/* attach */ true, /* force_attach */ true, has_force_restore_data_flag, /*secondary*/ false);
-    TablesLoader loader{context, std::move(loaded_databases), mode};
-    auto load_tasks = loader.loadTablesAsync();
-    auto startup_tasks = loader.startupTablesAsync();
+    LoadTaskPtrs load_tasks;
+    LoadTaskPtrs  startup_tasks;
+    if (!loaded_databases.empty())
+    {
+        auto mode = getLoadingStrictnessLevel(/* attach */ true, /* force_attach */ true, has_force_restore_data_flag, /*secondary*/ false);
+        TablesLoader loader{context, std::move(loaded_databases), mode};
+        load_tasks = loader.loadTablesAsync();
+        startup_tasks = loader.startupTablesAsync();
+    }
+
+    if (!loaded_databases_create.empty())
+    {
+        auto mode_create = getLoadingStrictnessLevel(/* attach */ false, /* force_attach */ false, has_force_restore_data_flag, /*secondary*/ false);
+        TablesLoader loader_create{context, std::move(loaded_databases_create), mode_create};
+        load_tasks = loader_create.loadTablesAsync();
+        startup_tasks = loader_create.startupTablesAsync();
+    }
 
     if (async_load_databases)
     {

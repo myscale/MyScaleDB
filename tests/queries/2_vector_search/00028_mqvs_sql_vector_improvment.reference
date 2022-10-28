@@ -1,0 +1,19 @@
+0
+vector column name exists in both two joined tables
+1	0
+2	3
+3	12
+4	27
+5	48
+distance function column exists in GROUP BY clause
+1	0	1
+2	3	1
+3	12	1
+4	27	1
+5	48	1
+distance function exists when main table is subquery
+11	300
+12	363
+13	432
+14	507
+15	588

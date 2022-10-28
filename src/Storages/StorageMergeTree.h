@@ -18,7 +18,6 @@
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
-#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
 #include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 
 #include <Disks/StoragePolicy.h>
@@ -55,6 +54,8 @@ public:
     ~StorageMergeTree() override;
 
     std::string getName() const override { return merging_params.getModeName() + "MergeTree"; }
+
+    bool isShutdown() const override { return shutdown_called.load(); }
 
     bool supportsParallelInsert() const override { return true; }
 
@@ -121,7 +122,6 @@ public:
 
     MergeTreeDeduplicationLog * getDeduplicationLog() { return deduplication_log.get(); }
 
-    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
 private:
 
     /// Mutex and condvar for synchronous mutations wait
@@ -242,8 +242,6 @@ private:
         const DataPartPtr & right) const;
     void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
 
-    std::shared_ptr<VectorIndexEntry> selectPartsToBuildVectorIndex(const StorageMetadataPtr & metadata_snapshot);
-
     /// Returns maximum version of a part, with respect of mutations which would not change it.
     Int64 getUpdatedDataVersion(
         const DataPartPtr & part,
@@ -300,6 +298,7 @@ private:
     friend class MergeTreeData;
     friend class MergePlainMergeTreeTask;
     friend class MutatePlainMergeTreeTask;
+    friend class MergeTreeVectorIndexBuilderUpdater;
 
     struct DataValidationTasks : public IStorage::DataValidationTasksBase
     {

@@ -38,6 +38,7 @@
 #include <Interpreters/PartLog.h>
 #include <Poco/Timestamp.h>
 #include <Common/threadPoolCallbackRunner.h>
+#include <VectorIndex/SegmentId.h>
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/ordered_index.hpp>
@@ -239,6 +240,7 @@ public:
     using DataPartsVector = std::vector<DataPartPtr>;
 
     DataPartsLock lockParts() const { return DataPartsLock(data_parts_mutex); }
+    DataPartsLock tryLockParts() const { return DataPartsLock(data_parts_mutex, std::try_to_lock); }
 
     using OperationDataPartsLock = std::unique_lock<std::mutex>;
     OperationDataPartsLock lockOperationsWithParts() const { return OperationDataPartsLock(operation_with_data_parts_mutex); }
@@ -687,7 +689,11 @@ public:
     size_t clearOldPartsFromFilesystem(bool force = false);
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
-    void clearCachedVectorIndex(const DataPartsVector & parts);
+    void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
+    void clearPrimaryKeyCache(const DataPartsVector & parts);
+    /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
+    std::pair<bool, bool> needClearVectorIndexCacheAndFile(
+        const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
 
     ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
     void regularClearCachedIndex(const DataPartsVector & parts);
@@ -873,6 +879,13 @@ public:
     /// Returns true if table can create new parts with adaptive granularity
     /// Has additional constraint in replicated version
     virtual bool canUseAdaptiveGranularity() const;
+
+    // Returns true if primary key cache is enabled when cache size > 0.
+    bool canUsePrimaryKeyCache() const
+    {
+        const auto settings = getSettings();
+        return settings->enable_primary_key_cache.value && getContext()->getPrimaryKeyCacheSize()>0;
+    }
 
     /// Get constant pointer to storage settings.
     /// Copy this pointer into your scope and you will
@@ -1069,8 +1082,6 @@ public:
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
 
-    virtual void finishVectorIndexJob(const std::vector<String> & processed_parts) = 0;
-
     /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
     struct MergeTreeVectorIndexStatus
     {
@@ -1093,6 +1104,9 @@ public:
     /// error if built was successful. Otherwise update latested failed status.
     void updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message);
 
+    /// Reset vector index status when new vector index is added
+    void resetVectorIndexBuildStatus();
+
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
     /// with `currently_submerging_emerging_mutex`.
@@ -1100,6 +1114,9 @@ public:
     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
     /// Mutex for currently_submerging_parts and currently_emerging_parts
     mutable std::mutex currently_submerging_emerging_mutex;
+
+    /// Mutex for currently_vector_indexing_parts
+    mutable std::mutex currently_vector_indexing_parts_mutex;
     std::set<String> currently_vector_indexing_parts;
 
     /// Mutex for parts currently processing in background
@@ -1139,6 +1156,14 @@ public:
     /// Returns the number of parts for which index was unloaded.
     size_t unloadPrimaryKeysOfOutdatedParts();
 
+    virtual bool isShutdown() const { return false; }
+
+    /// Load vector indices to memory, map key is part_name, value are vector indices in this part to load
+    void loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices);
+
+    /// Remove loaded vector indices from memory
+    static void abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys);
+
 protected:
     friend class IMergeTreeDataPart;
     friend class MergeTreeDataMergerMutator;
@@ -1148,6 +1173,7 @@ protected:
     friend class MergeTask;
     friend class IPartMetadataManager;
     friend class IMergedBlockOutputStream; // for access to log
+    friend class MergeTreeVectorIndexBuilderUpdater;
 
     bool require_part_metadata;
 

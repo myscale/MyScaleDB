@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.3 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.3 . --push
-FROM  harbor.internal.moqi.ai/mqdb/runtime:1.3
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4 . --push
+FROM  harbor.internal.moqi.ai/mqdb/runtime:1.4
 
 ENV TZ=Europe/Moscow
 RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
@@ -14,15 +14,17 @@ RUN apt-get update \
     --yes --no-install-recommends
 
 # Sanitizer options for services (clickhouse-server)
-RUN echo "TSAN_OPTIONS='verbosity=1000 halt_on_error=1 history_size=7'" >> /etc/environment; \
-    echo "UBSAN_OPTIONS='print_stacktrace=1'" >> /etc/environment; \
-    echo "MSAN_OPTIONS='abort_on_error=1 poison_in_dtor=1'" >> /etc/environment; \
-    echo "LSAN_OPTIONS='suppressions=/usr/share/clickhouse-test/config/lsan_suppressions.txt'" >> /etc/environment; \
-    ln -s /usr/lib/llvm-${LLVM_VERSION}/bin/llvm-symbolizer /usr/bin/llvm-symbolizer;
-
+# Set resident memory limit for TSAN to 45GiB (46080MiB) to avoid OOMs in Stress tests
+# and MEMORY_LIMIT_EXCEEDED exceptions in Functional tests (total memory limit in Functional tests is ~55.24 GiB).
+# TSAN will flush shadow memory when reaching this limit.
+# It may cause false-negatives, but it's better than OOM.
+RUN echo "TSAN_OPTIONS='verbosity=1000 halt_on_error=1 history_size=7 memory_limit_mb=46080'" >> /etc/environment
+RUN echo "UBSAN_OPTIONS='print_stacktrace=1'" >> /etc/environment
+RUN echo "MSAN_OPTIONS='abort_on_error=1 poison_in_dtor=1'" >> /etc/environment
+RUN echo "LSAN_OPTIONS='suppressions=/usr/share/clickhouse-test/config/lsan_suppressions.txt'" >> /etc/environment
 # Sanitizer options for current shell (not current, but the one that will be spawned on "docker run")
 # (but w/o verbosity for TSAN, otherwise test.reference will not match)
-ENV TSAN_OPTIONS='halt_on_error=1 history_size=7'
+ENV TSAN_OPTIONS='halt_on_error=1 history_size=7 memory_limit_mb=46080'
 ENV UBSAN_OPTIONS='print_stacktrace=1'
 ENV MSAN_OPTIONS='abort_on_error=1 poison_in_dtor=1'
 
@@ -36,12 +38,14 @@ RUN apt-get update -y \
     gdb \
     gperf \
     lcov \
+    netbase \
+    perl \
+    ripgrep \
     llvm-${LLVM_VERSION} \
     moreutils \
     pigz \
     pv \
     brotli \
-    zstd \
     lsof \
     lz4 \
     npm \

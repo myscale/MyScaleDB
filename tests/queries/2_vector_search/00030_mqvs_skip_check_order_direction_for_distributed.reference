@@ -1,0 +1,6 @@
+metric_type=L2
+1	0
+2	3
+metric_type=IP
+100	300
+99	297

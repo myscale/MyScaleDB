@@ -8,6 +8,7 @@
 #include <Parsers/parseQuery.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
+#include <Parsers/ASTIdentifier.h>
 
 #include <Core/Defines.h>
 
@@ -148,6 +149,48 @@ ConstraintsExpressions ConstraintsDescription::getExpressions(const DB::ContextP
         }
     }
     return res;
+}
+
+std::pair<UInt64, bool> ConstraintsDescription::getArrayLengthByColumnName(const String & column_name) const
+{
+    UInt64 len = 0;
+    bool has_len_constraint = false;
+    for (const auto & constraint : constraints)
+    {
+        auto * constraint_ptr = constraint->as<ASTConstraintDeclaration>();
+        if (constraint_ptr->type == ASTConstraintDeclaration::Type::CHECK)
+        {
+            auto * func_equal = constraint_ptr->expr->as<ASTFunction>();
+            if (func_equal && func_equal->name == "equals")
+            {
+                auto * expr_list = func_equal->arguments->as<ASTExpressionList>();
+                if (expr_list && expr_list->children.size() == 2)
+                {
+                    auto * func_len = expr_list->children[0]->as<ASTFunction>();
+                    auto * literal = expr_list->children[1]->as<ASTLiteral>();
+                    if (func_len && literal && func_len->name == "length")
+                    {
+                        auto * expr_list_ = func_len->arguments->as<ASTExpressionList>();
+                        if (expr_list_ && expr_list_->children.size() == 1 && expr_list_->children[0]->as<ASTIdentifier>()
+                            && expr_list_->children[0]->as<ASTIdentifier>()->name() == column_name)
+                        {
+                            has_len_constraint = true;
+                            try
+                            {
+                                len = literal->value.safeGet<UInt64>();
+                                break;
+                            }
+                            catch (...)
+                            {
+                                /// Ignore
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return std::make_pair(len, has_len_constraint);
 }
 
 const ComparisonGraph<ASTPtr> & ConstraintsDescription::getGraph() const

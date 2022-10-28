@@ -217,10 +217,14 @@ select
     r <= threshold ? '' : top_message.1;
 
 -- Same as above for Debug
+<<<<<<< HEAD
 WITH 0.09 as threshold
 select 'noisy Debug messages',
        greatest(coalesce(((select message_format_string, count() from logs where level = 'Debug' group by message_format_string order by count() desc limit 1) as top_message).2, 0) / (select count() from logs), threshold) as r,
        r <= threshold ? '' : top_message.1;
+=======
+select 'noisy Debug messages', max2((select count() from logs where level <= 'Debug' group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.095);
+>>>>>>> e76e646aef1... squash of 665-842(support s3 disk for vector index files)
 
 -- Same as above for Info
 WITH 0.05 as threshold

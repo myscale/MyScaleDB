@@ -9,6 +9,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSubquery.h>
@@ -17,7 +18,6 @@
 #include <Parsers/ASTInterpolateElement.h>
 
 #include <DataTypes/DataTypeNullable.h>
-#include <DataTypes/DataTypeArray.h>
 #include <Columns/IColumn.h>
 
 #include <Interpreters/Aggregator.h>
@@ -41,12 +41,11 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
 
-#include <Functions/FunctionHelpers.h>
-
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/parseAggregateFunctionParameters.h>
 #include <AggregateFunctions/WindowFunction.h>
 
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/StorageDistributed.h>
 #include <Storages/StorageDictionary.h>
 #include <Storages/StorageJoin.h>
@@ -213,7 +212,7 @@ ExpressionAnalyzer::ExpressionAnalyzer(
     /// will contain out-of-date information, which will lead to an error when the query is executed.
     analyzeAggregation(temp_actions);
 
-    analyzeVectorScan();
+    analyzeVectorScan(temp_actions);
 }
 
 NamesAndTypesList ExpressionAnalyzer::getColumnsAfterArrayJoin(ActionsDAG & actions, const NamesAndTypesList & src_columns)
@@ -457,11 +456,32 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAG & temp_actions)
 }
 
 /// put vector scan ops column name into aggregated_columns
-void ExpressionAnalyzer::analyzeVectorScan()
+void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
 {
-    auto temp_actions = std::make_shared<ActionsDAG>(sourceColumns());
-    // auto * select_query = query->as<ASTSelectQuery>();
-    has_vector_scan = makeVectorScanDescriptions(temp_actions);
+    if (!syntax->vector_scan_funcs.empty())
+        has_vector_scan = makeVectorScanDescriptions(temp_actions);
+    else if (auto vec_scan_desc = getContext()->getVecScanDescription())
+    {
+        /// vector search column exists in right joined table
+        vector_scan_descriptions.emplace_back(*vec_scan_desc);
+        has_vector_scan = true;
+    }
+    /// Fill in dim from metadata
+    if (has_vector_scan)
+    {
+        if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+        {
+            auto & vector_scan_desc = vector_scan_descriptions[0];
+            vector_scan_desc.search_column_dim
+                = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
+            if (vector_scan_desc.search_column_dim == 0)
+            {
+                LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
+            }
+            LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
+        }
+    }
 }
 
 void ExpressionAnalyzer::initGlobalSubqueriesAndExternalTables(bool do_global, bool is_explain)
@@ -629,29 +649,12 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                     "wrong argument number in distance function");
         }
 
-        vector_scan_desc.search_column_name = arguments[0]->getColumnName();
-
-        auto search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
-
-        if (search_column_type)
-        {
-            LOG_DEBUG(log, "search column type name: {}", (*search_column_type).type->getName());
-        }
+        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
+        if (auto * identifier = arguments[0]->as<ASTIdentifier>())
+            vector_scan_desc.search_column_name = identifier->shortName();
         else
-        {
-            LOG_DEBUG(log, "search column name: {}, type not exist", vector_scan_desc.search_column_name);
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong search column name");
-        }
-
-        const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
-
-        if (!array_type)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                "Search column {} should be FixedArray type", vector_scan_desc.search_column_name);
-
-        LOG_DEBUG(log, "type dim: {}", array_type->getDim());
-
-        vector_scan_desc.search_column_dim = array_type->getDim();
+            vector_scan_desc.search_column_name = arguments[0]->getColumnName();
+        /// Not initialize dim here
 
         const auto * dag_node = actions->tryFindInOutputs(arguments[1]->getColumnName());
         if (!dag_node)
@@ -659,13 +662,55 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
                 "Unknown identifier '{}' in distance function", arguments[1]->getColumnName());
         }
+
+      /// In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
+        if (dag_node->column)
+        {
+            if (!isColumnConst(*dag_node->column))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
+        }
+
         vector_scan_desc.query_column = dag_node->column;
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
         //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
 
-        LOG_DEBUG(log, "[analyzeVectorScan] search_column: {}, query_column: {}", vector_scan_desc.search_column_name, vector_scan_desc.query_column_name);
+        LOG_DEBUG(
+            log,
+            "[analyzeVectorScan] search_column: {}, query_column: {}",
+            vector_scan_desc.search_column_name,
+            vector_scan_desc.query_column_name);
+
+        auto metadata_snapshot = storage() ? storage()->getInMemoryMetadataPtr() : nullptr;
+        String index_type = "";
+        // Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
+        std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(getContext()->getMergeTreeSettings());
+        bool use_parameter_check = storage_settings->vector_index_parameter_check;
+        LOG_TRACE(log, "[makeVectorScanDescriptions] vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
+        // Obtain the type of the vector index recorded in the meta_data.
+        if (metadata_snapshot && metadata_snapshot->getVectorIndices().size() == 1)
+        {
+            index_type = metadata_snapshot->getVectorIndices()[0].type;
+            LOG_TRACE(log, "[makeVectorScanDescriptions] The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+        }
+        // Use the user-defined `vector_index_parameter_check`.
+        if (metadata_snapshot && metadata_snapshot->hasSettingsChanges())
+        {
+            const auto current_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+            for (const auto & changed_setting : current_changes)
+            {
+                const auto & setting_name = changed_setting.name;
+                const auto & new_value = changed_setting.value;
+                if (setting_name == "vector_index_parameter_check")
+                {
+                    use_parameter_check = new_value.get<bool>();
+                    LOG_TRACE(
+                        log, "[makeVectorScanDescriptions] vector_index_parameter_check value in sql definition: {}", use_parameter_check);
+                    break;
+                }
+            }
+        }
         //parse vector scan's params, such as: top_k, n_probe ...
-        String param_str = parseVectorScanParameters(node, getContext());
+        String param_str = parseVectorScanParameters(node, getContext(), Poco::toUpper(index_type), use_parameter_check);
         if (!param_str.empty())
         {
             try
@@ -674,20 +719,27 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 vector_scan_desc.vector_parameters = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
                 vector_scan_desc.vector_parameters->set("metric_type", syntax->vector_scan_metric_type);
             }
-            catch([[maybe_unused]] const std::exception& e)
+            catch ([[maybe_unused]] const std::exception & e)
             {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
             }
         }
-        // String test = vector_scan_desc.parameters->get("metric");
-        // LOG_DEBUG(&Poco::Logger::get("test select parse arg"), test);
-        // txh added
+
+        /// top_k is get from limit N
+        vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
+        vector_scan_desc.direction = syntax->direction;
+
         LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
-        vector_scan_descriptions.push_back(vector_scan_desc);
+        if (syntax->vector_from_right_table)
+        {
+            analyzedJoin().setVecScanDescription(vector_scan_desc);
+        }
+        else
+            vector_scan_descriptions.push_back(vector_scan_desc);
     }
 
-    return !vector_scan_funcs().empty();
+    return !vector_scan_descriptions.empty();
 }
 
 void ExpressionAnalyzer::makeWindowDescriptionFromAST(const Context & context_,
@@ -1161,6 +1213,14 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
     TableJoin & analyzed_join,
     SelectQueryOptions query_options)
 {
+    /// Add vector scan description to Context for subquery of joined table
+    bool has_vector_scan = false;
+    if (auto vec_scan_desc = analyzed_join.getVecScanDescription())
+    {
+        has_vector_scan = true;
+        context->setVecScanDescription(*vec_scan_desc);
+    }
+
     /// Actions which need to be calculated on joined block.
     auto joined_block_actions = analyzed_join.createJoinedBlockActions(context);
     NamesWithAliases required_columns_with_aliases = analyzed_join.getRequiredColumns(
@@ -1204,6 +1264,10 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
     auto joined_actions_step = std::make_unique<ExpressionStep>(joined_plan->getCurrentDataStream(), std::move(joined_block_actions));
     joined_actions_step->setStepDescription("Joined actions");
     joined_plan->addStep(std::move(joined_actions_step));
+
+    /// Reset vector scan description
+    if (has_vector_scan)
+        context->resetVecScanDescription();
 
     return joined_plan;
 }

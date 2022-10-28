@@ -1,12 +1,15 @@
 #!/bin/bash
+# shellcheck disable=SC2086,SC2001,SC2046,SC2030,SC2031,SC2010,SC2015
 
-set -eux
+set -x
+
+# core.COMM.PID-TID
+sysctl kernel.core_pattern='core.%e.%p-%P'
+dmesg --clear ||:
+
+set -e
+set -u
 set -o pipefail
-trap "exit" INT TERM
-# The watchdog is in the separate process group, so we have to kill it separately
-# if the script terminates earlier.
-trap 'kill $(jobs -pr) ${watchdog_pid:-} ||:' EXIT
-
 
 PROJECT_PATH=$1
 SHA_TO_TEST=$2
@@ -37,7 +40,7 @@ function clone
     rm -rf "$repo_dir" ||:
     mkdir "$repo_dir" ||:
 
-    cp -r $TEST_FLOAD/tests/mqdb $repo_dir
+    cp -r $TEST_FLOAD/tests/server $repo_dir
     cp -r $TEST_FLOAD/tests/tests $repo_dir
 
     ls -lath ||:
@@ -57,10 +60,34 @@ function configure
     rm -rf $WORKPATH/db ||:
     mkdir $WORKPATH/db ||:
     
-    cp -av --dereference "$repo_dir"/mqdb/server.conf/config* $WORKPATH/db
-    cp -av --dereference "$repo_dir"/mqdb/server.conf/user* $WORKPATH/db
+    cp -av --dereference "$repo_dir"/server/config* $WORKPATH/db
+    cp -av --dereference "$repo_dir"/server/user* $WORKPATH/db
     # TODO figure out which ones are needed
     cp -av --dereference "$TEST_FLOAD"/query-fuzzer-tweaks-users.xml $WORKPATH/db/users.d
+    # cp -av --dereference "$PROJECT_PATH"/tests/config/config.d/listen.xml $WORKPATH/db/config.d
+    rm -rf $WORKPATH/db/config.d/listen.xml ||:
+    rm -rf $WORKPATH/db/config.d/interserver_listen_host.xml ||:
+    echo '<clickhouse><listen_host>0.0.0.0</listen_host></clickhouse>' >>$WORKPATH/db/config.d/listen.xml
+    echo '<clickhouse><interserver_listen_host>0.0.0.0</interserver_listen_host></clickhouse>' >>$WORKPATH/db/config.d/interserver_listen_host.xml
+    cp -av --dereference "$TEST_FLOAD"/allow-nullable-key.xml $WORKPATH/db/config.d
+    cat > $WORKPATH/db/config.d/max_server_memory_usage_to_ram_ratio.xml <<EOL
+<clickhouse>
+    <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+</clickhouse>
+EOL
+
+    cat > $WORKPATH/db/config.d/core.xml <<EOL
+<clickhouse>
+    <core_dump>
+        <!-- 100GiB -->
+        <size_limit>107374182400</size_limit>
+    </core_dump>
+    <!-- NOTE: no need to configure core_path,
+         since clickhouse is not started as daemon (via clickhouse start)
+    -->
+    <core_path>$PWD</core_path>
+</clickhouse>
+EOL
 }
 
 function watchdog
@@ -101,16 +128,7 @@ function filter_exists_and_template
 function stop_server
 {
     clickhouse-client --query "select elapsed, query from system.processes" ||:
-    killall clickhouse-server ||:
-    for _ in {1..10}
-    do
-        if ! pgrep -f clickhouse-server
-        then
-            break
-        fi
-        sleep 1
-    done
-    killall -9 clickhouse-server ||:
+    clickhouse stop
 
     # Debug.
     date
@@ -128,10 +146,10 @@ function fuzz
     # in MQDB test, NEW_TESTS_OPT parameter not used
     NEW_TESTS_OPT="${NEW_TESTS_OPT:-}"
 
-    # interferes with gdb
-    export CLICKHOUSE_WATCHDOG_ENABLE=0
+    mkdir -p /var/run/clickhouse-server
+
     # NOTE: we use process substitution here to preserve keep $! as a pid of clickhouse-server
-    clickhouse-server --config-file $WORKPATH/db/config.xml -- --path $WORKPATH/db > >(tail -100000 > server.log) 2>&1 &
+    clickhouse-server --config-file $WORKPATH/db/config.xml --pid-file /var/run/clickhouse-server/clickhouse-server.pid -- --path $WORKPATH/db > server.log 2>&1 &
     server_pid=$!
 
     kill -0 $server_pid
@@ -154,7 +172,6 @@ handle SIGUSR2 nostop noprint pass
 handle SIG$RTMIN nostop noprint pass
 info signals
 continue
-gcore
 backtrace full
 thread apply all backtrace full
 info registers
@@ -168,7 +185,7 @@ detach
 quit
 " > script.gdb
 
-    gdb -batch -command script.gdb -p $server_pid  &
+    gdb -batch -command script.gdb -p "$(cat /var/run/clickhouse-server/clickhouse-server.pid)" &
     sleep 5
     # gdb will send SIGSTOP, spend some time loading debug info and then send SIGCONT, wait for it (up to send_timeout, 300s)
     time clickhouse-client --query "SELECT 'Connected to clickhouse-server after attaching gdb'" ||:
@@ -191,28 +208,18 @@ quit
     # SC2046: Quote this to prevent word splitting. Actually I need word splitting.
     # shellcheck disable=SC2012,SC2046
     # add vector test for fuzz test
-    clickhouse-client \
+    timeout -s TERM --preserve-status 30m clickhouse-client \
         --receive_timeout=10 \
         --receive_data_timeout_ms=10000 \
         --stacktrace \
         --query-fuzzer-runs=1000 \
-        --testmode \
+        --create-query-fuzzer-runs=50 \
         --queries-file $(ls -1 $WORKPATH/ch/tests/queries/0_stateless/*.sql $WORKPATH/ch/tests/queries/2_vector_search/*.sql | sort -R) \
         $NEW_TESTS_OPT \
         > >(tail -n 100000 > fuzzer.log) \
         2>&1 &
     fuzzer_pid=$!
     echo "Fuzzer pid is $fuzzer_pid"
-
-    # Start a watchdog that should kill the fuzzer on timeout.
-    # The shell won't kill the child sleep when we kill it, so we have to put it
-    # into a separate process group so that we can kill them all.
-    set -m
-    watchdog &
-    watchdog_pid=$!
-    set +m
-    # Check that the watchdog has started.
-    kill -0 $watchdog_pid
 
     # Wait for the fuzzer to complete.
     # Note that the 'wait || ...' thing is required so that the script doesn't
@@ -221,21 +228,35 @@ quit
     wait "$fuzzer_pid" || fuzzer_exit_code=$?
     echo "Fuzzer exit code is $fuzzer_exit_code"
 
-    kill -- -$watchdog_pid ||:
-
     # If the server dies, most often the fuzzer returns code 210: connetion
     # refused, and sometimes also code 32: attempt to read after eof. For
     # simplicity, check again whether the server is accepting connections, using
     # clickhouse-client. We don't check for existence of server process, because
     # the process is still present while the server is terminating and not
     # accepting the connections anymore.
-    if clickhouse-client --query "select 1 format Null"
-    then
-        server_died=0
-    else
-        echo "Server live check returns $?"
-        server_died=1
-    fi
+
+    for _ in {1..100}
+    do
+        if clickhouse-client --query "SELECT 1" 2> err
+        then
+            server_died=0
+            break
+        else
+            # There are legitimate queries leading to this error, example:
+            # SELECT * FROM remote('127.0.0.{1..255}', system, one)
+            if grep -F 'TOO_MANY_SIMULTANEOUS_QUERIES' err
+            then
+                # Give it some time to cool down
+                clickhouse-client --query "SHOW PROCESSLIST"
+                sleep 1
+            else
+                echo "Server live check returns $?"
+                cat err
+                server_died=1
+                break
+            fi
+        fi
+    done
 
     # wait in background to call wait in foreground and ensure that the
     # process is alive, since w/o job control this is the only way to obtain
@@ -250,12 +271,24 @@ quit
     if [ "$server_died" == 1 ]
     then
         # The server has died.
-        task_exit_code=210
-        echo "failure" > status.txt
-        if ! grep --text -ao "Received signal.*\|Logical error.*\|Assertion.*failed\|Failed assertion.*\|.*runtime error: .*\|.*is located.*\|SUMMARY: AddressSanitizer:.*\|SUMMARY: MemorySanitizer:.*\|SUMMARY: ThreadSanitizer:.*\|.*_LIBCPP_ASSERT.*" server.log > description.txt
+        if ! rg --text -o 'Received signal.*|Logical error.*|Assertion.*failed|Failed assertion.*|.*runtime error: .*|.*is located.*|(SUMMARY|ERROR): [a-zA-Z]+Sanitizer:.*|.*_LIBCPP_ASSERT.*' server.log > description.txt
         then
             echo "Lost connection to server. See the logs." > description.txt
         fi
+
+        IS_SANITIZED=$(clickhouse-local --query "SELECT value LIKE '%-fsanitize=%' FROM system.build_options WHERE name = 'CXX_FLAGS'")
+
+        if [ "${IS_SANITIZED}" -eq "1" ] && rg --text 'Sanitizer:? (out-of-memory|out of memory|failed to allocate)|Child process was terminated by signal 9' description.txt
+        then
+            # OOM of sanitizer is not a problem we can handle - treat it as success, but preserve the description.
+            # Why? Because sanitizers have the memory overhead, that is not controllable from inside clickhouse-server.
+            task_exit_code=0
+            echo "success" > status.txt
+        else
+            task_exit_code=210
+            echo "failure" > status.txt
+        fi
+
     elif [ "$fuzzer_exit_code" == "143" ] || [ "$fuzzer_exit_code" == "0" ]
     then
         # Variants of a normal run:
@@ -278,16 +311,18 @@ quit
         # which is confusing.
         task_exit_code=$fuzzer_exit_code
         echo "failure" > status.txt
-        { grep --text -o "Found error:.*" fuzzer.log \
-            || grep --text -ao "Exception:.*" fuzzer.log \
+        { rg --text -o "Found error:.*" fuzzer.log \
+            || rg --text -ao "Exception:.*" fuzzer.log \
             || echo "Fuzzer failed ($fuzzer_exit_code). See the logs." ; } \
             | tail -1 > description.txt
     fi
 
     if test -f core.*; then
-        pigz core.*
-        mv core.*.gz core.gz
+        zstd --threads=0 core.*
+        mv core.*.zst core.zst
     fi
+
+    dmesg -T | rg -q -F -e 'Out of memory: Killed process' -e 'oom_reaper: reaped process' -e 'oom-kill:constraint=CONSTRAINT_NONE' && echo "OOM in dmesg" ||:
 }
 
 case "$stage" in
@@ -307,39 +342,27 @@ case "$stage" in
     ;&
 "report")
 CORE_LINK=''
-if [ -f core.gz ]; then
-    CORE_LINK='<a href="core.gz">core.gz</a>'
-    cp core.gz $WORKPATH/test_output/.
+if [ -f core.zst ]; then
+    CORE_LINK='<a href="core.zst">core.zst</a>'
 fi
+
+rg --text -F '<Fatal>' server.log > fatal.log ||:
+dmesg -T > dmesg.log ||:
+
+zstd --threads=0 server.log
+
 cat > report.html <<EOF ||:
 <!DOCTYPE html>
 <html lang="en">
-<link rel="preload" as="font" href="https://yastatic.net/adv-www/_/sUYVCPUAQE7ExrvMS7FoISoO83s.woff2" type="font/woff2" crossorigin="anonymous"/>
   <style>
-@font-face {
-    font-family:'Yandex Sans Display Web';
-    src:url(https://yastatic.net/adv-www/_/H63jN0veW07XQUIA2317lr9UIm8.eot);
-    src:url(https://yastatic.net/adv-www/_/H63jN0veW07XQUIA2317lr9UIm8.eot?#iefix) format('embedded-opentype'),
-            url(https://yastatic.net/adv-www/_/sUYVCPUAQE7ExrvMS7FoISoO83s.woff2) format('woff2'),
-            url(https://yastatic.net/adv-www/_/v2Sve_obH3rKm6rKrtSQpf-eB7U.woff) format('woff'),
-            url(https://yastatic.net/adv-www/_/PzD8hWLMunow5i3RfJ6WQJAL7aI.ttf) format('truetype'),
-            url(https://yastatic.net/adv-www/_/lF_KG5g4tpQNlYIgA0e77fBSZ5s.svg#YandexSansDisplayWeb-Regular) format('svg');
-    font-weight:400;
-    font-style:normal;
-    font-stretch:normal
-}
-
-body { font-family: "Yandex Sans Display Web", Arial, sans-serif; background: #EEE; }
+body { font-family: "DejaVu Sans", "Noto Sans", Arial, sans-serif; background: #EEE; }
 h1 { margin-left: 10px; }
-th, td { border: 0; padding: 5px 10px 5px 10px; text-align: left; vertical-align: top; line-height: 1.5; background-color: #FFF;
-td { white-space: pre; font-family: Monospace, Courier New; }
-border: 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 8px 25px -5px rgba(0, 0, 0, 0.1); }
+th, td { border: 0; padding: 5px 10px 5px 10px; text-align: left; vertical-align: top; line-height: 1.5; background-color: #FFF; }
+td { white-space: pre; font-family: Monospace, Courier New; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 8px 25px -5px rgba(0, 0, 0, 0.1); }
 a { color: #06F; text-decoration: none; }
 a:hover, a:active { color: #F40; text-decoration: underline; }
 table { border: 0; }
-.main { margin-left: 10%; }
 p.links a { padding: 5px; margin: 3px; background: #FFF; line-height: 2; white-space: nowrap; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05), 0 8px 25px -5px rgba(0, 0, 0, 0.1); }
-th { cursor: pointer; }
 
   </style>
   <title>AST Fuzzer for PR #${PR_TO_TEST} @ ${SHA_TO_TEST}</title>
@@ -347,15 +370,33 @@ th { cursor: pointer; }
 <body>
 <div class="main">
 
-<h1>AST Fuzzer for PR #${PR_TO_TEST} @ ${SHA_TO_TEST}</h1>
+<h1>AST Fuzzer for PR <a href="https://github.com/ClickHouse/ClickHouse/pull/${PR_TO_TEST}">#${PR_TO_TEST}</a> @ ${SHA_TO_TEST}</h1>
 <p class="links">
-<a href="fuzzer.log">fuzzer.log</a>
-<a href="server.log">server.log</a>
-${CORE_LINK}
+  <a href="run.log">run.log</a>
+  <a href="fuzzer.log">fuzzer.log</a>
+  <a href="server.log.zst">server.log.zst</a>
+  <a href="main.log">main.log</a>
+  <a href="dmesg.log">dmesg.log</a>
+  ${CORE_LINK}
 </p>
 <table>
-<tr><th>Test name</th><th>Test status</th><th>Description</th></tr>
-<tr><td>AST Fuzzer</td><td>$(cat status.txt)</td><td>$(cat description.txt)</td></tr>
+<tr>
+  <th>Test name</th>
+  <th>Test status</th>
+  <th>Description</th>
+</tr>
+<tr>
+  <td>AST Fuzzer</td>
+  <td>$(cat status.txt)</td>
+  <td>$(
+    clickhouse-local --input-format RawBLOB --output-format RawBLOB --query "SELECT encodeXMLComponent(*) FROM table" < description.txt || cat description.txt
+  )</td>
+</tr>
+<tr>
+  <td colspan="3" style="white-space: pre-wrap;">$(
+    clickhouse-local --input-format RawBLOB --output-format RawBLOB --query "SELECT encodeXMLComponent(*) FROM table" < fatal.log || cat fatal.log
+  )</td>
+</tr>
 </table>
 </body>
 </html>
@@ -363,9 +404,13 @@ ${CORE_LINK}
 EOF
     ;&
 esac
-cp fuzzer.log $WORKPATH/test_output/.
-cp server.log $WORKPATH/test_output/.
+
+cp run.log $WORKPATH/test_output/. ||:
+cp fuzzer.log $WORKPATH/test_output/. ||:
+cp server.log.zst $WORKPATH/test_output/. ||:
+cp main.log $WORKPATH/test_output/. ||: 
+cp dmesg.log $WORKPATH/test_output/. ||:
+cp status.txt $WORKPATH/test_output/. ||:
 cp report.html $WORKPATH/test_output/.
 
-task_exit_code=${task_exit_code:-0}
 exit $task_exit_code

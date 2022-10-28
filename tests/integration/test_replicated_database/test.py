@@ -50,6 +50,20 @@ snapshot_recovering_node = cluster.add_instance(
     user_configs=["configs/settings.xml"],
     with_zookeeper=True,
 )
+r1 = cluster.add_instance(
+    "r1",
+    main_configs=["configs/config.d/clusters.xml"],
+    user_configs=["configs/default_replicated.xml"],
+    with_zookeeper=True,
+    macros={"shard": 1, "replica": 1, "cluster": "cluster"},
+)
+r2 = cluster.add_instance(
+    "r2",
+    main_configs=["configs/config.d/clusters.xml"],
+    user_configs=["configs/default_replicated.xml"],
+    with_zookeeper=True,
+    macros={"shard": 1, "replica": 2, "cluster": "cluster"},
+)
 
 all_nodes = [
     main_node,
@@ -1549,3 +1563,34 @@ def test_all_groups_cluster(started_cluster):
     assert "bad_settings_node\ndummy_node\n" == bad_settings_node.query(
         "select host_name from system.clusters where name='all_groups.db_cluster' order by host_name"
     )
+
+def test_default_replicated_engine(started_cluster):
+    # test default_database_engine config
+    for node in [r1, r2]:
+        assert node.query("SHOW CREATE DATABASE default") == "CREATE DATABASE default\\nENGINE = Replicated(\\'/clickhouse/test/databases/default\\', \\'{shard}\\', \\'{replica}\\')\n"
+    
+    # test creating replicatedb db
+    r1.query("DROP DATABASE IF EXISTS testdb")
+    r1.query("CREATE DATABASE testdb")
+    assert r1.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\\nENGINE = Replicated(\\'/clickhouse/test/databases/testdb\\', \\'{shard}\\', \\'{replica}\\')\n"
+    assert "doesn't exist" in r2.query_and_get_error("SHOW CREATE DATABASE testdb")
+    
+    # test database_replicated_always_execute_with_on_cluster config
+    r1.query("DROP DATABASE testdb")
+    r1.query("CREATE DATABASE testdb", settings={"database_replicated_always_execute_with_on_cluster": 1})
+    for node in [r1, r2]:
+        assert node.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\\nENGINE = Replicated(\\'/clickhouse/test/databases/testdb\\', \\'{shard}\\', \\'{replica}\\')\n"
+    
+    r1.query("DROP DATABASE testdb", settings={"database_replicated_always_execute_with_on_cluster": 1})
+    for node in [r1, r2]:
+        assert "doesn't exist" in node.query_and_get_error("SHOW CREATE DATABASE testdb")
+
+    # test database_replicated_always_convert_table_to_replicated config
+    r1.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n")
+    for node in [r1, r2]:
+        assert "Replicated" not in node.query("SHOW CREATE TABLE test")
+        assert "MergeTree" in node.query("SHOW CREATE TABLE test")
+    r1.query("DROP TABLE IF EXISTS test")
+    r1.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n", settings={"database_replicated_always_convert_table_to_replicated": 1})
+    for node in [r1, r2]:
+        assert "ReplicatedMergeTree" in node.query("SHOW CREATE TABLE test")

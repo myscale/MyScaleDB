@@ -13,6 +13,7 @@ struct ReplicatedTableStatus
     bool can_become_leader;
     bool is_readonly;
     bool is_session_expired;
+    bool is_data_synced;
 
     ReplicatedMergeTreeQueue::Status queue;
     UInt32 parts_to_check;

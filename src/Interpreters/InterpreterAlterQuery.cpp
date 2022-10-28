@@ -51,6 +51,7 @@ namespace ErrorCodes
     extern const int UNKNOWN_TABLE;
     extern const int UNKNOWN_DATABASE;
     extern const int QUERY_IS_PROHIBITED;
+    extern const int QUERY_NOT_ALLOWED;
 }
 
 
@@ -208,6 +209,20 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
                 }
             }
 
+            if (mut_command->type == MutationCommand::DELETE && metadata_snapshot->hasVectorIndices())
+                throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                    "ALTER TABLE ... DELETE is not allowed for table {} with vector index. Please use DELETE FROM instead",
+                    table->getStorageID().getNameForLogs());
+
+
+            if (mut_command->type == MutationCommand::UPDATE && metadata_snapshot->hasVectorIndices()){
+                for(auto vectorIndexDescription : metadata_snapshot->getVectorIndices()){
+                    if(mut_command->column_to_update_expression.contains(vectorIndexDescription.column))
+                        throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                                        " ALTER UPDATE vector column with index is not allowed, Please use DELETE and INSERT statement instead");
+                }
+            }
+
             mutation_commands.emplace_back(std::move(*mut_command));
         }
         else
@@ -240,6 +255,9 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
         StorageInMemoryMetadata metadata = table->getInMemoryMetadata();
         alter_commands.validate(table, getContext());
         alter_commands.prepare(metadata);
+        auto total_rows = table->totalRows(getContext()->getSettingsRef());
+        if (!total_rows.has_value() || total_rows.value() == 0)
+            alter_commands.setTableEmptyFlag(true);
         table->checkAlterIsPossible(alter_commands, getContext());
         table->alter(alter_commands, getContext(), alter_lock);
     }

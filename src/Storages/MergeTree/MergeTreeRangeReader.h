@@ -230,6 +230,7 @@ public:
         friend class MergeTreeRangeReader;
         friend class IMergeTreeSelectAlgorithm;
         friend class MergeTreeVectorScanManager;
+        friend class MergeTreeSelectWithVectorScanProcessor;
 
         using NumRows = std::vector<size_t>;
 

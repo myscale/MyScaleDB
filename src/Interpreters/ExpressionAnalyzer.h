@@ -70,8 +70,6 @@ struct ExpressionAnalyzerData
     /// Keys of ORDER BY
     NameSet order_by_keys;
 
-    NamesAndTypesList vector_scan_columns;
-
     bool has_aggregation = false;
     NamesAndTypesList aggregation_keys;
     NamesAndTypesLists aggregation_keys_list;
@@ -214,7 +212,7 @@ protected:
     void analyzeAggregation(ActionsDAG & temp_actions);
     void makeAggregateDescriptions(ActionsDAG & actions, AggregateDescriptions & descriptions);
 
-    void analyzeVectorScan();
+    void analyzeVectorScan(ActionsDAGPtr & temp_actions);
     bool makeVectorScanDescriptions(ActionsDAGPtr & actions);
 
     const ASTSelectQuery * getSelectQuery() const;
@@ -425,7 +423,6 @@ private:
     ActionsAndProjectInputsFlagPtr appendPrewhere(ExpressionActionsChain & chain, bool only_types);
     bool appendWhere(ExpressionActionsChain & chain, bool only_types);
     bool appendGroupBy(ExpressionActionsChain & chain, bool only_types, bool optimize_aggregation_in_order, ManyExpressionActions &);
-    void appendVectorScanFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
     void appendAggregateFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
     void appendWindowFunctionsArguments(ExpressionActionsChain & chain, bool only_types);
 

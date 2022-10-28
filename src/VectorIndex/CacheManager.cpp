@@ -1,7 +1,9 @@
-#include <VectorIndex/CacheManager.h>
 #include <memory>
+#include <VectorIndex/CacheManager.h>
 
 #include <VectorIndex/IndexException.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <Interpreters/VectorIndexEventLog.h>
 
 namespace DB::ErrorCodes
 {
@@ -11,14 +13,25 @@ extern const int LOGICAL_ERROR;
 namespace VectorIndex
 {
 
-CacheManager::CacheManager(int): log(&Poco::Logger::get("CacheManager"))
+size_t IndexWithMetaWeightFunc::operator()(const IndexWithMeta & index_meta) const
+{
+    return index_meta.index->getResourceUsage().memory_usage_bytes;
+}
+
+void IndexWithMetaReleaseFunction::operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr)
+{
+    if (index_meta_ptr)
+        index_meta_ptr.reset();
+}
+
+CacheManager::CacheManager(int) : log(&Poco::Logger::get("CacheManager"))
 {
     while (!m)
     {
         sleep(100);
     }
 
-    cache_ = std::make_unique<VectorIndexCache>(cache_size_in_bytes);
+    cache = std::make_unique<VectorIndexCache>(cache_size_in_bytes);
 }
 
 CacheManager * CacheManager::getInstance()
@@ -28,79 +41,105 @@ CacheManager * CacheManager::getInstance()
     return &cache_mgr;
 }
 
-IndexWithMetaPtr CacheManager::get(const CacheKey& cache_key)
+IndexWithMetaHolderPtr CacheManager::get(const CacheKey & cache_key)
 {
-    if (!cache_)
+    if (!cache)
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
-    IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
-    if (iam_ptr)
+
+    return cache->get(cache_key);
+}
+
+void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
+{
+    if (!cache)
     {
-        return iam_ptr->index_ptr;
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
+    }
+    LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
+
+    auto global_context = DB::Context::getGlobalContextInstance();
+    auto release_callback = [cache_key, global_context]()
+    {
+        if (!global_context->isShutdown())
+            DB::VectorIndexEventLog::addEventLog(
+                global_context,
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::UNLOAD);
+    };
+
+    DB::VectorIndexEventLog::addEventLog(
+        DB::Context::getGlobalContextInstance(),
+        cache_key.getTableUUID(),
+        cache_key.getPartName(),
+        cache_key.getPartitionID(),
+        DB::VectorIndexEventLogElement::LOAD_START);
+
+    if (!cache->getOrSet(
+            cache_key, [&]() { return index; }, release_callback))
+    {
+        LOG_DEBUG(log, "Put into cache: {} failed", cache_key.toString());
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_FAILED);
     }
     else
     {
-        return nullptr;
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_SUCCEED);
     }
 }
 
-void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
+void CacheManager::flushWillUnloadLog()
 {
-    if (!cache_)
+    auto cache_mgr = getInstance();
+    auto cache_items = cache_mgr->cache->getCacheList();
+    for (auto item : cache_items)
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
+        auto context_ = DB::Context::getGlobalContextInstance();
+        auto cache_key = item.first;
+        if (context_)
+            DB::VectorIndexEventLog::addEventLog(
+                context_,
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::WILLUNLOAD);
     }
-    LOG_INFO(log, "VectorIndexCache put cache_key={}", cache_key.toString());
-
-    IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
-
-    cache_->set(cache_key, iam_ptr);
 }
 
 size_t CacheManager::countItem() const
 {
-    return cache_->count();
+    return cache->size();
 }
 
-void CacheManager::forceExpire(const CacheKey& cache_key)
+void CacheManager::forceExpire(const CacheKey & cache_key)
 {
-    LOG_INFO(log, "VectorIndexCache forceExpire cache_key={}", cache_key.toString());
-    return cache_->remove(cache_key);
+    LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
+    return cache->tryRemove(cache_key);
 }
 
-void CacheManager::startLoading(const CacheKey& cache_key)
+IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, 
+                                          std::function<IndexWithMetaPtr()> load_func,
+                                          std::function<void()> release_callback)
 {
-    if (!cache_)
+    if (!cache)
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "load: cache not allocated");
     }
-    LOG_INFO(log, "VectorIndexCache startLoading cache_key={}", cache_key.toString());
-    std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
+    LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
 
-    std::shared_ptr<IndexAndMutex> im_ptr = std::make_shared<IndexAndMutex>(nullptr, new_mutex);
-
-    cache_->getOrSet(cache_key, [&](){
-        return im_ptr;
-    });
-}
-
-std::shared_ptr<std::mutex> CacheManager::getMutex(const CacheKey& cache_key)
-{
-    if (!cache_)
-    {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "getMutex: cache not allocated");
-    }
-
-    IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
-    if (iam_ptr)
-    {
-        return iam_ptr->mu_ptr;
-    }
-    else
-    {
-        return nullptr;
-    }
+    return cache->getOrSet(cache_key, load_func, release_callback);
 }
 
 void CacheManager::setCacheSize(size_t size_in_bytes)
@@ -109,20 +148,17 @@ void CacheManager::setCacheSize(size_t size_in_bytes)
     m = true;
 }
 
-std::list<std::pair<CacheKey, Parameters>> CacheManager::getAllItems()
+std::list<std::pair<CacheKey, Search::Parameters>> CacheManager::getAllItems()
 {
-    std::list<std::pair<CacheKey, Parameters>> result;
+    std::list<std::pair<CacheKey, Search::Parameters>> result;
 
-    std::list<std::pair<CacheKey, std::shared_ptr<IndexAndMutex>>> cache_list = cache_->getCacheList();
+    std::list<std::pair<CacheKey, std::shared_ptr<IndexWithMeta>>> cache_list = cache->getCacheList();
 
-    for (auto im_ptr : cache_list)
+    for (auto cache_item : cache_list)
     {
         // key   --- string
-        // value --- std::shared_ptr<IndexAndMutex>
-        if (im_ptr.second->index_ptr)
-        {
-            result.emplace_back(std::make_pair(im_ptr.first, im_ptr.second->index_ptr->des));
-        }
+        // value --- std::shared_ptr<IndexWithMeta>
+        result.emplace_back(std::make_pair(cache_item.first, cache_item.second->des));
     }
     return result;
 }

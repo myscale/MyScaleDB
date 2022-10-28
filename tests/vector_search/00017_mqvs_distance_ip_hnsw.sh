@@ -2,7 +2,7 @@
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 clickhouse-client -q "DROP TABLE IF EXISTS test_vector;"
-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id;"
+clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id;"
 clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT('metric_type=IP');"
 clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
 

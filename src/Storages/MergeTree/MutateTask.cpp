@@ -29,6 +29,7 @@
 #include <Storages/MergeTree/MergeTreeIndexFullText.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/MergeTreeVirtualColumns.h>
+#include <VectorIndex/VectorIndexCommon.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeVariant.h>
 #include <boost/algorithm/string/replace.hpp>
@@ -668,7 +669,8 @@ static NameSet collectFilesToSkip(
     const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc,
     const std::set<ColumnStatisticsPtr> & stats_to_recalc)
 {
-    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums();
+    /// Don't skip to create hard links for vector index files in mutations.
+    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums(false);
 
     /// Do not hardlink this file because it's always rewritten at the end of mutation.
     files_to_skip.insert(IMergeTreeDataPart::SERIALIZATION_FILE_NAME);
@@ -979,9 +981,13 @@ void finalizeMutatedPart(
 
     new_data_part->default_codec = codec;
 
-    ///Origin part is decoupled with merged vector indices or has simple built vector index
+    /// Origin part is decoupled with merged vector indices or has simple built vector index
     if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
         new_data_part->loadVectorIndexMetadata();
+
+    /// Avoid build vector index for part with error
+    if (source_part->vector_index_build_error)
+        new_data_part->setBuildError();
 }
 
 }
@@ -1053,6 +1059,7 @@ struct MutationContext
     bool need_prefix = true;
 
     scope_guard temporary_directory_lock;
+    bool need_delete_rows{false};
 
     /// Whether we need to count lightweight delete rows in this mutation
     bool count_lightweight_deleted_rows;
@@ -1742,8 +1749,12 @@ private:
             ctx->new_data_part, ctx->need_sync, nullptr, &ctx->existing_indices_stats_checksums);
         ctx->out.reset();
 
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
-        if (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps())
+        /// Reuse vector index when no rows are deleted
+        if (!ctx->need_delete_rows && (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps()))
         {
             bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
@@ -1760,6 +1771,10 @@ private:
             if (vector_files_found)
                 ctx->new_data_part->loadVectorIndexMetadata();
         }
+
+        /// Avoid build vector index for part with error
+        if (ctx->source_part->vector_index_build_error)
+            ctx->new_data_part->setBuildError();
     }
 
     enum class State : uint8_t
@@ -1826,6 +1841,9 @@ private:
 
     void prepare()
     {
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         if (ctx->execute_ttl_type != ExecuteTTLType::NONE)
             ctx->files_to_skip.insert("ttl.txt");
 
@@ -2183,9 +2201,6 @@ bool MutateTask::prepare()
 
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
-    /// Used for vector index move and mutating confict
-    ctx->source_part->setPartIsMutating(true);
-
     auto context_for_reading = Context::createCopy(ctx->context);
 
     /// Allow mutations to work when force_index_by_date or force_primary_key is on.
@@ -2196,12 +2211,25 @@ bool MutateTask::prepare()
     context_for_reading->setSetting("use_index_for_in_with_subqueries_max_values", 100000);
 
     for (const auto & command : *ctx->commands)
+    {
         if (!canSkipMutationCommandForPart(ctx->source_part, command, context_for_reading))
+        {
             ctx->commands_for_part.emplace_back(command);
+
+            /// lightweight delete is changed to update command.
+            /// Currently delete and TTL will delete rows.
+            if (!ctx->need_delete_rows && (command.type == MutationCommand::Type::DELETE ||
+                    command.type == MutationCommand::Type::MATERIALIZE_TTL))
+                ctx->need_delete_rows = true;
+        }
+    }
 
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
     {
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         NameSet files_to_copy_instead_of_hardlinks;
         auto settings_ptr = ctx->data->getSettings();
         /// In zero-copy replication checksums file path in s3 (blob path) is used for zero copy locks in ZooKeeper. If we will hardlink checksums file, we will have the same blob path
@@ -2332,8 +2360,9 @@ bool MutateTask::prepare()
         /// Check if lightweight delete mask column is updated.
         /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
         /// Support part with simple built index and decoupled part with merged old parts' built index files
-        /// TODO: Should not use vector index when any normal delete command exists.
-        ctx->new_data_part->setDeletedMaskUpdate();
+        /// When any normal delete or ttl command exists, needs to be build vector index for the new data part.
+        if (!ctx->need_delete_rows)
+            ctx->new_data_part->setDeletedMaskUpdate();
     }
     else
     {

@@ -1,0 +1,11 @@
+# This variables autochanged by scripts/myscale_version_helper.py:
+
+# NOTE: has nothing common with DBMS_TCP_PROTOCOL_VERSION,
+# only DBMS_TCP_PROTOCOL_VERSION should be incremented on protocol changes.
+SET(MYSCALE_VERSION_MAJOR 0)
+SET(MYSCALE_VERSION_MINOR 9)
+SET(MYSCALE_VERSION_PATCH 3)
+SET(MYSCALE_VERSION_DESCRIBE myscale-v0.9.3-testing)
+SET(MYSCALE_VERSION_STRING 0.9.3)
+# end of autochange
+

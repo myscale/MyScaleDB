@@ -510,6 +510,9 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectPartsToMergeFromRanges(
         if (!data_settings->min_age_to_force_merge_on_partition_only)
             merge_settings.min_age_to_force_merge = data_settings->min_age_to_force_merge_seconds;
 
+        if (!metadata_snapshot->vec_indices.empty())
+            merge_settings.base = data_settings->simple_merge_selector_base;
+
         if (aggressive)
             merge_settings.base = 1;
 

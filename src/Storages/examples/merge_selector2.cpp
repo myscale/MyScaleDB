@@ -22,6 +22,7 @@ int main(int, char **)
     IMergeSelector::PartsRange & parts = partitions.back();
 
     SimpleMergeSelector::Settings settings;
+    settings.base = 2;
     SimpleMergeSelector selector(settings);
 
     ReadBufferFromFileDescriptor in(STDIN_FILENO);
@@ -48,7 +49,7 @@ int main(int, char **)
 
     while (parts.size() > 1)
     {
-        IMergeSelector::PartsRange selected_parts = selector.select(partitions, 100ULL * 1024 * 1024 * 1024);
+        IMergeSelector::PartsRange selected_parts = selector.select(partitions, 5ULL * 1024 * 1024 * 1024);
 
         if (selected_parts.empty())
         {

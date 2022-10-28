@@ -116,10 +116,10 @@
 #include <filesystem>
 #include <unordered_set>
 
-#include "config.h"
-#include <Common/config_version.h>
-#include <VectorIndex/Autotuner.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
+
+#include "config.h"
+#include "config_version.h"
 
 
 #if defined(OS_LINUX)
@@ -632,7 +632,7 @@ std::string getHexDigest(const std::string & content)
 {
     std::string salt_content = content + STRING_SUFFIX_FOR_DIGEST;
     unsigned char digest[33];
-    SHA256((unsigned char *)salt_content.c_str(), salt_content.size(), digest);
+    SHA256(reinterpret_cast<const uint8_t *>(salt_content.c_str()), salt_content.size(), digest);
     int len = 32;
     std::string result;
     result.resize(2 * len);
@@ -691,9 +691,14 @@ std::string getLicenseFileContent(const std::string & path)
     return license_file_content;
 }
 
-std::string getLicenseClusterName(const std::string & path)
+std::string getLicenseClusterName(const std::string & path, Poco::Logger * log)
 {
     std::string license_file_content = getLicenseFileContent(path);
+    if (license_file_content.empty())
+    {
+        LOG_ERROR(log, "License is empty, server will be terminated");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Empty license");
+    }
     size_t begin_idx_cluster_tag = license_file_content.find(CLUSTER_NAME_TAG);
     size_t end_idx_cluster_tag = license_file_content.rfind(CLUSTER_NAME_TAG);
     std::string cluster_name = license_file_content.substr(
@@ -721,9 +726,9 @@ bool checkLicenseSign(const std::string & public_key_path, const std::string & c
         LOG_DEBUG(log, "Read license public key failed.");
         return false;
     }
-    char digest[33];
-    SHA256((unsigned char *)content.c_str(), content.size(), (unsigned char *)digest);
-    int result = RSA_verify(NID_sha256, (unsigned char *)digest, 32, (unsigned char *)sign.c_str(), sign.size(), rsa_public_key);
+    uint8_t digest[33];
+    SHA256(reinterpret_cast<const uint8_t *>(content.c_str()), content.size(), digest);
+    int result = RSA_verify(NID_sha256, digest, 32, reinterpret_cast<const uint8_t *>(sign.c_str()), sign.size(), rsa_public_key);
     RSA_free(rsa_public_key);
     return result == 1;
 }
@@ -819,7 +824,7 @@ void checkLicenseImpl(
         }
 
         std::string cpu_count_xml = license_doc->getNodeByPath(CPU_COUNT_PATH_XML)->innerText();
-        if (cpu_count <= std::stoi(cpu_count_xml))
+        if (cpu_count <= std::stoul(cpu_count_xml))
         {
             LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, cpu_count_xml);
         }
@@ -891,7 +896,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
         zkutil::ZooKeeperPtr zookeeper = context->getZooKeeper();
         zookeeper->tryCreate(LICENSE_CLUSTERS_PREFIX, "", zkutil::CreateMode::Persistent);
 
-        std::string cluster_name = getLicenseClusterName(license_file_path);
+        std::string cluster_name = getLicenseClusterName(license_file_path, log);
 
         std::string cluster_prefix = fmt::format(fmt::runtime(LICENSE_CLUSTER_PREFIX_FMT), cluster_name);
         std::string license_content_path = fmt::format(fmt::runtime(LICENSE_CONTENT_FMT), cluster_name);
@@ -899,7 +904,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
 
         if (zookeeper->exists(cluster_prefix))
         {
-            LOG_INFO(log, "Checking license in cluster mode.");
+            LOG_INFO(log, "Checking license in cluster mode, cluster_prefix is {}", cluster_prefix);
 
             std::string active_node_path = fmt::format(fmt::runtime(ACTIVE_NODE_FMT), cluster_name, machine_id_digest);
             std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
@@ -951,7 +956,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
         }
         else
         {
-            LOG_INFO(log, "Init license data in Zookeeper.");
+            LOG_INFO(log, "Init license data in Zookeeper, cluster_prefix is {}", cluster_prefix);
 
             std::string license_file_content = getLicenseFileContent(license_file_path);
 
@@ -1033,7 +1038,23 @@ void offlineInstanceInZookeeper(const Poco::Util::AbstractConfiguration & config
 
         std::string license_file_path_prefix = getLicenseFilePathPrefix(config);
         std::string license_file_path = license_file_path_prefix + LICENSE_FILE_NAME;
-        std::string cluster_name = getLicenseClusterName(license_file_path);
+        std::string cluster_name = "";
+        try
+        {
+            cluster_name = getLicenseClusterName(license_file_path, log);
+        }
+        catch (const Exception & e)
+        {
+            if (e.code() == ErrorCodes::LICENSE_ERROR)
+            {
+                zookeeper->tryRemove(LICENSE_CLUSTERS_PREFIX);
+            }
+            return;
+        }
+        catch (...)
+        {
+            return;
+        }        
 
         std::string machine_id_digest = getMachineIDDigest();
         std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
@@ -1405,6 +1426,8 @@ try
         }
 
         async_metrics.stop();
+
+        global_context->flushAllVectorIndexWillUnload();
 
         /** Ask to cancel background jobs all table engines,
           *  and also query_log.
@@ -1804,6 +1827,12 @@ try
         fs::create_directories(user_scripts_path);
     }
 
+    {
+        std::string vector_index_cache_path = config().getString("vector_index_cache_path", path / "vector_index_cache/");
+        global_context->setVectorIndexCachePath(vector_index_cache_path);
+        fs::create_directories(vector_index_cache_path);
+    }
+
     /// top_level_domains_lists
     {
         const std::string & top_level_domains_path = config().getString("top_level_domains_path", path / "top_level_domains/");
@@ -1907,6 +1936,18 @@ try
         LOG_INFO(log, "Lowered index mark cache size to {} because the system has limited RAM", formatReadableSizeWithBinarySuffix(uncompressed_cache_size));
     }
     global_context->setIndexMarkCache(index_mark_cache_policy, index_mark_cache_size, index_mark_cache_size_ratio);
+
+    /// Size of cache for primary key, default size is 64 MB.
+    size_t primary_key_cache_size = server_settings.primary_key_cache_size;
+    if (!primary_key_cache_size)
+        LOG_ERROR(log, "When the size of the primary key cache is 0, the primary key cache will be disabled.");
+    if (primary_key_cache_size > max_cache_size)
+    {
+        primary_key_cache_size = max_cache_size;
+        LOG_INFO(log, "Primary key cache size was lowered to {} because the system has low amount of memory",
+            formatReadableSizeWithBinarySuffix(mark_cache_size));
+    }
+    global_context->setPrimaryKeyCacheSize(primary_key_cache_size);
 
     size_t mmap_cache_size = server_settings.mmap_cache_size;
     if (mmap_cache_size > max_cache_size)
@@ -2524,13 +2565,6 @@ try
     const size_t vector_index_cache_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_ratio);
     LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", vector_index_cache_max_size_in_bytes);
     VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size_in_bytes);
-
-    size_t max_permitted = global_context->getConfigRef().getUInt64("serialized_index_segment_max_byte", 500000000);
-    LOG_INFO(log, "max size of serializaed segment of vector index set to {}", max_permitted);
-    VectorIndex::VectorSegmentExecutor::setSerializeSegmentSize(max_permitted);
-    ///To turn on autotuner, turn it on here.
-//        VectorIndex::Autotuner* tuner = VectorIndex::Autotuner::getInstance();
-//        tuner->start();
 
     LOG_INFO(log, "Loading metadata from {}", path_str);
 

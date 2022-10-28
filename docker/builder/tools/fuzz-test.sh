@@ -33,7 +33,7 @@ clean
 # In ci test, all CK installation packages are from 
 # ${PROJECT_PATH}/artifacts path. we can copy the file that we want
 cp -rfv ${PROJECT_PATH}/artifacts/clickhouse-*.deb $WORKPATH/packages/.;
-cp -rf ${PROJECT_PATH}/docker/mqdb $WORKPATH/tests/.
+cp -rfL ${PROJECT_PATH}/programs/server $WORKPATH/tests/.
 rsync -a --exclude='integration/*' ${PROJECT_PATH}/tests $WORKPATH/tests/.
 
 echo "***Test environment initialization completed***"

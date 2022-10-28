@@ -145,6 +145,8 @@ public:
 
     std::string getName() const override { return "Replicated" + merging_params.getModeName() + "MergeTree"; }
 
+    bool isShutdown() const override { return shutdown_called.load(); }
+
     bool supportsParallelInsert() const override { return true; }
     bool supportsReplication() const override { return true; }
     bool supportsDeduplication() const override { return true; }
@@ -387,6 +389,8 @@ private:
     friend class MergeFromLogEntryTask;
     friend class MutateFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
+    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class ReplicatedVectorIndexTask;
 
     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
     using LogEntry = ReplicatedMergeTreeLogEntry;
@@ -519,6 +523,15 @@ private:
     PartMovesBetweenShardsOrchestrator part_moves_between_shards_orchestrator;
 
     std::atomic<bool> initialization_done{false};
+
+    /// A task that update cached vector index info to zookeeper.
+    BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
+
+    /// Whether vector indices were initially loaded on table start-up
+    std::atomic<bool> vidx_init_loaded{false};
+
+    /// It is acquired when writing vector index info to zookeeper
+    std::mutex vidx_info_mutex;
 
     /// True if replica was created for existing table with fixed granularity
     bool other_replicas_fixed_granularity = false;
@@ -982,8 +995,22 @@ private:
     /// If no connection to zookeeper, shutdown, readonly -- return std::nullopt.
     /// If somebody already holding the lock -- return unlocked ZeroCopyLock object (not std::nullopt).
     std::optional<ZeroCopyLock> tryCreateZeroCopyExclusiveLock(const String & part_name, const DiskPtr & disk) override;
-    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
-    /// mutable std::mutex currently_processing_in_background_mutex;
+
+    /// Create log entry for vector index build.
+    CreateMergeEntryResult createLogEntryToBuildVIndexForPart(
+        const String & part_name,
+        const String & vector_index_name,
+        int32_t log_version,
+        bool slow_mode = false);
+
+    /// Get cached vector index info from zookeeper and load into cache.
+    void loadVectorIndexFromZookeeper();
+
+    /// Update cached vector index info to zookeeper periodically.
+    void updateVectorIndexInfoZookeeper();
+
+    /// Write vector index info to zookeeper.
+    void writeVectorIndexInfoToZookeeper(bool force = false);
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

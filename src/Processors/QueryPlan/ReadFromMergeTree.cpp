@@ -569,6 +569,16 @@ Pipe ReadFromMergeTree::readInOrder(
             context);
     }
 
+    for (auto & col : required_columns)
+    {
+        LOG_DEBUG(log, "[createSource] required_column: {}", col);
+    }
+
+    for (auto & col : virt_column_names)
+    {
+        LOG_DEBUG(log, "[createSource] virt_column: {}", col);
+    }
+
     /// Actually it means that parallel reading from replicas enabled
     /// and we have to collaborate with initiator.
     /// In this case we won't set approximate rows, because it will be accounted multiple times.
@@ -2001,7 +2011,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
         LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
         for (auto & part : result.parts_with_ranges)
         {
-            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr);
+            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
             /// no prewhere info, first perform vector scan
             if (!prewhere_info)
             {
@@ -2013,8 +2023,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
         if (!prewhere_info)
         {
             LOG_DEBUG(log, "[initializePipeline] try to filter mark ranges by vector scan result");
-            filterMarkRangesByVectorScanResult(result.parts_with_ranges,
-                                               vector_scan_info_ptr->vector_scan_descs, context->getSettingsRef());
+            filterPartsMarkRangesByVectorScanResult(result.parts_with_ranges, vector_scan_info_ptr->vector_scan_descs);
 
             size_t sum_marks = 0;
             size_t sum_ranges = 0;

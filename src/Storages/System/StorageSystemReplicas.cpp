@@ -244,6 +244,7 @@ StorageSystemReplicas::StorageSystemReplicas(const StorageID & table_id_)
         { "lost_part_count",                      std::make_shared<DataTypeUInt64>(),   "The number of data parts lost in the table by all replicas in total since table creation. Value is persisted in ClickHouse Keeper and can only increase."},
         { "last_queue_update_exception",          std::make_shared<DataTypeString>(),   "When the queue contains broken entries. Especially important when ClickHouse breaks backward compatibility between versions and log entries written by newer versions aren't parseable by old versions."},
         { "zookeeper_exception",                  std::make_shared<DataTypeString>(),   "The last exception message, got if the error happened when fetching the info from ClickHouse Keeper."},
+        { "is_data_synced",                       std::make_shared<DataTypeUInt8>(),    "True if data is synced."},
         { "replica_is_active",                    std::make_shared<DataTypeMap>(std::make_shared<DataTypeString>(), std::make_shared<DataTypeUInt8>()), "Map between replica name and is replica active."}
     };
 
@@ -568,6 +569,7 @@ Chunk SystemReplicasSource::generate()
         res_columns[col_num++]->insert(status.lost_part_count);
         res_columns[col_num++]->insert(status.last_queue_update_exception);
         res_columns[col_num++]->insert(status.zookeeper_exception);
+        res_columns[col_num++]->insert(status.is_data_synced);
 
         Map replica_is_active_values;
         for (const auto & [name, is_active] : status.replica_is_active)

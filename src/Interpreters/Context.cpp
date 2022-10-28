@@ -80,6 +80,7 @@
 #include <Interpreters/InterserverCredentials.h>
 #include <Interpreters/Cluster.h>
 #include <Interpreters/InterserverIOHandler.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -123,6 +124,7 @@
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <base/defines.h>
+#include <VectorIndex/CacheManager.h>
 
 
 namespace fs = std::filesystem;
@@ -257,6 +259,7 @@ struct ContextSharedPart : boost::noncopyable
     String filesystem_cache_user TSA_GUARDED_BY(mutex);
     ConfigurationPtr config TSA_GUARDED_BY(mutex);           /// Global configuration settings.
     String tmp_path TSA_GUARDED_BY(mutex);                   /// Path to the temporary files that occur when processing the request.
+    String vector_index_cache_path;                          /// Path to the directory of vector index cache for MSTG disk mode
 
     /// All temporary files that occur when processing the requests accounted here.
     /// Child scopes for more fine-grained accounting are created per user/query/etc.
@@ -300,6 +303,7 @@ struct ContextSharedPart : boost::noncopyable
     mutable OnceFlag resource_manager_initialized;
     mutable ResourceManagerPtr resource_manager;
     mutable UncompressedCachePtr uncompressed_cache TSA_GUARDED_BY(mutex);            /// The cache of decompressed blocks.
+    size_t primary_key_cache_size;                          /// The cache size of primary key, default 64 MB.
     mutable MarkCachePtr mark_cache TSA_GUARDED_BY(mutex);                            /// Cache of marks in compressed files.
     mutable OnceFlag load_marks_threadpool_initialized;
     mutable std::unique_ptr<ThreadPool> load_marks_threadpool;  /// Threadpool for loading marks cache.
@@ -1029,6 +1033,12 @@ String Context::getFilesystemCacheUser() const
     return shared->filesystem_cache_user;
 }
 
+String Context::getVectorIndexCachePath() const
+{
+    auto lock = getLock();
+    return shared->vector_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -1128,6 +1138,9 @@ void Context::setPath(const String & path)
 
     if (shared->user_scripts_path.empty())
         shared->user_scripts_path = shared->path + "user_scripts/";
+    
+    if (shared->vector_index_cache_path.empty())
+        shared->vector_index_cache_path = shared->path + "vector_index_cache/";
 }
 
 void Context::setFilesystemCachesPath(const String & path)
@@ -1300,6 +1313,12 @@ void Context::setUserScriptsPath(const String & path)
 {
     std::lock_guard lock(shared->mutex);
     shared->user_scripts_path = path;
+}
+
+void Context::setVectorIndexCachePath(const String & path)
+{
+    auto lock = getLock();
+    shared->vector_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const
@@ -3111,6 +3130,11 @@ ThreadPool & Context::getLoadMarksThreadpool() const
     return *shared->load_marks_threadpool;
 }
 
+void Context::flushAllVectorIndexWillUnload() const
+{
+    VectorIndex::CacheManager::flushWillUnloadLog();
+}
+
 void Context::setIndexUncompressedCache(const String & cache_policy, size_t max_size_in_bytes, double size_ratio)
 {
     std::lock_guard lock(shared->mutex);
@@ -3144,6 +3168,19 @@ void Context::clearIndexUncompressedCache() const
 
     if (shared->index_uncompressed_cache)
         shared->index_uncompressed_cache->clear();
+}
+
+void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
+{
+    auto lock = getLock();
+    shared->primary_key_cache_size = max_size_in_bytes;
+}
+
+
+size_t Context::getPrimaryKeyCacheSize() const
+{
+    auto lock = getLock();
+    return shared->primary_key_cache_size;
 }
 
 void Context::setIndexMarkCache(const String & cache_policy, size_t max_cache_size_in_bytes, double size_ratio)
@@ -4251,6 +4288,19 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
     return shared->system_logs->transactions_info_log;
 }
 
+std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
+{
+    auto lock = getLock();
+
+    if (!shared->system_logs)
+        return {};
+    
+    if (part_database == DatabaseCatalog::SYSTEM_DATABASE)
+        return {};
+
+    return shared->system_logs->vector_index_event_log;
+}
+
 
 std::shared_ptr<ProcessorsProfileLog> Context::getProcessorsProfileLog() const
 {
@@ -4780,6 +4830,10 @@ void Context::shutdown() TSA_NO_THREAD_SAFETY_ANALYSIS
     shared->shutdown();
 }
 
+bool Context::isShutdown() const
+{
+    return shared->shutdown_called;
+}
 
 Context::ApplicationType Context::getApplicationType() const
 {
@@ -5621,6 +5675,21 @@ ReadSettings Context::getReadSettings() const
     res.mmap_cache = getMMappedFileCache().get();
 
     return res;
+}
+
+std::optional<VectorScanDescription> Context::getVecScanDescription() const
+{
+    return vector_scan_description;
+}
+
+void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+{
+    vector_scan_description = vec_scan_desc;
+}
+
+void Context::resetVecScanDescription() const
+{
+    vector_scan_description.reset();
 }
 
 WriteSettings Context::getWriteSettings() const

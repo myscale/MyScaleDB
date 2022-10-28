@@ -19,7 +19,6 @@
 #include <VectorIndex/Dataset.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/Status.h>
-#include <VectorIndex/VectorIndexFactory.h>
 #include <Common/logger_useful.h>
 #include <VectorIndex/MergeUtils.h>
 #include <Common/ActionBlocker.h>
@@ -41,18 +40,25 @@ class MergeTreeVectorIndexBuilderUpdater
 public:
     MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_);
 
-    /// select parts which vector_indexed not containing index names to build vector index
-    VectorIndexEntryPtr selectPartsToBuildVectorIndex(
+    /// Check backgroud pool size for vector index if new log entry is allowed.
+    /// True if allowed to select part for build vector index.
+    bool allowToBuildVectorIndex(const bool slow_mode, const size_t builds_count_in_queue) const;
+
+    /// select a part which vector_indexed not containing index names to build vector index
+    VectorIndexEntryPtr selectPartToBuildVectorIndex(
         const StorageMetadataPtr & metadata_snapshot,
-        size_t max_parts_number,
-        bool select_slow_mode_parts,
+        bool select_slow_mode_part,
         const MergeTreeData::DataParts & currently_merging_mutating_parts = {});
 
     void removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot);
 
     /// handle build index task
-    BuildVectorIndexStatus
-    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode);
+    BuildVectorIndexStatus buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool slow_mode);
+
+    /** Is used to cancel all index builds. On cancel() call all currently running actions will throw exception soon.
+      * All new attempts to start a vector index build will throw an exception until all 'LockHolder' objects will be destroyed.
+      */
+    ActionBlocker builds_blocker;
 
 private:
     class Counter
@@ -70,6 +76,7 @@ private:
     Counter counter;
 
     MergeTreeData & data;
+    bool is_replicated = false; /// Mark if replicated
     //const size_t background_pool_size;
 
     Poco::Logger * log;
@@ -77,10 +84,10 @@ private:
     time_t last_cache_check_time = 0;
 
     BuildVectorIndexStatus
-    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode);
+    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool slow_mode);
 
     /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
-    bool moveVectorIndexFilesToFuturePart(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part);
+    bool moveVectorIndexFilesToFuturePartAndCache(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part, const VectorIndex::VectorSegmentExecutorPtr vec_executor);
 
     void undoBuildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part);
 

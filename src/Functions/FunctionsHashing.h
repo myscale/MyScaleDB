@@ -15,7 +15,7 @@
 #pragma clang diagnostic ignored "-Wextra-semi-stmt"
 #pragma clang diagnostic ignored "-Wimplicit-fallthrough"
 #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
-#include "../../contrib/xxHash/xxhash.h"
+#include <xxhash.h>
 
 #include <Common/SipHash.h>
 #include <Common/typeid_cast.h>

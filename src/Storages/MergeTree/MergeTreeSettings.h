@@ -220,11 +220,17 @@ struct Settings;
     \
     /** Vector Search */ \
     M(Bool, enable_primary_key_cache, false, "Enable primary key cache when do vector search.", 0) \
-    M(Bool, enable_decouple_vector_index_rebuild_from_merge, true, "Enable use old vector indices during merge.", 0) \
-    M(Bool, distable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
+    M(Bool, enable_decouple_vector_index, true, "Enable use old vector indices during merge and vector search on decoupled data part.", 0) \
+    M(Bool, disable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
     M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
-    M(String, vector_search_metric_type, "L2", "default metric type for brute force search", 0) \
+    M(UInt64, min_bytes_to_build_vector_index, 0, "The minimum byte size of data part to build vector index", 0) \
+    M(String, vector_search_metric_type, "L2", "Default metric type for brute force search", 0) \
     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
+    M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
+    M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
+    M(Bool, vector_index_parameter_check, true, "Enable checking for vector index parameters and vector search parameters.", 0) \
+    M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
+    M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
 
 #define MAKE_OBSOLETE_MERGE_TREE_SETTING(M, TYPE, NAME, DEFAULT) \
     M(TYPE, NAME, DEFAULT, "Obsolete setting, does nothing.", BaseSettingsHelpers::Flags::OBSOLETE)

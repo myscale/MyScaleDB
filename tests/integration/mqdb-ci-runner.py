@@ -13,6 +13,7 @@ import subprocess
 import signal
 import time
 import zlib  # for crc32
+import pathlib
 
 RUNNER_FILE_PATH = os.path.split(os.path.realpath(__file__))[0]
 TEST_NAME_FORMAT = f"test_[a-zA-Z0-9]*/"
@@ -38,6 +39,18 @@ def ret_multi_directory(back_num: int,
     for i in range(back_num):
         ret_path = os.path.split(ret_path)[0]
     return ret_path
+
+def replace_build_dir(args, old_path) -> os.path:
+    replace_dir = args.build_dir
+    if replace_dir == 'build':
+        return old_path
+    path = pathlib.Path(old_path)
+    index = path.parts.index('programs')
+    new_prefix_path = os.path.join(get_project_path(),replace_dir)
+    new_path = pathlib.Path(new_prefix_path).joinpath(*path.parts[index:])
+    logging.info("this is new path {}".format(new_path))
+    return new_path
+    
         
 def check_args_and_update_paths(args):
     if not os.path.isabs(args.clickhouse_root):
@@ -45,14 +58,14 @@ def check_args_and_update_paths(args):
     else:
         CLICKHOUSE_ROOT = args.clickhouse_root
     
-    if not os.path.isabs(args.odbc_bridge_binary):
-        args.odbc_bridge_binary = os.path.abspath(args.odbc_bridge_binary)
+    args.odbc_bridge_binary = replace_build_dir(args, os.path.abspath(args.odbc_bridge_binary))
 
-    if not os.path.isabs(args.library_bridge_binary):
-        args.library_bridge_binary = os.path.abspath(args.library_bridge_binary)
+    args.library_bridge_binary = replace_build_dir(args, os.path.abspath(args.library_bridge_binary))
     
     if not os.path.isabs(args.base_configs_dir):
         args.base_configs_dir = os.path.abspath(args.base_configs_dir)
+        
+    args.binary = replace_build_dir(args, os.path.abspath(args.binary))
         
     if not os.path.isabs(args.cases_dir):
         args.cases_dir = os.path.abspath(args.cases_dir)
@@ -143,6 +156,10 @@ def get_test_list(args):
 if __name__ == "__main__":
     # logging.basicConfig(level=logging.INFO, format='%(asctime)s [ %(process)d ] %(levelname)s : %(message)s (%(filename)s:%(lineno)s, %(funcName)s)')
     parser = argparse.ArgumentParser(description="MQDB integration tests runner")
+    parser.add_argument(
+        "--build-dir",
+        default="build",
+        help="ck compiled build directory, such as \"build-debug\", \"build-debug-asan\", default build dir \"build\"")
     parser.add_argument(
         "--binary",
         default=os.environ.get("CLICKHOUSE_TESTS_SERVER_BIN_PATH", 
@@ -292,7 +309,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--runner-image-version",
-        default="1.0",
+        default="1.6",
         help="MQDB Integration tests runner version")
     
     parser.add_argument(
@@ -376,7 +393,7 @@ if __name__ == "__main__":
         --volume={src_dir}/Server/grpc_protos:/ClickHouse/src/Server/grpc_protos \
         {dockerd_internal_volume} \
         -e DOCKER_CLIENT_TIMEOUT=300 -e COMPOSE_HTTP_TIMEOUT=600 \
-        -e XTABLES_LOCKFILE=/run/host/xtables.lock \
+        -e XTABLES_LOCKFILE=/run/host/xtables.lock -e PYTHONUNBUFFERED=1 \
         -e PYTEST_OPTS='{parallel} {opts} {tests_list} -vvv' {img} {command}".format(
             net=net,
             bin=args.binary,
@@ -396,7 +413,7 @@ if __name__ == "__main__":
     
     try:
         logging.info("Trying to kill container {} if it's already running".format(CONTAINER_NAME))
-        subprocess.check_call(f'docker kill $(docker ps -a -q --filter name={CONTAINER_NAME} --format="{{{{.ID}}}}")', shell=True)
+        subprocess.check_call(f'docker rm $(docker ps -a -q --filter name={CONTAINER_NAME} --format="{{{{.ID}}}}")', shell=True)
         logging.info("Container killed")
     except:
         logging.info("Nothing to kill")

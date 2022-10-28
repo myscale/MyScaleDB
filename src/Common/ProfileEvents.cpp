@@ -819,6 +819,9 @@ The server successfully detected this situation and will download merged part fr
     \
     M(VectorIndexBuildFailEvents, "Number of vector index build fail events.") \
     M(VectorIndexLoadFailEvents, "Number of vector index load fail events") \
+    M(CreatedLogEntryForBuildVIndex, "Successfully created log entry to build vector index for part in ReplicatedMergeTree.") \
+    M(NotCreatedLogEntryForBuildVIndex, \
+      "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
 
 #ifdef APPLY_FOR_EXTERNAL_EVENTS
     #define APPLY_FOR_EVENTS(M) APPLY_FOR_BUILTIN_EVENTS(M) APPLY_FOR_EXTERNAL_EVENTS(M)

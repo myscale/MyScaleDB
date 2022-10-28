@@ -64,7 +64,6 @@ private:
 
     std::shared_ptr<MutationContext> ctx;
     ExecutableTaskPtr task;
-
 };
 
 [[ maybe_unused]] static MergeTreeData::MutableDataPartPtr executeHere(MutateTaskPtr task)

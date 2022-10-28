@@ -37,6 +37,7 @@ private:
     template<typename T, typename U> friend class BaseMergePredicate;
     friend class MergeFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
+    friend class ReplicatedVectorIndexTask;
 
     using LogEntry = ReplicatedMergeTreeLogEntry;
     using LogEntryPtr = LogEntry::Ptr;
@@ -59,6 +60,8 @@ private:
         size_t merges = 0;
         size_t mutations = 0;
         size_t merges_with_ttl = 0;
+        size_t vector_index_builds = 0; /// fast vector index build
+        size_t slow_vector_index_builds = 0; /// slow vector index build
     };
 
     /// To calculate min_unprocessed_insert_time, max_processed_insert_time, for which the replica lag is calculated.
@@ -531,6 +534,11 @@ public:
     bool canMergeTwoParts(const MergeTreeData::DataPartPtr & left,
                           const MergeTreeData::DataPartPtr & right,
                           PreformattedMessage & out_reason) const;
+
+    /// Can we merge two parts with vector index?
+    static bool canMergeWithVectorIndex(const MergeTreeData::DataPartPtr & left,
+                                 const MergeTreeData::DataPartPtr & right,
+                                 String * out_reason = nullptr);
 
     /// Can we assign a merge this part and some other part?
     /// For example a merge of a part and itself is needed for TTL.

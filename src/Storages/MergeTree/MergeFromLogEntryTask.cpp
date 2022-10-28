@@ -428,6 +428,7 @@ bool MergeFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrite
     ProfileEvents::increment(ProfileEvents::ReplicatedPartMerges);
 
     write_part_log({});
+    storage.vidx_info_updating_task->schedule();
     StorageReplicatedMergeTree::incrementMergedPartsProfileEvent(part->getType());
 
     return true;

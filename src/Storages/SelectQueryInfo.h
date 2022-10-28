@@ -84,6 +84,8 @@ struct PrewhereInfo
 
         return prewhere_info;
     }
+
+    mutable std::mutex prewhere_info_mutex;
 };
 
 /// Helper struct to store all the information about the filter expression.

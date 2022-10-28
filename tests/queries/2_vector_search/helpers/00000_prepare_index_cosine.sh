@@ -2,7 +2,7 @@
 
 INDEX_TYPE=$1
 clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 4)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 4) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0, vector_index_parameter_check=0;"
 clickhouse-client -q "INSERT INTO test_vector select number, [number / pow(number, 2), number / pow(number, 2), number / pow(number, 2), sqrt(1 - 3 * pow(number / pow(number, 2), 2))] from numbers(4000) where number > 1;"
 clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE $INDEX_TYPE('metric_type=cosine');"
 status="NotBuilt"

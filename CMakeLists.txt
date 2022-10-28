@@ -12,8 +12,6 @@ if(FAIL_ON_UNSUPPORTED_OPTIONS_COMBINATION)
 else()
     set(RECONFIGURE_MESSAGE_LEVEL WARNING)
 endif()
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error -Wno-shorten-64-to-32 -Wno-implicit-float-conversion")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error -Wno-shorten-64-to-32 -Wno-implicit-float-conversion")
 
 include (cmake/arch.cmake)
 include (cmake/target.cmake)

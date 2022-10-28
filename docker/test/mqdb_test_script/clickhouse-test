@@ -173,6 +173,8 @@ def get_zookeeper_session_uptime(args):
 
 
 def need_retry(args, stdout, stderr, total_time):
+    if args.force_retry:
+        return True
     if args.check_zookeeper_session:
         # Sometimes we may get unexpected exception like "Replica is readonly" or "Shutdown is called for table"
         # instead of "Session expired" or "Connection loss"
@@ -305,7 +307,7 @@ class FailureReason(enum.Enum):
     SERVER_DIED = "server died"
     EXIT_CODE = "return code: "
     STDERR = "having stderror: "
-    EXCEPTION = "having having exception in stdout: "
+    EXCEPTION = "having exception in stdout: "
     RESULT_DIFF = "result differs with reference: "
     TOO_LONG = "Test runs too long (> 60s). Make it faster."
 
@@ -582,7 +584,7 @@ class TestCase:
             pattern = '{test} > {stdout} 2> {stderr}'
 
         if self.ext == '.sql':
-            pattern = "{client} --send_logs_level={logs_level} --testmode --multiquery {options} < " + pattern
+            pattern = "{client} --send_logs_level={logs_level} --multiquery {options} < " + pattern
 
         command = pattern.format(**params)
 
@@ -837,9 +839,8 @@ class TestSuite:
         if 'stateful' in suite and args.no_stateful:
             print("Won't run stateful tests because they were manually disabled.")
             return None
-        # if 'vector_search' in suite or 'bugs' in suite or 'ai_core_support' in suite or 'vector' in suite:
         if 'bugs' in suite or 'ai_core_support' in suite:
-            print("only run statless test")
+            print("Won't run bugs and ai_core_support test")
             return None
         return TestSuite(args, suite_path, suite_tmp_path, suite)
 
@@ -1329,6 +1330,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-stateful', action='store_true', help='Disable all stateful tests')
     parser.add_argument('--skip', nargs='+', help="Skip these tests")
     parser.add_argument('--sequential', nargs='+', help="Run these tests sequentially even if --parallel specified")
+    parser.add_argument('--force-retry', action='store_true', help='Force retry for fail test')
     parser.add_argument('--no-long', action='store_true', dest='no_long', help='Do not run long tests')
     parser.add_argument('--client-option', nargs='+', help='Specify additional client argument')
     parser.add_argument('--print-time', action='store_true', dest='print_time', help='Print test time')

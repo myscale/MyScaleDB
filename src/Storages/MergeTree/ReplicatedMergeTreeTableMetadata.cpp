@@ -504,6 +504,9 @@ StorageInMemoryMetadata ReplicatedMergeTreeTableMetadata::Diff::getNewMetadata(c
         if (skip_indices_changed)
             new_metadata.secondary_indices = IndicesDescription::parse(new_skip_indices, new_columns, context);
 
+        if (vector_indices_changed)
+            new_metadata.vec_indices = VectorIndicesDescription::parse(new_vector_indices, new_columns);
+
         if (constraints_changed)
             new_metadata.constraints = ConstraintsDescription::parse(new_constraints);
 

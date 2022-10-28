@@ -30,6 +30,11 @@ namespace ErrorCodes
     extern const int CORRUPTED_DATA;
 }
 
+VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage)
+{
+    return storage.volume;
+}
+
 DataPartStorageOnDiskBase::DataPartStorageOnDiskBase(VolumePtr volume_, std::string root_path_, std::string part_dir_)
     : volume(std::move(volume_)), root_path(std::move(root_path_)), part_dir(std::move(part_dir_))
 {

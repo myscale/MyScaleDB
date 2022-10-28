@@ -26,6 +26,7 @@
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeDataPartBuilder.h>
 #include <Storages/ColumnsDescription.h>
+#include <Storages/VectorIndexInfo.h>
 #include <Interpreters/TransactionVersionMetadata.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <Storages/MergeTree/IPartMetadataManager.h>
@@ -363,7 +364,55 @@ public:
     Checksums checksums;
 
     /// TODO: move vector index related structures out of data part class
+    mutable std::mutex vector_indexed_mutex;
     mutable std::set<String> vector_indexed;
+
+    mutable std::mutex vector_indices_mutex;
+    mutable std::unordered_map<String, VectorIndexInfoPtr> vector_indices;
+    mutable std::unordered_map<String, VectorIndexInfoPtrList> vector_indices_decoupled;
+
+    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const;
+
+    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part = false) const;
+
+    void onVectorIndexBuildStart(const String & index_name) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+            it->second->onBuildStart();
+    }
+
+    void onVectorIndexBuildFinish(const String & index_name, const VectorIndex::Metadata * metadata = nullptr) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+        {
+            it->second->onBuildFinish(true);
+            if (metadata)
+                it->second->setIndexSize(*metadata);
+        }
+    }
+
+    void onVectorIndexBuildError(const String & index_name, const String & err_msg) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+            it->second->onError(err_msg);
+    }
+
+    void removeVectorIndexInfo(const String & index_name) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        vector_indices.erase(index_name);
+        vector_indices_decoupled.erase(index_name);
+    }
+
+    void removeAllVectorIndexInfo() const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        vector_indices.clear();
+        vector_indices_decoupled.clear();
+    }
 
     /// Used for decouple part
     mutable std::mutex decouple_mutex;
@@ -387,25 +436,49 @@ public:
 
     mutable bool small_part = false;
 
+    /// Avoid conflict between move build vector index and mutate
     /// Used when vector index built is finished but the active part is under mutating.
-    /// Note: this is for StorageMergeTree engine only.
-    /// Move index files to active part OR new active part after mutation to pick up.
-    /// TODO: Remove when build vector index is handled by log entry for replciated MergeTree
+    /// Or mutate happens when vector index files are moving.
     mutable std::mutex vector_index_move_and_mutate_mutex;
+
+    /// This variable works with vector_index_move_and_mutate_mutex due to mutate is executed in multiple threads via excutable tasks.
     mutable bool part_is_currently_mutating = false;
 
     mutable bool lightweight_delete_mask_updated = false;
 
-    bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
+    bool containAnyVectorIndex() const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        return !vector_indexed.empty();
+    }
 
-    bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
+    bool containVectorIndex(String index_name, String col_name) const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        return vector_indexed.contains(index_name + "_" + col_name);
+    }
 
-    void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
+    void addVectorIndex(String index_name) const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        vector_indexed.insert(index_name);
+    }
 
-    /// remove specified vector index from part, both disk and metadata.
-    void removeVectorIndex(const String & index_name, const String & col_name) const;
+    void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
+
+    /// Force decoupled vector index owned by current part expired
+    void forceAllDecoupledVectorIndexExpire() const;
+
+    /// Cancel loading of all decoupled vector index owned by current part
+    void CancelLoadingVIOfInactivePart() const;
+
+    /// Remove specified vector index from part, both disk and metadata.
+    /// If skip_decouple, skip the vector index of old part in decouple part.
+    void removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple = false) const;
 
     void setBuildError() const { vector_index_build_error = true; }
+
+    void resetBuildError() const { vector_index_build_error = false; }
 
     void setTuned() const { vector_index_tuned = true; }
 
@@ -418,21 +491,33 @@ public:
 
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
 
-    bool getPartIsMutating() const
+   /// lock part for move build vector index, avoid concurrently mutation
+   /// new_value is true when called in mutate task, false when called in MutatePlainMergeTreeTask and MutateFromLogENtryTask.
+   /// This is used to avoid move happens during mutate task and renameTempPartAndReplace when source part is active.
+    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate(const bool & new_value = false) const
     {
-        std::lock_guard lock(vector_index_move_and_mutate_mutex);
-        return part_is_currently_mutating;
+        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
+        part_is_currently_mutating = new_value;
+        return lock;
     }
 
-    void setPartIsMutating(const bool & new_value) const
+    std::unique_lock<std::mutex> tryLockPartForIndexMoveAndMutate() const
     {
-        std::lock_guard lock(vector_index_move_and_mutate_mutex);
-        part_is_currently_mutating = new_value;
+        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
+
+        /// Mutate is executed in mutiple threads, lock is required in mutate task and before renameTempPartAndReplace
+        /// Build index files cannot be moved during mutate.
+        if (lock.owns_lock() && part_is_currently_mutating)
+            lock.unlock();
+
+        return lock;
     }
+
+    void convertIndexFileForUpgrade(const String & full_relative_path) const;
 
     /// Read vector_index_ready file to initialize vector_indxed if exists.
     /// Otherwise, try to read merged vector_index_ready file if exists.
-    void loadVectorIndexMetadata() const;
+    void loadVectorIndexMetadata(bool need_convert_index_file = false) const;
 
     bool containRowIdsMaps() const
     {
@@ -554,7 +639,8 @@ public:
 
     /// Return set of metadata file names without checksums. For example,
     /// columns.txt or checksums.txt itself.
-    NameSet getFileNamesWithoutChecksums() const;
+    /// Mutations should not skip vector index files.
+    NameSet getFileNamesWithoutChecksums(bool include_vector_files = true) const;
 
     /// File with compression codec name which was used to compress part columns
     /// by default. Some columns may have their own compression codecs, but
@@ -576,6 +662,8 @@ public:
 
 
     static constexpr auto METADATA_VERSION_FILE_NAME = "metadata_version.txt";
+
+    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx2";
 
     /// One of part files which is used to check how many references (I'd like
     /// to say hardlinks, but it will confuse even more) we have for the part

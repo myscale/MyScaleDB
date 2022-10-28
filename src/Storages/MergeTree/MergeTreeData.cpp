@@ -32,6 +32,7 @@
 #include <Compression/CompressedReadBuffer.h>
 #include <Core/QueryProcessingStage.h>
 #include <DataTypes/DataTypeCustomSimpleAggregateFunction.h>
+#include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeEnum.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -57,6 +58,7 @@
 #include <Interpreters/PartLog.h>
 #include <Interpreters/TransactionLog.h>
 #include <Interpreters/TreeRewriter.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/inplaceBlockConversions.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIndexDeclaration.h>
@@ -85,6 +87,7 @@
 #include <Storages/MergeTree/checkDataPart.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/MergeTree/ActiveDataPartSet.h>
+#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/StorageMergeTree.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/VirtualColumnUtils.h>
@@ -115,10 +118,8 @@
 #include <azure/core/http/http.hpp>
 #endif
 
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/VectorIndexCommon.h>
-#include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/MergeUtils.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -2433,7 +2434,7 @@ void MergeTreeData::clearTemporaryIndexBuildDirectories()
             {
                 if (disk->isDirectory(it->path()))
                 {
-                    LOG_INFO(log, "Removing temporary directory for vector index build {}", full_path);
+                    LOG_DEBUG(log, "Removing temporary directory for vector index build {}", full_path);
                     disk->removeRecursive(it->path());
                 }
             }
@@ -2676,26 +2677,107 @@ size_t MergeTreeData::clearOldPartsFromFilesystem(bool force)
     return parts_to_remove.size();
 }
 
-void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
+void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool force)
 {
     StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
-    if(meta_snapshot->getVectorIndices().empty())
+    if (meta_snapshot->getVectorIndices().empty())
         return;
 
-    /// TODO: how to remove old parts' caches
     for (const auto & part : parts)
     {
-        for(const auto & vec_index_desc : meta_snapshot->vec_indices)
+        for (const auto & vec_index_desc : meta_snapshot->vec_indices)
         {
             auto segment_ids
                 = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
             for (auto & segment_id : segment_ids)
-                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+            {
+                auto cache_key = segment_id.getCacheKey();
+
+                if (force)
+                {
+                    VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
+                }
+                else
+                {
+                    /// Try to remove old parts' caches.
+                    LOG_DEBUG(log, "Try to remove old part' cache, part name: {}.", part->info.getPartNameV1());
+
+                    bool can_do_clear = false;
+                    {
+                        auto lock = tryLockParts();
+                        if (lock.owns_lock() == true)
+                            can_do_clear = true;
+                    }
+
+                    if (can_do_clear)
+                    {
+                        auto active_part = getActiveContainingPart(cache_key.part_name_no_mutation);
+                        auto [clear_cache, _] = needClearVectorIndexCacheAndFile(active_part, meta_snapshot, cache_key);
+                        if (clear_cache)
+                            VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
+                    }
+                }
+            }
         }
     }
 }
 
-void MergeTreeData::regularClearCachedIndex(const DataPartsVector & parts)
+std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
+    const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const
+{
+    if (!part)
+    {
+        return std::make_pair(true, false);
+    }
+
+    bool existed = false;
+    auto old_part_info = MergeTreePartInfo::fromPartName(cache_key.part_name_no_mutation, format_version);
+    bool is_same = part->info == old_part_info;
+    bool is_mutate = !is_same && part->info.getPartNameWithoutMutation() == cache_key.part_name_no_mutation;
+
+    /// Check vector index in cache is same as metadata
+    if (!metadata_snapshot->vec_indices.empty())
+    {
+        /// Currently only one vector index is allowed.
+        const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+
+        LOG_DEBUG(
+            log,
+            "Cache: {} {}, metadata: {} {}",
+            cache_key.vector_index_name,
+            cache_key.column_name,
+            vec_index_desc.name,
+            vec_index_desc.column);
+
+        /// Further check the part status, decouple part or VPart with single vector index
+        if (cache_key.vector_index_name == vec_index_desc.name && cache_key.column_name == vec_index_desc.column
+            && ((is_same && part->containVectorIndex(cache_key.vector_index_name, cache_key.column_name))
+                || (!is_same && (part->containRowIdsMaps() || is_mutate))))
+        {
+            existed = true;
+        }
+    }
+
+    return std::make_pair(!existed, is_same);
+}
+
+void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
+{
+    if (!canUsePrimaryKeyCache())
+        return;
+
+    for (const auto & part : parts)
+    {
+        /// Temporary part does not present in primary key cache
+        if (part->getState() == DataPartState::Temporary)
+            continue;
+
+        const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
+        PrimaryKeyCacheManager::getMgr().removeFromPKCache(cache_key);
+    }
+}
+
+void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
     //    for (const auto & part : parts)
@@ -2754,8 +2836,33 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     if (parts_to_remove.empty())
         return;
 
-    /// The old part's vector index is reused by new part, no need to clear cache.
-    /// clearCachedVectorIndex(parts_to_remove);
+    clearPrimaryKeyCache(parts_to_remove);
+    clearCachedVectorIndex(parts_to_remove, false);
+
+    auto table_id = getStorageID();
+    VectorIndexEventLogElement vec_elem;
+    bool detach = getContext()->isDetachQuery();
+    auto vec_event_log = getContext()->getVectorIndexEventLog(table_id.database_name);
+    if (vec_event_log && !detach)
+    {
+        vec_elem.event_type = VectorIndexEventLogElement::CLEARED;
+        const auto time_now = std::chrono::system_clock::now();
+        vec_elem.event_time = timeInSeconds(time_now);
+        vec_elem.event_time_microseconds = timeInMicroseconds(time_now);
+        vec_elem.database_name = table_id.database_name;
+        vec_elem.table_name = table_id.table_name;
+    }
+    for (const DataPartPtr & part : parts_to_remove)
+    {
+        if (vec_event_log &&
+            part->containAnyVectorIndex() &&
+            vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+        {
+            vec_elem.part_name = part->name;
+            vec_elem.partition_id = part->info.partition_id;
+            vec_event_log->add(vec_elem);
+        }
+    }
 
     const auto settings = getSettings();
 
@@ -6901,7 +7008,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(DataPartsLock 
 
                     part->remove_time.store(0, std::memory_order_relaxed); /// The part will be removed without waiting for old_parts_lifetime seconds.
                     data.modifyPartState(part, DataPartState::Outdated);
-                    part->cancelBuild();
+                    /// part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
                 }
                 else
                 {
@@ -6917,6 +7024,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(DataPartsLock 
                         reduce_rows += covered_part->rows_count;
 
                         data.modifyPartState(covered_part, DataPartState::Outdated);
+                        /// covered_part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
                         data.removePartContributionToColumnAndSecondaryIndexSizes(covered_part);
                     }
 
@@ -8779,6 +8887,146 @@ void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool 
         vector_index_status.latest_failed_part_info = part_info;
         vector_index_status.latest_fail_reason = exception_message;
     }
+}
+
+void MergeTreeData::resetVectorIndexBuildStatus()
+{
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    vector_index_status.clear();
+
+    /// Reset vector_index_build_error after add vector index
+    /// In cases when a new vector index is added after an old vector index was dropped.
+    for (const auto & part : getDataPartsForInternalUsage())
+    {
+        if (part->vector_index_build_error)
+            part->resetBuildError();
+    }
+}
+
+void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)
+{
+    auto metadata = getInMemoryMetadata();
+
+    std::unordered_map<String, VectorIndexDescription> v_index_map;
+    for (const auto & v_index : metadata.getVectorIndices())
+    {
+        v_index_map.try_emplace(v_index.name, v_index);
+    }
+
+    std::unordered_set<String> valid_vidx;
+    std::unordered_set<String> invalid_vidx;
+    std::vector<VectorIndex::CacheKey> loaded_keys;
+
+    Search::IndexType index_type;
+    Search::Metric metric;
+    Search::Parameters index_params;
+    size_t dim;
+
+    String metric_str = getSettings()->vector_search_metric_type;
+    size_t min_bytes_to_build_vector_index = getSettings()->min_bytes_to_build_vector_index;
+    int default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
+
+    for (const auto & data_part : getDataPartsVectorForInternalUsage())
+    {
+        String part_name = data_part->info.getPartNameWithoutMutation();
+
+        if (!vector_indices.contains(part_name))
+            continue;
+
+        for (const auto & vidx_name : vector_indices[part_name])
+        {
+            if (invalid_vidx.contains(vidx_name) || !v_index_map.contains(vidx_name))
+                continue;
+
+            auto v_index = v_index_map[vidx_name];
+            dim = metadata.getConstraints().getArrayLengthByColumnName(v_index.column).first;
+
+            if (!valid_vidx.contains(vidx_name))
+            {
+                /// check vector index metadata
+                auto col_and_type = metadata.getColumns().getAllPhysical().tryGetByName(v_index.column);
+                if (!col_and_type)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Vector index column {} not found in metadata", v_index.column);
+                    continue;
+                }
+
+                const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
+                if (!array_type)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Vector index column {} type is not array", v_index.column);
+                    continue;
+                }
+
+                if (dim == 0)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Wrong dimension: 0 for column {}, please check length constraint on the column.", v_index.column);
+                    continue;
+                }
+
+                valid_vidx.insert(vidx_name);
+            }
+
+            if (isShutdown())
+                abortLoadVectorIndex(loaded_keys);
+
+            index_type = VectorIndex::getIndexType(v_index.type);
+
+            if (v_index.parameters && v_index.parameters->has("metric_type"))
+            {
+                metric_str = v_index.parameters->getValue<String>("metric_type");
+            }
+            metric = VectorIndex::getMetric(metric_str);
+
+            index_params = VectorIndex::convertPocoJsonToMap(v_index.parameters);
+            index_params.erase("metric_type");
+
+            /// load vector index into cache
+            for (const auto & segment_id : VectorIndex::getAllSegmentIds(data_part->getDataPartStorage().getFullPath(), data_part, v_index.name, v_index.column))
+            {
+                auto vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+                    segment_id,
+                    index_type,
+                    metric,
+                    dim,
+                    data_part->rows_count,
+                    index_params,
+                    min_bytes_to_build_vector_index,
+                    default_mstg_disk_mode);
+
+                LOG_INFO(log, "Start loading vector index {} in {}", v_index.name, data_part->name);
+                VectorIndex::Status status = vec_executor->load();
+
+                if (status.fine())
+                {
+                    LOG_DEBUG(log, "Loaded vector index {} in {}", v_index.name, data_part->name);
+                    loaded_keys.emplace_back(segment_id.getCacheKey());
+                }
+                else
+                {
+                    LOG_ERROR(
+                        log,
+                        "Failed to load vector index {} in part {}: [{}] {}",
+                        v_index.name,
+                        data_part->name,
+                        status.getCode(),
+                        status.getMessage());
+                }
+            }
+        }
+    }
+
+    if (isShutdown())
+        abortLoadVectorIndex(loaded_keys);
+}
+
+void MergeTreeData::abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys)
+{
+    for (const auto & key : loaded_keys)
+        VectorIndex::VectorSegmentExecutor::removeFromCache(key);
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

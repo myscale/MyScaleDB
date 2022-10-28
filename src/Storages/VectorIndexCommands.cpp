@@ -37,7 +37,7 @@ std::optional<VectorIndexCommand> VectorIndexCommand::parse(ASTAlterCommand * co
         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
         res.column_name = getIdentifierName(command->column);
         res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
-        LOG_DEBUG(log, "add vector index: name: {}, index_type: {}", res.index_name, res.index_type);
+        LOG_DEBUG(log, "Add vector index: name: {}, index_type: {}", res.index_name, res.index_type);
         return res;
     }
     else if (command->type == ASTAlterCommand::DROP_VECTOR_INDEX)
@@ -47,7 +47,7 @@ std::optional<VectorIndexCommand> VectorIndexCommand::parse(ASTAlterCommand * co
         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
         res.column_name = getIdentifierName(command->column);
         res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
-        LOG_DEBUG(log, "drop vector index: name: {}, index_type: {}", res.index_name, res.index_type);
+        LOG_DEBUG(log, "Drop vector index: name: {}, index_type: {}", res.index_name, res.index_type);
         return res;
     }
     else

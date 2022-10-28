@@ -1,0 +1,103 @@
+all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
+0
+0
+0
+0
+0
+0
+all_1_1_0	all_1_1_0	0	vec_ind	LOADED
+--- detach
+--- attach
+all_1_1_0	all_1_1_0	0	vec_ind	BUILT
+--- query
+2	2.69
+3	3.8899999
+1	7.49
+4	11.089999
+0	18.29
+5	24.289999
+6	43.49
+7	68.69
+8	99.89
+9	137.09
+0
+all_1_1_0	all_1_1_0	0	vec_ind	LOADED
+--- drop vector index
+--- add vector index
+all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
+0
+0
+0
+0
+0
+0
+all_1_1_0	all_1_1_0	0	vec_ind	LOADED
+--- truncate
+0
+--- insert
+all_2_2_0	all_2_2_0	0	vec_ind	BUILDING
+0
+0
+0
+0
+0
+0
+all_2_2_0	all_2_2_0	0	vec_ind	LOADED
+--- lightweight delete
+all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
+--- insert
+all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
+all_4_4_0	all_4_4_0	0	vec_ind	BUILDING
+0
+0
+0
+0
+0
+0
+all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
+all_4_4_0	all_4_4_0	0	vec_ind	LOADED
+--- merge
+all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
+all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
+--- query
+2	2.69
+1	7.49
+4	11.089999
+0	18.29
+5	24.289999
+6	43.49
+7	68.69
+8	99.89
+9	137.09
+10	180.29
+0
+all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
+all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
+--- drop table
+0
+--- test auto build after merge
+--- insert part 1
+0
+0
+0
+0
+0
+0
+all_1_1_0	all_1_1_0	0	vec_ind	LOADED
+--- insert part 2
+all_1_1_0	all_1_1_0	0	vec_ind	LOADED
+all_2_2_0	all_2_2_0	0	vec_ind	BUILDING
+0
+0
+0
+0
+0
+0
+--- merge
+0
+0
+0
+0
+0
+0
+0	vec_ind	LOADED

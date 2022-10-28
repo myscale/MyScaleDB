@@ -3,6 +3,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Interpreters/IdentifierSemantic.h>
+#include <Interpreters/TreeRewriter.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
@@ -78,7 +79,7 @@ MergeTreeWhereOptimizer::MergeTreeWhereOptimizer(
     }
 }
 
-void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context) const
+void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context)
 {
     auto & select = select_query_info.query->as<ASTSelectQuery &>();
     if (!select.where() || select.prewhere())
@@ -95,6 +96,10 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.move_primary_key_columns_to_end_of_prewhere = context->getSettingsRef().move_primary_key_columns_to_end_of_prewhere;
     where_optimizer_context.is_final = select.final();
     where_optimizer_context.use_statistics = context->getSettingsRef().allow_statistics_optimize;
+
+    /// Move as much as possible where conditions to prewhere for vector search
+    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->vector_scan_funcs.empty())
+        has_vector_func = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
     RPNBuilderTreeNode node(select.where().get(), tree_context);
@@ -282,7 +287,18 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             return false;
         };
 
-        LOG_DEBUG(log, "[MergeTreeWhereOptimizer] containVectorScanFunc(cond.node): {}", containVectorScanFunc());
+//        bool require_distance_func = false;
+//        for (const auto & col : queried_columns)
+//        {
+//            LOG_DEBUG(log, "Queried column: {}", col);
+//            if (isVectorScanFunc(col))
+//            {
+//                require_distance_func = true;
+//                break;
+//            }
+//        }
+
+        LOG_DEBUG(log, "containVectorScanFunc(cond.node): {}", containVectorScanFunc());
 
         cond.viable =
             !has_invalid_column
@@ -437,7 +453,7 @@ std::optional<MergeTreeWhereOptimizer::OptimizeResult> MergeTreeWhereOptimizer::
         if (!it->viable)
             break;
 
-        if (!where_optimizer_context.move_all_conditions_to_prewhere)
+        if (!where_optimizer_context.move_all_conditions_to_prewhere && !has_vector_func)
         {
             bool moved_enough = false;
             if (total_size_of_queried_columns > 0)

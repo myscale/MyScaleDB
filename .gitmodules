@@ -205,7 +205,7 @@
 	url = https://github.com/ClickHouse/sqlite-amalgamation
 [submodule "contrib/s2geometry"]
 	path = contrib/s2geometry
-	url = https://github.com/ClickHouse/s2geometry
+	url = git@git.moqi.ai:mqdb/s2geometry.git
 [submodule "contrib/bzip2"]
 	path = contrib/bzip2
 	url = https://github.com/ClickHouse/bzip2
@@ -372,9 +372,6 @@
 [submodule "contrib/numactl"]
 	path = contrib/numactl
 	url = https://github.com/ClickHouse/numactl.git
-[submodule "contrib/faiss"]
-	path = contrib/faiss
-	url = git@git.moqi.ai:mqdb/faiss.git
-[submodule "contrib/hnswlib"]
-	path = contrib/hnswlib
-	url = git@git.moqi.ai:mqdb/hnswlib.git
+[submodule "contrib/search-index"]
+	path = contrib/search-index
+	url = git@git.moqi.ai:mqdb/search-index.git

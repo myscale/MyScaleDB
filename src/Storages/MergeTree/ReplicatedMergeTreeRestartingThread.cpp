@@ -150,6 +150,7 @@ bool ReplicatedMergeTreeRestartingThread::runImpl()
     storage.mutations_updating_task->activateAndSchedule();
     storage.mutations_finalizing_task->activateAndSchedule();
     storage.merge_selecting_task->activateAndSchedule();
+    storage.vidx_info_updating_task->activateAndSchedule();
     storage.cleanup_thread.start();
     storage.async_block_ids_cache.start();
     storage.part_check_thread.start();

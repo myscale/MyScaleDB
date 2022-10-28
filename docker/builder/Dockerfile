@@ -1,15 +1,19 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.1 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.1 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.9 bash
 
 FROM ubuntu:20.04
 
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=13
+ENV LLVM_VERSION=15
 ENV CC=clang-${LLVM_VERSION}
 ENV CXX=clang++-${LLVM_VERSION}
 ENV INTEL_ONEAPI_VERSION=2021.4.0
+ENV CCACHE_VERSION=4.7.4
+ENV NFPM_VERSION=2.16.0
+ENV GO_VERSION=1.18.3
 
 RUN apt update && apt install ca-certificates --yes --verbose-versions \
     && sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list \
@@ -18,7 +22,7 @@ RUN apt update && apt install ca-certificates --yes --verbose-versions \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/
 
-RUN apt update \
+RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && apt install ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common --yes --verbose-versions \
     && wget -q -O - https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
     && echo "deb [trusted=yes] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker-ce.list \
@@ -26,10 +30,10 @@ RUN apt update \
     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
     && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
     && wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
-    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
+    && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list ; fi \
     && apt update \
-    && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping --yes --verbose-versions \
-    && apt install git build-essential ccache cmake g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
+    && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
+    && apt install git build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
     && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu libblas-dev liblapack-dev --yes --verbose-versions \
     && apt install \
     llvm-${LLVM_VERSION} \
@@ -55,7 +59,6 @@ RUN apt update \
     && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then apt install intel-oneapi-mkl-${INTEL_ONEAPI_VERSION} intel-oneapi-mkl-devel-${INTEL_ONEAPI_VERSION} --yes --verbose-versions ; fi \
     && ln -s /usr/bin/lld-${LLVM_VERSION} /usr/bin/ld.lld \
     && ln -s /usr/bin/llvm-symbolizer-${LLVM_VERSION} /usr/bin/llvm-symbolizer \
-    && update-ccache-symlinks \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/*
 
@@ -63,6 +66,42 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     && pip install --upgrade cmake numpy clickhouse_driver
 
 RUN mkdir -pv ${WORK_DIRECTORY}
+
+ENV CCACHE_DIR="${WORK_DIRECTORY}/.ccache"
+# ENV CCACHE_CONFIGPATH="${WORK_DIRECTORY}/.ccache/ccache.conf"
+RUN curl -Lo /tmp/ccache.tar.gz https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}.tar.gz \
+    && mkdir -p /tmp/ccache \
+    && tar xf /tmp/ccache.tar.gz -C /tmp/ccache --strip-components=1 \
+    && mkdir -p /tmp/ccache/build \
+    && cd /tmp/ccache/build \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_SYSCONFDIR=/etc .. \
+    && make \
+    && make install \
+    && mkdir -p ${CCACHE_DIR} \ 
+    && cd /tmp \
+    && rm -fr /tmp/ccache \
+    && rm -f /tmp/ccache.tar.gz
+
+ADD update-ccache-symlinks /usr/sbin/update-ccache-symlinks
+
+# Rust toolchain and libraries
+ENV RUSTUP_HOME=${WORK_DIRECTORY}/rustup
+ENV CARGO_HOME=${WORK_DIRECTORY}/cargo
+ENV PATH="${WORK_DIRECTORY}/cargo/env:${PATH}"
+ENV PATH="${WORK_DIRECTORY}/cargo/bin:${PATH}"
+ENV SCCACHE_DIR="${WORK_DIRECTORY}/.sccache"
+# ENV SCCACHE_CONF="${WORK_DIRECTORY}/.sccache/sccache.conf"
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y \
+    && chmod 777 -R ${WORK_DIRECTORY}/rustup  \
+    && chmod 777 -R ${WORK_DIRECTORY}/cargo  \
+    && rustup target add aarch64-unknown-linux-gnu \
+    && rustup target add x86_64-apple-darwin \
+    && rustup target add x86_64-unknown-freebsd \
+    && rustup target add aarch64-apple-darwin \
+    && rustup target add powerpc64le-unknown-linux-gnu \
+    && cargo install sccache \
+    && mkdir -p ${SCCACHE_DIR} \
+    && rm -fr ${CARGO_HOME}/registry
 
 # libtapi is required to support .tbh format from recent MacOS SDKs
 RUN git clone --depth 1 https://github.com/tpoechtrager/apple-libtapi.git \
@@ -104,14 +143,12 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test --yes \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/*
 
-ARG NFPM_VERSION=2.16.0
 RUN curl -Lo /tmp/nfpm.deb "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${TARGETARCH:-amd64}.deb" \
     && dpkg -i /tmp/nfpm.deb \
     && rm -fv /tmp/nfpm.deb
 
 RUN curl -Lo /usr/bin/mc https://dl.min.io/client/mc/release/linux-${TARGETARCH:-amd64}/mc && chmod +x /usr/bin/mc
 
-ARG GO_VERSION=1.18.3
 RUN curl -Lo /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH:-amd64}.tar.gz" \
     && tar -xzf /tmp/go.tgz -C /usr/local/ \
     && rm -fv /tmp/go.tgz
@@ -122,7 +159,16 @@ ENV GOCACHE=${WORK_DIRECTORY}/go/.cache
 
 RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTORY}
 
-ADD ccache.conf /etc/ccache.conf
+
+RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
+    && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
+    && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
+    && apt update \
+    && apt install mono-complete --yes \
+    && apt clean \
+    && rm -rfv /var/lib/apt/lists/*
+
+RUN pip install --upgrade clickhouse_driver
 
 ADD ssh /root/.ssh
 RUN chmod -R 600 /root/.ssh

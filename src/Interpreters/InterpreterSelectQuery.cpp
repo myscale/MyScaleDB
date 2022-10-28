@@ -657,9 +657,6 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             StorageView::replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot, view->isParameterizedView());
         }
 
-        /// LOG_DEBUG(log, "[analyze] before analyze: source header: {}, required_result_column_names size: {}",
-        ///     source_header.getNamesAndTypesList().toString(), required_result_column_names.size());
-
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, storage_snapshot),
@@ -686,6 +683,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             && query.where() && !query.prewhere()
             && !query.hasJoin()) /// Join may produce rows with nulls or default values, it's difficult to analyze if they affected or not.
         {
+            LOG_DEBUG(log, "[analyze] try to move to prewhere");
             /// PREWHERE optimization: transfer some condition from WHERE to PREWHERE if enabled and viable
             if (const auto & column_sizes = storage->getColumnSizes(); !column_sizes.empty())
             {
@@ -2016,7 +2014,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                 /// We must do projection after DISTINCT because projection may remove some columns.
                 executeProjection(query_plan, expressions.final_projection);
             }
-            LOG_DEBUG(log, "[executeImpl] after execute projection, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
+            // LOG_DEBUG(log, "[executeImpl] after execute projection, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
             /// Extremes are calculated before LIMIT, but after LIMIT BY. This is Ok.
             executeExtremes(query_plan);
@@ -2531,12 +2529,19 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         ASTPtr subquery = extractTableExpression(query, 0);
         if (!subquery)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Subquery expected");
+        
+        /// If there is vector scan in the outer query and main table is subquery, save the vector scan description to subquery.
+        if (query_analyzer->hasVectorScan())
+            context->setVecScanDescription(query_analyzer->vectorScanDescs().front());
 
         interpreter_subquery = std::make_unique<InterpreterSelectWithUnionQuery>(
             subquery, getSubqueryContext(context),
             options.copy().subquery().noModify(), required_columns);
 
         interpreter_subquery->addStorageLimits(storage_limits);
+
+        if (query_analyzer->hasVectorScan())
+            context->resetVecScanDescription();
 
         if (query_analyzer->hasAggregation())
             interpreter_subquery->ignoreWithTotals();

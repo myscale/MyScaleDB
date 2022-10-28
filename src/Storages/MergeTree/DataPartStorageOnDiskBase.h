@@ -117,6 +117,10 @@ public:
 
 protected:
     friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class MergeTreeVectorScanManager;
+    friend class IMergeTreeDataPart;
+    friend VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage);
+
     DiskPtr getDisk() const;
 
     DataPartStorageOnDiskBase(VolumePtr volume_, std::string root_path_, std::string part_dir_, DiskTransactionPtr transaction_);

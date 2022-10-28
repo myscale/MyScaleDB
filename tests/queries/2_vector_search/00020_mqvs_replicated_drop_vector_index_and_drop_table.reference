@@ -1,0 +1,7 @@
+-- Test drop index not blocked by concurently buiding vector index
+test_drop_replica_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	InProgress
+0
+-- Empty result, no vector index v1 after drop index
+0
+-- Test drop table can interrupt building vector index, not blocked by it
+test_drop_replica_table	v2	HNSWPQ	v2 vector TYPE HNSWPQ	InProgress

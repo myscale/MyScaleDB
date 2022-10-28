@@ -481,6 +481,8 @@ def get_zookeeper_session_uptime(args):
 
 
 def need_retry(args, stdout, stderr, total_time):
+    if args.force_retry:
+        return True
     if args.check_zookeeper_session:
         # Sometimes we may get unexpected exception like "Replica is readonly" or "Shutdown is called for table"
         # instead of "Session expired" or "Connection loss"
@@ -3264,6 +3266,11 @@ def parse_args():
         "--sequential",
         nargs="+",
         help="Run these tests sequentially even if --parallel specified",
+    )
+    parser.add_argument(
+        "--force-retry", 
+        action='store_true', 
+        help='Force retry for fail test',
     )
     parser.add_argument(
         "--no-long", action="store_true", dest="no_long", help="Do not run long tests"

@@ -196,6 +196,24 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
+    
+    if with_sanitizer == 'memory':
+        cmake["-DENABLE_EMBEDDED_COMPILER"] = "OFF"
+        cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
+        cmake["-DENABLE_CLICKHOUSE_SERVER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_CLIENT"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_FORMAT"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_LOCAL"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_COMPRESSOR"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_COPIER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_EXTRACT_FROM_CONFIG"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_ODBC_BRIDGE"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_LIBRARY_BRIDGE"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_OBFUSCATOR"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_INSTALL"] = "ON"
     # else:
     #     cmake["-DSANITIZE"] = "''"
 
@@ -213,8 +231,10 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
         cmake["-DCMAKE_AUTOGEN_VERBOSE"] = "ON"
 
         if build_type in ["Release", "RelWithDebInfo"]:
-            cmake["-DSPLIT_DEBUG_SYMBOLS"] = "ON"
-            cmake["-DBUILD_STANDALONE_KEEPER"] = "ON"
+            if build_type not in ["RelWithDebInfo"]:
+                cmake["-DSPLIT_DEBUG_SYMBOLS"] = "ON"
+            if with_sanitizer == '':
+                cmake["-DBUILD_STANDALONE_KEEPER"] = "ON"
 
     return cmake
 
@@ -249,7 +269,6 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
     target_os, target_arch = arch.split("-", maxsplit=1)
 
     warp = [
-        'PATH="/usr/lib/ccache:$PATH"',
         'LD_LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LD_LIBRARY_PATH}'
     ]
 
@@ -264,7 +283,10 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
     cmd = "rm -fv CMakeCache.txt"
     command(cmd, shell=True, cwd=BUILD_DIRECTORY)
 
-    cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=ON"
+    if "-DSANITIZE" in cmake.keys() and cmake["-DSANITIZE"] == "address":
+        cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=OFF"
+    else:
+        cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=ON"
     for k, v in cmake.items():
         logging.debug("CMAKE: %s = %s", k, v)
         cmd += f" {k}={v}"
@@ -395,9 +417,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compiler",
         choices=(
-            "clang-13",
-            "clang-14",
             "clang-15",
+            "clang-16",
         ),
         default="clang-15",
     )
@@ -543,9 +564,10 @@ if __name__ == "__main__":
         run_docker_builder(image, True, args.ccache, args.output, options)
         exit(0)
 
-    build_diagnostics(args.arch, args.name)
+    # build_diagnostics(args.arch, args.name)
 
     cmake = prepare_build(args.compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
 
     build(args.arch, args.build_jobs, cmake)
+    ccache_show_stats()
     package(args.name, args.arch, args.package, args.with_sanitizer, args.build_type, args.output)

@@ -28,7 +28,7 @@ function download
     do
         echo  $dataset_name
         if [[ ! -f "db0/user_files/test_some_expr_matches.values" ]]; then
-            ../s3downloader --url-prefix "https://mqdb-release.moqi.com.cn/datasets" --dataset-names $dataset_name --clickhouse-data-path db0
+            ../s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" --dataset-names $dataset_name --clickhouse-data-path db0
         fi
     done
 

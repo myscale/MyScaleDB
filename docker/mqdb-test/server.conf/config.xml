@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <clickhouse>
     <logger>
-        <level>trace</level>
+        <level>information</level>
         <log>/var/log/clickhouse-server/clickhouse-server.log</log>
         <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
         <size>1000M</size>

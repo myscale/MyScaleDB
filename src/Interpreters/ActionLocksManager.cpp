@@ -20,6 +20,7 @@ namespace ActionLocks
     extern const StorageActionBlockType PullReplicationLog = 8;
     extern const StorageActionBlockType Cleanup = 9;
     extern const StorageActionBlockType ViewRefresh = 10;
+    extern const StorageActionBlockType PartsBuildIndex = 11; /// Action lock for vector index build
 }
 
 

@@ -1,5 +1,6 @@
 #include <memory>
 #include <optional>
+#include <Interpreters/Context.h>
 
 #include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 
@@ -8,59 +9,50 @@ namespace DB
 
 
 PrimaryKeyCacheManager::PrimaryKeyCacheManager(size_t max_size)
-: cache_ex("LRU", max_size)
+    : cache_ex(max_size), log(&Poco::Logger::get("PrimaryKeyCacheManager"))
 {
+    LOG_INFO(log, "PrimaryKeyCache size limit is: {}", max_size);
 }
 
 
-void PrimaryKeyCacheManager::setPartPkCache(String part_name, Columns columns)
+void PrimaryKeyCacheManager::setPartPkCache(String cache_key, Columns columns)
 {
+    LOG_INFO(log, "PrimaryKeyCache put cache_key={}", cache_key);
+
     /// type of clickhouse LRUCache's value must be std::shard_ptr
-    /// too rigid
+    std::shared_ptr<Columns> cols_ptr = std::make_shared<Columns>(columns);
 
-    Columns *cols = new Columns(columns.size());
-    for (size_t i = 0; i < columns.size(); ++i)
-    {
-        (*cols)[i] = columns[i];
-    }
-
-    std::shared_ptr<Columns> cols_ptr;
-    cols_ptr.reset(cols);
-
-    cache_ex.set(part_name, cols_ptr);
+    cache_ex.set(cache_key, cols_ptr);
 }
 
 
-std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String part_name)
+std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String cache_key)
 {
-    std::shared_ptr<Columns> v = cache_ex.get(part_name);
-    if (v == nullptr)
-    {
+    std::shared_ptr<Columns> pk_cache = cache_ex.get(cache_key);
+    if (!pk_cache)
         return std::nullopt;
-    }
-    else
-    {
-        return {*v};
-    }
+
+    return *pk_cache;
+}
+
+void PrimaryKeyCacheManager::removeFromPKCache(const String & cache_key)
+{
+    return cache_ex.remove(cache_key);
 }
 
 
-bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & kd)
+bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & primary_key)
 {
-    size_t n = kd.data_types.size();
-    if (n != 1)
-    {
+    if (primary_key.data_types.size() != 1)
         return false;
-    }
-    String type_name = kd.data_types[0]->getName();
-    return type_name == "UInt32" || type_name == "UInt64";
+
+    return primary_key.data_types[0]->isValueRepresentedByNumber();
 }
 
 
 PrimaryKeyCacheManager & PrimaryKeyCacheManager::getMgr()
 {
-    constexpr size_t MaxSize = static_cast<size_t>(1) << 30;
-    static PrimaryKeyCacheManager mgr(MaxSize);
+    static PrimaryKeyCacheManager mgr(Context::getGlobalContextInstance()->getPrimaryKeyCacheSize());
     return mgr;
 }
 

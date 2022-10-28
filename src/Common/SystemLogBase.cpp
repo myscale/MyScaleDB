@@ -19,6 +19,7 @@
 #include <Interpreters/AsynchronousInsertLog.h>
 #include <Interpreters/BackupLog.h>
 #include <IO/S3/BlobStorageLogWriter.h>
+#include <Interpreters/VectorIndexEventLog.h>
 
 #include <Common/MemoryTrackerBlockerInThread.h>
 #include <Common/SystemLogBase.h>

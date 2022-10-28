@@ -499,10 +499,11 @@ def test_ttl_empty_parts(started_cluster):
     assert not node2.contains_in_log(error_msg)
 
 
-@pytest.mark.parametrize(
-    ("node_left", "node_right", "num_run"),
-    [(node1, node2, 0), (node3, node4, 1), (node5, node6, 2)],
-)
+# @pytest.mark.parametrize(
+#     ("node_left", "node_right", "num_run"),
+#     [(node1, node2, 0), (node3, node4, 1), (node5, node6, 2)],
+# )
+@pytest.mark.skip(reason="using clickhouse official image, does not support openmp")
 def test_ttl_compatibility(started_cluster, node_left, node_right, num_run):
     table = f"test_ttl_compatibility_{node_left.name}_{node_right.name}_{num_run}"
     for node in [node_left, node_right]:

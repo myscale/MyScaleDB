@@ -2,6 +2,7 @@
 set -e
 
 TEST_NAME=${1:-NONE}
+WITH_SANITIZER=${2}
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
 WORKPATH=$PROJECT_PATH/docker/test/$TEST_NAME/test_output
@@ -65,6 +66,31 @@ function check_stress
     fi
 }
 
+# It only detects sanitizer-related problems and is a temporary solution
+function check_stress_temporary
+{
+    TEST_STATE=$(cat $WORKPATH/test_results.tsv | grep sanitizer | awk '{x=$(NF-1)}END{print x}')
+    cat $WORKPATH/test_results.tsv
+    if [[ "$TEST_STATE" != "OK" ]]; then
+        echo "sanitizer check error, please check the test log"
+        exit 1
+    else
+        echo "test pass"
+    fi
+}
+
+function check_stateles_sanitizer_test
+{
+    TESTS_STATE=$(cat $WORKPATH/check_status.tsv | awk '{print $1}')
+    IS_FINISHED=$(cat $WORKPATH/check_status.tsv | awk '{print $4}')
+    if [ "$TESTS_STATE" == "failure" ] && [ "$IS_FINISHED" == "not" ]; then
+        echo "sanitizer check error, please check the test log"
+        exit 1
+    else
+        echo "test pass"
+    fi
+}
+
 function check_performance
 {
     echo "don't support"
@@ -78,13 +104,18 @@ function check_integration
 if [[ "$TEST_NAME" == "mqdb_run_stateful" ]]; then
     check_stateful
 elif [[ "$TEST_NAME" == "mqdb_run_stateless" ]]; then
-    check_stateless
+    if [ -n "$WITH_SANITIZER" ]; then
+        check_stateles_sanitizer_test
+    else
+        check_stateless
+    fi
 elif [[ "$TEST_NAME" == "mqdb_run_fuzzer" ]]; then
     check_fuzzer
 elif [[ "$TEST_NAME" == "mqdb_run_smoke" ]]; then
     check_smoke
 elif [[ "$TEST_NAME" == "mqdb_run_stress" ]]; then
-    check_stress
+    # check_stress
+    check_stress_temporary
 elif [[ "$TEST_NAME" == "mqdb_run_performance" ]]; then
     check_performance
 elif [[ "$TEST_NAME" == "mqdb_run_integration" ]]; then

@@ -47,6 +47,8 @@ public:
 
     ConstraintsExpressions getExpressions(ContextPtr context, const NamesAndTypesList & source_columns_) const;
 
+    std::pair<UInt64, bool> getArrayLengthByColumnName(const String & column_name) const;
+
     struct AtomId
     {
         size_t group_id;

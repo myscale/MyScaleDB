@@ -25,6 +25,7 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/StorageID.h>
 #include <Interpreters/MergeTreeTransactionHolder.h>
+#include <Interpreters/VectorScanDescription.h>
 #include <Parsers/IAST_fwd.h>
 #include <Server/HTTP/HTTPContext.h>
 #include <Storages/ColumnsDescription.h>
@@ -118,6 +119,7 @@ class ObjectStorageQueueLog;
 class AsynchronousInsertLog;
 class BackupLog;
 class BlobStorageLog;
+class VectorIndexEventLog;
 class IAsynchronousReader;
 class IOUringReader;
 struct MergeTreeSettings;
@@ -455,6 +457,7 @@ protected:
 
     /// A flag, used to distinguish between user query and internal query to a database engine (MaterializedPostgreSQL).
     bool is_internal_query = false;
+    bool is_detach_query = false;
 
     inline static ContextPtr global_context_instance;
 
@@ -473,6 +476,10 @@ protected:
     /// and generate specific filters on the replicas (e.g. when using parallel replicas with sample key)
     /// if we already use a different mode of parallel replicas we want to disable this mode
     bool offset_parallel_replicas_enabled = true;
+
+    /// TODO: will be enhanced similar as scalars.
+    /// Used when vector scan func exists in right joined table
+    mutable std::optional<VectorScanDescription> vector_scan_description;
 
 public:
     /// Some counters for current query execution.
@@ -567,14 +574,12 @@ public:
     String getUserScriptsPath() const;
     String getFilesystemCachesPath() const;
     String getFilesystemCacheUser() const;
+    String getVectorIndexCachePath() const;
 
     /// A list of warnings about server configuration to place in `system.warnings` table.
-    Strings getWarnings() const;
 
     VolumePtr getGlobalTemporaryVolume() const; /// TODO: remove, use `getTempDataOnDisk`
-
     TemporaryDataOnDiskScopePtr getTempDataOnDisk() const;
-    TemporaryDataOnDiskScopePtr getSharedTempDataOnDisk() const;
     void setTempDataOnDisk(TemporaryDataOnDiskScopePtr temp_data_on_disk_);
 
     void setFilesystemCachesPath(const String & path);
@@ -585,6 +590,7 @@ public:
     void setUserFilesPath(const String & path);
     void setDictionariesLibPath(const String & path);
     void setUserScriptsPath(const String & path);
+    void setVectorIndexCachePath(const String & path);
 
     void addWarningMessage(const String & msg) const;
     void addWarningMessageAboutDatabaseOrdinary(const String & database_name) const;
@@ -1054,10 +1060,16 @@ public:
     void clearMarkCache() const;
     ThreadPool & getLoadMarksThreadpool() const;
 
+    void flushAllVectorIndexWillUnload() const;
+
     void setIndexUncompressedCache(const String & cache_policy, size_t max_size_in_bytes, double size_ratio);
     void updateIndexUncompressedCacheConfiguration(const Poco::Util::AbstractConfiguration & config);
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
     void clearIndexUncompressedCache() const;
+
+    /// Primary key cache size limit.
+    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
+    size_t getPrimaryKeyCacheSize() const;
 
     void setIndexMarkCache(const String & cache_policy, size_t max_cache_size_in_bytes, double size_ratio);
     void updateIndexMarkCacheConfiguration(const Poco::Util::AbstractConfiguration & config);
@@ -1155,6 +1167,7 @@ public:
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
     std::shared_ptr<BackupLog> getBackupLog() const;
     std::shared_ptr<BlobStorageLog> getBlobStorageLog() const;
+    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     SystemLogs getSystemLogs() const;
 
@@ -1219,9 +1232,12 @@ public:
     void stopServers(const ServerType & server_type) const;
 
     void shutdown();
+    bool isShutdown() const;
 
     bool isInternalQuery() const { return is_internal_query; }
     void setInternalQuery(bool internal) { is_internal_query = internal; }
+    bool isDetachQuery() const { return  is_detach_query; }
+    void setDetachQuery(bool detach) { is_detach_query = detach; }
 
     ActionLocksManagerPtr getActionLocksManager() const;
 
@@ -1353,6 +1369,11 @@ public:
     PreparedSetsCachePtr getPreparedSetsCache() const;
 
     const ServerSettings & getServerSettings() const;
+
+    /// Used for vector scan functions
+    std::optional<VectorScanDescription> getVecScanDescription() const;
+    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    void resetVecScanDescription() const;
 
 private:
     std::shared_ptr<const SettingsConstraintsAndProfileIDs> getSettingsConstraintsAndCurrentProfilesWithLock() const;

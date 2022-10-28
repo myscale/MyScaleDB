@@ -66,7 +66,7 @@ void prefaultPages([[maybe_unused]] void * buf_, [[maybe_unused]] size_t len_)
 template <bool clear_memory, bool populate>
 void * allocNoTrack(size_t size, size_t alignment)
 {
-    void * buf;
+    void * buf = nullptr; /// Initialize it to avoid warning in memory sanitizer;
 #if USE_GWP_ASAN
     if (unlikely(GWPAsan::shouldSample()))
     {

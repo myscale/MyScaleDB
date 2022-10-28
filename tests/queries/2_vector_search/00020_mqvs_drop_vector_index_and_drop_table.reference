@@ -1,0 +1,8 @@
+test_drop_table	v1	IVFFLAT	v1 vector TYPE IVFFLAT	InProgress
+-- Empty result, no vector index v1
+ok
+-- Create a new vector index v2 with different name and different type
+test_build_index	v2	MSTG	v2 vector TYPE MSTG	Built
+Test drop vector index cancel build MSTG type
+test_drop_table	v1	MSTG	v1 vector TYPE MSTG	InProgress
+Test drop table cancel build MSTG type

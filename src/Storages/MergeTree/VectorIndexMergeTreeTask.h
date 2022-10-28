@@ -35,8 +35,9 @@ public:
         , builder(builder_)
         , task_result_callback(std::forward<Callback>(task_result_callback_))
         , slow_mode(slow_mode_)
+        , log(&Poco::Logger::get("VectorIndexMergeTreeTask"))
     {
-        LOG_INFO(&Poco::Logger::get("VectorIndexMergeTreeTask"), "create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
+        LOG_DEBUG(log, "Create VectorIndexMergeTreeTask for {}, slow mode: {}", vector_index_entry->part_name, slow_mode);
     }
 
     bool executeStep() override;
@@ -58,6 +59,8 @@ private:
     ContextMutablePtr fake_query_context;
 
     bool slow_mode;
+
+    Poco::Logger * log;
 };
 
 }

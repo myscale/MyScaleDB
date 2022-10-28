@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-runner
+  namespace: "CHAOS_NAMESPACE"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaos-runner-role
+rules:
+  - apiGroups:
+      - "chaos-mesh.org"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - "namespaces"
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+  - apiGroups:
+      - clickhouse.altinity.com
+    resources:
+      - clickhouseinstallations
+    verbs:
+      - get
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaos-runner-rolebinding-CHAOS_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaos-runner-role
+subjects:
+  - kind: ServiceAccount
+    name: chaos-runner
+    namespace: "CHAOS_NAMESPACE"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-test-config
+  namespace: "CHAOS_NAMESPACE"
+data:
+  config.yaml: |-
+    # server config
+    server:
+      namespace: "CHAOS_NAMESPACE"
+      base_image: "BASE_IMAGE"
+      upgrade_image: "IMAGE_VERSION"
+      chi_name: chaos-test
+      cluster_name: clickhouse
+      replica: 2
+      port: 8123
+      username: "default"
+      password: ""
+    
+    table_name: "gist1m"
+    build_index_timeout: 1h
+    chaos_timeout: "CHAOS_TIMEOUT"
+    vector_dimension: 960
+    benchmark_parallel: 4
+    prom_host: "http://kube-prometheus-kube-prome-prometheus.monitoring:9090"
+    
+    # queries executed during chaos
+    queries:
+      create_table: "CREATE TABLE gist1m (
+          id UInt32,
+          vector Array(Float32),
+          CONSTRAINT check_length CHECK length(vector) = 960
+      ) ENGINE = MergeTree
+      ORDER BY id"
+    
+      insert_data: "INSERT INTO gist1m SELECT id, vector FROM s3(
+          'https://mqdb-public-1253802058.cos.ap-beijing.myqcloud.com/public/gist_960_1m.parquet',
+          'Parquet',
+          'id Int32, vector Array(Float32)'
+      )"
+    
+      build_index: "ALTER TABLE gist1m ADD VECTOR INDEX vector_idx vector TYPE MSTG('metric_type=IP')"
+      delete_from: "DELETE FROM gist1m WHERE id > 600000 and id <= 800000"
+    
+    # chaos config
+    chaos:
+      fault_interval: 1m
+      faults:
+        # should be the same name as files inside the chaos-mesh folder
+        - name: one-kill-keeper
+          qps_timeout: 30s
+        - name: one-kill
+          qps_timeout: 2m
+        - name: all-kill
+          qps_timeout: 2m
+        - name: one-failure
+          qps_timeout: 5m
+        - name: all-failure
+          qps_timeout: 5m
+        - name: network-partition
+          qps_timeout: 30s
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chaos-test
+  namespace: "CHAOS_NAMESPACE"
+spec:
+  completions: 1
+  backoffLimit: 0
+  template:
+    metadata:
+      name: chaos-test
+      labels:
+        jobgroup: chaos-test
+    spec:
+      serviceAccountName: chaos-runner
+      containers:
+        - name: test
+          image: harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:2.1
+          imagePullPolicy: Always
+          command: ["bash", "run_chaos.sh"]
+          resources:
+            requests:
+              cpu: 1
+              memory: 300Mi
+            limits:
+              cpu: 2
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /home/config.yaml
+              subPath: config.yaml
+              name: config
+      restartPolicy: Never
+      volumes:
+        - name: config
+          configMap:
+            name: chaos-test-config

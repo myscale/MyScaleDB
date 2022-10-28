@@ -46,7 +46,7 @@ namespace
         if (overide_duration > 0)
             conn.aws_role_credential_duration = overide_duration;
         else if (!query.duration_value.isNull())
-            conn.aws_role_credential_duration = query.duration_value.get<UInt32>();
+            conn.aws_role_credential_duration = static_cast<UInt32>(query.duration_value.get<UInt32>());
     }
 }
 
@@ -78,7 +78,7 @@ BlockIO InterpreterCreateConnectionQuery::execute()
         external_id = query.external_id_value.get<String>();
 
     if (!query.duration_value.isNull())
-        duration = query.duration_value.get<UInt32>();
+        duration = static_cast<UInt32>(query.duration_value.get<UInt32>());
 
     if (query.alter)
     {

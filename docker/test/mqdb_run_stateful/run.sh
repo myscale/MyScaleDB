@@ -23,8 +23,13 @@ chmod a+x /usr/bin/clickhouse-test
 
 # install test configs
 /usr/share/clickhouse-test/config/install.sh
+
+azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --debug /azurite_log &
+./setup_minio.sh stateful
+
 rm -rf /etc/clickhouse-server/config.d/listen.xml
 echo '<clickhouse><listen_host>0.0.0.0</listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/listen.xml
+echo '<clickhouse><interserver_listen_host>0.0.0.0</interserver_listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/interserver_listen_host.xml
 
 function start() {
     if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
@@ -46,6 +51,8 @@ function start() {
             --keeper_server.tcp_port 29181 --keeper_server.server_id 3
     fi
 
+    sudo clickhouse start
+
     counter=0
     until clickhouse-client --query "SELECT 1"; do
         if [ "$counter" -gt 120 ]; then
@@ -55,7 +62,6 @@ function start() {
             tail -n1000 /var/log/clickhouse-server/clickhouse-server.log
             break
         fi
-        timeout 120 sudo clickhouse start
         sleep 0.5
         counter=$((counter + 1))
     done
@@ -63,7 +69,7 @@ function start() {
 
 start
 # shellcheck disable=SC2086 # No quotes because I want to split it into words.
-/s3downloader --url-prefix "$DATASETS_URL" --dataset-names $DATASETS
+/s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" --dataset-names $DATASETS
 chmod 777 -R /var/lib/clickhouse
 clickhouse-client --query "SHOW DATABASES"
 
@@ -123,19 +129,30 @@ function run_tests() {
 export -f run_tests
 timeout "$MAX_RUN_TIME" bash -c run_tests || :
 
+echo "Files in current directory"
+ls -la ./
+echo "Files in root directory"
+ls -la /
+
 python3 ./process_functional_tests_result.py || echo -e "failure\tCannot parse results" >/test_output/check_status.tsv
 
-grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server.log || :
-pigz </var/log/clickhouse-server/clickhouse-server.log >/test_output/clickhouse-server.log.gz || :
+sudo clickhouse stop ||:
+
+rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server.log ||:
+
+zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server.log > /test_output/clickhouse-server.log.zst ||:
 mv /var/log/clickhouse-server/stderr.log /test_output/ || :
 if [[ -n "$WITH_COVERAGE" ]] && [[ "$WITH_COVERAGE" -eq 1 ]]; then
-    tar -chf /test_output/clickhouse_coverage.tar.gz /profraw || :
+    tar --zstd -c -h -f /test_output/clickhouse_coverage.tar.zst /profraw ||:
 fi
 if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server1.log || :
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server2.log || :
-    pigz </var/log/clickhouse-server/clickhouse-server1.log >/test_output/clickhouse-server1.log.gz || :
-    pigz </var/log/clickhouse-server/clickhouse-server2.log >/test_output/clickhouse-server2.log.gz || :
-    mv /var/log/clickhouse-server/stderr1.log /test_output/ || :
-    mv /var/log/clickhouse-server/stderr2.log /test_output/ || :
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server1.log ||:
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server2.log ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server1.log > /test_output/clickhouse-server1.log.zst ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server2.log > /test_output/clickhouse-server2.log.zst ||:
+    # FIXME: remove once only github actions will be left
+    rm /var/log/clickhouse-server/clickhouse-server1.log
+    rm /var/log/clickhouse-server/clickhouse-server2.log
+    mv /var/log/clickhouse-server/stderr1.log /test_output/ ||:
+    mv /var/log/clickhouse-server/stderr2.log /test_output/ ||:
 fi

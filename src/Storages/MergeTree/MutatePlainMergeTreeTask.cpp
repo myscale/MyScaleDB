@@ -96,6 +96,9 @@ bool MutatePlainMergeTreeTask::executeStep()
                 if (data_part_storage.hasActiveTransaction())
                     data_part_storage.precommitTransaction();
 
+                /// Data part lock used for vector index move and mutating conflict
+                auto move_mutate_lock = future_part->parts[0]->lockPartForIndexMoveAndMutate();
+
                 MergeTreeData::Transaction transaction(storage, merge_mutate_entry->txn.get());
                 /// FIXME Transactions: it's too optimistic, better to lock parts before starting transaction
                 storage.renameTempPartAndReplace(new_part, transaction);
@@ -105,10 +108,10 @@ bool MutatePlainMergeTreeTask::executeStep()
                 mutate_task->updateProfileEvents();
                 write_part_log({});
 
-                /// Safe here, the source part status is Outdated, vector index move cannot find it.
-                future_part->parts[0]->setPartIsMutating(false);
-
                 /// Update vector index bitmap after mutations with lightweight delete.
+                /// There will be insufficient topk problems, Update the content related to the bitmap in the cache.
+                /// If the cache is being loaded, the delete bitmap in the cache will not be updated normally,
+                /// resulting in insufficient topk returned during subsequent searches.
                 if (new_part->lightweight_delete_mask_updated)
                 {
                    if (new_part->containAnyVectorIndex())

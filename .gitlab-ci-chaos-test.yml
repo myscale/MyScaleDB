@@ -1,0 +1,14 @@
+########## VECTOR-DB ###########
+chaos_test:
+  stage: chaos-test
+  dependencies: ["build_image"]
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stability:1.0
+  tags:
+    - task
+  script:
+    - mkdir -p $HOME/Downloads/
+    - cp $KUBECONFIG_CONTENT $HOME/Downloads/cls-config
+    - TIMEOUT=${JOB_TIMEOUT:-14400}
+    - bash docker/test/mqdb_run_chaos/scripts/run.sh ${JOB_TIMEOUT}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "chaos"' # Trigger pipline during scheduled tasks

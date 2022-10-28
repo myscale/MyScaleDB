@@ -293,11 +293,4 @@ void setIdentifierSpecial(ASTPtr & ast)
             id->semantic->special = true;
 }
 
-void setIdentifierIgnored(ASTPtr & ast)
-{
-    if (ast)
-        if (auto * id = ast->as<ASTIdentifier>())
-            id->ignored = true;
-}
-
 }

@@ -64,6 +64,7 @@
 #include <Interpreters/ProcessList.h>
 #include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/QueryLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/ReplaceQueryParameterVisitor.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -598,6 +599,19 @@ void logExceptionBeforeStart(
 
     /// Log the start of query execution into the table if necessary.
     QueryLogElement elem;
+    VectorIndexEventLogElement vec_elem;
+    auto current_event_type = getQueryWithVectorType(ast);
+    if(current_event_type != VectorIndexEventLogElement::DEFAULT &&
+       current_event_type != VectorIndexEventLogElement::DEFINITION_DROPPED)
+        vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+    vec_elem.part_name = "";
+    vec_elem.partition_id = "";
+    vec_elem.event_time = timeInSeconds(query_end_time);
+    vec_elem.event_time_microseconds = timeInMicroseconds(query_end_time);
+    if (const auto * query_with_table_output = dynamic_cast<const ASTQueryWithTableAndOutput *>(ast.get()))
+    {
+        vec_elem.table_name = query_with_table_output->getTable();
+    }
 
     elem.type = QueryLogElementType::EXCEPTION_BEFORE_START;
     elem.event_time = timeInSeconds(query_end_time);
@@ -607,6 +621,7 @@ void logExceptionBeforeStart(
     elem.query_duration_ms = elapsed_millliseconds;
 
     elem.current_database = context->getCurrentDatabase();
+    vec_elem.database_name = elem.current_database;
     elem.query = query_for_logging;
     elem.normalized_query_hash = normalizedQueryHash(query_for_logging, false);
 
@@ -623,7 +638,9 @@ void logExceptionBeforeStart(
     // We don't calculate databases, tables and columns when the query isn't able to start
 
     elem.exception_code = getCurrentExceptionCode();
+    vec_elem.error_code = getCurrentExceptionCode();
     auto exception_message = getCurrentExceptionMessageAndPattern(/* with_stacktrace */ false);
+    vec_elem.exception = getCurrentExceptionMessage(false);
     elem.exception = std::move(exception_message.text);
     elem.exception_format_string = exception_message.format_string;
     elem.exception_format_string_args = exception_message.format_string_args;
@@ -646,6 +663,10 @@ void logExceptionBeforeStart(
 
     /// Update performance counters before logging to query_log
     CurrentThread::finalizePerformanceCounters();
+
+    if (auto vector_index_event_log = context->getVectorIndexEventLog())
+        if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+            vector_index_event_log->add(vec_elem);
 
     if (settings.log_queries && elem.type >= settings.log_queries_min_type && !settings.log_queries_min_query_duration_ms.totalMilliseconds())
         if (auto query_log = context->getQueryLog())
@@ -709,6 +730,34 @@ void validateAnalyzerSettings(ASTPtr ast, bool context_value)
                 nodes_to_process.push_back(std::move(child));
         }
     }
+}
+
+VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
+{
+    if(ast)
+    {
+        auto * create_query = ast->as<ASTCreateQuery>();
+        auto * alter_query = ast->as<ASTAlterQuery>();
+        if (create_query && 
+            !create_query->attach && 
+            create_query->columns_list && 
+            create_query->columns_list->vec_indices && 
+            !create_query->columns_list->vec_indices->children.empty())
+        {
+            return VectorIndexEventLogElement::DEFINITION_CREATED;
+        }
+        else if (alter_query)
+        {
+            for (const auto & command : alter_query->command_list->children)
+            {
+                if ( command->as<ASTAlterCommand&>().type == ASTAlterCommand::ADD_VECTOR_INDEX )
+                    return VectorIndexEventLogElement::DEFINITION_CREATED;
+                else if (command->as<ASTAlterCommand&>().type == ASTAlterCommand::DROP_VECTOR_INDEX)
+                    return VectorIndexEventLogElement::DEFINITION_DROPPED;
+            }
+        }
+    }
+    return VectorIndexEventLogElement::DEFAULT;
 }
 
 static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
@@ -894,6 +943,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     String query_database;
     String query_table;
 
+    /// Used for atomic insert via HTTP
+    ContextMutablePtr session_context = nullptr;
+
     auto execute_implicit_tcl_query = [implicit_txn_control](const ContextMutablePtr & query_context, ASTTransactionControl::QueryType tcl_type)
     {
         /// Unset the flag on COMMIT and ROLLBACK
@@ -1049,8 +1101,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         {
             if (context->getCurrentTransaction() && settings.throw_on_unsupported_query_inside_transaction)
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts inside transactions are not supported");
-            if (settings.implicit_transaction && settings.throw_on_unsupported_query_inside_transaction)
-                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'implicit_transaction' are not supported");
+            if (settings.atomic_insert && settings.throw_on_unsupported_query_inside_transaction)
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'atomic_insert' are not supported");
 
             /// Let's agree on terminology and say that a mini-INSERT is an asynchronous INSERT
             /// which typically contains not a lot of data inside and a big-INSERT in an INSERT
@@ -1333,7 +1385,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 async_insert);
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem,
+                                    vec_elem,
                                     context,
+                                    session_context,
                                     ast,
                                     query_cache_usage,
                                     internal,

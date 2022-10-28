@@ -51,6 +51,9 @@ public:
     /// Cancel execution. May be called from another thread.
     void cancel();
 
+    /// Used for atomic insert to check if execution is cancelled.
+    bool isCancelled() const { return cancelled; }
+
     /// Cancel processors which only read data from source. May be called from another thread.
     void cancelReading();
 

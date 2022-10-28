@@ -65,8 +65,7 @@ struct ReplicatedMergeTreeLogEntryData
             case ReplicatedMergeTreeLogEntryData::SYNC_PINNED_PART_UUIDS: return "SYNC_PINNED_PART_UUIDS";
             case ReplicatedMergeTreeLogEntryData::CLONE_PART_FROM_SHARD:  return "CLONE_PART_FROM_SHARD";
             case ReplicatedMergeTreeLogEntryData::DROP_PART:  return "DROP_PART";
-            case ReplicatedMergeTreeLogEntryData::BUILD_VECTOR_INDEX:
-                return "BUILD_VECTOR_INDEX";
+            case ReplicatedMergeTreeLogEntryData::BUILD_VECTOR_INDEX:     return "BUILD_VECTOR_INDEX";
             default:
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown log entry type: {}", DB::toString<int>(type));
         }
@@ -178,6 +177,9 @@ struct ReplicatedMergeTreeLogEntryData
 
     /// Used only in tests for permanent fault injection for particular queue entry.
     CopyableAtomic<bool> fault_injected{false};
+
+    /// For build vector index, true for slow mode.
+    bool slow_mode = false;
 
     /// If this MUTATE_PART entry caused by alter(modify/drop) query.
     bool isAlterMutation() const

@@ -53,6 +53,8 @@ private:
     /// Mutex for thread safety
     std::mutex holder_mutex;
 
+    Poco::Logger * log = &Poco::Logger::get("BackgroundJobsAssignee");
+
 public:
     /// In case of ReplicatedMergeTree the first assignee will be responsible for
     /// polling the replication queue and schedule operations according to the LogEntry type

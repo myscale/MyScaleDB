@@ -3,6 +3,7 @@
 #include <Common/logger_useful.h>
 #include <Common/VectorScanUtils.h>
 #include <Interpreters/InDepthNodeVisitor.h>
+#include <Parsers/formatAST.h>
 
 namespace DB
 {
@@ -21,6 +22,7 @@ public:
     struct Data
     {
         const char * assert_no_vector_scan = nullptr;
+        std::unordered_set<String> uniq_names {};
         std::vector<const ASTFunction *> vector_scan_funcs;
     };
 
@@ -56,14 +58,23 @@ public:
 private:
     static void visit(ASTFunction & node, const ASTPtr &, Data & data)
     {
-        // throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "Unknown function");
-        /// Poco::Logger * log = &Poco::Logger::get("GetVectorScanMatcher");
         if (isVectorScanFunc(node.name))
         {
+            auto full_name = getFullName(node);
+            if (data.uniq_names.count(full_name))
+                return;
+
             if (data.assert_no_vector_scan)
-                throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "Vector Scan function {} is found {} in query", node.getColumnName(), String(data.assert_no_vector_scan));
+                throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "Vector Scan function {} is found {} in query", full_name, String(data.assert_no_vector_scan));
             data.vector_scan_funcs.push_back(&node);
+            data.uniq_names.insert(full_name);
         }
+    }
+    static String getFullName(ASTFunction & node)
+    {
+        WriteBufferFromOwnString buf;
+        formatAST(node, buf, false, true);
+        return buf.str();
     }
 };
 

@@ -1457,12 +1457,9 @@
     <!-- Settings to fine-tune MergeTree tables. See documentation in source code, in MergeTreeSettings.h -->
     <!--
     <merge_tree>
-        <!--
         <max_suspicious_broken_parts>5</max_suspicious_broken_parts>
-        -->
-        <enable_primary_key_cache>true</enable_primary_key_cache>
     </merge_tree>
-
+    -->
 
     <!-- Settings to fine-tune ReplicatedMergeTree tables. See documentation in source code, in MergeTreeSettings.h -->
     <!--

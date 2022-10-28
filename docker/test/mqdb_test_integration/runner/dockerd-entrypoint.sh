@@ -2,6 +2,7 @@
 set -e
 
 mkdir -p /etc/docker/
+
 echo '{
     "ipv6": true,
     "fixed-cidr-v6": "fd00::/8",
@@ -12,32 +13,50 @@ echo '{
     "registry-mirrors" : ["http://dockerhub-proxy.dockerhub-proxy-zone:5000"]
 }' | dd of=/etc/docker/daemon.json 2>/dev/null
 
-dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2376 --default-address-pool base=172.17.0.0/12,size=24 &>/var/log/dockerd.log &
+# In case of test hung it is convenient to use pytest --pdb to debug it,
+# and on hung you can simply press Ctrl-C and it will spawn a python pdb,
+# but on SIGINT dockerd will exit, so ignore it to preserve the daemon.
+trap '' INT
+# Binding to an IP address without --tlsverify is deprecated. Startup is intentionally being slowed
+# unless --tls=false or --tlsverify=false is set
+dockerd --host=unix:///var/run/docker.sock --tls=false \
+        --host=tcp://0.0.0.0:2376 \
+        --default-address-pool base=172.17.0.0/12,size=24 \
+        --http-proxy=http://clash.internal.moqi.ai:7890 \
+        --https-proxy=http://clash.internal.moqi.ai:7890 \
+        --no-proxy=localhost,127.0.0.1,172.17.0.0/12,172.16.0.0/12,192.168.0.0/16,harbor.internal.moqi.ai,pypi.tuna.tsinghua.edu.cn \
+        &>/ClickHouse/tests/integration/dockerd.log &
 
-set +e
-reties=0
-while true; do
-    docker info &>/dev/null && break
-    reties=$((reties+1))
-    if [[ $reties -ge 100 ]]; then # 10 sec max
-        echo "Can't start docker daemon, timeout exceeded." >&2
-        exit 1;
-    fi
-    sleep 10
-done
-set -e
+
+function waitDockerSetup
+{
+    set +e
+    reties=0
+    while true; do
+        docker info &>/dev/null && break
+        reties=$((reties+1))
+        if [[ $reties -ge 100 ]]; then # 10 sec max
+            echo "Can't start docker daemon, timeout exceeded." >&2
+            exit 1;
+        fi
+        sleep 10
+    done
+    set -e
+}
+
+waitDockerSetup
 
 # cleanup for retry run if volume is not recreated
 # shellcheck disable=SC2046
 {
-  docker kill $(docker ps -aq) || true
-  docker rm $(docker ps -aq) || true
+  docker ps --all --quiet | xargs --no-run-if-empty docker kill || true
+  docker ps --all --quiet | xargs --no-run-if-empty docker rm || true
 }
 
-USER=shanfengp
-PASSWORD=Psf00401..
+HARBOR_USER=shanfengp
+HARBOR_PASSWORD=Psf00401..
 
-docker login harbor.internal.moqi.ai/mqdb -u $USER -p $PASSWORD
+docker login harbor.internal.moqi.ai/mqdb -u $HARBOR_USER -p $HARBOR_PASSWORD
 
 echo "Start tests"
 export CLICKHOUSE_TESTS_SERVER_BIN_PATH=/clickhouse

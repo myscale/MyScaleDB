@@ -1,0 +1,15 @@
+########## VECTOR-DB ###########
+stability_test:
+  stage: stability
+  dependencies: ["build_image"]
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stability:1.0
+  tags: 
+    - task
+  script:
+    - mkdir -p $HOME/Downloads/
+    - cp $KUBECONFIG_CONTENT $HOME/Downloads/cls-config
+    - TIMEOUT=${STABILITY_TIMEOUT:-259200}
+    - bash docker/test/mqdb_run_stability/run.sh "stability-test" ${TIMEOUT}
+  rules:
+  # [TODO] Add more policy
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "stability"' # Trigger pipline during scheduled tasks

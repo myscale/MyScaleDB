@@ -1155,8 +1155,6 @@ MergeTreeRangeReader::ReadResult MergeTreeRangeReader::startReadingChain(size_t 
                 result.addRows(stream.finalize(result.columns));
                 stream = Stream(ranges.front().begin, ranges.front().end, current_task_last_mark, merge_tree_reader);
                 result.addRange(ranges.front());
-                // LOG_DEBUG(log, "[startReadingChain] range start: {}, end: {}, num rows: {}",
-                //         ranges.front().begin, ranges.front().end, result.num_rows);
                 current_start_mark = ranges.front().begin;
                 current_row_offset = index_granularity->getMarkStartingRow(current_start_mark);
                 ranges.pop_front();

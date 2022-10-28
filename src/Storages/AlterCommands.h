@@ -179,6 +179,9 @@ struct AlterCommand
     /// Is this MODIFY COLUMN MODIFY SETTING or MODIFY COLUMN column with settings declaration)
     bool append_column_setting = false;
 
+    /// For DROP CONSTRAINT on vector index column
+    bool empty_table = false;
+
     static std::optional<AlterCommand> parse(const ASTAlterCommand * command);
 
     void apply(StorageInMemoryMetadata & metadata, ContextPtr context) const;
@@ -245,6 +248,9 @@ public:
 
     /// All commands modify comments only.
     bool isCommentAlter() const;
+
+    /// Used to determine whether the constraint on the vector index column can be dropped.
+    void setTableEmptyFlag(bool is_empty);
 
     /// Return mutation commands which some storages may execute as part of
     /// alter. If alter can be performed as pure metadata update, then result is
