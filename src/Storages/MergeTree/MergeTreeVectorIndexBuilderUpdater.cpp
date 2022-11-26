@@ -468,7 +468,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         size_t total_mask = part->getMarksCount();
 
         auto & index_granularity = part->index_granularity;
-        Columns result;
 
         /// process data block by block
         while (num_rows_read < part->rows_count)
@@ -480,8 +479,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             empty_ids.clear();
             size_t remaining_size = part->rows_count - num_rows_read;
             size_t max_read_row = std::min(remaining_size, read_block_rows_num);
-            result.resize(cols.size());
 
+            Columns result(cols.size());
             size_t num_rows = reader->readRows(current_mask, 0, continue_read, max_read_row, result);
 
             continue_read = true;
@@ -562,8 +561,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             vec_data = std::make_shared<VectorIndex::VectorDataset>(
                 static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
-
-            result.clear();
 
             /// only run in the first read round
             if (training)
