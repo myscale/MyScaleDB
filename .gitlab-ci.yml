@@ -90,6 +90,7 @@ build_package:
   only:
     - mqdb-master
     - mqdb-staging
+    - mqdb-dev
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
     paths:
@@ -129,6 +130,7 @@ build_image:
   only:
     - mqdb-master
     - mqdb-staging
+    - mqdb-dev
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
