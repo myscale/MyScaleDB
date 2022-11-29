@@ -752,31 +752,9 @@ void finalizeMutatedPart(
 
     new_data_part->default_codec = codec;
 
-    if (new_data_part->vector_index_in_origin_part)
-        new_data_part->vector_indexed = source_part->vector_indexed;
-    else if (source_part->containAnyVectorIndex()) /// origin part doesn't have vector index before create hardlink.
-    {
-        bool vector_files_found = false;
-        /// The vector index is built and copy to source part during mutation.
-        for (auto it = source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
-        {
-            String file_name = it->name();
-            if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
-                continue;
-
-            if (!new_data_part->getDataPartStorage().exists(file_name))
-                new_data_part->getDataPartStorage().createHardLinkFrom(source_part->getDataPartStorage(), file_name, file_name);
-
-            if (!vector_files_found)
-                vector_files_found = true;
-        }
-
-        if (vector_files_found)
-        {
-            new_data_part->vector_indexed = source_part->vector_indexed;
-            new_data_part->setOriginPartHasVectorIndex();
-        }
-    }
+    ///Origin part is decoupled with merged vector indices or has simple built vector index
+    if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
+        new_data_part->loadVectorIndexMetadata();
 }
 
 }
@@ -1304,8 +1282,8 @@ private:
         static_pointer_cast<MergedBlockOutputStream>(ctx->out)->finalizePart(ctx->new_data_part, ctx->need_sync);
         ctx->out.reset();
 
-        /// Create hardlinks for vector index files
-        if (ctx->source_part->containAnyVectorIndex())
+        /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
+        if (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps())
         {
             bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
@@ -1318,11 +1296,9 @@ private:
                 vector_files_found = true;
             }
 
+            /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
             if (vector_files_found)
-            {
-                ctx->new_data_part->vector_indexed = ctx->source_part->vector_indexed;
-                ctx->new_data_part->setOriginPartHasVectorIndex();
-            }
+                ctx->new_data_part->loadVectorIndexMetadata();
         }
     }
 
@@ -1393,9 +1369,6 @@ private:
             ctx->files_to_skip.insert("ttl.txt");
 
         ctx->new_data_part->getDataPartStorage().createDirectories();
-
-        if (ctx->source_part->containAnyVectorIndex())
-            ctx->new_data_part->setOriginPartHasVectorIndex();
 
         /// We should write version metadata on part creation to distinguish it from parts that were created without transaction.
         TransactionID tid = ctx->txn ? ctx->txn->tid : Tx::PrehistoricTID;
@@ -1673,6 +1646,9 @@ bool MutateTask::prepare()
 
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
+    /// Used for vector index move and mutating confict
+    ctx->source_part->setPartIsMutating(true);
+
     auto context_for_reading = Context::createCopy(ctx->context);
 
     /// Allow mutations to work when force_index_by_date or force_primary_key is on.
@@ -1790,17 +1766,14 @@ bool MutateTask::prepare()
 
     /// Check if lightweight delete mask column is updated.
     /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
+    /// Support part with simple built index and decoupled part with merged old parts' built index files
     /// TODO: Should not use vector index when any normal delete command exists.
-    if (ctx->source_part->containAnyVectorIndex())
+    for (const auto & name_type : ctx->updated_header.getNamesAndTypesList())
     {
-        ctx->new_data_part->setOriginPartHasVectorIndex();
-        for (const auto & name_type : ctx->updated_header.getNamesAndTypesList())
+        if (name_type.name == LightweightDeleteDescription::FILTER_COLUMN.name)
         {
-            if (name_type.name == LightweightDeleteDescription::FILTER_COLUMN.name)
-            {
-                ctx->new_data_part->setDeletedMaskUpdate();
-                break;
-            }
+            ctx->new_data_part->setDeletedMaskUpdate();
+            break;
         }
     }
 

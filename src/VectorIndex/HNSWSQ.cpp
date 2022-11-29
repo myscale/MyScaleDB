@@ -121,22 +121,17 @@ void HNSWsq::load(BinaryPtr & bi, int64_t /*total_vec*/)
     {
         throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
     }
-    setRawData(bi);
     IndexReader reader;
     reader.data = bi->data;
     reader.total = bi->size;
 
     index.reset(reinterpret_cast<faiss::IndexHNSWfastSQ *>(faiss::read_index(&reader)));
-    //index->init_hnsw();
-    //reinterpret_cast might seem fishy, but when they returned from read_index they initially
-    // created a child class then cast it to Index.
 }
 
 void * HNSWsq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
-///handle this pointer carefully! remember to deconstruct it somewhere
 {
-    faiss::bitMap * new_map = new faiss::bitMap(outerBitMap->get_size());
-    new_map->bitmap = outerBitMap->bitmap;
+    /// handle this pointer carefully! remember to deconstruct it somewhere
+    faiss::bitMap * new_map = new faiss::bitMap(outerBitMap->get_size(), outerBitMap->bitmap);
     return new_map;
 }
 

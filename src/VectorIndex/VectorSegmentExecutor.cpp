@@ -2,30 +2,32 @@
 #include <random>
 #include <thread>
 #include <omp.h>
+#include <boost/algorithm/string/split.hpp>
 
-#include <Common/HashTable/HashMap.h>
-#include <Common/Exception.h>
 #include <Compression/CompressedReadBuffer.h>
-#include <Compression/CompressedWriteBuffer.h>
 #include <Compression/CompressedReadBufferFromFile.h>
-#include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Compression/CompressedWriteBuffer.h>
+#include <IO/BufferWithOwnMemory.h>
 #include <IO/ReadBufferFromFile.h>
 #include <IO/WriteHelpers.h>
+#include <Interpreters/OpenTelemetrySpanLog.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/DiskIOWriter.h>
 #include <VectorIndex/IndexException.h>
+#include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/VectorIndexFactory.h>
 #include <VectorIndex/VectorIndexCommon.h>
-#include <VectorIndex/MergeUtils.h>
+#include <Common/Exception.h>
+#include <Common/HashTable/HashMap.h>
 
 #include <Common/logger_useful.h>
 
 namespace DB::ErrorCodes
 {
-extern const int LOGICAL_ERROR;
 extern const int STD_EXCEPTION;
+extern const int CORRUPTED_DATA;
 }
 
 namespace VectorIndex
@@ -36,30 +38,16 @@ std::condition_variable_any cv;
 int num_thread_for_vector;
 std::atomic_int count;
 
-String cutMutVer(const String &part_name)
+String cutMutVer(const String & part_name)
 {
-    static const String sub("_");
-
-    int count_of_sub = 0;
-
-    size_t i = 0;
-    while (i != String::npos)
-    {
-        i = part_name.find(sub, i);
-        if (i != String::npos) {
-            count_of_sub += 1;
-            i += 1;
-        }
-    }
-
-    if (count_of_sub <= 3)
+    std::vector<String> tokens;
+    boost::split(tokens, part_name, boost::is_any_of("_"));
+    if (tokens.size() <= 4) /// without mutation version
     {
         return part_name;
     }
-
-    size_t j = part_name.rfind(sub);
-
-    return part_name.substr(0, j);
+    else
+        return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
 }
 
 static String dumpBitmap(GeneralBitMapPtr bit_map_ptr)
@@ -134,25 +122,14 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
             }
             if (para_copy.contains("compression_scheme"))
             {
-                if (this->dimension < 5)
-                {
-                    cmb = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
-                }
-                else
-                {
-                    cmb = DB::CompressionCodecFactory::instance().get(para_copy.find("compression_scheme")->second, {})->getMethodByte();
-                }
+                cmb = DB::CompressionCodecFactory::instance().get(para_copy.find("compression_scheme")->second, {})->getMethodByte();
                 para_copy.erase("compression_scheme");
-            }
-            else if (this->dimension < 5)
-            {
-                cmb = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
             }
             index = VectorIndexFactory::createIndex(type, mode, me, this->dimension, para_copy);
 
             {
                 /// slow mode
-                if (containRowIdsMaps(segment_id.data_part_path))
+                if (slow_mode)
                 {
                     int num_procs = omp_get_num_procs();
                     /// only use half cores
@@ -507,7 +484,7 @@ Status VectorSegmentExecutor::load()
             BinaryPtr index_binary = std::make_shared<Binary>();
             index_binary->size = original_binary_size;
             LOG_INFO(log, "[load] original_binary_size: {}", original_binary_size);
-            index_binary->data = new uint8_t[original_binary_size];
+            index_binary->data = new uint8_t[original_binary_size + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER];
 
             bool next = true;
             int part_count = 0;
@@ -538,13 +515,9 @@ Status VectorSegmentExecutor::load()
             if (des.contains("metric_type"))
             {
                 me = VectorIndexFactory::createIndexMetrics(des.at("metric_type"));
-                des.erase("metric_type");
             }
             Parameters place_holder;
             index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
-            //        if(total_vec < MAX_BRUTE_FORCE_SEARCH_SIZE){
-            //            type = IndexType::FLAT;
-            //        }
             LOG_INFO(log, "[load] start loading index: total_vec: {}", total_vec);
             try
             {
@@ -614,12 +587,10 @@ Status VectorSegmentExecutor::load()
 Status VectorSegmentExecutor::readPart(bool & next, int part_count, uint8_t* index_binary, int64_t & current_loaded_size)
 {
     DiskIOReader reader;
-    if (!reader.open(segment_id.getFullPath() + "_" + ItoS(part_count) + VECTOR_INDEX_FILE_SUFFIX))
+    String path = segment_id.getFullPath() + "_" + ItoS(part_count) + VECTOR_INDEX_FILE_SUFFIX;
+    if (!reader.open(path))
     {
-        if (!reader.open(segment_id.getFullPath() + "_" + ItoS(part_count)))
-        {
-            return Status(5, "unable to open file" + segment_id.getFullPath() + "_" + ItoS(part_count));
-        }
+        return Status(5, "unable to open file " + path);
     }
     BinaryPtr index_binary_compressed = std::make_shared<Binary>();
     /// first 8 bytes is final mark, deciding if this is the last segment
@@ -651,7 +622,7 @@ Status VectorSegmentExecutor::readPart(bool & next, int part_count, uint8_t* ind
 
     /// finally we have the compressed binaries
     reader.seekg(sizeof(int64_t) * 4);
-    index_binary_compressed->data = new uint8_t[binary_length];
+    index_binary_compressed->data = new uint8_t[binary_length + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER];
     index_binary_compressed->size = binary_length;
 
     reader.read(index_binary_compressed->data, binary_length);
@@ -941,15 +912,7 @@ uint32_t VectorSegmentExecutor::compressWithCheckSum(uint8_t * source, size_t si
 
 uint32_t VectorSegmentExecutor::validateAndDecompress(const BinaryPtr source, size_t uncompressed_size, uint8_t * des)
 {
-    uint8_t method = 0;
-    if (this->dimension < 5)
-    {
-        method = static_cast<const UInt8>(DB::CompressionMethodByte::NONE);
-    }
-    else
-    {
-        method = DB::ICompressionCodec::readMethod(reinterpret_cast<const char *>(source->data));
-    }
+    uint8_t method = DB::ICompressionCodec::readMethod(reinterpret_cast<const char *>(source->data));
     //    if(method==static_cast<const UInt8>(DB::CompressionMethodByte::NONE)){
     //        ///if no compression,don't decompress, just point des to source
     //        des.swap(source);
@@ -968,7 +931,7 @@ uint32_t VectorSegmentExecutor::validateAndDecompress(const BinaryPtr source, si
     {
         LOG_ERROR(
             log, "The binary is corrupted, decompressed size: {}, recorded decompressed sized: {}", size_decompressed, uncompressed_size);
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "vector index on disk is corrupted");
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "vector index on disk is corrupted");
     }
     return size_decompressed;
 }
@@ -1033,26 +996,28 @@ bool VectorSegmentExecutor::readBitMap()
 {
     DiskIOReader bit_map_reader;
     String read_file_path = segment_id.getBitMapFilePath();
-    if (delete_bitmap == nullptr)
-    {
-        delete_bitmap = std::make_shared<GeneralBitMap>(total_vec);
-    }
 
     if (!bit_map_reader.open(read_file_path + VECTOR_INDEX_FILE_SUFFIX))
     {
         if (!bit_map_reader.open(read_file_path))
         {
-            memset(delete_bitmap->bitmap, 255, (total_vec / 8) + 1);
             return false;
         }
     }
 
     int64_t bit_map_size;
     bit_map_reader.read(&bit_map_size, sizeof(int64_t));
+    if (bit_map_size != (total_vec >> 3) + 1)
+    {
+        LOG_ERROR(log, "bitmap file {} is corrupted: bit_map_size {}, total_vec {}", read_file_path, bit_map_size, total_vec);
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "vector index bitmap on disk is corrupted");
+    }
+
+    if (delete_bitmap == nullptr)
+        delete_bitmap = std::make_shared<GeneralBitMap>(total_vec);
+
     bit_map_reader.seekg(sizeof(int64_t));
     bit_map_reader.read(delete_bitmap->bitmap, bit_map_size);
-
-    delete_bitmap->size = total_vec;
 
     return true;
 }
@@ -1127,56 +1092,118 @@ std::list<std::pair<CacheKey, Parameters>> VectorSegmentExecutor::getAllCacheNam
     return CacheManager::getInstance()->getAllItems();
 }
 
-GeneralBitMapPtr VectorIndexUtil::readDeleteBitmap(const String & bitmap_path, UInt64 total_vec)
+void VectorSegmentExecutor::readTotalVec()
 {
-    DiskIOReader bit_map_reader;
-    if (!bit_map_reader.open(bitmap_path))
+    DiskIOReader reader;
+    String path = segment_id.getFullPath() + "_" + ItoS(0) + VECTOR_INDEX_FILE_SUFFIX;
+    if (!reader.open(path))
     {
-        return nullptr;
+        LOG_ERROR(log, "failed to open {}", path);
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "failed to open " + path);
     }
 
-    GeneralBitMapPtr delete_bitmap = std::make_shared<GeneralBitMap>(total_vec);
-
-    int64_t bit_map_size;
-    bit_map_reader.read(&bit_map_size, sizeof(int64_t));
-    bit_map_reader.seekg(sizeof(int64_t));
-    bit_map_reader.read(delete_bitmap->bitmap, bit_map_size);
-
-    delete_bitmap->size = total_vec;
-
-    return delete_bitmap;
+    reader.seekg(sizeof(int64_t) * 3);
+    reader.read(&total_vec, sizeof(total_vec));
+    LOG_DEBUG(log, "[readTotalVec] total vectors read: {}", total_vec);
 }
 
-bool VectorIndexUtil::writeDeleteBitmap(const String & bitmap_path, GeneralBitMapPtr delete_bitmap)
+void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_ids)
 {
-    if (!delete_bitmap)
+    if (segment_id.fromMergedParts())
+        return;
+
+    readTotalVec();
+
+    /// Read the delete bitmap
+    if (!readBitMap())
     {
-        return false;
+        LOG_WARNING(log, "[updateBitMap] Skip to update not readable vector bitMap file part {}", segment_id.current_part_name);
+        return;
     }
 
-    DiskIOWriter bit_map_writer;
-    bit_map_writer.open(bitmap_path, false);
+    /// Map new deleted row ids to row ids in old part and update delete bitmap
+    bool need_update = false;
+    for (auto & del_row_id : deleted_row_ids)
+    {
+        if (delete_bitmap->test(del_row_id))
+        {
+            delete_bitmap->unset(del_row_id);
 
-    int64_t total_vec = delete_bitmap->size;
-    int64_t byte_count = (total_vec >> 3) + 1;
-    bit_map_writer.write(&byte_count, sizeof(int64_t));
+            if (!need_update)
+                need_update = true;
+        }
+    }
 
-    bit_map_writer.write(delete_bitmap->bitmap, byte_count);
-    bit_map_writer.close();
+    if (!need_update)
+        return;
 
-    return true;
+    /// Flush the updated delete bitmap to disk
+    writeBitMap();
+
+    /// Update bitmap in cache if exists
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaPtr cache_index = mgr->get(cache_key);
+    if (cache_index)
+        cache_index->setDeleteBitmap(delete_bitmap);
 }
 
-bool VectorIndexUtil::writeDeleteBitmap(const SegmentId & segment_id, GeneralBitMapPtr delete_bitmap)
+void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& deleted_row_ids)
 {
-    if (!delete_bitmap)
+    if (!segment_id.fromMergedParts())
+        return;
+
+    readTotalVec();
+
+    /// Read the delete bitmap
+    if (!readBitMap())
     {
-        return false;
+        LOG_WARNING(log, "[updateMergedBitMap] Skip to update not readable vector bitMap file for segement: merged part {} in decouple part {}", segment_id.owner_part_name, segment_id.current_part_name);
+        return;
     }
 
-    String bitMap_path = segment_id.getBitMapFilePath() + VECTOR_INDEX_FILE_SUFFIX;
+    /// Call handleMergedMaps() to get inverted_row_ids_map and inverted_row_sources_map
+    try
+    {
+        handleMergedMaps();
+    }
+    catch(const DB::Exception & e)
+    {
+        LOG_DEBUG(log, "[updateMergedBitMap] Skip to update vector bitmap due to failure when read inverted row ids map entries, error: {}", e.what());
+        return;
+    }
 
-    return writeDeleteBitmap(bitMap_path, delete_bitmap);
+    /// Map new deleted row ids to row ids in old part and update delete bitmap
+    bool need_update = false;
+    for (auto & new_row_id : deleted_row_ids)
+    {
+        if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
+        {
+            UInt64 old_row_id = (*inverted_row_ids_map)[new_row_id];
+            if (delete_bitmap->test(old_row_id))
+            {
+                delete_bitmap->unset(old_row_id);
+
+                if (!need_update)
+                    need_update = true;
+            }
+        }
+    }
+
+    if (!need_update)
+        return;
+
+    /// Flush the updated delete bitmap to disk
+    writeBitMap();
+
+    /// Update bitmap in cache if exists
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaPtr cache_index = mgr->get(cache_key);
+    if (cache_index)
+        cache_index->setDeleteBitmap(delete_bitmap);
 }
 
 

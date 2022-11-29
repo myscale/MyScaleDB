@@ -663,18 +663,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     LOG_DEBUG(log, "[readFromPartImpl] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
 
-    if (part_offset)
-    {
-        LOG_DEBUG(log, "[readFromPartImpl] offset values before vector search merge result, and the part name is {}", task->data_part->name);
-        const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
-        const size_t the_size = part_offset->size();
-        for (size_t i = 0; i < the_size && i < 10; ++i)
-        {
-            UInt64 v = offset_raw_value[i];
-            LOG_DEBUG(log, "[readFromPartImpl] offset values --- offset[{}] = {}", i, v);
-        }
-    }
-
     /// [MQDB] vector search
     if (task->vector_scan_manager)
     {

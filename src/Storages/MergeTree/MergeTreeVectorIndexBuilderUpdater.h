@@ -74,9 +74,12 @@ private:
 
     Poco::Logger * log;
 
+    time_t last_cache_check_time = 0;
+
     BuildVectorIndexStatus
     buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode);
 
+    /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
     bool moveVectorIndexFilesToFuturePart(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part);
 
     void undoBuildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part);
@@ -84,7 +87,7 @@ private:
     bool isSlowModePart(const MergeTreeDataPartPtr & part)
     {
         /// Smaller part built with single vector index is also treated as slow mode.
-        return VectorIndex::containRowIdsMaps(part) || part->rows_count < data.getSettings()->max_rows_for_slow_mode_single_vector_index_build;
+        return part->containRowIdsMaps() || part->rows_count < data.getSettings()->max_rows_for_slow_mode_single_vector_index_build;
     }
 };
 

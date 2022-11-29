@@ -629,9 +629,9 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
 
     if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
     {
-        ctx->rows_sources_file.release();
-        ctx->rows_sources_write_buf.release();
-        ctx->rows_sources_uncompressed_write_buf.release();
+        ctx->rows_sources_file.reset();
+        ctx->rows_sources_write_buf.reset();
+        ctx->rows_sources_uncompressed_write_buf.reset();
     }
 
     for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
@@ -959,6 +959,9 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
 
         String inverted_row_sources_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
         std::filesystem::rename(global_ctx->inverted_row_sources_map_file_path, inverted_row_sources_file_path);
+
+        /// Initialize the vector index metadata for the new part
+        global_ctx->new_data_part->loadVectorIndexMetadata();
     }
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();

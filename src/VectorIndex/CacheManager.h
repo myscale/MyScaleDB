@@ -102,6 +102,8 @@ public:
 
 protected:
     mutable std::unique_ptr<VectorIndexCache> cache_;
+    Poco::Logger *log;
+
 };
 
 }

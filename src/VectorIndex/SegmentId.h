@@ -15,20 +15,20 @@ String cutMutVer(const String & part_name);
 struct CacheKey
 {
     String table_path;
-    String part_name;
+    String part_name_no_mutation; /// part_name doesn't include mutation version
     String vector_index_name;
     String column_name;
 
     bool operator==(const CacheKey& other) const {
         return (table_path == other.table_path)
-        && (cutMutVer(part_name) == cutMutVer(other.part_name))
+        && (part_name_no_mutation == other.part_name_no_mutation)
         && (vector_index_name == other.vector_index_name)
         && (column_name == other.column_name);
     }
 
     String toString() const
     {
-        return table_path + "/" + cutMutVer(part_name) + "/" + vector_index_name + "_" + column_name;
+        return table_path + "/" + part_name_no_mutation + "/" + vector_index_name + "_" + column_name;
     }
 };
 
@@ -80,7 +80,7 @@ struct SegmentId
         fs::path full_path(data_part_path);
         /// use parent data path, need to call parent_path() twice, 
         /// according to https://en.cppreference.com/w/cpp/filesystem/path/parent_path
-        return CacheKey{full_path.parent_path().parent_path().string(), owner_part_name, vector_index_name, column_name};
+        return CacheKey{full_path.parent_path().parent_path().string(), cutMutVer(owner_part_name), vector_index_name, column_name};
     }
 
     String getVectorReadyFilePath() const

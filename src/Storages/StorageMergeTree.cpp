@@ -211,6 +211,9 @@ void StorageMergeTree::shutdown()
     {
         /// Temporary directories contain incomplete results of vector index building.
         clearTemporaryIndexBuildDirectories();
+
+        /// Clear cached vector index
+        clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
     }
     catch (...)
     {
@@ -982,7 +985,7 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
         }
 
         return !currently_vector_indexing_parts.contains(left->name) && !currently_vector_indexing_parts.contains(right->name)
-            && !VectorIndex::containRowIdsMaps(left) && !VectorIndex::containRowIdsMaps(right)
+            && !left->containRowIdsMaps() && !right->containRowIdsMaps()
             && canMergeForVectorIndex(metadata_snapshot, left, right);
     };
 
@@ -1299,8 +1302,6 @@ void StorageMergeTree::finishVectorIndexJob(const std::vector<String>& processed
 
 bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assignee)
 {
-    Poco::Logger * const log = &Poco::Logger::get("StorageMergeTree");
-
     if (shutdown_called)
         return false;
 
@@ -1364,53 +1365,15 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     }
     if (vector_index_entry)
     {
-        /// std::unique_lock lock(currently_processing_in_background_mutex);
-        {
-            for (auto & part_name : vector_index_entry->data_part_names)
-            {
-                LOG_DEBUG(log, "[scheduleDataProcessingJob] has part name {}", part_name);
-            }
-        }
-
-        LOG_INFO(log, "[scheduleDataProcessingJob] before calling constructor of VectorIndexMergeTreeTask");
-
         std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
             *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
-        if (task)
-        {
-            LOG_DEBUG(log, "[scheduleDataProcessingJob] task has been created");
-        }
-        else
-        {
-            LOG_ERROR(log, "[scheduleDataProcessingJob] create task failed");
-            return false;
-        }
         assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (slow_mode_vector_index_entry)
     {
-        /// std::unique_lock lock(currently_processing_in_background_mutex);
-        {
-            for (auto & part_name : slow_mode_vector_index_entry->data_part_names)
-            {
-                LOG_INFO(log, "[scheduleDataProcessingJob] slow mode build task has part name {}", part_name);
-            }
-        }
-
-        LOG_INFO(log, "[scheduleDataProcessingJob] before calling constructor of VectorIndexMergeTreeTask");
-
         std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
             *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
-        if (task)
-        {
-            LOG_DEBUG(log, "[scheduleDataProcessingJob] task has been created");
-        }
-        else
-        {
-            LOG_ERROR(log, "[scheduleDataProcessingJob] create task failed");
-            return false;
-        }
         assignee.scheduleSlowModeVectorIndexTask(task);
         return true;
     }

@@ -245,10 +245,21 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 find_index = true;
                 index = v_index;
 
-                VectorIndex::SegmentId segment_id(data_path, data_part->name, data_part->name, index.name, index.column, 0);
-                segment_ids.emplace_back(std::move(segment_id));
+                /// For decouple part, background index build will mark the data part's metadata before put it in cache.
+                /// Hence use the old segments first to avoid load vector index.
+                if (data_part->containRowIdsMaps())
+                {
+                    segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
+                    LOG_DEBUG(log, "[vectorScan] index found for decouple part, use old parts' index first when both exist in metadata.");
+                }
+                else
+                {
+                    VectorIndex::SegmentId segment_id(data_path, data_part->name, data_part->name, index.name, index.column, 0);
+                    segment_ids.emplace_back(std::move(segment_id));
 
-                LOG_DEBUG(log, "[vectorScan] index found, because current data part contains it");
+                    LOG_DEBUG(log, "[vectorScan] index found, because current data part contains it");
+                }
+
                 break;
             }
             else
@@ -1241,7 +1252,12 @@ void MergeTreeVectorScanManager::searchWrapper(
             int tmp_curr_pos = 0;
             while (curr_pos < k && tmp_curr_pos < k + delete_id_num)
             {
-                if (row_exists->test(tmp_per_id[i * (k + delete_id_num) + tmp_curr_pos] + num_rows_read))
+                auto & tmp_id = tmp_per_id[i * (k + delete_id_num) + tmp_curr_pos];
+                if (tmp_id < 0)
+                {
+                    LOG_ERROR(log, "tmp_id: {}, num_rows_read: {}", tmp_id, num_rows_read);
+                }
+                else if (tmp_id >= 0 && row_exists->test(tmp_id + num_rows_read))
                 {
                     per_id[i * k + curr_pos] = tmp_per_id[i * (k + delete_id_num) + tmp_curr_pos];
                     per_distance[i * k + curr_pos] = tmp_per_distance[i * (k + delete_id_num) + tmp_curr_pos];

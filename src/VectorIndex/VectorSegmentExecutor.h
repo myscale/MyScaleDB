@@ -55,7 +55,7 @@ public:
     void setDeleteBitmap(GeneralBitMapPtr delete_bitmap_)
     {
         std::lock_guard<std::mutex> lg(mutex_of_delete_bitmap);
-        delete_bitmap = delete_bitmap_;
+        delete_bitmap = std::move(delete_bitmap_);
     }
 
     GeneralBitMapPtr getDeleteBitmap() const
@@ -192,6 +192,15 @@ public:
         segment_id = new_segment_id;
     }
 
+    /// Reload delete bitmap from disk.
+    bool reloadDeleteBitMap() { return readBitMap(); }
+
+    /// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
+    void updateBitMap(const std::vector<UInt64>& deleted_row_ids);
+
+    /// Update merged old part's delete bitmap after lightweight delete on disk and cache if exists.
+    void updateMergedBitMap(const std::vector<UInt64>& deleted_row_ids);
+
 private:
     Status startWrite();
 
@@ -215,6 +224,8 @@ private:
 
     void handleMergedMaps();
 
+    void readTotalVec();
+
     void transferToNewRowIds(int64_t *& labels, int size)
     {
         if (row_ids_map->empty())
@@ -226,14 +237,14 @@ private:
 
         for (int i = 0; i < size; i++)
         {
-            if (labels[i] > row_ids_map->size())
+            if (labels[i] != -1)
             {
-                LOG_DEBUG(log, "[transferToNewRowIds] overflow: label: {}", labels[i]);
+                labels[i] = (*row_ids_map)[labels[i]];
             }
-            labels[i] = (*row_ids_map)[labels[i]];
         }
     }
 
+    const static UInt32 COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER = LZ4::ADDITIONAL_BYTES_AT_END_OF_BUFFER;
     const UInt32 dimension;
     const IndexType type;
     IndexMode mode = IndexMode::CPU;
@@ -254,13 +265,5 @@ private:
 
 using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;
 
-
-class VectorIndexUtil
-{
-public:
-    static GeneralBitMapPtr readDeleteBitmap(const String & bitmap_path, UInt64 total_vec);
-    static bool writeDeleteBitmap(const String & bitmap_path, GeneralBitMapPtr delete_bitmap);
-    static bool writeDeleteBitmap(const SegmentId & segment_id, GeneralBitMapPtr delete_bitmap);
-};
 
 }

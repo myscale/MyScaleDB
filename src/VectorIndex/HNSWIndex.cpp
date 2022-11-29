@@ -158,8 +158,8 @@ void HNSWIndex::load(BinaryPtr & bi, int64_t total_vec)
 
 void * HNSWIndex::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
 {
-    hnswlib::bitMap * new_map = new hnswlib::bitMap(outerBitMap->get_size());
-    new_map->bitmap = outerBitMap->bitmap; //TODO possibility of mem leak
+    /// handle this pointer carefully! remember to deconstruct it somewhere
+    hnswlib::bitMap * new_map = new hnswlib::bitMap(outerBitMap->get_size(), outerBitMap->bitmap);
     return new_map;
 }
 

@@ -23,7 +23,15 @@ SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector
 optimize table test_vector final;
 
 SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
-
 SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector prewhere id > 5;
 
-## drop table test_vector;
+SELECT '--- lightweight delete on decoupled part';
+delete from test_vector where id = 3;
+delete from test_vector where id = 15;
+
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_vector';
+
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector prewhere id > 5;
+
+drop table test_vector;

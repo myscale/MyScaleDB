@@ -29,30 +29,14 @@ public:
         MergeTreeVectorIndexBuilderUpdater & builder_,
         Callback && task_result_callback_, 
         bool slow_mode_)
-        : storage(storage_) // MergeTreeData's base class is IStorage.
-                            // in IStorage, 'operator=' is explicitly marked deleted.
-                            // it cannot be assigned
-        //, metadata_snapshot(std::move(metadata_snapshot_))
-        //, vector_index_entry(std::move(vector_index_entry_))
+        : storage(storage_)
+        , metadata_snapshot(std::move(metadata_snapshot_))
+        , vector_index_entry(std::move(vector_index_entry_))
         , builder(builder_)
+        , task_result_callback(std::forward<Callback>(task_result_callback_))
         , slow_mode(slow_mode_)
-        //, task_result_callback(std::forward<Callback>(task_result_callback_))
     {
-        Poco::Logger * const log = &Poco::Logger::get("VectorIndexMergeTreeTask");
-
-        LOG_INFO(log, "[VectorIndexMergeTreeTask] start to initialize VectorIndexMergeTreeTask");
-
-        if (!metadata_snapshot_)
-            LOG_INFO(log, "[VectorIndexMergeTreeTask] metadata_snapshot_ is NIL");
-        metadata_snapshot = std::move(metadata_snapshot_);
-
-        if (!vector_index_entry_)
-            LOG_INFO(log, "[VectorIndexMergeTreeTask] vector_index_entry_ is NIL");
-
-        vector_index_entry = std::move(vector_index_entry_);
-        task_result_callback = std::forward<Callback>(task_result_callback_);
-
-        LOG_INFO(log, "create VectorIndexMergeTreeTask");
+        LOG_INFO(&Poco::Logger::get("VectorIndexMergeTreeTask"), "create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
     }
 
     bool executeStep() override;

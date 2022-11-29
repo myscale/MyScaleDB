@@ -312,6 +312,20 @@ public:
     /// TODO: move vector index related structures out of data part class
     mutable std::set<String> vector_indexed;
 
+    /// Used for decouple part
+    mutable std::mutex decouple_mutex;
+
+    struct MergedPartNameAndId
+    {
+        String name;
+        int id;
+
+        MergedPartNameAndId(const String & name_, const int & id_) : name(name_), id(id_) {}
+    };
+
+    /// Source part names which were merged to this decouple part, used to locate their vector index files.
+    mutable std::vector<MergedPartNameAndId> merged_source_parts;
+
     mutable bool vector_index_build_error = false;
 
     mutable bool vector_index_tuned = false;
@@ -320,10 +334,14 @@ public:
 
     mutable bool small_part = false;
 
-    mutable bool lightweight_delete_mask_updated = false;
+    /// Used when vector index built is finished but the active part is under mutating.
+    /// Note: this is for StorageMergeTree engine only.
+    /// Move index files to active part OR new active part after mutation to pick up.
+    /// TODO: Remove when build vector index is handled by log entry for replciated MergeTree
+    mutable std::mutex vector_index_move_and_mutate_mutex;
+    mutable bool part_is_currently_mutating = false;
 
-    /// Used for vector index building and mutation. True if original source part doesn't have vindex when mutation starts.
-    mutable bool vector_index_in_origin_part = false;
+    mutable bool lightweight_delete_mask_updated = false;
 
     bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
 
@@ -340,14 +358,42 @@ public:
 
     void cancelBuild() const {vector_index_build_cancelled = true;}
 
-    bool isSmallPart(size_t min_rows_to_build_vector_index) const { return this->rows_count < min_rows_to_build_vector_index; }
+    bool isSmallPart(size_t min_rows_to_build_vector_index) const
+    {
+        return this->rows_count == 0 || this->rows_count < min_rows_to_build_vector_index;
+    }
 
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
 
-    void setOriginPartHasVectorIndex() const { vector_index_in_origin_part = true; }
+    bool getPartIsMutating() const
+    {
+        std::lock_guard lock(vector_index_move_and_mutate_mutex);
+        return part_is_currently_mutating;
+    }
 
-    /// Read vector_index_ready file to initialize vector_indxed
+    void setPartIsMutating(const bool & new_value) const
+    {
+        std::lock_guard lock(vector_index_move_and_mutate_mutex);
+        part_is_currently_mutating = new_value;
+    }
+
+    /// Read vector_index_ready file to initialize vector_indxed if exists.
+    /// Otherwise, try to read merged vector_index_ready file if exists.
     void loadVectorIndexMetadata() const;
+
+    bool containRowIdsMaps() const
+    {
+        std::lock_guard lock(decouple_mutex);
+        return !merged_source_parts.empty();
+    }
+
+    void removeAllRowIdsMaps(const bool force = false) const;
+
+    const std::vector<MergedPartNameAndId> getMergedSourceParts() const
+    {
+        std::lock_guard lock(decouple_mutex);
+        return merged_source_parts;
+    }
 
     /// Columns with values, that all have been zeroed by expired ttl
     NameSet expired_columns;
@@ -500,7 +546,10 @@ public:
     std::optional<ColumnPtr> readRowExistsColumn() const;
 
     /// when lightweight delete mutation complete, this function will be called.
-    virtual void onLightweightDelete() const;
+    void onLightweightDelete() const;
+
+    /// Decoupled part support lightweight delete
+    void onDecoupledLightWeightDelete() const;
 
 protected:
 
@@ -626,6 +675,12 @@ private:
     /// if it not exists tries to deduce codec from compressed column without
     /// any specifial compression.
     void loadDefaultCompressionCodec();
+
+    /// Load simple single vector index metadata
+    void loadSimpleVectorIndexMetadata() const;
+
+    /// Load decoulped part with many old vector indecies
+    void loadDecoupledVectorIndexMetadata() const;
 
     void writeColumns(const NamesAndTypesList & columns_, const WriteSettings & settings);
     void writeVersionMetadata(const VersionMetadata & version_, bool fsync_part_dir) const;

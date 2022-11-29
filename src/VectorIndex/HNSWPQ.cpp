@@ -130,10 +130,9 @@ void HNSWpq::load(BinaryPtr & bi, int64_t /*total_vec*/)
 }
 
 void * HNSWpq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
-///handle this pointer carefully! remember to deconstruct it somewhere
 {
-    faiss::bitMap * new_map = new faiss::bitMap(outerBitMap->get_size());
-    new_map->bitmap = outerBitMap->bitmap;
+    /// handle this pointer carefully! remember to deconstruct it somewhere
+    faiss::bitMap * new_map = new faiss::bitMap(outerBitMap->get_size(), outerBitMap->bitmap);
     return new_map;
 }
 

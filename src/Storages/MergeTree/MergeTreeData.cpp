@@ -2302,9 +2302,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
 {
     StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
     if(meta_snapshot->getVectorIndices().empty())
-    {
         return;
-    }
 
     /// TODO: how to remove old parts' caches
     for (const auto & part : parts)
@@ -2314,9 +2312,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
             auto segment_ids
                 = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
             for (auto & segment_id : segment_ids)
-            {
                 VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
-            }
         }
     }
 }
@@ -2380,7 +2376,8 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     if (parts_to_remove.empty())
         return;
 
-    clearCachedVectorIndex(parts_to_remove);
+    /// The old part's vector index is reused by new part, no need to clear cache.
+    /// clearCachedVectorIndex(parts_to_remove);
 
     const auto settings = getSettings();
 

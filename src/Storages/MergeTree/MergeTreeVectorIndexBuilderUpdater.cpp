@@ -24,6 +24,9 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
 }
 
+/// minimum interval (seconds) between check if need to remove dropped vector index cache.
+static const auto RECHECK_VECTOR_INDDEX_CACHE_INTERVAL_SECONDS = 600;
+
 MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
     : data(data_), log(&Poco::Logger::get(data.getLogName() + " (VectorIndexUpdater)"))
 {
@@ -31,23 +34,44 @@ MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTree
 
 void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot)
 {
+    auto now = time(nullptr);
+    if (last_cache_check_time == 0)
+        last_cache_check_time = now;
+
+    /// we don't want to check vector index too frequent.
+    if (now - last_cache_check_time < RECHECK_VECTOR_INDDEX_CACHE_INTERVAL_SECONDS)
+        return;
+
     ///check existing parts to see if any cached vector index need cleaning
     std::list<std::pair<VectorIndex::CacheKey, VectorIndex::Parameters>> cached_item_list
         = VectorIndex::VectorSegmentExecutor::getAllCacheNames();
 
+    /// getRelativeDataPath() contains '/' in the tail, but table_path in cache key doesn't have.
+    std::string relative_data_path = fs::path(data.getRelativeDataPath()).parent_path().string();
     for (const auto & cache_item : cached_item_list)
     {
         bool existed = false;
-        /// LOG_DEBUG(log, "relative_path: {}", data.getRelativeDataPath());
+
         /// not this table
-        if (cache_item.first.table_path.find(data.getRelativeDataPath()) == std::string::npos)
-        {
+        if (cache_item.first.table_path.find(relative_data_path) == std::string::npos)
             continue;
-        }
-        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+
+        const auto cache_key = cache_item.first;
+
+        /// Need to check part no matter exists or not exists.
+        MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_item.first.part_name_no_mutation);
+
+        /// Check vector index in cache is same as metadata
+        if (!metadata_snapshot->vec_indices.empty())
         {
+            /// Currently only one vector index is allowed.
+            const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+
             LOG_DEBUG(log, "cache: {} {}, metadata: {} {}", cache_item.first.vector_index_name, cache_item.first.column_name, vec_index_desc.name, vec_index_desc.column);
-            if (cache_item.first.vector_index_name == vec_index_desc.name && cache_item.first.column_name == vec_index_desc.column)
+
+            /// Further check the part status, decouple part or VPart with single vector index
+            if (cache_item.first.vector_index_name == vec_index_desc.name && cache_item.first.column_name == vec_index_desc.column &&
+                (part && (part->containVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name) || part->containRowIdsMaps())))
             {
                 LOG_DEBUG(log, "Find Vector Index in metadata");
                 VectorIndex::Parameters params = cache_item.second;
@@ -71,15 +95,22 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
 
         if (!existed)
         {
-            LOG_DEBUG(log, "Find not existed cache, remove it: {}", cache_item.first.toString());
-            VectorIndex::VectorSegmentExecutor::removeFromCache(cache_item.first);
+            LOG_DEBUG(log, "Find not existed cache, remove it: {}", cache_key.toString());
+            VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
 
             /// Clear vector files in active part
-            MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_item.first.part_name);
-            if (part && part.unique())
+            if (part)
             {
-                LOG_DEBUG(log, "Remove files of dropped vector index {} for part {}", cache_item.first.vector_index_name, part->name);
-                part->removeVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name);
+                if (part->containVectorIndex(cache_key.vector_index_name, cache_key.column_name))
+                {
+                    LOG_DEBUG(log, "Remove files of dropped vector index {} for part {}", cache_key.vector_index_name, part->name);
+                    part->removeVectorIndex(cache_key.vector_index_name, cache_key.column_name);
+                }
+                else if (part->containRowIdsMaps()) /// Decouple part
+                {
+                    LOG_DEBUG(log, "Remove old parts' vector index files {} for decouple part {}", cache_key.vector_index_name, part->name);
+                    part->removeAllRowIdsMaps();
+                }
             }
         }
     }
@@ -102,11 +133,16 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVector
     for (const auto & part : data.getDataPartsForInternalUsage())
     {
         /// LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] part name: {}, count: {}", part->name, currently_vector_indexing_parts.count(part->name));
+
+        /// Skip empty part
+        if (part->isEmpty())
+            continue;
+
         /// need to check currently_vector_indexing_parts.count(part) > 0
         if (data.currently_vector_indexing_parts.count(part->name) > 0 || part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
             continue;
 
-        if (VectorIndex::containRowIdsMaps(part) && data.getSettings()->distable_rebuild_for_decouple)
+        if (part->containRowIdsMaps() && data.getSettings()->distable_rebuild_for_decouple)
             continue;
 
         /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
@@ -429,8 +465,17 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                                 }
                             }
 
-                            if (future_part)
+                            if (future_part && !future_part->getPartIsMutating())
+                            {
                                 moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
+
+                                if (future_part->containRowIdsMaps())
+                                {
+                                    auto lock = data.lockParts();
+                                    VectorIndex::removeRowIdsMaps(future_part);
+                                }
+                            }
+                            /// else future part will pick up later at the next time when index built for it.
                         }
 
                         return BuildVectorIndexStatus::SUCCESS;
@@ -607,6 +652,19 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             }
             LOG_INFO(log, "[buildVectorIndex] index after read vectors: read vector num: {}", vec_data->getVectorNum());
         }
+
+        if (num_rows_read == 0 && part->rows_count == 0)
+        {
+            LOG_WARNING(log, "[buildVectorIndex] part {} is empty", part->name);
+            continue;
+        }
+        else if (num_rows_read < part->rows_count)
+        {
+            LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
+            disk->removeRecursive(vector_tmp_relative_path);
+            return BuildVectorIndexStatus::BUILD_FAIL;
+        }
+
         if (!part->vector_index_build_cancelled)
         {
             if (tune)
@@ -655,15 +713,27 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     return BuildVectorIndexStatus::SUCCESS;
                 }
 
+                /// First, move index files to part and apply lightweight delete.
                 moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
 
+                /// Second, update delete bitmap in memory in currently builder, which will be put in cache.
                 /// Update segment id with correct part name and path.
                 VectorIndex::SegmentId segment_id(future_part->getDataPartStorage().getFullPath(), future_part->name, future_part->name, vec_index_desc.name, vec_index_desc.column, 0);
                 vec_index_builder->updateSegmentId(segment_id);
 
+                /// Need to reload delete bitmap from disk. The delete_bitmap in vec_index_builder doesn't contain rows deleted by lightweight.
+                if (future_part->hasLightweightDelete())
+                    vec_index_builder->reloadDeleteBitMap();
+
                 LOG_INFO(log, "[buildVectorIndex] index cache: status: {}", seri_status.getCode());
                 vec_index_builder->cache();
                 LOG_INFO(log, "[buildVectorIndex] index after cache: status: {}", seri_status.getCode());
+
+                if (future_part->containRowIdsMaps())
+                {
+                    auto lock = data.lockParts();
+                    VectorIndex::removeRowIdsMaps(future_part);
+                }
             }
         }
     }
@@ -766,23 +836,12 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const 
 
     LOG_INFO(log, "[buildVectorIndex] move vector index files to part {}", dest_part->name);
 
-    if (VectorIndex::containRowIdsMaps(dest_part->getDataPartStorage().getFullPath()))
-    {
-        auto lock = data.lockParts();
-        LOG_INFO(log, "[buildVectorIndex] try to remove row ids maps files in {}", dest_part->getDataPartStorage().getFullPath());
-        /// currently only consider one vector index
-        auto vec_index_desc = metadata_snapshot->vec_indices[0];
-        auto old_segments = VectorIndex::getAllSegmentIds(dest_part->getDataPartStorage().getFullPath(), dest_part, vec_index_desc.name, vec_index_desc.column);
-        for (auto& old_segment : old_segments)
-        {
-            VectorIndex::VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
-        }
-        VectorIndex::removeAllRowIdsMaps(dest_part->getDataPartStorage().getFullPath());
-    }
-
     /// Apply lightweight delete bitmap to index's bitmap
     if (dest_part->hasLightweightDelete())
+    {
+        LOG_DEBUG(log, "[buildVectorIndex] apply lightweight delete to vector index in part {}", dest_part->name);
         dest_part->onLightweightDelete();
+    }
 
     return true;
 }

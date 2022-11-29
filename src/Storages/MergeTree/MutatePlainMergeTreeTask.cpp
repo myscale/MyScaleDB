@@ -99,24 +99,16 @@ bool MutatePlainMergeTreeTask::executeStep()
                 storage.updateMutationEntriesErrors(future_part, true, "");
                 write_part_log({});
 
-                /// Update vector index bitmap after mutations with lightweight delete.
-                if (new_part->containAnyVectorIndex())
-                {
-                    if (VectorIndex::containRowIdsMaps(new_part->getDataPartStorage().getFullPath()))
-                    {
-                        LOG_INFO(storage.log, "try to remove row ids maps files in {}", new_part->getDataPartStorage().getFullPath());
-                        /// currently only consider one vector index
-                        auto vec_index_desc = metadata_snapshot->vec_indices[0];
-                        auto old_segments = VectorIndex::getAllSegmentIds(new_part->getDataPartStorage().getFullPath(), new_part, vec_index_desc.name, vec_index_desc.column);
-                        for (auto& old_segment : old_segments)
-                        {
-                            VectorIndex::VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
-                        }
-                        VectorIndex::removeAllRowIdsMaps(new_part->getDataPartStorage().getFullPath());
-                    }
+                /// Safe here, the source part status is Outdated, vector index move cannot find it.
+                future_part->parts[0]->setPartIsMutating(false);
 
-                   if (new_part->lightweight_delete_mask_updated)
+                /// Update vector index bitmap after mutations with lightweight delete.
+                if (new_part->lightweight_delete_mask_updated)
+                {
+                   if (new_part->containAnyVectorIndex())
                        new_part->onLightweightDelete();
+                   else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
+                       new_part->onDecoupledLightWeightDelete();
                 }
 
                 state = State::NEED_FINISH;

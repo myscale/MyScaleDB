@@ -10,9 +10,9 @@ CREATE TABLE test_vector
 ENGINE = MergeTree PRIMARY KEY id;
 
 create vector index if not exists i_h on test_vector vector TYPE FLAT;
-SELECT table, name, type, expr, status FROM system.vector_indices WHERE table = 'test_vector' FORMAT Vertical;
+SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector' FORMAT Vertical;
 drop vector index if exists i_h on test_vector;
-SELECT table, name, type, expr, status FROM system.vector_indices WHERE table = 'test_vector' FORMAT Vertical;
+SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector' FORMAT Vertical;
 
 create vector index i_h on test_vector vector TYPE FLAT;
 drop vector index i_h on test_vector; 
