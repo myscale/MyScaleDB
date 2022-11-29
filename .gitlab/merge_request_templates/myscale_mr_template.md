@@ -1,37 +1,42 @@
 <!--
 
-Thank you for contributing to MyScale!
-
-PR Title Format:
-1. pkg [, pkg2, pkg3]: what's changed
-2. *: what's changed
+MR 的标题应该符合 commit message 的标题规范:
+http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/git-workflow/#commit-message
 
 -->
 
-### What problem does this PR solve?
+### 背景
 <!--
 
-Please create an issue first to describe the problem.
+请先创建一个 issue 描述你要解决的问题。
 
-There MUST be one line starting with "Issue Number:  " and 
-linking the relevant issues via the "close" or "ref".
+这里必须有一行以 "Issue Number:  " 开头，并且通过
+"close" 或 "ref" 引用相关的 issue。
 
-For more info, check http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/git-workflow.md
+详情见 http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/git-workflow.md
 
--->Number: close #xxx
+-->
 
-Problem Summary:
+问题描述：...
 
-### What is changed and how it works?
+Issue Number: close #xxx, ref #xxx
 
-### Check List
+### 描述你的修改和工作原理
 
-Tests <!-- At least one of them must be included. -->
+### 检查列表
+
+请负责人检查自己是否
+
+1. 完成了必要的测试
+2. 记录了 MR 引发的副作用
+3. 更新了相关的用户手册
+
+Tests <!-- 至少应该完成一项 -->
 
 - [ ] Unit test
 - [ ] Integration test
 - [ ] Manual test (add detailed scripts or steps below)
-- [ ] No code
+- [ ] No code is changed
 
 Side effects
 
@@ -45,13 +50,13 @@ Documentation
 - [ ] Contains syntax changes
 - [ ] Contains variable changes
 - [ ] Contains experimental features
-- [ ] Changes MySQL compatibility
 
-### Release note
+### 发行说明
 
 <!-- compatibility change, improvement, bugfix, and new feature need a release note -->
 
-Please refer to [Release Notes Language Style Guide](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html) to write a quality release note.
+参考[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html)
+写一个高质量的发行说明。
 
 ```release-note
 None
