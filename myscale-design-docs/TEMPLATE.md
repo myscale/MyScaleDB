@@ -1,8 +1,10 @@
 # MyScale 设计文档
 
 - 作者: @qliu
-- 讨论 MR: <https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/xxx>
-- 跟踪 Issue: <https://git.moqi.ai/mqdb/ClickHouse/-/issues/xxx>
+- 讨论该文档的 MR: <https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/xxx>
+- 跟踪实现的 Issue: <https://git.moqi.ai/mqdb/ClickHouse/-/issues/xxx>
+
+[[_TOC_]]
 
 ## 简介
 
