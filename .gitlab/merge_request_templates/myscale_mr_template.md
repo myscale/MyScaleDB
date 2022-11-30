@@ -55,7 +55,8 @@ Documentation
 
 <!-- compatibility change, improvement, bugfix, and new feature need a release note -->
 
-参考[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html)
+参考
+[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/release-notes-style-guide/)
 写一个高质量的发行说明。
 
 ```release-note
