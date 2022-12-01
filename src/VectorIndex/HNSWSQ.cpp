@@ -5,8 +5,39 @@
 #include "IndexWriter.h"
 #include <VectorIndex/VectorIndexCommon.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+extern const int EMPTY_DATA_PASSED;
+}
+
 namespace VectorIndex
 {
+HNSWsq::HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
+{
+    in_mem = false;
+    //TODO initialized index with dynamic fields
+    faiss::MetricType metrictype;
+
+    getMyParameters(parameters);
+    switch (me)
+    {
+        case (Metrics::L2):
+            metrictype = faiss::METRIC_L2;
+            break;
+        case (Metrics::IP):
+            metrictype = faiss::METRIC_INNER_PRODUCT;
+            break;
+        case (Metrics::Cosine):
+            // metrictype = faiss::METRIC_Cosine;
+            throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unsupported metric_type COSINE");
+    }
+    index = std::make_shared<faiss::IndexHNSWfastSQ>(dimension, quantizer, neighbor, metrictype);
+    index->hnsw.efConstruction = ef_c;
+    index->own_fields = true;
+}
+
 void HNSWsq::train(const VectorDatasetPtr dataset, int64_t total)
 {
     if (index != nullptr)
@@ -16,7 +47,7 @@ void HNSWsq::train(const VectorDatasetPtr dataset, int64_t total)
     }
     else
     {
-        throw IndexException(1, "vector index uninitialized, can't train");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "train: index not intialized");
     }
 }
 
@@ -29,7 +60,7 @@ void HNSWsq::addWithoutId(VectorDatasetPtr dataset)
     }
     else
     {
-        throw IndexException(2, "vector index uninitialized, can't add");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
     }
 }
 
@@ -43,7 +74,7 @@ void HNSWsq::search(
 {
     if (index == nullptr)
     {
-        throw IndexException(3, "index not initialize, can't search");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
     }
 
     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
@@ -66,7 +97,7 @@ void HNSWsq::search(
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::HNSWSQ);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
     int num_thread = 1;
     if (num_query > 1)
@@ -88,7 +119,7 @@ void HNSWsq::load(BinaryPtr & bi, int64_t /*total_vec*/)
 {
     if (bi->size == 0 || bi->data == nullptr)
     {
-        throw IndexException(4, "index load failed with empty data");
+        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
     }
     setRawData(bi);
     IndexReader reader;
@@ -142,7 +173,7 @@ void HNSWsq::getMyParameters(Parameters p)
     if (!p.empty())
     {
         std::string message = generateUnsupportedParameters(p, IndexType::HNSWSQ);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
 VectorDatasetPtr HNSWsq::getInMemVectors()
@@ -204,7 +235,7 @@ faiss::ScalarQuantizer::QuantizerType HNSWsq::parse_SQ_string(String bits)
     }
     else
     {
-        throw IndexException(11, "unsupported QT bit size in HNSWSQ: " + bits);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unsupported QT bit size in HNSWSQ: {}", bits);
     }
 }
 

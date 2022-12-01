@@ -22,6 +22,12 @@
 
 #include <Common/logger_useful.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int STD_EXCEPTION;
+}
+
 namespace VectorIndex
 {
 std::once_flag once;
@@ -171,7 +177,7 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
     }
     catch (const IndexException & e)
     {
-        std::cerr << "IndexException: " << e.message();
+        LOG_ERROR(log, "IndexException: {}, {}", e.code(), e.message());
         return Status(e.code(), e.message());
     }
 }
@@ -275,11 +281,11 @@ Status VectorSegmentExecutor::serialize()
         writeBitMap();
         return finishWrite(binary_total_size);
     }
-    catch (std::exception & e)
+    catch (const std::exception & e)
     {
-        LOG_ERROR(log, "something went wrong during serialzing: {}", e.what());
+        LOG_ERROR(log, "serialze: failed due to {}", e.what());
+        return Status(1, e.what());
     }
-    return Status();
 }
 
 Status VectorSegmentExecutor::startWrite()
@@ -543,7 +549,7 @@ Status VectorSegmentExecutor::load()
             {
                 index->load(index_binary, total_vec);
             }
-            catch (IndexException & e)
+            catch (const IndexException & e)
             {
                 return Status(e.code(), e.message());
             }
@@ -730,7 +736,7 @@ Status VectorSegmentExecutor::search(
     }
     catch (const IndexException & e)
     {
-        std::cerr << "IndexException: " << e.message();
+        LOG_ERROR(log, "IndexException: {}", e.message());
         if (added)
             count.fetch_sub(1);
         cv.notify_one();
@@ -961,7 +967,7 @@ uint32_t VectorSegmentExecutor::validateAndDecompress(const BinaryPtr source, si
     {
         LOG_ERROR(
             log, "The binary is corrupted, decompressed size: {}, recorded decompressed sized: {}", size_decompressed, uncompressed_size);
-        throw IndexException(4, "disk vector index data corrupted");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "vector index on disk is corrupted");
     }
     return size_decompressed;
 }

@@ -8,6 +8,11 @@
 #include "faiss/impl/AuxIndexStructures.h"
 #include <VectorIndex/VectorIndexCommon.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+}
 
 namespace VectorIndex
 {
@@ -48,7 +53,7 @@ void IVFPQIndex::addWithoutId(VectorDatasetPtr dataset)
     }
     else
     {
-        throw IndexException(2, "vector index uninitialized, can't add");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
     }
 }
 
@@ -62,7 +67,7 @@ void IVFPQIndex::search(
 {
     if (index == nullptr)
     {
-        throw IndexException(3, "index not initialize, can't search");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
     }
 
     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
@@ -84,7 +89,7 @@ void IVFPQIndex::search(
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
     faiss::IVFSearchParameters ivf_params;
     ivf_params.nprobe = nprobe;
@@ -141,7 +146,7 @@ void IVFPQIndex::getMyParameters(Parameters params)
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::IVFPQ);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
 

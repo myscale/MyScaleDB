@@ -8,6 +8,11 @@
 #include "IVFSQIndex.h"
 #include "IndexException.h"
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+}
+
 namespace VectorIndex
 {
 VectorIndexPtr VectorIndexFactory::createIndex(IndexType it, IndexMode im, Metrics me, int dimension, Parameters parameters)
@@ -155,7 +160,7 @@ Metrics VectorIndexFactory::createIndexMetrics(std::string index_metric)
     {
         return Metrics::Cosine;
     }
-    throw IndexException(0, "wrong metrics");
+    throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unknown metric_type {}", index_metric);
 }
 
 std::string VectorIndexFactory::modeToString(IndexMode mode)

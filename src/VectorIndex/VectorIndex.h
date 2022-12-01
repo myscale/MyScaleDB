@@ -129,9 +129,10 @@ public:
         {
             getMyParameters(param);
         }
-        catch (IndexException & e)
+        catch (const IndexException & e)
         {
-            (void)e;
+            LOG_WARNING(&Poco::Logger::get("VectorIndex"), "failed to parse parameters: {}", e.what());
+            return false;
         }
         return true;
     }

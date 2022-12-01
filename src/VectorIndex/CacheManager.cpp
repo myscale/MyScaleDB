@@ -3,6 +3,11 @@
 
 #include <VectorIndex/IndexException.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+}
+
 namespace VectorIndex
 {
 
@@ -27,7 +32,7 @@ IndexWithMetaPtr CacheManager::get(const CacheKey& cache_key)
 {
     if (!cache_)
     {
-        throw IndexException(100, "cache not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
     IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
     if (iam_ptr)
@@ -44,7 +49,7 @@ void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
 {
     if (!cache_)
     {
-        throw IndexException(4, "cache not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
 
     IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
@@ -66,7 +71,7 @@ void CacheManager::startLoading(const CacheKey& cache_key)
 {
     if (!cache_)
     {
-        throw IndexException(4, "currently_loading_segments list not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
     }
     std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
 
@@ -81,7 +86,7 @@ std::shared_ptr<std::mutex> CacheManager::getMutex(const CacheKey& cache_key)
 {
     if (!cache_)
     {
-        throw IndexException(4, "currently_loading_segments list not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "getMutex: cache not allocated");
     }
 
     IndexAndMutexPtr iam_ptr = cache_->get(cache_key);

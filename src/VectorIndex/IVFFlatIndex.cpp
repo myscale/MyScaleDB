@@ -12,6 +12,12 @@
 #include "faiss/profile.h"
 #include <VectorIndex/VectorIndexCommon.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+extern const int INCORRECT_INDEX;
+}
 
 namespace VectorIndex
 {
@@ -66,7 +72,7 @@ void IVFFlatIndex::addWithoutId(VectorDatasetPtr dataset)
     }
     else
     {
-        throw IndexException(2, "vector index uninitialized, can't add");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
     }
 }
 
@@ -76,7 +82,7 @@ void IVFFlatIndex::search(
 {
     if (index == nullptr)
     {
-        throw IndexException(3, "index not initialize, can't search");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
     }
     auto * index_real = reinterpret_cast<faiss::IndexIVFFlatFilter *>(index.get());
 
@@ -101,11 +107,11 @@ void IVFFlatIndex::search(
         params.erase("acc");
         if (!index_real->tuned)
         {
-            throw IndexException(11, "profiler off, please turn on profiler and rebuild index");
+            throw IndexException(DB::ErrorCodes::INCORRECT_INDEX, "autotune is off, turn on profiler and rebuild index");
         }
         if (acc < 0 || acc > 1)
         {
-            throw IndexException(11, "impossible accuracy, check the parameter.");
+            throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "invalid acc {} for autotune", acc);
         }
         if (!index_real->tuned)
         {
@@ -122,7 +128,7 @@ void IVFFlatIndex::search(
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
     faiss::IVFSearchParameters ivf_params;
     int current_running_task = count.load(std::memory_order_relaxed);
@@ -211,7 +217,7 @@ void IVFFlatIndex::getMyParameters(Parameters params)
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
 
@@ -284,7 +290,7 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
     }
     else
     {
-        throw IndexException(0, "IVFFlat casting failed, this is logic error.");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "IVFFlat casting failed, this is logic error.");
     }
 }
 }

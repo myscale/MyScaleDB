@@ -23,33 +23,7 @@ namespace VectorIndex
 class HNSWsq : public VectorIndex
 {
 public:
-    HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
-    {
-        in_mem = false;
-        //TODO initialized index with dynamic fields
-        faiss::MetricType metrictype;
-
-        getMyParameters(parameters);
-        if (me == Metrics::L2)
-        {
-            metrictype = faiss::METRIC_L2;
-        }
-        else if (me == Metrics::IP)
-        {
-            metrictype = faiss::METRIC_INNER_PRODUCT;
-        }
-        else if (me == Metrics::Cosine)
-        {
-            throw IndexException(0, "cosine unsupported in sq");
-        }
-        else
-        {
-            throw IndexException(0, "unsupported metrics");
-        }
-        index = std::make_shared<faiss::IndexHNSWfastSQ>(dimension_, quantizer, neighbor, metrictype);
-        index->hnsw.efConstruction = ef_c;
-        index->own_fields = true;
-    }
+    HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
 
     void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
 

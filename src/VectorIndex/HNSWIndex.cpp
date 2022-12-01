@@ -8,6 +8,12 @@
 #include "IndexException.h"
 #include <VectorIndex/VectorIndexCommon.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+extern const int EMPTY_DATA_PASSED;
+}
 
 namespace VectorIndex
 {
@@ -50,7 +56,7 @@ void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
     }
     else
     {
-        throw IndexException(2, "vector index uninitialized, can't add");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
     }
 }
 
@@ -61,7 +67,7 @@ void HNSWIndex::search(
 
     if (index == nullptr)
     {
-        throw IndexException(3, "index not initialize, can't search");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
     }
     int total_vectors = dataset->getVectorNum();
     float * __restrict data_grid = dataset->getData();
@@ -83,7 +89,7 @@ void HNSWIndex::search(
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::HNSWFLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
     int num_thread = 1;
     if (total_vectors > 1)
@@ -122,7 +128,7 @@ void HNSWIndex::load(BinaryPtr & bi, int64_t total_vec)
 {
     if (bi->size == 0 || bi->data == nullptr)
     {
-        throw IndexException(4, "index load failed with empty data");
+        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
     }
     hnswlib::SpaceInterface<float> * space;
     Poco::Logger * log = &Poco::Logger::get("HNSW");
@@ -204,7 +210,7 @@ void HNSWIndex::getMyParameters(Parameters params)
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::HNSWFLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
 int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)

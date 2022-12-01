@@ -7,6 +7,12 @@
 #include "faiss/index_io.h"
 #include <VectorIndex/VectorIndexCommon.h>
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+}
+
 namespace VectorIndex
 {
 void FlatIndex::train(VectorDatasetPtr dataset, int64_t total)
@@ -21,7 +27,7 @@ void FlatIndex::addWithoutId(VectorDatasetPtr dataset)
     }
     else
     {
-        throw IndexException(2, "vector index uninitialized, can't add");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
     }
 }
 
@@ -36,7 +42,7 @@ void FlatIndex::search(
     Poco::Logger * log = &Poco::Logger::get("FlatIndex");
     if (index == nullptr)
     {
-        throw IndexException(3, "index not initialize, can't search");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
     }
     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
     inner_bit_map.reset(reinterpret_cast<faiss::bitMap *>(convertInnerBitMap(filter)));
@@ -73,7 +79,7 @@ void FlatIndex::getMyParameters(Parameters params)
     if (!params.empty())
     {
         std::string message = generateUnsupportedParameters(params, IndexType::FLAT);
-        throw IndexException(11, message);
+        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
 

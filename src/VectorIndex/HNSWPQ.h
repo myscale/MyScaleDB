@@ -17,39 +17,19 @@
 #include "Binary.h"
 #include "VectorIndex.h"
 
+namespace DB::ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+extern const int UNSUPPORTED_PARAMETER;
+extern const int EMPTY_DATA_PASSED;
+}
+
 namespace VectorIndex
 {
 class HNSWpq : public VectorIndex
 {
 public:
-    HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
-    {
-        in_mem = false;
-        //TODO initialized index with dynamic fields
-        faiss::MetricType metrictype;
-
-        getMyParameters(parameters);
-        if (me == Metrics::L2)
-        {
-            metrictype = faiss::METRIC_L2;
-        }
-        else if (me == Metrics::IP)
-        {
-            metrictype = faiss::METRIC_INNER_PRODUCT;
-        }
-        else
-        {
-            metrictype = faiss::METRIC_Cosine;
-        }
-
-        if (dimension_ == -1)
-        {
-            dimension_ = pq_m;
-        }
-        index = std::make_shared<faiss::IndexHNSWfastPQ>(dimension_, pq_m, bit_size, neighbor, metrictype);
-        index->hnsw.efConstruction = ef_c;
-        index->own_fields = true;
-    }
+    HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
 
     void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
 

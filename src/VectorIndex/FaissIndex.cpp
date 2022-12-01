@@ -8,6 +8,11 @@
 #include "faiss/impl/AuxIndexStructures.h"
 #include "faiss/index_io.h"
 
+namespace DB::ErrorCodes
+{
+extern const int EMPTY_DATA_PASSED;
+extern const int STD_EXCEPTION;
+}
 namespace VectorIndex
 {
 BinaryPtr FaissIndex::serialize(size_t max_bytes, bool & finished)
@@ -26,7 +31,7 @@ void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
     }
     if (bi->size == 0 || bi->data == nullptr)
     {
-        throw IndexException(4, "index load failed with empty data");
+        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
     }
     IndexReader reader;
     reader.data = bi->data;
@@ -35,13 +40,13 @@ void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
     {
         index.reset(faiss::read_index(&reader));
     }
-    catch (std::runtime_error & e)
+    catch (const std::runtime_error & e)
     {
-        throw IndexException(5, e.what());
+        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
     }
-    catch (faiss::FaissException & e)
+    catch (const faiss::FaissException & e)
     {
-        throw IndexException(5, e.what());
+        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
     }
     // reinterpret_cast might seem fishy, but when they returned from read_index they initially
     // created a child class then cast it to Index.

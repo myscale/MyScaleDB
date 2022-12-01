@@ -245,6 +245,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
             }
             if (status == BuildVectorIndexStatus::BUILD_FAIL)
             {
+                part->setBuildError();
                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
             }
         }
@@ -583,14 +584,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     dim);
                 VectorIndex::Status build_status = vec_index_builder->buildIndex(vec_data, part->rows_count, slow_mode);
 
-                if (build_status.getCode() == 11)
-                {
-                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                    return BuildVectorIndexStatus::MISCONFIGURED;
-                }
-
                 if (!build_status.fine())
                 {
+                    LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
                     disk->removeRecursive(vector_tmp_relative_path);
                     return BuildVectorIndexStatus::BUILD_FAIL;
                 }
