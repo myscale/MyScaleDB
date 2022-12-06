@@ -31,8 +31,6 @@ struct StorageInMemoryMetadata
     IndicesDescription secondary_indices;
     /// Vector indices.
     VectorIndicesDescription vec_indices;
-    /// to_be dropped vector indices.
-    VectorIndicesDescription vec_indices_drop_queue;
     /// Table constraints. Currently supported for MergeTree only.
     ConstraintsDescription constraints;
     /// Table projections. Currently supported for MergeTree only.

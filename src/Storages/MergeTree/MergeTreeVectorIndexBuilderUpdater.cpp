@@ -73,10 +73,13 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
         {
             LOG_DEBUG(log, "Find not existed cache, remove it: {}", cache_item.first.toString());
             VectorIndex::VectorSegmentExecutor::removeFromCache(cache_item.first);
-            for (const auto& part : data.getDataPartsForInternalUsage())
+
+            /// Clear vector files in active part
+            MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_item.first.part_name);
+            if (part && part.unique())
             {
+                LOG_DEBUG(log, "Remove files of dropped vector index {} for part {}", cache_item.first.vector_index_name, part->name);
                 part->removeVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name);
-                part->vector_index_build_error = false;
             }
         }
     }
@@ -197,6 +200,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
         {
             LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled.", part->name);
             continue;
+        }
+
+        /// Check latest metadata
+        if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+        {
+            LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+            return BuildVectorIndexStatus::SUCCESS;
         }
 
         const DataPartStorageOnDiskBase * part_storage
@@ -640,6 +650,14 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             if (future_part)
             {
+                /// Check the latest metadata before move files, in case drop index submitted during index building.
+                if (future_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+                {
+                    LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+                    disk->removeRecursive(vector_tmp_relative_path);
+                    return BuildVectorIndexStatus::SUCCESS;
+                }
+
                 moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
 
                 /// Update segment id with correct part name and path.

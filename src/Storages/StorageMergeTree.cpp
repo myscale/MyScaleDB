@@ -339,10 +339,10 @@ void StorageMergeTree::alter(
     StorageInMemoryMetadata old_metadata = getInMemoryMetadata();
     auto maybe_mutation_commands = commands.getMutationCommands(new_metadata, local_context->getSettingsRef().materialize_ttl_after_modify, local_context);
     Int64 mutation_version = -1;
-
+    /// get vector index commands
     auto maybe_vec_index_commands = commands.getVectorIndexCommands(new_metadata, local_context);
+    /// Apply alter commands and update new_metadata
     commands.apply(new_metadata, local_context);
-    LOG_DEBUG(log, "[alter] get vec index commands: {}", maybe_vec_index_commands.size());
 
     /// This alter can be performed at new_metadata level only
     if (commands.isSettingsAlter())
@@ -356,18 +356,15 @@ void StorageMergeTree::alter(
             changeSettings(new_metadata.settings_changes, table_lock_holder);
             checkTTLExpressions(new_metadata, old_metadata);
             /// Reinitialize primary key because primary key column types might have changed.
-            if (!maybe_vec_index_commands.empty())
-            {
-                LOG_DEBUG(log, "[alter] start vector index job");
-                startVectorIndexJob(maybe_vec_index_commands,new_metadata);
-            }
-
             setProperties(new_metadata, old_metadata);
+
             DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
+
+            if (!maybe_vec_index_commands.empty())
+                startVectorIndexJob(maybe_vec_index_commands);
 
             if (!maybe_mutation_commands.empty())
                 mutation_version = startMutation(maybe_mutation_commands, local_context);
-
         }
 
         {
@@ -509,26 +506,29 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
     return version;
 }
 
-void StorageMergeTree::startVectorIndexJob(VectorIndexCommands vector_index_commands,StorageInMemoryMetadata& metadata)
+void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_index_commands)
 {
     if (vector_index_commands.size() == 1 && vector_index_commands.back().drop_command)
     {
-        ///nothing to do
-        for(auto& part:getDataPartsForInternalUsage())
+        auto drop_vector_index = vector_index_commands[0];
+
+        /// Delete vector index files.
+        for (const auto & part : getDataPartsForInternalUsage())
         {
-            LOG_INFO(log,"supposed to erase:{}",vector_index_commands.back().index_name);
-            LOG_INFO(log,"queue length {},",metadata.vec_indices_drop_queue.size());
-            for(const auto& vec_index_desc :metadata.vec_indices_drop_queue)
+            if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
             {
-                if(vec_index_desc.name==vector_index_commands.back().index_name)
+                /// Clear cache first, now getAllSegementIds() is based on vector index files
+                auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, drop_vector_index.index_name, drop_vector_index.column_name);
+                for (auto & segment_id : segment_ids)
                 {
-                    size_t erased = part->vector_indexed.erase(vec_index_desc.name+"_"+vec_index_desc.column);
-                    part->vector_index_build_error = false;
-                    LOG_INFO(log,"erased number:{}",erased);
+                    VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
                 }
+
+                /// Delete files in part directory if exists and metadata
+                part->removeVectorIndex(drop_vector_index.index_name, drop_vector_index.column_name);
+
             }
         }
-        metadata.vec_indices_drop_queue.clear();
     }
     else
     {

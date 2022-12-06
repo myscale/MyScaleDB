@@ -2309,7 +2309,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
     /// TODO: how to remove old parts' caches
     for (const auto & part : parts)
     {
-        for(const auto& vec_index_desc : meta_snapshot->vec_indices)
+        for(const auto & vec_index_desc : meta_snapshot->vec_indices)
         {
             auto segment_ids
                 = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);

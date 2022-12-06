@@ -727,7 +727,8 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
             [this](const auto & vec_index)
             {
                 return vec_index.name == vec_index_name;
-            })){
+            }))
+        {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot add vector index {}: this name is used", vec_index_name);
         }
         if (std::any_of(
@@ -769,23 +770,21 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
     {
         if (!partition && !clear)
         {
-            Poco::Logger * log = &Poco::Logger::get("AlterCommand");
-            for (auto & vec_index : metadata.vec_indices)
-            {
-                LOG_DEBUG(log, "vec_index: {}", vec_index.name);
-            }
-            auto erase_it = std::find_if(metadata.vec_indices.begin(), metadata.vec_indices.end(), [this](const auto & vec_index) {
-                return vec_index.name == vec_index_name;
-            });
+            auto erase_it = std::find_if(
+                metadata.vec_indices.begin(),
+                metadata.vec_indices.end(),
+                [this](const auto & vec_index)
+                {
+                    return vec_index.name == vec_index_name;
+                });
 
             if (erase_it == metadata.vec_indices.end())
             {
                 if (if_exists)
                     return;
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong vector index name. Cannot find vector index {} to drop.", backQuote(vec_index_name));
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong vector index name. Cannot find vector index {} to drop", backQuote(vec_index_name));
             }
-            metadata.vec_indices_drop_queue.emplace_back(*erase_it);
-            LOG_DEBUG(log, "vec_indices_drop_queue: {}", metadata.vec_indices_drop_queue.size());
+
             metadata.vec_indices.erase(erase_it);
         }
     }
@@ -1030,7 +1029,7 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
         result.index_name = vec_index_name;
         result.index_type = Poco::toUpper(vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
-        LOG_DEBUG(log, "index_name: {}, index_type: {}", result.index_name, result.index_type);
+        LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
     } 
     else if (type == DROP_VECTOR_INDEX) 
     {
@@ -1038,7 +1037,14 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
         LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
         result.drop_command = true;
         result.index_name = vec_index_name;
-    } 
+
+        /// Get column name of the dropped vector index from metadata
+        for (auto & vec_index : metadata.vec_indices)
+        {
+            if (vec_index_name == vec_index.name)
+                result.column_name = vec_index.column;
+        }
+    }
     else 
     {
         return {};

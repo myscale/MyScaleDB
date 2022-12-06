@@ -331,7 +331,8 @@ public:
 
     void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
 
-    void removeVectorIndex(String index_name, String col_name) const { vector_indexed.erase(index_name + "_" + col_name); }
+    /// remove specified vector index from part, both disk and metadata.
+    void removeVectorIndex(const String & index_name, const String & col_name) const;
 
     void setBuildError() const { vector_index_build_error = true; }
 

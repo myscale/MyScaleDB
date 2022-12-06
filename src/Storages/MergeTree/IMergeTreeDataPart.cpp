@@ -1337,6 +1337,33 @@ void IMergeTreeDataPart::loadColumns(bool require)
     setColumns(loaded_columns, infos);
 }
 
+void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
+{
+    /// No need to check metadata of table, because for drop index, the metadata has erased it.
+    /// Remove all the files which end with .vidx
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+            continue;
+
+        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+        part_storage.removeFileIfExists(file_name);
+    }
+
+    /// Clear from metadata
+    if (containVectorIndex(index_name, col_name))
+        vector_indexed.erase(index_name + "_" + col_name);
+    else if (index_name.empty()) /// Empty index name will clear all vector indices.
+        vector_indexed.clear();
+
+    /// Clear vector index build flags
+    vector_index_build_error = false;
+    vector_index_build_cancelled = false;
+}
+
 void IMergeTreeDataPart::loadVectorIndexMetadata() const
 {
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();

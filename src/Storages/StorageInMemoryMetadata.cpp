@@ -37,7 +37,6 @@ StorageInMemoryMetadata::StorageInMemoryMetadata(const StorageInMemoryMetadata &
     : columns(other.columns)
     , secondary_indices(other.secondary_indices)
     , vec_indices(other.vec_indices)
-    , vec_indices_drop_queue(other.vec_indices_drop_queue)
     , constraints(other.constraints)
     , projections(other.projections.clone())
     , minmax_count_projection(
@@ -62,7 +61,6 @@ StorageInMemoryMetadata & StorageInMemoryMetadata::operator=(const StorageInMemo
     columns = other.columns;
     secondary_indices = other.secondary_indices;
     vec_indices = other.vec_indices;
-    vec_indices_drop_queue = other.vec_indices_drop_queue;
     constraints = other.constraints;
     projections = other.projections.clone();
     if (other.minmax_count_projection)

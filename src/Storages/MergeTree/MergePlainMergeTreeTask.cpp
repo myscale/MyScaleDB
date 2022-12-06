@@ -134,16 +134,19 @@ void MergePlainMergeTreeTask::prepare()
 
 void MergePlainMergeTreeTask::finish()
 {
-    /* auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
-
-    auto table_name = storage.getStorageID().getTableName();
-    if (table_name != "asynchronous_metric_log" && table_name != "trace_log" && table_name != "metric_log")
-        LOG_INFO(logger, "{} Merge Finish here", storage.getStorageID().getTableName());
-    */
     new_part = merge_task->getFuture().get();
 
     MergeTreeData::Transaction transaction(storage, txn.get());
     storage.merger_mutator.renameMergedTemporaryPart(new_part, future_part->parts, txn, transaction);
+    /// Check latest metadata if vector index has been dropped.
+    if (new_part->storage.getInMemoryMetadataPtr()->vec_indices.empty() && (new_part->containAnyVectorIndex() || VectorIndex::containRowIdsMaps(new_part)))
+    {
+        /// Pass empty string for index_name and column name, all vector index will be removed from this part.
+        String dummy_name;
+        new_part->removeVectorIndex(dummy_name, dummy_name);
+
+        /// Unable to get vector index name so wait to clear by backgound removeDroppedVectorIndices()
+    }
     transaction.commit();
 
     write_part_log({});

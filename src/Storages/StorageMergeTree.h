@@ -233,7 +233,7 @@ private:
     UInt32 getMaxLevelInBetween(
         const DataPartPtr & left,
         const DataPartPtr & right) const;
-    void startVectorIndexJob(VectorIndexCommands vector_index_commands,StorageInMemoryMetadata& metadata);
+    void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
 
     std::shared_ptr<VectorIndexEntry> selectPartsToBuildVectorIndex(const StorageMetadataPtr & metadata_snapshot);
 
