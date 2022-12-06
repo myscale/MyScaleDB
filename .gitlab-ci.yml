@@ -60,10 +60,16 @@ stateless_test:
       # - ARCH: arm64
   tags:
     - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateless-test"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+    when: always
   before_script:
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateless-test.sh
+    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
 
 stateful_test:
   stage: test
@@ -74,10 +80,16 @@ stateful_test:
       # - ARCH: arm64
   tags:
     - ${ARCH}
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateful-test"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateful/test_output
+    when: always
   before_script:
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateful-test.sh
+    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
 
 build_package:
   stage: package

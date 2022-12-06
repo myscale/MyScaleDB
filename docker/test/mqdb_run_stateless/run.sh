@@ -113,7 +113,9 @@ function run_tests() {
         01086_odbc_roundtrip 02049_clickhouse_local_merge_tree 01753_max_uri_size 01753_max_uri_size \
         01565_reconnect_after_client_error 01324_settings_documentation 01293_show_clusters \
         02344_show_caches 02456_BLAKE3_hash_function_test \
-        01271_show_privileges 01158_zookeeper_log_long 01528_clickhouse_local_prepare_parts 01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize 02047 01039 00993 02207 02117 02226 2>&1 |
+        01271_show_privileges 01158_zookeeper_log_long 01528_clickhouse_local_prepare_parts \
+        01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
+        02047 01039 00993 02207 02117 02226 01606_git_import 2>&1 |
         ts '%Y-%m-%d %H:%M:%S' |
         tee -a test_output/test_result.txt
     set -e
