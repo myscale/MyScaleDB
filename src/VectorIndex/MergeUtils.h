@@ -80,7 +80,11 @@ static bool containRowIdsMaps(const String& data_path)
 
 static bool containRowIdsMaps(const std::shared_ptr<const DB::IMergeTreeDataPart>& part)
 {
-    return containRowIdsMaps(part->getDataPartStorage().getFullPath());
+    /// Skip to check disk for in-memory part
+    if (!part->isStoredOnDisk())
+        return false;
+    else
+       return containRowIdsMaps(part->getDataPartStorage().getFullPath());
 }
 
 static void removeAllRowIdsMaps(const String& data_path)

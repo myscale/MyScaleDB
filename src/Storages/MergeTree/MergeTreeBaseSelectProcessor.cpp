@@ -630,7 +630,11 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     /// Remove distance_func column from read_result.columns, it will be added by vector search.
     Columns ordered_columns;
-    ordered_columns.reserve(sample_block.columns() - 1);
+    if (task->vector_scan_manager)
+        ordered_columns.reserve(sample_block.columns() - 1);
+    else
+        ordered_columns.reserve(sample_block.columns());
+
     size_t which_cut = 0;
     String vector_scan_col_name;
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
