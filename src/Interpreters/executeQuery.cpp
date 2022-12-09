@@ -596,8 +596,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         {
             if (context->getCurrentTransaction() && settings.throw_on_unsupported_query_inside_transaction)
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts inside transactions are not supported");
-            if (settings.implicit_transaction && settings.throw_on_unsupported_query_inside_transaction)
-                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'implicit_transaction' are not supported");
+            if (settings.atomic_insert && settings.throw_on_unsupported_query_inside_transaction)
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'atomic_insert' are not supported");
 
             quota = context->getQuota();
             if (quota)
@@ -648,7 +648,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         if (!async_insert)
         {
             /// We need to start the (implicit) transaction before getting the interpreter as this will get links to the latest snapshots
-            if (!context->getCurrentTransaction() && settings.implicit_transaction && !ast->as<ASTTransactionControl>())
+            if (!context->getCurrentTransaction() && (insert_query && settings.atomic_insert))
             {
                 try
                 {
@@ -659,7 +659,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 }
                 catch (Exception & e)
                 {
-                    e.addMessage("while starting a transaction with 'implicit_transaction'");
+                    e.addMessage("while starting a transaction with 'atomic_insert'");
                     throw;
                 }
             }
