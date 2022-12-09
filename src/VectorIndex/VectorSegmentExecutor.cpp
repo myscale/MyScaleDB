@@ -236,11 +236,12 @@ Status VectorSegmentExecutor::cache()
 
 Status VectorSegmentExecutor::serialize()
 {
-    /// serialization contains three steps:
+    /// Serialization contains three steps:
     /// 1. write vector_index_ready file to mark that we start writting
     /// 2. incrementally write index file
     /// 3. write vector_index_ready file to mark that we finished writting
-    /// vector_index_ready file is a binary_log which can only be appended to but not altered
+    ///    vector_index_ready file is a binary_log which can only be appended
+    ///    to but not altered
     try
     {
         int64_t binary_total_size = 0;
@@ -250,8 +251,8 @@ Status VectorSegmentExecutor::serialize()
         startWrite();
         while (!last_part)
         {
-            ///even though we set the max bytes to serialize for serialization,
-            ///it could exceed this amount by accident,then we need to handle the exceeded part.
+            /// Even though we set the max bytes to serialize for serialization,
+            /// it could exceed this amount by accident,then we need to handle the exceeded part.
             LOG_INFO(log, "expected segment_size: {}", optimal_segment_size);
             index_binary = index->serialize(optimal_segment_size, last_part);
             if (index_binary->size <= 0)
@@ -266,7 +267,7 @@ Status VectorSegmentExecutor::serialize()
             {
                 size_t max_allowed_per_write = compressBound(actual_all, cmb);
                 bool last_sub_part = (last_part & (max_allowed_per_write == actual_all));
-                ///write index loop, compress and write index in small parts
+                /// write index loop, compress and write index in small parts
                 Status stat = writePart(last_sub_part, segment_count, index_binary->data + written, max_allowed_per_write);
                 if (!stat.fine())
                 {

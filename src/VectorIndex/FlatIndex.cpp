@@ -17,6 +17,7 @@ namespace VectorIndex
 {
 void FlatIndex::train(VectorDatasetPtr dataset, int64_t total)
 {
+    reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->reserve(total);
 }
 
 void FlatIndex::addWithoutId(VectorDatasetPtr dataset)
@@ -52,17 +53,8 @@ void FlatIndex::search(
 
     LOG_DEBUG(log, "[search] raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
 
-    //TODO make dynamic or user defined
     reinterpret_cast<faiss::IndexFlatFilter *>(index.get())
         ->search(num_query, query_datas, topK, distances, result_id, inner_bit_map.get());
-    //distance might not be useful in many cases
-
-    /*
-    for (int32_t i = 0; i < topK; ++i)
-    {
-        LOG_DEBUG(log, "[search] result {} {}", result_id[i], distances[i]);
-    }
-    */
 }
 
 VectorDatasetPtr FlatIndex::getInMemVectors()
