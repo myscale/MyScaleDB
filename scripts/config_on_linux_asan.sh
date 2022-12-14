@@ -24,6 +24,4 @@ cmake -G Ninja .. -DCMAKE_C_COMPILER=$(command -v clang-13) \
     -DENABLE_TESTS=OFF \
     -DENABLE_RAPIDJSON=ON \
     -DENABLE_LICENSE_CHECK=OFF \
-    -DSANITIZE=address \
-    -DVERSION_GITHASH=""
-
+    -DSANITIZE=address
