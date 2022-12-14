@@ -1268,6 +1268,7 @@ void MergeTreeVectorScanManager::searchWrapper(
     {
         for (int i = 0; i < k * nq; i++)
         {
+            /// security check
             if (per_id[i] > -1 && per_id[i] < actual_id_in_range.size())
                 per_id[i] = actual_id_in_range[per_id[i]];
         }
