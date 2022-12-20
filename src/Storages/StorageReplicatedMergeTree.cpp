@@ -3148,10 +3148,10 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
                     metadata_snapshot, 1, true);
                 if (slow_mode_vector_index_entry)
                 {
-                    auto & parts = vector_index_entry->data_part_names;
+                    auto & parts = slow_mode_vector_index_entry->data_part_names;
                     LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
                     auto task = std::make_shared<VectorIndexMergeTreeTask>(
-                        *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+                        *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
                     assignee.scheduleSlowModeVectorIndexTask(task);
                     return true;
                 }

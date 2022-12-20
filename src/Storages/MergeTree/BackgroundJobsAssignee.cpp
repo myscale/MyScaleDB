@@ -96,7 +96,7 @@ void BackgroundJobsAssignee::scheduleVectorIndexTask(ExecutableTaskPtr vector_in
 void BackgroundJobsAssignee::scheduleSlowModeVectorIndexTask(ExecutableTaskPtr vector_index_task)
 {
     bool res = getContext()->getSlowModeVectorIndexExecutor()->trySchedule(vector_index_task);
-    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"vector try schedule response: {}", res);
+    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"slow mode vector try schedule response: {}", res);
     res ? trigger() : postpone();
 }
 

@@ -83,7 +83,8 @@ private:
 
     bool isSlowModePart(const MergeTreeDataPartPtr & part)
     {
-        return VectorIndex::containRowIdsMaps(part) || part->rows_count < data.getSettings()->min_rows_for_slow_mode_vector_index_build;
+        /// Smaller part built with single vector index is also treated as slow mode.
+        return VectorIndex::containRowIdsMaps(part) || part->rows_count < data.getSettings()->max_rows_for_slow_mode_single_vector_index_build;
     }
 };
 
