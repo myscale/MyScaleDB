@@ -22,6 +22,7 @@ namespace ErrorCodes
 {
     extern const int MEMORY_LIMIT_EXCEEDED;
     extern const int BAD_ARGUMENTS;
+    extern const int LOGICAL_ERROR;
 }
 
 /// minimum interval (seconds) between check if need to remove dropped vector index cache.
@@ -257,7 +258,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
         if (failed_count >= maxBuildRetryCount)
         {
             part->setBuildError();
-            return BuildVectorIndexStatus::BUILD_FAIL;
+            throw Exception(ErrorCodes::MEMORY_LIMIT_EXCEEDED, "part = {}, has MEMORY_LIMIT_EXCEEDED for max retry times {}", part->name, failed_count);
         }
 
         bool mem_limit_happened = false;
@@ -356,7 +357,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         if (dim == 0)
                         {
                             LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0");
-                            return BuildVectorIndexStatus::BUILD_FAIL;
+                            throw Exception(ErrorCodes::LOGICAL_ERROR, "wrong dimension: 0");
                         }
                     }
                     ///only reading one column
@@ -519,7 +520,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         {
             if (part->vector_index_build_cancelled)
             {
-                return BuildVectorIndexStatus::BUILD_FAIL;
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index build is cancelled for part {}", part->name);
             }
             empty_ids.clear();
             size_t remaining_size = part->rows_count - num_rows_read;
@@ -640,7 +641,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 {
                     LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
                     disk->removeRecursive(vector_tmp_relative_path);
-                    return BuildVectorIndexStatus::BUILD_FAIL;
+                    throw Exception(build_status.getCode(), build_status.getMessage());
                 }
                 training = false;
             }
@@ -682,7 +683,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             {
                 /// Remove temporay directory
                 disk->removeRecursive(vector_tmp_relative_path);
-                return BuildVectorIndexStatus::BUILD_FAIL;
+
+                throw Exception(seri_status.getCode(), seri_status.getMessage());
             }
 
             /// Done with writing vector index files to temporary directory.

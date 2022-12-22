@@ -32,6 +32,8 @@ StorageSystemVectorIndices::StorageSystemVectorIndices(const StorageID & table_i
         {"small_parts", std::make_shared<DataTypeInt64>()},
         {"status", std::make_shared<DataTypeString>()},
         {"host_name", std::make_shared<DataTypeString>()},
+        {"latest_failed_part", std::make_shared<DataTypeString>()},
+        {"latest_fail_reason",  std::make_shared<DataTypeString>()},
     }));
     setInMemoryMetadata(storage_metadata);
 }
@@ -128,7 +130,6 @@ protected:
                 if (!metadata_snapshot)
                     continue;
 
-                String data_path = database->getTableDataPath(table_name);
                 MergeTreeData * data = dynamic_cast<MergeTreeData *>(table.get());
                 if (!data)
                     continue;
@@ -196,10 +197,23 @@ protected:
                             res_columns[res_index++]->insert("DataIncomplete");
                         }
                     }
+                    /// host
                     if (column_mask[src_index++])
                     {
                         auto host = escapeForFileName(getFQDNOrHostName()) + ':' + DB::toString(context->getTCPPort());
                         res_columns[res_index++]->insert(host);
+                    }
+
+                    const auto fail_status = data->getVectorIndexBuildStatus();
+                    /// latest failed part
+                    if (column_mask[src_index++])
+                    {
+                        res_columns[res_index++]->insert(fail_status.latest_failed_part);
+                    }
+                    /// latest fail reason
+                    if (column_mask[src_index++])
+                    {
+                        res_columns[res_index++]->insert(fail_status.latest_fail_reason);
                     }
                 }
             }

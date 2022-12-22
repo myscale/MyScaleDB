@@ -8280,6 +8280,35 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
     return new_data_part;
 }
 
+MergeTreeData::MergeTreeVectorIndexStatus MergeTreeData::getVectorIndexBuildStatus() const
+{
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    return vector_index_status;
+}
+
+void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message)
+{
+    /// Update the information about failed parts in the system.vector_indices table.
+
+    auto part_info = MergeTreePartInfo::fromPartName(part_name, format_version);
+
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    if (is_successful)
+    {
+        /// If last failed part has been successfully built (in the part_info), clear the fail info.
+        if (!vector_index_status.latest_failed_part.empty() && part_info.contains(vector_index_status.latest_failed_part_info))
+        {
+            vector_index_status.clear();
+        }
+    }
+    else
+    {
+        vector_index_status.latest_failed_part = part_name;
+        vector_index_status.latest_failed_part_info = part_info;
+        vector_index_status.latest_fail_reason = exception_message;
+    }
+}
+
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()
 {
     std::lock_guard lock(storage.currently_submerging_emerging_mutex);

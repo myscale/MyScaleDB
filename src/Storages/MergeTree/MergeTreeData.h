@@ -1048,7 +1048,30 @@ public:
     /// Store metadata for replicated tables
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
+
     virtual void finishVectorIndexJob(const std::vector<String> & processed_parts) = 0;
+
+    /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
+    struct MergeTreeVectorIndexStatus
+    {
+        String latest_failed_part;
+        MergeTreePartInfo latest_failed_part_info;
+        String latest_fail_reason;
+
+        void clear()
+        {
+            latest_failed_part.clear();
+            latest_failed_part_info = MergeTreePartInfo();
+            latest_fail_reason.clear();
+        }
+    };
+
+    /// Return introspection information about currently processing or recently processed vector index build jobs.
+    MergeTreeVectorIndexStatus getVectorIndexBuildStatus() const;
+
+    /// Update vector index status after buildVectorIndexForOnePart() is called for this part. May reset old
+    /// error if built was successful. Otherwise update latested failed status.
+    void updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message);
 
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
@@ -1539,6 +1562,9 @@ private:
     static MutableDataPartPtr asMutableDeletingPart(const DataPartPtr & part);
 
     mutable TemporaryParts temporary_parts;
+
+    mutable std::mutex currently_vector_index_status_mutex;
+    MergeTreeVectorIndexStatus vector_index_status;
 };
 
 /// RAII struct to record big parts that are submerging or emerging.

@@ -25,10 +25,14 @@ bool VectorIndexMergeTreeTask::executeStep()
         try
         {
             builder.buildVectorIndex(metadata_snapshot, vector_index_entry->data_part_names, false, slow_mode);
+            storage.updateVectorIndexBuildStatus(vector_index_entry->data_part_names[0], true, "");
         }
-        catch (std::exception & e)
+        catch (...)
         {
-            LOG_DEBUG(&Poco::Logger::get("(VectorIndexMergeTreeTask)"), "something went wrong during index building: {}", e.what());
+            String exception_message = getCurrentExceptionMessage(false);
+            LOG_ERROR(&Poco::Logger::get("(VectorIndexMergeTreeTask)"), "something went wrong during index building: {}", exception_message);
+            storage.updateVectorIndexBuildStatus(vector_index_entry->data_part_names[0], false, exception_message);
+
             for (const String & part_name : vector_index_entry->data_part_names)
             {
                 auto part = storage.getActiveContainingPart(part_name);
