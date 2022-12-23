@@ -43,6 +43,9 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
     if (now - last_cache_check_time < RECHECK_VECTOR_INDDEX_CACHE_INTERVAL_SECONDS)
         return;
 
+    /// Update last_cache_check
+    last_cache_check_time = now;
+
     ///check existing parts to see if any cached vector index need cleaning
     std::list<std::pair<VectorIndex::CacheKey, VectorIndex::Parameters>> cached_item_list
         = VectorIndex::VectorSegmentExecutor::getAllCacheNames();

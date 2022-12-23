@@ -3894,7 +3894,7 @@ void Context::initializeBackgroundExecutorsIfNeeded()
 
     shared->slow_mode_vector_index_executor = std::make_shared<MergeMutateBackgroundExecutor>
     (
-        "SlowVectorIndex",
+        "SlowVecIndex",
         background_slow_mode_vector_pool_size,
         background_slow_mode_vector_pool_size,
         CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask,
