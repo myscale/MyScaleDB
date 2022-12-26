@@ -213,6 +213,7 @@ void HNSWIndex::getMyParameters(Parameters params)
         throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
     }
 }
+
 int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)
 {
 #pragma omp parallel for
@@ -220,9 +221,10 @@ int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)
     {
         index->markDelete(ids[i]);
     }
-    ///HNSW does mark for delete, so it will delete required number of items
+    /// HNSW does mark for delete, so it will delete required number of items
     return n;
 }
+
 bool HNSWIndex::compare(const VectorIndex & other)
 {
     const HNSWIndex * other_p = dynamic_cast<const HNSWIndex *>(&other);

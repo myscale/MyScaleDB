@@ -24,38 +24,26 @@ namespace VectorIndex
 {
 class IVFPQIndex : public FaissIndex
 {
-    ///the IVFPQ index type conforming to the generalized vector index standard,
-    ///with these standarlization it could be used by execution engine.
 public:
     IVFPQIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
     {
         in_mem = false;
-        //TODO initialized index with dynamic fields
         getMyParameters(parameters);
-        //index->verbose = true;
     }
 
-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
+    void train(const VectorDatasetPtr dataset, int64_t total) override;
 
-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
+    void addWithoutId(const VectorDatasetPtr dataset) override;
 
     void search(
         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
         override;
-    //filter the index with bitmap and perform searching.
 
     VectorDatasetPtr getInMemVectors() override;
-
-    //when index is neither held by an explicit pointer or held in cache,
-    //it'll destruct automatically.
 
     void getMyParameters(Parameters params) override;
 
     bool compare(const VectorIndex & other) override;
-
-    //    std::unordered_map<std::string, std::string>
-    //    exploreTask(const float *query_data, const int64_t *gt,int topK,int query_size,bool oneRecall, std::mutex &m, std::condition_variable &cv, bool &go) override;
 
     int ncentroids = 1024;
     int M = 16;

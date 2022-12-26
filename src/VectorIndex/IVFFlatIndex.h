@@ -24,28 +24,20 @@ namespace VectorIndex
 {
 class IVFFlatIndex : public FaissIndex
 {
-    ///the IVFFlat index type conforming to the generalized vector index standard,
-    ///with these standarlization it could be used by execution engine.
 public:
     IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
     {
         in_mem = false;
-        //TODO initialized index with dynamic fields
         getMyParameters(parameters);
-        //index->verbose = true;
     }
 
-    void train(const VectorDatasetPtr dataset, int64_t total) override; //give a dataset for training.
+    void train(const VectorDatasetPtr dataset, int64_t total) override;
 
-    void addWithoutId(const VectorDatasetPtr dataset) override; //give index a set of data to add index，
-    // they'll be stored as <id, vector> in index, with auto-incremental ids.
+    void addWithoutId(const VectorDatasetPtr dataset) override;
 
     void search(
         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
         override;
-    //filter the index with bitmap and perform searching.
-
-    // void remove(const int32_t * ids) override; //remove id corresponded vectors from index.
 
     VectorDatasetPtr getInMemVectors() override;
 
@@ -55,11 +47,8 @@ public:
 
     void tune(VectorDatasetPtr base, int topK);
 
-    //when index is neither held by an explicit pointer or held in cache,
-    //it'll destruct automatically.
-
 private:
-    ///These are just default values, outside class shouldn't access them for reference.
+    /// These are just default values, outside class shouldn't access them for reference.
     int ncentroids = 1024;
     float std_m = 6.0;
     float multiplier = 1.3;

@@ -203,6 +203,7 @@ AccParametersPack HNSWpq::exploreTask(
     (void)log;
     return AccParametersPack();
 }
+
 int64_t HNSWpq::removeWithIds(int64_t n, int64_t * ids)
 {
     faiss::IDSelectorBatch batch_selector(n, ids);
