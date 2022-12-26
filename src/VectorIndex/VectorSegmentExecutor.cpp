@@ -738,15 +738,6 @@ Status VectorSegmentExecutor::searchWithoutIndex(
         metrics);
 }
 
-float * VectorSegmentExecutor::getDataInMem()
-{
-    if (index->inMemVectors())
-    {
-        return index->getInMemVectors()->getData();
-    }
-    return nullptr;
-}
-
 Status VectorSegmentExecutor::copyToCpu()
 {
     //TODO
@@ -962,25 +953,6 @@ Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
     else
     {
         return Status(10, "error during remove by id, removed item num: " + ItoS(removed) + ", needed to remove num:" + ItoS(n));
-    }
-}
-
-GeneralBitMapPtr VectorSegmentExecutor::getDeleteBitMapCopy()
-{
-    if (delete_bitmap != nullptr)
-    {
-        GeneralBitMapPtr copy = std::make_shared<GeneralBitMap>();
-        char * bits = new char[total_vec];
-        memcpy(bits, delete_bitmap->bitmap, (total_vec >> 3) + 1);
-        copy->bitmap = bits;
-        copy->size = total_vec;
-        return copy;
-    }
-    else
-    {
-        GeneralBitMapPtr copy = std::make_shared<GeneralBitMap>(total_vec);
-        memset(copy->bitmap, 255, (total_vec / 8) + 1);
-        return copy;
     }
 }
 

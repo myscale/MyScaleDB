@@ -27,7 +27,6 @@ class IVFSQIndex : public FaissIndex
 public:
     IVFSQIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
     {
-        in_mem = false;
         getMyParameters(parameters);
     }
 

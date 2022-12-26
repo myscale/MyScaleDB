@@ -19,7 +19,6 @@ namespace VectorIndex
 {
 void HNSWIndex::train(const VectorDatasetPtr dataset, int64_t total)
 {
-    in_mem = true;
     hnswlib::SpaceInterface<float> * space;
     switch (me)
     {

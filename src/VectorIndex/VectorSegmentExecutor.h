@@ -111,14 +111,7 @@ public:
 
     Status removeByIds(int64_t n, int64_t * ids);
 
-    GeneralBitMapPtr getDeleteBitMapCopy();
-
     GeneralBitMapPtr getDeleteBitMap() { return this->delete_bitmap; }
-
-    /// If index is flat, then the index has uncompressed vectors.
-    /// We can read all vectors directly from memory and use them to build new index.
-    /// If vectors in mem is compressed, this methods does nothing.
-    float * getDataInMem();
 
     ///return total number of vectors.
     int64_t getRawDataSize();

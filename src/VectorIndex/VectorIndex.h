@@ -80,9 +80,6 @@ public:
 
     Metrics metrics() { return me; }
 
-    /// Whether the data in index is uncompressed
-    bool inMemVectors() { return in_mem; }
-
     void setTrained() { trained = true; }
 
     bool trainStatus() { return trained; }
@@ -144,7 +141,6 @@ protected:
     Metrics me; // L1, L2, IP, Cosine
     IndexMode im; // cpu, gpu
     int dimension; // dimension
-    bool in_mem; // if vectors are stored fully in mem
     bool trained = false; // searchabled
     BinaryPtr rawData; // unfortunately to boost load speed we have to manage rawData ourselves
     int64_t total_vector = 0;

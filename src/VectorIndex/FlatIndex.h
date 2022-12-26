@@ -24,12 +24,9 @@ namespace VectorIndex
 {
 class FlatIndex : public FaissIndex
 {
-    //the IVFPQ index type conforming to the generalized vector index standard,
-    //with these standarlization it could be used by execution engine.
 public:
     FlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
     {
-        in_mem = true;
         faiss::MetricType metrictype;
         switch (me)
         {

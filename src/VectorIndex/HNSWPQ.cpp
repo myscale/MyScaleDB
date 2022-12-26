@@ -9,8 +9,6 @@ namespace VectorIndex
 {
 HNSWpq::HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
 {
-    in_mem = false;
-    //TODO initialized index with dynamic fields
     faiss::MetricType metrictype;
 
     getMyParameters(parameters);
