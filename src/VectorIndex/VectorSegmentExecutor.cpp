@@ -945,7 +945,15 @@ Status VectorSegmentExecutor::cancelBuild()
 Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
 {
     LOG_INFO(log, "need to remove {} ids", n);
-    int64_t removed = index->removeWithIds(n, ids);
+    int64_t removed = 0;
+    for (int64_t i = 0; i < n; i++)
+    {
+        if (delete_bitmap->test(ids[i]))
+        {
+            removed++;
+            delete_bitmap->unset(ids[i]);
+        }
+    }
     LOG_INFO(log, "removed {} ids", removed);
     if (removed == n)
     {
