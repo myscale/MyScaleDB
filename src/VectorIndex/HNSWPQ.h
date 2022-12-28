@@ -22,6 +22,8 @@ namespace DB::ErrorCodes
 extern const int LOGICAL_ERROR;
 extern const int UNSUPPORTED_PARAMETER;
 extern const int EMPTY_DATA_PASSED;
+extern const int STD_EXCEPTION;
+extern const int INCORRECT_DISK_INDEX;
 }
 
 namespace VectorIndex
@@ -41,9 +43,9 @@ public:
         const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & param, GeneralBitMapPtr filter)
         override;
 
-    BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override; //searilize index
+    BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override;
 
-    void load(BinaryPtr & bi, int64_t total_vec) override; //reverse serialize index
+    void load(IndexReader & reader) override;
 
     VectorDatasetPtr getInMemVectors() override;
 

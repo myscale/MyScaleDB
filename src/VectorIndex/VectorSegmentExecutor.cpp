@@ -13,6 +13,7 @@
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
+#include <VectorIndex/CompositeIndexReader.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/DiskIOWriter.h>
 #include <VectorIndex/IndexException.h>
@@ -106,9 +107,6 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
     {
         if (!index)
         {
-            //        if(data_set->getVectorNum()< MAX_BRUTE_FORCE_SEARCH_SIZE){
-            //            type = IndexType::FLAT;
-            //        }
             LOG_INFO(log, "Index type actually created {}", VectorIndexFactory::typeToString(type));
             if (para_copy.contains("metric_type"))
             {
@@ -269,8 +267,6 @@ Status VectorSegmentExecutor::serialize()
 Status VectorSegmentExecutor::startWrite()
 {
     DiskIOWriter ready_flag_writer;
-    /// try a more elegant way
-    /// String ready_file_path = segment_id.substr(0, segment_id.find("//")) + "/" + VECTOR_INDEX_READY;
     String ready_file_path = segment_id.getVectorReadyFilePath();
     String index_type = VectorIndexFactory::typeToString(type);
     String paras = "";
@@ -300,7 +296,7 @@ Status VectorSegmentExecutor::writePart(bool final, int segment_count, uint8_t *
     std::string part_id = segment_id.getFullPath() + "_" + ItoS(segment_count) + VECTOR_INDEX_FILE_SUFFIX;
     BinaryPtr index_binary_compressed = std::make_shared<Binary>();
     LOG_INFO(log, "Size of binary before compress: {}", index_segment_size);
-    compressWithCheckSum(index_segment_offset, index_segment_size, index_binary_compressed);
+    compressWithCheckSum(cmb, index_segment_offset, index_segment_size, index_binary_compressed);
     LOG_INFO(log, "Size of binary after compress: {}", index_binary_compressed->size);
     DiskIOWriter writer;
     if (!writer.open(part_id, false))
@@ -311,20 +307,19 @@ Status VectorSegmentExecutor::writePart(bool final, int segment_count, uint8_t *
     int64_t final_mark = final ? 1 : 0;
     int64_t binary_length_compressed = index_binary_compressed->size;
     int64_t binary_length_original = index_segment_size;
-    ///when this is the last part to write, the mark will be 1, else 0.
+    /// When this is the last part to write, the mark will be 1, else 0.
     writer.write(&final_mark, sizeof(final_mark));
-    ///compressed size of binaries of index
+    /// Compressed size of binaries of index
     writer.write(&binary_length_compressed, sizeof(binary_length_compressed));
-    ///uncompressed size of binaries of index
+    /// Uncompressed size of binaries of index
     writer.write(&binary_length_original, sizeof(binary_length_original));
-    ///total vector
+    /// Total vector
     writer.write(&total_vec, sizeof(total_vec));
-    ///compressed binaries of index
+    /// Compressed binaries of index
     writer.write(index_binary_compressed->data, binary_length_compressed);
-    /// writer.write(index_segment_offset, index_segment_size);
     writer.close();
-    ///after serializing the index, we write a ready flag to mark future
-    ///TODO with checksum, we can possiblly drop this
+    /// After serializing the index, we write a ready flag to mark future
+    /// TODO with checksum, we can possiblly drop this
     return Status();
 }
 
@@ -346,8 +341,6 @@ Status VectorSegmentExecutor::finishWrite(int64_t binary_total_size)
     String index_name = segment_id.getIndexNameWithColumn();
     String binary_total_size_str = ItoS(binary_total_size);
     String nextline = "\n";
-    ///TODO,This is hacky, as our segment_id is like store/12345/all_1_1_0//v1, the extra / before v1 gives a delimeter.
-    ///need to find a better way to handle this
     if (!ready_flag_writer.open(ready_file_path + VECTOR_INDEX_FILE_SUFFIX, true))
     {
         if (!ready_flag_writer.open(ready_file_path, true))
@@ -436,8 +429,8 @@ Status VectorSegmentExecutor::load()
     if (new_index == nullptr)
     {
         LOG_DEBUG(log, "[load] miss cache, cache_key_str = {}", cache_key_str);
-        ///we don't want many execution engine reading disk and preserving multiple copies of index, so we use a unique lock to
-        ///ensure that only one execution engine may read from disk at any time.
+        /// We don't want many execution engine reading disk and preserving multiple copies of index, so we use a unique lock to
+        /// ensure that only one execution engine may read from disk at any time.
         LOG_DEBUG(log, "[load] num of item before cache {}", mgr->countItem());
         mgr->startLoading(cache_key);
         std::shared_ptr<std::mutex> this_segment_mutex = mgr->getMutex(cache_key);
@@ -463,7 +456,7 @@ Status VectorSegmentExecutor::load()
             }
 
             DiskIOReader reader;
-            ///TODO this is really funky... have to change it later
+            /// TODO this is really funky... have to change it later
             String ready_file_path = segment_id.getVectorReadyFilePath();
             String index_name = segment_id.getIndexNameWithColumn();
             std::vector<String> index_names{index_name};
@@ -481,34 +474,10 @@ Status VectorSegmentExecutor::load()
                 return Status(5, "unable to parse the original index size " + ready_file_path);
             }
             des = params.at(index_name);
-            BinaryPtr index_binary = std::make_shared<Binary>();
-            index_binary->size = original_binary_size;
-            LOG_INFO(log, "[load] original_binary_size: {}", original_binary_size);
-            index_binary->data = new uint8_t[original_binary_size + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER];
-
-            bool next = true;
-            int part_count = 0;
-            int64_t current_loaded_size = 0;
-            while (next)
-            {
-                Status stat = readPart(next, part_count, index_binary->data + current_loaded_size, current_loaded_size);
-                if (!stat.fine())
-                {
-                    return stat;
-                }
-                part_count++;
-            }
-            LOG_DEBUG(log, "[load] after read part");
-
-            if (current_loaded_size != original_binary_size)
-            {
-                LOG_ERROR(log, "vector index binary size not matching size recorded in metadata, this might be corrupted data.");
-                return Status(5, "corrupted data: " + segment_id.getFullPath());
-            }
 
             if (!readBitMap())
             {
-                LOG_WARNING(log, "vector bitMap file not readable !");
+                LOG_ERROR(log, "failed to read vector index bitmap: {}", segment_id.getFullPath());
                 return Status(5, "corrupted data: " + segment_id.getFullPath());
             }
 
@@ -519,15 +488,18 @@ Status VectorSegmentExecutor::load()
             Parameters place_holder;
             index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
             LOG_INFO(log, "[load] start loading index: total_vec: {}", total_vec);
+            CompositeIndexReader index_reader(segment_id, original_binary_size);
             try
             {
-                index->load(index_binary, total_vec);
+                index->load(index_reader);
             }
             catch (const IndexException & e)
             {
+                LOG_ERROR(log, "failed to load index: {}", e.message());
                 return Status(e.code(), e.message());
             }
             index->setTrained();
+            des.erase("type");
             index->parseParameter(des);
             LOG_INFO(log, "[load] finish loading index");
             if (auto_tune && getOps().getCode() != 0)
@@ -584,65 +556,14 @@ Status VectorSegmentExecutor::load()
     }
 }
 
-Status VectorSegmentExecutor::readPart(bool & next, int part_count, uint8_t* index_binary, int64_t & current_loaded_size)
-{
-    DiskIOReader reader;
-    String path = segment_id.getFullPath() + "_" + ItoS(part_count) + VECTOR_INDEX_FILE_SUFFIX;
-    if (!reader.open(path))
-    {
-        return Status(5, "unable to open file " + path);
-    }
-    BinaryPtr index_binary_compressed = std::make_shared<Binary>();
-    /// first 8 bytes is final mark, deciding if this is the last segment
-    int64_t final_mark;
-    reader.read(&final_mark, sizeof(final_mark));
-    if (final_mark)
-    {
-        next = false;
-    }
-
-    /// second 8 bytes are meta recording compressed binary size of index
-    reader.seekg(sizeof(int64_t));
-    int64_t binary_length;
-    reader.read(&binary_length, sizeof(binary_length));
-    LOG_DEBUG(log, "[readPart] binary length in meta {}", binary_length);
-
-    /// third 8 bytes are meta recording uncompressed binary size of index
-    reader.seekg(sizeof(int64_t) * 2);
-    int64_t binary_length_original;
-    reader.read(&binary_length_original, sizeof(binary_length_original));
-    LOG_DEBUG(log, "[readPart] binary length originally in meta {}", binary_length_original);
-
-    /// fourth 8 bytes records total vectors stored, this is repeated many times. Could be d, or not.
-    reader.seekg(sizeof(int64_t) * 3);
-    int64_t total_vec_bin;
-    reader.read(&total_vec_bin, sizeof(total_vec_bin));
-    LOG_DEBUG(log, "[readPart] total vectors read: {}", total_vec_bin);
-    total_vec = total_vec_bin;
-
-    /// finally we have the compressed binaries
-    reader.seekg(sizeof(int64_t) * 4);
-    index_binary_compressed->data = new uint8_t[binary_length + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER];
-    index_binary_compressed->size = binary_length;
-
-    reader.read(index_binary_compressed->data, binary_length);
-
-    validateAndDecompress(index_binary_compressed, binary_length_original, index_binary);
-
-    current_loaded_size += binary_length_original;
-    LOG_DEBUG(log, "[readPart] current_loaded_size: {}", current_loaded_size);
-
-    return Status();
-}
-
 Status VectorSegmentExecutor::addVectors(VectorDatasetPtr dataset)
 {
     LOG_TRACE(log, "adding {} vectors", dataset->getVectorNum());
     index->addWithoutId(dataset);
     total_vec += dataset->getVectorNum();
     index->setTrained();
-    ///index is only searchable after the first call to addVector.
-    ///this bypassed some concurrency problem.
+    /// Index is only searchable after the first call to addVector.
+    /// this bypassed some concurrency problem.
     return Status();
 }
 
@@ -738,18 +659,6 @@ Status VectorSegmentExecutor::searchWithoutIndex(
         metrics);
 }
 
-Status VectorSegmentExecutor::copyToCpu()
-{
-    //TODO
-    return Status();
-}
-
-// Status VectorSegmentExecutor::copyToGpu(int32_t device_id, bool hybrid)
-// {
-//TODO
-//     return Status();
-// }
-
 IndexType VectorSegmentExecutor::indexType()
 {
     return index->indexType();
@@ -836,8 +745,8 @@ Status VectorSegmentExecutor::tune(VectorDatasetPtr base, std::vector<int64_t> &
 }
 
 
-///if the autoTuning has finished, we try to get the points from the disk
-///and load them into op_points
+/// If the autoTuning has finished, we try to get the points from the disk
+/// and load them into op_points
 Status VectorSegmentExecutor::getOps()
 {
     if (op_points == nullptr)
@@ -887,49 +796,9 @@ Status VectorSegmentExecutor::getOps()
     return Status();
 }
 
-uint32_t VectorSegmentExecutor::compressWithCheckSum(uint8_t * source, size_t size, BinaryPtr des)
-{
-    //DB::WriteBuffer out(des,size);
-    DB::CompressionCodecPtr codec = DB::CompressionCodecFactory::instance().get(cmb);
-    size_t decompressed_size = size;
-    des->data = new uint8_t[codec->getCompressedReserveSize(decompressed_size)];
-    uint32_t size_compressed
-        = codec->compress(reinterpret_cast<const char *>(source), decompressed_size, reinterpret_cast<char *>(des->data));
-    /// although we preallocated much more memory than needed, this is the amount actually need to get
-    /// serialized
-    des->size = size_compressed;
-    return size_compressed;
-}
-
-uint32_t VectorSegmentExecutor::validateAndDecompress(const BinaryPtr source, size_t uncompressed_size, uint8_t * des)
-{
-    uint8_t method = DB::ICompressionCodec::readMethod(reinterpret_cast<const char *>(source->data));
-    //    if(method==static_cast<const UInt8>(DB::CompressionMethodByte::NONE)){
-    //        ///if no compression,don't decompress, just point des to source
-    //        des.swap(source);
-    //        des->data = &des->data[DB::ICompressionCodec::getHeaderSize()];
-    //        des->size-= DB::ICompressionCodec::getHeaderSize();
-    //        return des->size;
-    //    }
-    DB::CompressionCodecPtr codec = DB::CompressionCodecFactory::instance().get(method);
-
-    uint32_t size_decompressed
-        = codec->decompress(reinterpret_cast<const char *>(source->data), source->size, reinterpret_cast<char *>(des));
-
-    LOG_DEBUG(log, "[validateAndDecompress] decompressed size: {}", size_decompressed);
-    
-    if (uncompressed_size != size_decompressed)
-    {
-        LOG_ERROR(
-            log, "The binary is corrupted, decompressed size: {}, recorded decompressed sized: {}", size_decompressed, uncompressed_size);
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "vector index on disk is corrupted");
-    }
-    return size_decompressed;
-}
-
 Status VectorSegmentExecutor::cancelBuild()
 {
-    ///TODO implement
+    /// TODO implement
     return Status();
 }
 
@@ -974,6 +843,8 @@ bool VectorSegmentExecutor::writeBitMap()
 
 bool VectorSegmentExecutor::readBitMap()
 {
+    readTotalVec();
+
     DiskIOReader bit_map_reader;
     String read_file_path = segment_id.getBitMapFilePath();
 
@@ -1016,7 +887,7 @@ bool VectorSegmentExecutor::compareVectorIndexParameters(IndexType t1, Parameter
 {
     Metrics me = L2;
     IndexMode mode = CPU;
-    char cmb = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
+    char cmb = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
     if (p1.contains("metric_type"))
     {
         me = VectorIndexFactory::createIndexMetrics(p1.at("metric_type"));
@@ -1035,7 +906,7 @@ bool VectorSegmentExecutor::compareVectorIndexParameters(IndexType t1, Parameter
 
     Metrics me2 = L2;
     IndexMode mode2 = CPU;
-    char cmb2 = static_cast<uint8_t>(DB::CompressionMethodByte::NONE);
+    char cmb2 = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
     if (p2.contains("metric_type"))
     {
         me2 = VectorIndexFactory::createIndexMetrics(p2.at("metric_type"));
@@ -1092,12 +963,10 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_
     if (segment_id.fromMergedParts())
         return;
 
-    readTotalVec();
-
     /// Read the delete bitmap
     if (!readBitMap())
     {
-        LOG_WARNING(log, "[updateBitMap] Skip to update not readable vector bitMap file part {}", segment_id.current_part_name);
+        LOG_WARNING(log, "[updateBitMap] skip to update unreadable vector bitmap file for part {}", segment_id.current_part_name);
         return;
     }
 
@@ -1134,12 +1003,14 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
     if (!segment_id.fromMergedParts())
         return;
 
-    readTotalVec();
-
     /// Read the delete bitmap
     if (!readBitMap())
     {
-        LOG_WARNING(log, "[updateMergedBitMap] Skip to update not readable vector bitMap file for segement: merged part {} in decouple part {}", segment_id.owner_part_name, segment_id.current_part_name);
+        LOG_WARNING(
+            log,
+            "[updateMergedBitMap] skip to update unreadable vector bitmap file: owner part {}, current part {}",
+            segment_id.owner_part_name,
+            segment_id.current_part_name);
         return;
     }
 

@@ -12,30 +12,20 @@ namespace DB::ErrorCodes
 {
 extern const int EMPTY_DATA_PASSED;
 extern const int STD_EXCEPTION;
+extern const int INCORRECT_DISK_INDEX;
 }
 namespace VectorIndex
 {
 BinaryPtr FaissIndex::serialize(size_t max_bytes, bool & finished)
 {
-    IndexWriter writer;
+    BufferIndexWriter writer;
     faiss::write_index_incremental(index.get(), &writer, max_bytes, finished);
+    index_size += writer.actual_size;
     return convertStructToBinary(writer.data, writer.actual_size);
 }
 
-void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
+void FaissIndex::load(IndexReader & reader)
 {
-    ///FLAT is just a vector, so no bother keeping the original data.
-    if (it != FLAT)
-    {
-        setRawData(bi);
-    }
-    if (bi->size == 0 || bi->data == nullptr)
-    {
-        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
-    }
-    IndexReader reader;
-    reader.data = bi->data;
-    reader.total = bi->size;
     try
     {
         index.reset(faiss::read_index(&reader));
@@ -46,10 +36,8 @@ void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
     }
     catch (const faiss::FaissException & e)
     {
-        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
+        throw IndexException(DB::ErrorCodes::INCORRECT_DISK_INDEX, e.what());
     }
-    // reinterpret_cast might seem fishy, but when they returned from read_index they initially
-    // created a child class then cast it to Index.
 }
 
 void * FaissIndex::convertInnerBitMap(GeneralBitMapPtr outerBitMap)

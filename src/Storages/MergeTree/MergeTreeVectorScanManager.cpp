@@ -360,7 +360,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
             if (!status.fine())
             {
                 /// case of merged vector indices had been removed, we need to use new vector index files
-                LOG_INFO(log, "[vectorScan] fail to load vector index: {}", segment_id.getFullPath());
+                LOG_ERROR(log, "[vectorScan] fail to load vector index: {}", segment_id.getFullPath());
                 retry = true;
                 brute_force = true;
                 break;
@@ -392,7 +392,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
                 if (!status.fine())
                 {
-                    LOG_INFO(log, "[vectorScan] fail to load vector index: {}", segment_ids[0].getFullPath());
+                    LOG_ERROR(log, "[vectorScan] fail to load vector index: {}", segment_ids[0].getFullPath());
                 }
                 else
                 {

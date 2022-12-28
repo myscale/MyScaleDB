@@ -5,7 +5,7 @@ namespace VectorIndex
 {
 
 Status tryBruteForceSearch(
-    const float * x, const float * y, size_t d, size_t k, size_t nx, size_t ny, int64_t * result_id, float * distance, const Metrics& m)
+    const float * x, const float * y, size_t d, size_t k, size_t nx, size_t ny, int64_t * result_id, float * distance, const Metrics & m)
 {
     if (m == IP)
     {
@@ -25,11 +25,10 @@ Status tryBruteForceSearch(
         faiss::float_maxheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
         faiss::knn_cosine(x, y, d, nx, ny, &res, nullptr);
     }
-    else 
+    else
     {
         return Status(8, "Metric not implemented in brute force search");
     }
     return Status();
 }
-
 }

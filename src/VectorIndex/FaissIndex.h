@@ -15,7 +15,7 @@ class FaissIndex : public VectorIndex
 public:
     FaissIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_) : VectorIndex(it_, im_, me_, dimension_) { }
     virtual BinaryPtr serialize(size_t max_bytes, bool & finished) override;
-    virtual void load(BinaryPtr & bi, int64_t total_vec) override;
+    void load(IndexReader & reader) override;
     int64_t removeWithIds(int64_t n, int64_t * ids) override;
     AccParametersPack exploreTask(
         const float * query_data,

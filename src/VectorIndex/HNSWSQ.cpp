@@ -1,15 +1,17 @@
 #include "HNSWSQ.h"
+#include <VectorIndex/VectorIndexCommon.h>
 #include <faiss/index_io.h>
 #include "IndexException.h"
 #include "IndexReader.h"
 #include "IndexWriter.h"
-#include <VectorIndex/VectorIndexCommon.h>
 
 namespace DB::ErrorCodes
 {
 extern const int LOGICAL_ERROR;
 extern const int UNSUPPORTED_PARAMETER;
 extern const int EMPTY_DATA_PASSED;
+extern const int STD_EXCEPTION;
+extern const int INCORRECT_DISK_INDEX;
 }
 
 namespace VectorIndex
@@ -106,24 +108,30 @@ void HNSWsq::search(
     index->search(num_query, query_datas, topK, distances, result_id, ef_s, inner_bit_map.get());
     //distance might not be useful in many cases
 }
+
 BinaryPtr HNSWsq::serialize(size_t max_bytes_to_serialize, bool & finished)
 {
-    IndexWriter writer;
+    BufferIndexWriter writer;
     faiss::write_index_incremental(index.get(), &writer, max_bytes_to_serialize, finished);
+    index_size += writer.actual_size;
     return convertStructToBinary(writer.data, writer.actual_size);
 }
 
-void HNSWsq::load(BinaryPtr & bi, int64_t /*total_vec*/)
-{
-    if (bi->size == 0 || bi->data == nullptr)
-    {
-        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
-    }
-    IndexReader reader;
-    reader.data = bi->data;
-    reader.total = bi->size;
 
-    index.reset(reinterpret_cast<faiss::IndexHNSWfastSQ *>(faiss::read_index(&reader)));
+void HNSWsq::load(IndexReader & reader)
+{
+    try
+    {
+        index.reset(reinterpret_cast<faiss::IndexHNSWfastSQ *>(faiss::read_index(&reader)));
+    }
+    catch (const std::runtime_error & e)
+    {
+        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
+    }
+    catch (const faiss::FaissException & e)
+    {
+        throw IndexException(DB::ErrorCodes::INCORRECT_DISK_INDEX, e.what());
+    }
 }
 
 void * HNSWsq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)

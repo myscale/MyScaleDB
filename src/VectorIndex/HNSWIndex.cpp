@@ -118,41 +118,29 @@ void HNSWIndex::search(
 
 BinaryPtr HNSWIndex::serialize(size_t max_bytes_to_serialize, bool & finished)
 {
-    IndexWriter writer;
+    BufferIndexWriter writer;
     index->saveIndex(writer, max_bytes_to_serialize, finished);
+    index_size += writer.actual_size;
     return convertStructToBinary(writer.data, writer.actual_size);
 }
 
-void HNSWIndex::load(BinaryPtr & bi, int64_t total_vec)
+
+void HNSWIndex::load(IndexReader & reader)
 {
-    if (bi->size == 0 || bi->data == nullptr)
-    {
-        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
-    }
     hnswlib::SpaceInterface<float> * space;
-    Poco::Logger * log = &Poco::Logger::get("HNSW");
     switch (me)
     {
         case (Metrics::L2):
-            LOG_INFO(log, "searching in HNSW, metric type: L2");
             space = new hnswlib::L2Space(dimension);
             break;
         case (Metrics::IP):
-            LOG_INFO(log, "searching in HNSW, metric type: IP");
             space = new hnswlib::InnerProductSpace(dimension);
             break;
         case (Metrics::Cosine):
-            LOG_INFO(log, "searching in HNSW, metric type: Cosine");
             space = new hnswlib::CosineSpace(dimension);
-            break;
     }
-    setRawData(bi);
-    IndexReader reader;
-    reader.data = bi->data;
-    reader.total = bi->size;
     index = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-    index->loadIndex(reader, space, total_vec + 1);
-    index->manage_own_fields = false;
+    index->loadIndex(reader, space);
 }
 
 void * HNSWIndex::convertInnerBitMap(GeneralBitMapPtr outerBitMap)

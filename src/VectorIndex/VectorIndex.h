@@ -2,11 +2,12 @@
 
 #include <memory>
 #include <unordered_map>
-#include <Common/logger_useful.h>
 #include <VectorIndex/Binary.h>
 #include <VectorIndex/Dataset.h>
 #include <VectorIndex/GeneralBitMap.h>
 #include <VectorIndex/IndexException.h>
+#include <VectorIndex/IndexReader.h>
+#include <Common/logger_useful.h>
 
 namespace VectorIndex
 {
@@ -70,8 +71,8 @@ public:
     /// Serialize index into binaries in memory, returns a pointer to that binary.
     virtual BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) = 0;
 
-    /// Load index from binaries into a usable index.
-    virtual void load(BinaryPtr & bi, int64_t total_vec) = 0;
+    /// Load index from IndexReader into a usable index.
+    virtual void load(IndexReader & reader) = 0;
 
     /// The type of index (IVFFLAT, HNSW, etc)
     IndexType indexType() { return it; }
@@ -84,19 +85,7 @@ public:
 
     bool trainStatus() { return trained; }
 
-    void setRawData(BinaryPtr ptr) { rawData = ptr; }
-
-    size_t sizeInBytes() const
-    {
-        if (rawData != nullptr && rawData->size >= 0)
-        {
-            return static_cast<size_t>(rawData->size);
-        }
-        else
-        {
-            return 0;
-        }
-    }
+    size_t sizeInBytes() const { return index_size; }
 
     /// If possible, get uncompressed vectors stored in memory
     virtual VectorDatasetPtr getInMemVectors() = 0;
@@ -142,8 +131,8 @@ protected:
     IndexMode im; // cpu, gpu
     int dimension; // dimension
     bool trained = false; // searchabled
-    BinaryPtr rawData; // unfortunately to boost load speed we have to manage rawData ourselves
     int64_t total_vector = 0;
+    size_t index_size = 0;
 
 protected:
     virtual void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) = 0; //TODO might be too expensive

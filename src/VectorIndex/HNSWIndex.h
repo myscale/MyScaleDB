@@ -39,7 +39,7 @@ public:
 
     BinaryPtr serialize(size_t max_bytes_to_serialize, bool & finished) override;
 
-    void load(BinaryPtr & bi, int64_t total_vec) override;
+    void load(IndexReader & reader) override;
 
     VectorDatasetPtr getInMemVectors() override;
 

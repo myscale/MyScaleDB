@@ -105,26 +105,26 @@ void HNSWpq::search(
 
 BinaryPtr HNSWpq::serialize(size_t max_bytes_to_serialize, bool & finished)
 {
-    IndexWriter writer;
+    BufferIndexWriter writer;
     faiss::write_index_incremental(index.get(), &writer, max_bytes_to_serialize, finished);
+    index_size += writer.actual_size;
     return convertStructToBinary(writer.data, writer.actual_size);
 }
 
-void HNSWpq::load(BinaryPtr & bi, int64_t /*total_vec*/)
+void HNSWpq::load(IndexReader & reader)
 {
-    if (bi->size == 0 || bi->data == nullptr)
+    try
     {
-        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
+        index.reset(reinterpret_cast<faiss::IndexHNSWfastPQ *>(faiss::read_index(&reader)));
     }
-    setRawData(bi);
-    IndexReader reader;
-    reader.data = bi->data;
-    reader.total = bi->size;
-
-    index.reset(reinterpret_cast<faiss::IndexHNSWfastPQ *>(faiss::read_index(&reader)));
-
-    /// reinterpret_cast might seem fishy, but when they returned from read_index they initially
-    /// created a child class then cast it to Index.
+    catch (const std::runtime_error & e)
+    {
+        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
+    }
+    catch (const faiss::FaissException & e)
+    {
+        throw IndexException(DB::ErrorCodes::INCORRECT_DISK_INDEX, e.what());
+    }
 }
 
 void * HNSWpq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)

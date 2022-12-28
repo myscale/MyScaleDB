@@ -10,15 +10,18 @@
 
 namespace VectorIndex
 {
-//in memory reader conforming to faiss IOwriter that's used to produce
-// a binary object
-class IndexWriter : public faiss::VectorIOWriter
+struct IndexWriter : faiss::IOWriter
 {
-public:
-    size_t operator()(const void * ptr, size_t size, size_t nitems) override;
     size_t write(const void * ptr, size_t size, size_t nitems = 1) { return operator()(ptr, size, nitems); }
 };
 
-#define RESERVE 2
-
+// in memory reader conforming to faiss IOwriter that's used to produce
+// a binary object
+struct BufferIndexWriter : IndexWriter
+{
+    uint8_t * data;
+    uint64_t actual_size = 0;
+    uint64_t reserved_size = 0;
+    size_t operator()(const void * ptr, size_t size, size_t nitems) override;
+};
 }
