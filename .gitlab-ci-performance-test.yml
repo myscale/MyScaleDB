@@ -97,4 +97,4 @@ vector_db_test:
     - timeout 300 kubectl logs -f $WORK_POD_NAME
   rules:
   # [TODO] Add more policy
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true" && $CI_COMMIT_BRANCH == "mqdb-dev"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'    # Trigger pipline during scheduled tasks

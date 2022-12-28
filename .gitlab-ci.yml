@@ -1,5 +1,10 @@
 image: harbor.internal.moqi.ai/mqdb/builder:2.8
 
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
 include:
   - '/.gitlab-ci-build.yml'
   - '/.gitlab-ci-functional-test.yml'
@@ -36,11 +41,6 @@ build_package:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
-  only:
-    - mqdb-master
-    - mqdb-staging
-    - mqdb-dev
-    - merge_requests
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-without-license"
     paths:
@@ -60,9 +60,8 @@ build_package_with_license:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
-  only:
-    - mqdb-master
-    - mqdb-staging
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-license"
     paths:
@@ -77,11 +76,6 @@ build_package_with_license:
 build_image:
   stage: image
   dependencies: ["build_package"]
-  only:
-    - mqdb-master
-    - mqdb-staging
-    - mqdb-dev
-    - merge_requests
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
@@ -93,8 +87,8 @@ upload_performance_file_to_s3:
   image:
     name: minio/mc
     entrypoint: [""]
-  only:
-    - mqdb-dev
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
   before_script:
     - mkdir -pv ~/.mc
     - cp -fv $mc_config ~/.mc/config.json
@@ -104,9 +98,8 @@ upload_performance_file_to_s3:
 # deploy_to_staging:
 #   stage: deploy
 #   dependencies: ["build_x86_64_package"]
-#   only:
-#     - mqdb-master
-#     - mqdb-staging
+#   rules:
+#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 #   variables:
 #     deploy_to_host: 10.10.1.48
 #   script:
@@ -123,9 +116,8 @@ upload_performance_file_to_s3:
 #   image:
 #     name: minio/mc
 #     entrypoint: [""]
-#   only:
-#     - mqdb-master
-#     - mqdb-staging
+#   rules:
+#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 #   before_script:
 #     - mkdir -pv ~/.mc
 #     - cp -fv $mc_config ~/.mc/config.json
