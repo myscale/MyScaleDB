@@ -1,7 +1,9 @@
 ####################################### PERFORMANCE TESTS ####################################
 performance_test0:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: performance-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
   parallel:
     matrix:
@@ -21,8 +23,10 @@ performance_test0:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
 performance_test1:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: performance-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
   parallel:
     matrix:
@@ -42,8 +46,10 @@ performance_test1:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
 performance_test2:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: performance-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
   parallel:
     matrix:

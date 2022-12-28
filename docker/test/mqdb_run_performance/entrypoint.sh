@@ -22,7 +22,7 @@ function download_left_package
 {
     # $WORKPATH/s3downloader --url-prefix "https://mqdb-release.moqi.com.cn/" --dataset-names "performance_package" --clickhouse-data-path "$WORKPATH/workspace"
     # TODO: Modified to download according to the commit number
-    wget https://mqdb-release.moqi.com.cn/performance/performance_pack_amd64.tar.gz -O left.tar.gz
+    wget https://mqdb-release.moqi.com.cn/performance/performance_pack_amd64_${1}.tar.gz -O left.tar.gz || wget https://mqdb-release.moqi.com.cn/performance/performance_pack_amd64.tar.gz -O left.tar.gz
     tar -zxvf left.tar.gz -C $WORKPATH/workspace
     mv $WORKPATH/workspace/performance_pack $WORKPATH/workspace/left
 }
@@ -107,25 +107,17 @@ chmod 777 workspace output
 
 cd workspace
 
-# url_build_binary=$(Download_Url)
-# Download the package for the version we are going to test.
-# if curl_with_retry $url_build_binary
-# then
-#     right_path=$url_build_binary
-# fi
-
 if [[ ! -f "right/clickhouse" ]]; then
     # cp -rf $comp_file/right/* right/.
     rm -rf right ||:
     tar -xzf $WORKPATH/tests/performance_pack_right.tar.gz
     mv performance_pack right
 fi
+
 if [[ ! -f "left/clickhouse" ]]; then
     # cp -rf $comp_file/left/* left/.
     rm -rf left ||:
-    # tar -xzf $WORKPATH/tests/performance_pack_left.tar.gz
     download_left_package
-    # mv performance_pack left
 fi
 ls -al right
 ls -al left
@@ -176,10 +168,8 @@ echo "enrtypoint_end"
 
 # Start the main comparison script.
 { \
-    # time "$script_path"/download.sh "$REF_PR" "$REF_SHA" "$PR_TO_TEST" "$SHA_TO_TEST";
     time ../download.sh && \
     time stage=configure ../compare.sh ; \
-    # time stage=configure "$script_path"/compare.sh ; \
 } 2>&1 | ts "$(printf '%%Y-%%m-%%d %%H:%%M:%%S\t')" | tee compare.log
 
 # Stop the servers to free memory. Normally they are restarted before getting

@@ -9,8 +9,10 @@ include:
 
 stages:
   - build
-  - vs_test
-  - test
+  - functional-test
+  - performance-test
+  - failover-test
+  - memory-leak-test
   - package
   - image
   - deploy
@@ -85,7 +87,7 @@ build_image:
     - docker/builder/tools/image.sh
 upload_performance_file_to_s3:
   stage: deploy
-  dependencies: ["build_for_integration_test"]
+  dependencies: ["build_binary"]
   image:
     name: minio/mc
     entrypoint: [""]
@@ -95,6 +97,7 @@ upload_performance_file_to_s3:
     - mkdir -pv ~/.mc
     - cp -fv $mc_config ~/.mc/config.json
   script:
+    # - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
     - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
 # deploy_to_staging:
 #   stage: deploy

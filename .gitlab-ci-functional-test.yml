@@ -1,8 +1,10 @@
 ######################################## VECTOR TESTS ########################################
 ######### VECTOR TESTS ###########
 vector_search_test:
-  stage: vs_test
-  dependencies: ["build_binary"]
+  stage: functional-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   parallel:
     matrix:
       - ARCH: amd64
@@ -18,8 +20,10 @@ vector_search_test:
 ###################################### FUNCTIONAL TESTS ######################################
 ########## SMOKE TESTS ###########
 smoke_test:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: functional-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.0
   parallel:
     matrix:
@@ -41,8 +45,10 @@ smoke_test:
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
 stateless_test:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: functional-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateless-test"
     paths:
@@ -63,8 +69,10 @@ stateless_test:
     - if: '$CI_TEST_VECTOR_DB != "true"'
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
-  stage: test
-  dependencies: ["build_binary"]
+  stage: functional-test
+  needs: 
+    - job: build_binary
+      artifacts: true
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateful-test"
     paths:

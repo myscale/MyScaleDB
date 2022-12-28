@@ -1,7 +1,9 @@
 ######################################## INTEGRATION TESTS ###################################
 integration_test0:
-  stage: test
-  dependencies: ["build_for_integration_test"]
+  stage: failover-test
+  needs: 
+    - job: build_for_integration_test
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-integration0"
@@ -15,8 +17,10 @@ integration_test0:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
 integration_test1:
-  stage: test
-  dependencies: ["build_for_integration_test"]
+  stage: failover-test
+  needs: 
+    - job: build_for_integration_test
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-integration1"
@@ -30,8 +34,10 @@ integration_test1:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
 integration_test2:
-  stage: test
-  dependencies: ["build_for_integration_test"]
+  stage: failover-test
+  needs: 
+    - job: build_for_integration_test
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-integration2"

@@ -5,6 +5,7 @@ test_config_xml_main
 test_config_xml_yaml_mix
 test_config_yaml_full
 test_config_yaml_main
+test_dictionaries_redis
 test_distributed_backward_compatability
 test_distributed_insert_backward_compatibility
 test_groupBitmapAnd_on_distributed
