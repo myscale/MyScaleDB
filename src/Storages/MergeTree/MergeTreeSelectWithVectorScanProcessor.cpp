@@ -57,7 +57,7 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
 ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & mark_ranges)
 {
     OpenTelemetry::SpanHolder span("MergeTreeSelectWithVectorScanProcessor::performPrefilter()");
-    Names columns;
+    Names requried_columns;
     Names system_columns;
     system_columns.emplace_back("_part_offset");
 
@@ -72,22 +72,30 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
     {
         Names row_filter_column_names =  prewhere_info->row_level_filter->getRequiredColumnsNames();
 
-        columns.insert(columns.end(), row_filter_column_names.begin(), row_filter_column_names.end());
+        requried_columns.insert(requried_columns.end(), row_filter_column_names.begin(), row_filter_column_names.end());
         pre_name_set.insert(row_filter_column_names.begin(), row_filter_column_names.end());
     }
 
     /// 2. Columns for prewhere
-    Names all_pre_column_names = prewhere_info->prewhere_actions->getRequiredColumnsNames();
-
-    for (const auto & name : all_pre_column_names)
+    if (prewhere_info->prewhere_actions)
     {
-        if (pre_name_set.contains(name))
-            continue;
-        columns.push_back(name);
-        pre_name_set.insert(name);
+        Names all_pre_column_names = prewhere_info->prewhere_actions->getRequiredColumnsNames();
+
+        for (const auto & name : all_pre_column_names)
+        {
+            if (pre_name_set.contains(name))
+                continue;
+            requried_columns.push_back(name);
+            pre_name_set.insert(name);
+        }
     }
 
+    bool bak_remove_prewhere_column = prewhere_info->remove_prewhere_column;
     prewhere_info->remove_prewhere_column = true;
+
+    /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
+    /// In this case, we need only rows statisfied prewhere conditions.
+    prewhere_info->need_filter = true;
 
     auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
         storage,
@@ -96,7 +104,7 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
         max_block_size_rows,
         preferred_block_size_bytes,
         preferred_max_column_in_block_size_bytes,
-        columns,
+        requried_columns,
         mark_ranges,
         use_uncompressed_cache,
         prewhere_info,
@@ -115,12 +123,9 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
     size_t num_rows = data_part->rows_count;
 
     Block block;
-    auto new_filter = ColumnUInt8::create(num_rows);
+    auto new_filter = ColumnUInt8::create(num_rows, 0);
     IColumn::Filter & new_data = new_filter->getData();
-    for (int i = 0; i < num_rows; i++)
-    {
-        new_data[i] = 0;
-    }
+
     /// new_data.resize_fill(num_rows, 0);
     OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithVectorScanProcessor::performPrefilter():StartPipe");
     while (filter_executor.pull(block))
@@ -139,6 +144,10 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
             new_data[col_data[i]] = 1;
         }
     }
+
+    /// Restore the remove_prewhere_column.
+    prewhere_info->remove_prewhere_column = bak_remove_prewhere_column;
+
     return new_filter;
 }
 
@@ -295,6 +304,22 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
     const size_t final_result_num_rows = read_result.num_rows;
 
     Block res_block;
+
+    /// Add prewhere column name to avoid column not found error
+    if (prewhere_info && !prewhere_info->remove_prewhere_column)
+    {
+        ColumnWithTypeAndName prewhere_col;
+
+        const auto & node = prewhere_info->prewhere_actions->findInOutputs(prewhere_info->prewhere_column_name);
+        auto filter_type = node.result_type;
+
+        prewhere_col.type = filter_type;
+        prewhere_col.name = prewhere_info->prewhere_column_name;
+        prewhere_col.column = filter_type->createColumnConst(final_result_num_rows, 1);
+
+        res_block.insert(std::move(prewhere_col));
+    }
+
     for (size_t i = 0; i < ordered_columns.size(); ++i)
     {
         ColumnWithTypeAndName ctn;
@@ -324,7 +349,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
             }
         }
 
-        res_block.insert(ctn);
+        res_block.insert(std::move(ctn));
     }
 
     if (need_remove_part_offset)
