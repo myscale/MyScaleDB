@@ -1524,6 +1524,12 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
 
     MergeTreeReaderSettings reader_settings;
 
+    if (getMarksCount() == 0)
+    {
+        LOG_WARNING(storage.log, "[readRowExistsColumn] skip empty part");
+        return std::nullopt;
+    }
+
     MergeTreeReaderPtr reader = getReader(
             cols,
             storage_snapshot_ptr->metadata,

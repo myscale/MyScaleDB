@@ -166,8 +166,8 @@ Pipe ReadWithVectorScan::readFromParts(
         }
 
         MarkRanges ranges;
-        MarkRange range{0, part->index_granularity.getMarksCount()};
-        ranges.emplace_back(range);
+        if (part->index_granularity.getMarksCount())
+            ranges.emplace_back(0, part->index_granularity.getMarksCount());
 
         auto algorithm = std::make_unique<MergeTreeSelectWithVectorScanProcessor>(
             data,
@@ -190,7 +190,7 @@ Pipe ReadWithVectorScan::readFromParts(
 
         auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
 
-        pipes.emplace_back(std::move(source));
+        pipes.emplace_back(Pipe(std::move(source)));
     }
 
     auto pipe = Pipe::unitePipes(std::move(pipes));
