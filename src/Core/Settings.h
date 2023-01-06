@@ -117,7 +117,8 @@ class IColumn;
     M(Float, incremental_build_index_ratio, 0.1, "the ratio which data in a datapart is being added to vector index, also is the ratio of data being used for training index", 0)   \
     M(UInt64, max_build_index_block, 100000, "number of rows to build index in one round", 0)     \
     M(UInt64, max_build_index_block_size_rows, 160000, "number of rows to build index in one round", 0) \
-    M(UInt64, max_build_index_block_size_bytes, 512 * 1024 * 1024, "bytes to build index in one round", 0) \
+    M(UInt64, min_build_index_train_block_size, 100 * 1024 * 1024, "Minimum block size in bytes for training in build index", 0) \
+    M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
     M(UInt64, serialized_index_segment_max_byte, 1000000000,"the number of bytes each segment of a vector index can occupy. lower value generate more segments, resulting in longer build index time but smaller memory consumption.",0)        \
     M(UInt64, max_replicated_fetches_network_bandwidth_for_server, 0, "The maximum speed of data exchange over the network in bytes per second for replicated fetches. Zero means unlimited. Only has meaning at server startup.", 0) \
     M(UInt64, max_replicated_sends_network_bandwidth_for_server, 0, "The maximum speed of data exchange over the network in bytes per second for replicated sends. Zero means unlimited. Only has meaning at server startup.", 0) \

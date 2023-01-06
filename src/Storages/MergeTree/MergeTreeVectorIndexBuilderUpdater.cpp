@@ -333,15 +333,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOnePart(
     const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
 {
-    MergeTreeReaderSettings reader_settings;
-
-    /// float incremental_ratio = data.getContext()->getSettingsRef().incremental_build_index_ratio;
-    /// size_t max_build_index_block_size_rows = data.getContext()->getSettingsRef().max_build_index_block_size_rows;
-
-    /// try to control memory usage only use max_build_index_block_size_bytes
-    size_t max_build_index_block_size_bytes
-        = data.getContext()->getConfigRef().getUInt64("max_build_index_block_size_bytes", 512 * 1024 * 1024);
-
     LOG_INFO(log, "[buildVectorIndex] part:{}, start checking for build index", part->name);
     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
     {
@@ -503,6 +494,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             }
         }
 
+        MergeTreeReaderSettings reader_settings;
         auto reader = part->getReader(
             cols,
             metadata_snapshot,
@@ -517,9 +509,21 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         /// max read block rows for each round
         /// size_t read_block_rows_num = std::max(max_build_index_block_size_rows, static_cast<size_t>(part->rows_count * incremental_ratio));
 
+        /// try to control memory usage only use max_build_index_add_block_size and min_build_index_train_block_size
+        size_t max_build_index_add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
+        size_t min_build_index_train_block_size = data.getContext()->getSettingsRef().min_build_index_train_block_size;
+        if (min_build_index_train_block_size < max_build_index_add_block_size)
+        {
+            LOG_INFO(log, "[buildVectorIndex] min_build_index_train_block_size {} is smaller than max_build_index_add_block_size {}, will be updated",
+                     min_build_index_train_block_size, max_build_index_add_block_size);
+            min_build_index_train_block_size = max_build_index_add_block_size;
+        }
+
         /// never divide a zero
-        size_t read_block_rows_num = max_build_index_block_size_bytes / 4 / (dim > 1 ? dim : 1);
-        LOG_INFO(log, "[buildVectorIndex] set read_block_rows_num to {}", read_block_rows_num);
+        size_t read_block_rows_num = max_build_index_add_block_size / 4 / std::max(static_cast<uint64_t>(1), dim);
+        size_t train_block_rows_num = min_build_index_train_block_size / 4 / std::max(static_cast<uint64_t>(1), dim);
+        LOG_INFO(log, "[buildVectorIndex] set read_block_rows_num to {}, train_block_rows_num to {}", read_block_rows_num, train_block_rows_num);
+
         bool continue_read = false;
         bool training = true;
 
@@ -533,6 +537,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
         auto & index_granularity = part->index_granularity;
 
+        size_t num_rows_train = 0;
+        int32_t dataset_offsets_size_train = 0;
+        std::vector<float> vector_raw_data_train;
+
         /// process data block by block
         while (num_rows_read < part->rows_count)
         {
@@ -540,7 +548,27 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             {
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index build is cancelled for part {}", part->name);
             }
-            empty_ids.clear();
+
+            bool found = false;
+            for (auto & vec_index_desc_storage : part->storage.getInMemoryMetadataPtr()->vec_indices)
+            {
+                if (vec_index_desc == vec_index_desc_storage)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if(!found)
+            {
+                LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+                disk->removeRecursive(vector_tmp_relative_path);
+                return BuildVectorIndexStatus::SUCCESS;
+            }
+
+            /// traning size is bigger than add vector size, may call several times before training.
+            if (!training)
+                empty_ids.clear();
+
             size_t remaining_size = part->rows_count - num_rows_read;
             size_t max_read_row = std::min(remaining_size, read_block_rows_num);
 
@@ -551,7 +579,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             num_rows_read += num_rows;
 
-            for (size_t mask = 0; mask < total_mask - 1; ++mask)
+            for (size_t mask = current_mask; mask < total_mask - 1; ++mask)
             {
                 if (index_granularity.getMarkStartingRow(mask) >= num_rows_read
                     && index_granularity.getMarkStartingRow(mask + 1) < num_rows_read)
@@ -571,11 +599,20 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             const auto & one_column = result.back();
             const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
+            if (!array)
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "[buildVectorIndex] vector column type is not Array in part {}", part->name);
+            }
+
             const IColumn & src_data = array->getData();
             const ColumnArray::Offsets & offsets = array->getOffsets();
             const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+            if (!src_data_concrete)
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "[buildVectorIndex] vector column inner type in Array is not Float32 in part {}", part->name);
+            }
+
             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
-            // size_t size = offsets.size();
             if (src_vec.empty())
             {
                 LOG_WARNING(log, "[buildVectorIndex] part:{}, no data read for column {}", part->name, cols.back().name);
@@ -623,8 +660,26 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 vector_raw_data.size(),
                 empty_ids.size());
 
-            vec_data = std::make_shared<VectorIndex::VectorDataset>(
-                static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
+            /// Checks for read rows >= minimum rows for training
+            if (training)
+            {
+                num_rows_train += num_rows;
+                dataset_offsets_size_train += offsets.size();
+                vector_raw_data_train.insert(vector_raw_data_train.end(), vector_raw_data.begin(), vector_raw_data.end());
+
+                if (num_rows_train < train_block_rows_num && part->rows_count - num_rows_read > 0)
+                    continue;
+                else
+                {
+                    vec_data = std::make_shared<VectorIndex::VectorDataset>(
+                        static_cast<int32_t>(dataset_offsets_size_train), static_cast<int32_t>(dim), std::move(vector_raw_data_train));
+                }
+            }
+            else /// Normal add vectors after training
+            {
+                vec_data = std::make_shared<VectorIndex::VectorDataset>(
+                    static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
+            }
 
             result.clear();
 
@@ -633,9 +688,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             {
                 LOG_INFO(
                     log,
-                    "[buildVectorIndex] index train: part_name: {}, num_rows: {}, vector index name: {}, path: {}",
+                    "[buildVectorIndex] index train: part_name: {}, num_rows_train: {}, vector index name: {}, path: {}",
                     part->name,
-                    num_rows,
+                    num_rows_train,
                     vec_index_desc.name,
                     vector_tmp_relative_path + index_name);
 
@@ -665,12 +720,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 }
                 training = false;
             }
+
             LOG_INFO(log, "[buildVectorIndex] index add vectors: read vector num: {}", vec_data->getVectorNum());
             vec_index_builder->addVectors(vec_data);
+
             if (!empty_ids.empty())
-            {
                 vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
-            }
+
             LOG_INFO(log, "[buildVectorIndex] index after read vectors: read vector num: {}", vec_data->getVectorNum());
         }
 

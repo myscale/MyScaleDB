@@ -238,6 +238,12 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             bool check_loading_deps = !check_ref_deps && getContext()->getSettingsRef().check_table_dependencies;
             DatabaseCatalog::instance().checkTableCanBeRemovedOrRenamed(table_id, check_ref_deps, check_loading_deps, is_drop_or_detach_database);
 
+            if(!table->getInMemoryMetadata().vec_indices.empty())
+            {
+                StorageInMemoryMetadata metadata_table = table->getInMemoryMetadata();
+                metadata_table.vec_indices.clear();
+                table->setInMemoryMetadata(metadata_table);
+            }
             table->flushAndShutdown();
 
             TableExclusiveLockHolder table_lock;

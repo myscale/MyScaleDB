@@ -1,0 +1,5 @@
+test_drop_table	v1	HNSWSQ	v1 vector TYPE HNSWSQ	NoVectorIndexData
+-- Empty result, no vector index v1
+-- Create a new vector index v2 with different name and different type
+test_drop_table	v2	HNSWPQ	v2 vector TYPE HNSWPQ	Built
+ok

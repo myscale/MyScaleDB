@@ -518,19 +518,16 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
         /// Delete vector index files.
         for (const auto & part : getDataPartsForInternalUsage())
         {
-            if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+            // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+
+            /// Clear cache first, now getAllSegementIds() is based on vector index files
+            auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, drop_vector_index.index_name, drop_vector_index.column_name);
+            for (auto & segment_id : segment_ids)
             {
-                /// Clear cache first, now getAllSegementIds() is based on vector index files
-                auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, drop_vector_index.index_name, drop_vector_index.column_name);
-                for (auto & segment_id : segment_ids)
-                {
-                    VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
-                }
-
-                /// Delete files in part directory if exists and metadata
-                part->removeVectorIndex(drop_vector_index.index_name, drop_vector_index.column_name);
-
+                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
             }
+            /// Delete files in part directory if exists and metadata
+            part->removeVectorIndex(drop_vector_index.index_name, drop_vector_index.column_name);
         }
     }
     else
