@@ -14,6 +14,7 @@ include:
   - '/.gitlab-ci-performance-test.yml'
 
 stages:
+  - check-pipeline
   - build
   - functional-test
   - performance-test
@@ -24,6 +25,20 @@ stages:
   - deploy
   - benchmark
 
+check_pipeline_already_running:
+  stage: check-pipeline
+  cache:
+    key: $CI_PIPELINE_SOURCE-$CI_COMMIT_SHA-$CI_TEST_VECTOR_DB
+    paths:
+      - .schedule_cache
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - if [[ -f .schedule_cache ]]; then
+          echo "already ran for this commit, nothing to do";
+          exit 1;
+      fi
+    - echo "done" > .schedule_cache
 style_check:
   stage: build
   image: harbor.internal.moqi.ai/mqdb/style-check

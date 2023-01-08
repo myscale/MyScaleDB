@@ -5,6 +5,11 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
 WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stateless
 
+THREAD_SANITIZER_TEST=${1:-false}
+if [ $THREAD_SANITIZER_TEST == "true" ]; then
+    sed -i 's?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.3?' docker/test/mqdb_run_stateless/Dockerfile
+fi
+
 mkdir docker/test/mqdb_run_stateless/tests/queries
 cp -rfv artifacts/clickhouse-*.deb docker/test/mqdb_run_stateless/packages
 cp -rfv docker/test/mqdb_test_script/clickhouse-test docker/test/mqdb_run_stateless/clickhouse-test

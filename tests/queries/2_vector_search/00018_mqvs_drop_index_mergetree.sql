@@ -1,3 +1,5 @@
+-- Tags: no-parallel
+
 DROP TABLE IF EXISTS test_drop_index;
 CREATE TABLE test_drop_index(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
 INSERT INTO test_drop_index SELECT number, [number, number, number] FROM numbers(2100);

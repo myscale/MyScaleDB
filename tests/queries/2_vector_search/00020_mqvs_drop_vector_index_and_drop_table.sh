@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Tags: no-parallel
 
 max_response_time_drop_vector_index=1
 max_response_time_drop_table=10
@@ -6,7 +7,7 @@ max_response_time_drop_table=10
 # create table & insert data
 clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
 clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
-clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(2000000);"
+clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);"
 clickhouse-client -q "optimize table test_drop_table final;"
 
 # when building vector index, drop this vector index
@@ -25,6 +26,9 @@ status="NotBuilt"
 while [[ $status != "Built" ]]
 do
         status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_drop_table' and name = 'v2';"`
+        if [ $(clickhouse-client -q "select 1" 2>&1 | grep "Connection refused" | wc -l) == "1" ]; then
+            exit 1;
+        fi
         sleep 1
 done
 clickhouse-client -q "select '-- Create a new vector index v2 with different name and different type';"

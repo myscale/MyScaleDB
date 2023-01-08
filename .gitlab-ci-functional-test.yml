@@ -15,6 +15,7 @@ vector_search_test:
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/vector-search-test.sh
+    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
 ###################################### FUNCTIONAL TESTS ######################################

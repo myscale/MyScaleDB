@@ -1,3 +1,5 @@
+-- Tags: no-parallel
+
 drop table if exists test_vector;
 create table test_vector
 (

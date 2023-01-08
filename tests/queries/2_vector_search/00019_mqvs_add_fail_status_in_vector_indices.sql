@@ -1,3 +1,5 @@
+-- Tags: no-parallel
+
 DROP TABLE IF EXISTS test_success_vector;
 CREATE TABLE test_success_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
 INSERT INTO test_success_vector SELECT number, [number, number, number] FROM numbers(2100);
