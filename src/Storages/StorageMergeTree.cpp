@@ -71,6 +71,7 @@ namespace ActionLocks
     extern const StorageActionBlockType PartsMerge;
     extern const StorageActionBlockType PartsTTLMerge;
     extern const StorageActionBlockType PartsMove;
+    extern const StorageActionBlockType PartsBuildIndex;
 }
 
 static MergeTreeTransactionPtr tryGetTransactionForMutation(const MergeTreeMutationEntry & mutation, Poco::Logger * log = nullptr)
@@ -200,6 +201,7 @@ void StorageMergeTree::shutdown()
 
     merger_mutator.merges_blocker.cancelForever();
     parts_mover.moves_blocker.cancelForever();
+    vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancle background vector index build tasks
 
     background_operations_assignee.finish();
     background_moves_assignee.finish();
@@ -1335,6 +1337,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
         if (!merge_entry && !mutate_entry)
         {
+            if (vec_index_builder_updater.builds_blocker.isCancelled())
+                return false;
+
             /// first for new data parts, then for merged data parts   
             /// only select one part for each build
             vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(metadata_snapshot, 1, false, currently_merging_mutating_parts);
@@ -2128,13 +2133,15 @@ ActionLock StorageMergeTree::getActionLock(StorageActionBlockType action_type)
         return merger_mutator.ttl_merges_blocker.cancel();
     else if (action_type == ActionLocks::PartsMove)
         return parts_mover.moves_blocker.cancel();
+    else if (action_type == ActionLocks::PartsBuildIndex)
+        return vec_index_builder_updater.builds_blocker.cancel();
 
     return {};
 }
 
 void StorageMergeTree::onActionLockRemove(StorageActionBlockType action_type)
 {
-    if (action_type == ActionLocks::PartsMerge ||  action_type == ActionLocks::PartsTTLMerge)
+    if (action_type == ActionLocks::PartsMerge ||  action_type == ActionLocks::PartsTTLMerge || action_type == ActionLocks::PartsBuildIndex)
         background_operations_assignee.trigger();
     else if (action_type == ActionLocks::PartsMove)
         background_moves_assignee.trigger();

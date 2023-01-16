@@ -4477,6 +4477,7 @@ void StorageReplicatedMergeTree::partialShutdown()
         auto fetch_lock = fetcher.blocker.cancel();
         auto merge_lock = merger_mutator.merges_blocker.cancel();
         auto move_lock = parts_mover.moves_blocker.cancel();
+        auto build_block = vec_index_builder_updater.builds_blocker.cancel();
         background_operations_assignee.finish();
     }
 
@@ -4495,6 +4496,7 @@ void StorageReplicatedMergeTree::shutdown()
     fetcher.blocker.cancelForever();
     merger_mutator.merges_blocker.cancelForever();
     parts_mover.moves_blocker.cancelForever();
+    vec_index_builder_updater.builds_blocker.cancelForever();
     mutations_finalizing_task->deactivate();
     stopBeingLeader();
 

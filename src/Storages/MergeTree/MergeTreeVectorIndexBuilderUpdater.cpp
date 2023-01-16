@@ -23,10 +23,24 @@ namespace ErrorCodes
     extern const int MEMORY_LIMIT_EXCEEDED;
     extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
+    extern const int ABORTED;
 }
 
 /// minimum interval (seconds) between check if need to remove dropped vector index cache.
 static const auto RECHECK_VECTOR_INDDEX_CACHE_INTERVAL_SECONDS = 600;
+
+namespace BuildIndexHelpers
+{
+
+    static bool checkOperationIsNotCanceled(ActionBlocker & builds_blocker)
+    {
+        if (builds_blocker.isCancelled())
+            throw Exception(ErrorCodes::ABORTED, "Cancelled building vector index");
+
+        return true;
+    }
+
+}
 
 MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
     : data(data_), log(&Poco::Logger::get(data.getLogName() + " (VectorIndexUpdater)"))
@@ -269,8 +283,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
         BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
         try
         {
-            LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
-            status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
+            if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
+            {
+                LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
+                status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
+            }
         }
         catch (Exception & e)
         {
@@ -542,23 +559,15 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         std::vector<float> vector_raw_data_train;
 
         /// process data block by block
-        while (num_rows_read < part->rows_count)
+        while (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker) && num_rows_read < part->rows_count)
         {
             if (part->vector_index_build_cancelled)
             {
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index build is cancelled for part {}", part->name);
             }
 
-            bool found = false;
-            for (auto & vec_index_desc_storage : part->storage.getInMemoryMetadataPtr()->vec_indices)
-            {
-                if (vec_index_desc == vec_index_desc_storage)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if(!found)
+            auto & latest_vec_indices = part->storage.getInMemoryMetadataPtr()->vec_indices;
+            if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
             {
                 LOG_INFO(log, "Vector index has been dropped, no need to build it.");
                 disk->removeRecursive(vector_tmp_relative_path);
@@ -742,7 +751,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             return BuildVectorIndexStatus::BUILD_FAIL;
         }
 
-        if (!part->vector_index_build_cancelled)
+        if (!part->vector_index_build_cancelled && BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
         {
             if (tune)
             {
@@ -784,7 +793,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             if (future_part)
             {
                 /// Check the latest metadata before move files, in case drop index submitted during index building.
-                if (future_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+                auto & latest_vec_indices = future_part->storage.getInMemoryMetadataPtr()->vec_indices;
+                if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
                 {
                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
                     disk->removeRecursive(vector_tmp_relative_path);

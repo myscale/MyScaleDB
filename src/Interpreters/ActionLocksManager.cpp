@@ -16,6 +16,7 @@ namespace ActionLocks
     extern const StorageActionBlockType DistributedSend = 5;
     extern const StorageActionBlockType PartsTTLMerge = 6;
     extern const StorageActionBlockType PartsMove = 7;
+    extern const StorageActionBlockType PartsBuildIndex = 8; /// Action lock for vector index build
 }
 
 

@@ -12,6 +12,7 @@
 #include <Common/quoteString.h>
 #include <Common/typeid_cast.h>
 #include <Databases/DatabaseReplicated.h>
+#include <Storages/MergeTree/MergeTreeData.h>
 
 #include "config.h"
 
@@ -39,6 +40,7 @@ namespace ErrorCodes
 namespace ActionLocks
 {
     extern const StorageActionBlockType PartsMerge;
+    extern const StorageActionBlockType PartsBuildIndex;
 }
 
 static DatabasePtr tryGetDatabase(const String & database_name, bool if_exists)
@@ -215,6 +217,11 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             /// For the rest of tables types exclusive lock is needed
             if (!std::dynamic_pointer_cast<MergeTreeData>(table))
                 table_excl_lock = table->lockExclusively(context_->getCurrentQueryId(), context_->getSettingsRef().lock_acquire_timeout);
+            
+            if (!table->supportsReplication())
+            {
+                auto builds_blocker = table->getActionLock(ActionLocks::PartsBuildIndex);
+            }
 
             auto metadata_snapshot = table->getInMemoryMetadataPtr();
             /// Drop table data, don't touch metadata
@@ -238,12 +245,6 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             bool check_loading_deps = !check_ref_deps && getContext()->getSettingsRef().check_table_dependencies;
             DatabaseCatalog::instance().checkTableCanBeRemovedOrRenamed(table_id, check_ref_deps, check_loading_deps, is_drop_or_detach_database);
 
-            if(!table->getInMemoryMetadata().vec_indices.empty())
-            {
-                StorageInMemoryMetadata metadata_table = table->getInMemoryMetadata();
-                metadata_table.vec_indices.clear();
-                table->setInMemoryMetadata(metadata_table);
-            }
             table->flushAndShutdown();
 
             TableExclusiveLockHolder table_lock;

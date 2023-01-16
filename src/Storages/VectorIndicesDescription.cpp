@@ -231,6 +231,14 @@ bool VectorIndicesDescription::has(const String & name) const
     return false;
 }
 
+bool VectorIndicesDescription::has(const VectorIndexDescription & vec_index_desc) const
+{
+    for (const auto & index : *this)
+        if (index == vec_index_desc)
+            return true;
+    return false;
+}
+
 String VectorIndicesDescription::toString() const
 {
     if (empty())

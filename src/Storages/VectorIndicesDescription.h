@@ -76,6 +76,8 @@ struct VectorIndicesDescription : public std::vector<VectorIndexDescription>
 {
     /// Index with name exists
     bool has(const String & name) const;
+    /// Index with name and type desc exists
+    bool has(const VectorIndexDescription & vec_index_desc) const;
     /// Convert description to string
     String toString() const;
     /// Parse description from string

@@ -54,6 +54,11 @@ public:
     BuildVectorIndexStatus
     buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode);
 
+    /** Is used to cancel all index builds. On cancel() call all currently running actions will throw exception soon.
+      * All new attempts to start a vector index build will throw an exception until all 'LockHolder' objects will be destroyed.
+      */
+    ActionBlocker builds_blocker;
+
 private:
     class Counter
     {
