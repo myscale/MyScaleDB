@@ -11,7 +11,7 @@ build_binary:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
     paths:
       - artifacts/*.deb
-      - build/programs/clickhouse 
+      - build/programs/clickhouse
       - artifacts/performance_pack_*
   retry: 2
   script:
@@ -29,6 +29,7 @@ build_binary:
     - ls -al artifacts
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
+
 build_with_sanitizer_asanbinary:
   stage: build
   parallel:
@@ -54,8 +55,9 @@ build_with_sanitizer_asanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 build_with_sanitizer_tsanbinary:
   stage: build
   parallel:
@@ -81,8 +83,9 @@ build_with_sanitizer_tsanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 build_with_sanitizer_ubsanbinary:
   stage: build
   parallel:
@@ -108,8 +111,9 @@ build_with_sanitizer_ubsanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 build_with_sanitizer_msanbinary:
   stage: build
   parallel:
@@ -135,8 +139,9 @@ build_with_sanitizer_msanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 build_for_integration_test:
   stage: build
   variables:
@@ -155,5 +160,5 @@ build_for_integration_test:
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-x86_64
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'    # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"

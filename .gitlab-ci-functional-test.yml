@@ -2,7 +2,7 @@
 ######### VECTOR TESTS ###########
 vector_search_test:
   stage: functional-test
-  needs: 
+  needs:
     - job: build_binary
       artifacts: true
   parallel:
@@ -18,11 +18,12 @@ vector_search_test:
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
+
 ###################################### FUNCTIONAL TESTS ######################################
 ########## SMOKE TESTS ###########
 smoke_test:
   stage: functional-test
-  needs: 
+  needs:
     - job: build_binary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.0
@@ -43,11 +44,12 @@ smoke_test:
     - docker/builder/tools/check_job_states.sh mqdb_run_smoke
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
+
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
 stateless_test:
   stage: functional-test
-  needs: 
+  needs:
     - job: build_binary
       artifacts: true
   artifacts:
@@ -68,10 +70,11 @@ stateless_test:
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
+
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
   stage: functional-test
-  needs: 
+  needs:
     - job: build_binary
       artifacts: true
   artifacts:
@@ -95,7 +98,7 @@ stateful_test:
 ####### AST FUZZER TESTS #########
 .fuzzer_test:
   stage: functional-test
-  needs: 
+  needs:
     - job: build_binary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0

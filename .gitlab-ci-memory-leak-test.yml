@@ -2,7 +2,7 @@
 # TODO build test image for arm64
 stress_test_asan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_asanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
@@ -24,9 +24,10 @@ stress_test_asan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 stress_test_tsan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_tsanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
@@ -46,11 +47,12 @@ stress_test_tsan:
     - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_stress
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"'  # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 stress_test_ubsan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_ubsanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
@@ -72,9 +74,10 @@ stress_test_ubsan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 stress_test_msan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_msanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
@@ -96,9 +99,10 @@ stress_test_msan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 vector-test-asan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_asanbinary
       artifacts: true
   parallel:
@@ -123,11 +127,12 @@ vector-test-asan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 vector-test-tsan:
   stage: memory-leak-test
-  needs: 
-   - job: build_with_sanitizer_tsanbinary
-     artifacts: true
+  needs:
+    - job: build_with_sanitizer_tsanbinary
+      artifacts: true
   parallel:
     matrix:
       - ARCH: amd64
@@ -151,9 +156,10 @@ vector-test-tsan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 vector-test-msan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_msanbinary
       artifacts: true
   parallel:
@@ -178,9 +184,10 @@ vector-test-msan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 vector-test-ubsan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_ubsanbinary
       artifacts: true
   parallel:
@@ -205,9 +212,10 @@ vector-test-ubsan:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+
 fuzzer_test-asan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_asanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
@@ -231,7 +239,7 @@ fuzzer_test-asan:
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
 fuzzer_test-ubsan:
   stage: memory-leak-test
-  needs: 
+  needs:
     - job: build_with_sanitizer_ubsanbinary
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0

@@ -3,15 +3,15 @@ image: harbor.internal.moqi.ai/mqdb/builder:2.8
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 include:
-  - '/.gitlab-ci-build.yml'
-  - '/.gitlab-ci-functional-test.yml'
-  - '/.gitlab-ci-integration-test.yml'
-  - '/.gitlab-ci-memory-leak-test.yml'
-  - '/.gitlab-ci-performance-test.yml'
+  - "/.gitlab-ci-build.yml"
+  - "/.gitlab-ci-functional-test.yml"
+  - "/.gitlab-ci-integration-test.yml"
+  - "/.gitlab-ci-memory-leak-test.yml"
+  - "/.gitlab-ci-performance-test.yml"
 
 stages:
   - check-pipeline
@@ -35,10 +35,11 @@ check_pipeline_already_running:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
     - if [[ -f .schedule_cache ]]; then
-          echo "already ran for this commit, nothing to do";
-          exit 1;
+      echo "already ran for this commit, nothing to do";
+      exit 1;
       fi
     - echo "done" > .schedule_cache
+
 style_check:
   stage: build
   image: harbor.internal.moqi.ai/mqdb/style-check
@@ -97,6 +98,18 @@ build_image:
     - docker/builder/tools/docker-buildx.sh
   script:
     - docker/builder/tools/image.sh
+
+build_saas_image:
+  stage: image
+  dependencies: ["build_package"]
+  # only:
+  #   - mqdb-stable
+  before_script:
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/saas-image.sh
+
 upload_performance_file_to_s3:
   stage: deploy
   dependencies: ["build_binary"]
