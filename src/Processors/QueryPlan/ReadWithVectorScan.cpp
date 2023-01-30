@@ -2,6 +2,7 @@
 #include <Parsers/ASTSelectQuery.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/QueryPlan/ReadWithVectorScan.h>
+#include <Processors/Sources/NullSource.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h>
@@ -86,12 +87,20 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
     /// If there are only virtual columns in the query, should be wrong, just return.
     if (column_names_to_read.empty())
     {
+        LOG_DEBUG(log, "column_names_to_read is empty");
+        pipeline.init(Pipe(std::make_shared<NullSource>(getOutputStream().header)));
         return;
     }
 
     pipe = createReadProcessorsAmongParts(
         prepared_parts,
         column_names_to_read);
+
+    if (pipe.empty())
+    {
+        pipeline.init(Pipe(std::make_shared<NullSource>(getOutputStream().header)));
+        return;
+    }
 
     for (const auto & processor : pipe.getProcessors())
     {
@@ -113,21 +122,28 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
         return {};
 
     const auto & settings = context->getSettingsRef();
-    const size_t min_parts_per_stream = (parts.size() - 1) / requested_num_streams + 1;
-    
+
     Pipes res;
 
-    for (size_t i = 0; i < requested_num_streams && !parts.empty(); ++i)
+    size_t num_streams = requested_num_streams;
+    if (num_streams > 1)
+    {
+        /// Reduce the number of num_streams if the data is small.
+        if (parts.size() < num_streams)
+            num_streams = parts.size();
+    }
+
+    const size_t min_parts_per_stream = (parts.size() - 1) / num_streams + 1;
+    for (size_t i = 0; i < num_streams && !parts.empty(); ++i)
     {
         MergeTreeData::DataPartsVector new_parts;
-        size_t need_parts = min_parts_per_stream;
-        while (need_parts > 0 && !parts.empty())
+        for (size_t need_parts = min_parts_per_stream; need_parts > 0 && !parts.empty(); need_parts--)
         {
             new_parts.push_back(parts.back());
             parts.pop_back();
         }
 
-        res.emplace_back(readFromParts(new_parts, column_names, settings.use_uncompressed_cache));
+        res.emplace_back(readFromParts(std::move(new_parts), column_names, settings.use_uncompressed_cache));
     }
 
     auto pipe = Pipe::unitePipes(std::move(res));
@@ -136,7 +152,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
 }
 
 Pipe ReadWithVectorScan::readFromParts(
-    MergeTreeData::DataPartsVector & parts,
+    const MergeTreeData::DataPartsVector & parts,
     Names required_columns,
     bool use_uncompressed_cache)
 {

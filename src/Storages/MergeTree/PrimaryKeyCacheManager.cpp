@@ -16,16 +16,7 @@ PrimaryKeyCacheManager::PrimaryKeyCacheManager(size_t max_size)
 void PrimaryKeyCacheManager::setPartPkCache(String part_name, Columns columns)
 {
     /// type of clickhouse LRUCache's value must be std::shard_ptr
-    /// too rigid
-
-    Columns *cols = new Columns(columns.size());
-    for (size_t i = 0; i < columns.size(); ++i)
-    {
-        (*cols)[i] = columns[i];
-    }
-
-    std::shared_ptr<Columns> cols_ptr;
-    cols_ptr.reset(cols);
+    std::shared_ptr<Columns> cols_ptr = std::make_shared<Columns>(columns);
 
     cache_ex.set(part_name, cols_ptr);
 }
@@ -33,26 +24,20 @@ void PrimaryKeyCacheManager::setPartPkCache(String part_name, Columns columns)
 
 std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String part_name)
 {
-    std::shared_ptr<Columns> v = cache_ex.get(part_name);
-    if (v == nullptr)
-    {
+    std::shared_ptr<Columns> pk_cache = cache_ex.get(part_name);
+    if (!pk_cache)
         return std::nullopt;
-    }
-    else
-    {
-        return {*v};
-    }
+
+    return *pk_cache;
 }
 
 
-bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & kd)
+bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & primary_key)
 {
-    size_t n = kd.data_types.size();
-    if (n != 1)
-    {
+    if (primary_key.data_types.size() != 1)
         return false;
-    }
-    String type_name = kd.data_types[0]->getName();
+
+    String type_name = primary_key.data_types[0]->getName();
     return type_name == "UInt32" || type_name == "UInt64";
 }
 

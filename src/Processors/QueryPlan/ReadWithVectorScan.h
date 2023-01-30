@@ -62,7 +62,7 @@ private:
     Poco::Logger * log;
 
     Pipe readFromParts(
-        MergeTreeData::DataPartsVector & parts,
+        const MergeTreeData::DataPartsVector & parts,
         Names required_columns,
         bool use_uncompressed_cache);
 };
