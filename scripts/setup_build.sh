@@ -20,13 +20,13 @@ fi
 if [ $# -ge 2 ]; then
     if [ "$2" == "ASAN" ]; then
         BUILD_FOLDER="${BUILD_FOLDER}-asan"
-        SANIITIZE_ARGS="-DSANITIZE=address"
+        SANITIZE_ARGS="-DSANITIZE=address"
     elif [ "$2" == "TSAN" ]; then
         BUILD_FOLDER="${BUILD_FOLDER}-tsan"
-        SANIITIZE_ARGS="-DSANITIZE=thread"
+        SANITIZE_ARGS="-DSANITIZE=thread"
     elif [ "$2" == "MSAN" ]; then
         BUILD_FOLDER="${BUILD_FOLDER}-msan"
-        SANIITIZE_ARGS="-DSANITIZE=memory"
+        SANITIZE_ARGS="-DSANITIZE=memory"
     else
         echo "Invalid sanitizer mode: $2"
         exit 1

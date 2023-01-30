@@ -8,7 +8,7 @@ mkdir -p $CURDIR/../$BUILD_FOLDER/
 cd $CURDIR/../$BUILD_FOLDER/
 export LD_LIBRARY_PATH=/usr/lib/llvm-13/lib:/opt/intel/oneapi/mkl/2021.4.0/lib/intel64/:${LD_LIBRARY_PATH}
 cmake -G Ninja .. -DCMAKE_C_COMPILER=$(command -v clang-13) \
-    -DCMAKE_CXX_COMPILER=$(command -v clang++-13) $SANITIZER_ARGS \
+    -DCMAKE_CXX_COMPILER=$(command -v clang++-13) $SANITIZE_ARGS \
     -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DENABLE_CLICKHOUSE_ALL=OFF \
