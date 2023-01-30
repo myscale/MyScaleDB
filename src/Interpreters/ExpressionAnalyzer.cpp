@@ -712,7 +712,9 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         vector_scan_desc.search_column_name = arguments[0]->getColumnName();
 
-        auto search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
+        std::optional<NameAndTypePair> search_column_type = std::nullopt;
+        if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+            search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
 
         if (search_column_type)
         {
