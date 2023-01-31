@@ -216,6 +216,9 @@ void StorageMergeTree::shutdown()
 
         /// Clear cached vector index
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
+
+        /// Clear primary key cache if exists.
+        clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
     }
     catch (...)
     {

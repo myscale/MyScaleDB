@@ -664,6 +664,7 @@ public:
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
     void clearCachedVectorIndex(const DataPartsVector & parts);
+    void clearPrimaryKeyCache(const DataPartsVector & parts);
 
     ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
     void regularClearCachedIndex(const DataPartsVector & parts);

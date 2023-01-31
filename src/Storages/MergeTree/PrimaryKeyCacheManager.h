@@ -31,8 +31,9 @@ public:
 class PrimaryKeyCacheManager
 {
 public:
-    void setPartPkCache(String part_name, Columns columns);
-    std::optional<Columns> getPartPkCache(String part_name);
+    void setPartPkCache(String cache_key, Columns columns);
+    std::optional<Columns> getPartPkCache(String cache_key);
+    void removeFromPKCache(const String & cache_key);
 
     /// tools
     static bool isSupportedPrimaryKey(const KeyDescription & kd);
@@ -40,6 +41,7 @@ public:
 
 private:
     CacheBase<String, Columns, std::hash<String>, ColumnsWeightFunc> cache_ex;
+    Poco::Logger * log;
 
     explicit PrimaryKeyCacheManager(size_t max_size);
     ~PrimaryKeyCacheManager() = default;

@@ -723,7 +723,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         else
         {
             LOG_DEBUG(log, "search column name: {}, type not exist", vector_scan_desc.search_column_name);
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong search column name");
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong search column name '{}'", vector_scan_desc.search_column_name);
         }
 
         const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());

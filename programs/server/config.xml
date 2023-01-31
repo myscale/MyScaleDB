@@ -1368,14 +1368,11 @@
     </distributed_ddl>
 
     <!-- Settings to fine tune MergeTree tables. See documentation in source code, in MergeTreeSettings.h -->
-
+    <!--
     <merge_tree>
-        <!--
         <max_suspicious_broken_parts>5</max_suspicious_broken_parts>
-        -->
-        <enable_primary_key_cache>true</enable_primary_key_cache>
     </merge_tree>
-
+    -->
 
     <!-- Protection from accidental DROP.
          If size of a MergeTree table is greater than max_table_size_to_drop (in bytes) than table could not be dropped with any DROP query.

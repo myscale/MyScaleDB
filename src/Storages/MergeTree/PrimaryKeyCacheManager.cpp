@@ -8,27 +8,35 @@ namespace DB
 
 
 PrimaryKeyCacheManager::PrimaryKeyCacheManager(size_t max_size)
-: cache_ex("LRU", max_size)
+    : cache_ex(max_size), log(&Poco::Logger::get("PrimaryKeyCacheManager"))
 {
 }
 
 
-void PrimaryKeyCacheManager::setPartPkCache(String part_name, Columns columns)
+void PrimaryKeyCacheManager::setPartPkCache(String cache_key, Columns columns)
 {
+    LOG_INFO(log, "PrimaryKeyCache put cache_key={}", cache_key);
+
     /// type of clickhouse LRUCache's value must be std::shard_ptr
     std::shared_ptr<Columns> cols_ptr = std::make_shared<Columns>(columns);
 
-    cache_ex.set(part_name, cols_ptr);
+    cache_ex.set(cache_key, cols_ptr);
 }
 
 
-std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String part_name)
+std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String cache_key)
 {
-    std::shared_ptr<Columns> pk_cache = cache_ex.get(part_name);
+    std::shared_ptr<Columns> pk_cache = cache_ex.get(cache_key);
     if (!pk_cache)
         return std::nullopt;
 
     return *pk_cache;
+}
+
+void PrimaryKeyCacheManager::removeFromPKCache(const String & cache_key)
+{
+    LOG_INFO(log, "PrimaryKeyCache remove cache_key={}", cache_key);
+    return cache_ex.remove(cache_key);
 }
 
 

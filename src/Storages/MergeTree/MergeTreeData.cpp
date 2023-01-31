@@ -69,6 +69,7 @@
 #include <Storages/MergeTree/MergeTreeDataPartInMemory.h>
 #include <Storages/MergeTree/MergeTreeDataPartWide.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
+#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/StorageMergeTree.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/VirtualColumnUtils.h>
@@ -2317,6 +2318,22 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
     }
 }
 
+void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
+{
+    if (!getSettings()->enable_primary_key_cache)
+        return;
+
+    for (const auto & part : parts)
+    {
+        /// Temporary part does not present in primary key cache
+        if (part->getState() == DataPartState::Temporary)
+            continue;
+
+        const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
+        PrimaryKeyCacheManager::getMgr().removeFromPKCache(cache_key);
+    }
+}
+
 void MergeTreeData::regularClearCachedIndex(const DataPartsVector & parts)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
@@ -2378,6 +2395,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
     /// The old part's vector index is reused by new part, no need to clear cache.
     /// clearCachedVectorIndex(parts_to_remove);
+    clearPrimaryKeyCache(parts_to_remove);
 
     const auto settings = getSettings();
 
