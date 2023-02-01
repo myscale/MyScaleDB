@@ -80,6 +80,8 @@ public:
 
     ColumnsDescription getTableStructureFromFileDescriptor(ContextPtr context);
 
+    bool supportsTransactions() const override { return true; }
+
     static ColumnsDescription getTableStructureFromFile(
         const String & format,
         const std::vector<String> & paths,

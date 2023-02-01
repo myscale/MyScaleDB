@@ -361,6 +361,11 @@ void TCPHandler::runImpl()
                 {
                     state.block_in.reset();
                     state.maybe_compressed_in.reset();
+
+                    if (query_context->getSettingsRef().atomic_insert
+                        && (state.cancellation_status == CancellationStatus::FULLY_CANCELLED || state.is_connection_closed))
+                        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Insert query has been canceled");
+
                     return Block();
                 }
                 return state.block_for_input;
@@ -435,6 +440,11 @@ void TCPHandler::runImpl()
                 /// FIXME: check explicitly that insert query suggests to receive data via native protocol,
                 state.need_receive_data_for_insert = true;
                 processInsertQuery();
+
+                if (query_context->getSettingsRef().atomic_insert
+                    && (state.cancellation_status == CancellationStatus::FULLY_CANCELLED || state.is_connection_closed))
+                    throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Insert query has been canceled");
+
                 finish_or_cancel();
             }
             else if (state.io.pipeline.pulling())
@@ -467,6 +477,9 @@ void TCPHandler::runImpl()
                         executor.setCancelCallback(callback, interactive_delay / 1000);
                     }
                     executor.execute();
+
+                    if (query_context->getSettingsRef().atomic_insert && executor.isCancelled())
+                        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Insert query has been canceled");
                 }
 
                 finish_or_cancel();
@@ -684,7 +697,10 @@ bool TCPHandler::readDataNext()
 
         /// Do we need to shut down?
         if (server.isCancelled())
+        {
+            state.cancellation_status = CancellationStatus::FULLY_CANCELLED;
             break;
+        }
 
         /** Have we waited for data for too long?
          *  If we periodically poll, the receive_timeout of the socket itself does not work.
@@ -769,6 +785,7 @@ void TCPHandler::processInsertQuery()
         while (readDataNext())
             executor.push(std::move(state.block_for_insert));
 
+        /// For atomic insert or other
         if (state.cancellation_status == CancellationStatus::FULLY_CANCELLED)
             executor.cancel();
         else
@@ -1362,6 +1379,7 @@ bool TCPHandler::receivePacket()
             return false;
 
         case Protocol::Client::Cancel:
+            /// Mark cancel from client for atomic insert or other
             decreaseCancellationStatus("Received 'Cancel' packet from the client, canceling the query.");
             return false;
 

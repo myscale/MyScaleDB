@@ -27,6 +27,8 @@ public:
         size_t max_block_size,
         size_t num_streams) override;
 
+    bool supportsTransactions() const override { return true; }
+
 private:
     Pipe pipe;
 };

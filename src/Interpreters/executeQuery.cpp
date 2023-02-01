@@ -443,6 +443,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     String query_database;
     String query_table;
 
+    /// Used for atomic insert via HTTP
+    ContextMutablePtr session_context = nullptr;
+
     auto execute_implicit_tcl_query = [implicit_txn_control](const ContextMutablePtr & query_context, ASTTransactionControl::QueryType tcl_type)
     {
         /// Unset the flag on COMMIT and ROLLBACK
@@ -654,6 +657,13 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 {
                     if (context->isGlobalContext())
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "Global context cannot create transactions");
+
+                    if (!context->hasSessionContext())
+                    {
+                        session_context = Context::createCopy(context);
+                        session_context->makeSessionContext();
+                        context->setSessionContext(session_context);
+                    }
 
                     execute_implicit_tcl_query(context, ASTTransactionControl::BEGIN);
                 }
@@ -912,6 +922,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem,
                                     context,
+                                    session_context,
                                     ast,
                                     can_use_query_cache = can_use_query_cache,
                                     enable_writes_to_query_cache = settings.enable_writes_to_query_cache,
@@ -1058,6 +1069,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             auto exception_callback = [start_watch,
                                        elem,
                                        context,
+                                       session_context,
                                        ast,
                                        log_queries,
                                        log_queries_min_type = settings.log_queries_min_type,

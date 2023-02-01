@@ -1526,7 +1526,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
     buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
 
     StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
-    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshotWithoutParts(metadata_ptr);
+    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr, storage.getContext());
 
     MergeTreeReaderSettings reader_settings;
 
