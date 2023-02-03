@@ -27,6 +27,9 @@ if [ $# -ge 2 ]; then
     elif [ "$2" == "MSAN" ]; then
         BUILD_FOLDER="${BUILD_FOLDER}-msan"
         SANITIZE_ARGS="-DSANITIZE=memory"
+    elif [ "$2" == "UBSAN" ]; then
+        BUILD_FOLDER="${BUILD_FOLDER}-ubsan"
+        SANITIZE_ARGS="-DSANITIZE=undefined"
     else
         echo "Invalid sanitizer mode: $2"
         exit 1

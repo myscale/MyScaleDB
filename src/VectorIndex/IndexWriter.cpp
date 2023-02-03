@@ -1,4 +1,3 @@
-
 #include "IndexWriter.h"
 namespace VectorIndex
 {
@@ -7,6 +6,8 @@ namespace VectorIndex
 
 size_t BufferIndexWriter::operator()(const void * ptr, size_t size, size_t nitems)
 {
+    if (ptr == nullptr || size == 0 || nitems == 0)
+        return 0;
     size_t total_need = size * nitems + actual_size;
     if (total_need > 0)
     {

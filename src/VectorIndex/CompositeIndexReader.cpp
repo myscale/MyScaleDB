@@ -104,6 +104,9 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
     size_t to_read = size * nitems;
     size_t ret = 0;
 
+    if (to_read == 0)
+        return 0;
+
     while (offset + to_read > static_cast<size_t>(current_loaded_size))
     {
         if (offset < static_cast<size_t>(current_loaded_size))

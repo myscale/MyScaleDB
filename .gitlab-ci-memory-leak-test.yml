@@ -128,7 +128,8 @@ vector-test-asan:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
 
-vector-test-tsan:
+# disable TSAN due to #89
+.vector-test-tsan:
   stage: memory-leak-test
   needs:
     - job: build_with_sanitizer_tsanbinary
@@ -149,7 +150,7 @@ vector-test-tsan:
   script:
     - replace_openmp=true
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/vector-search-test.sh &replace_openmp
+    - docker/builder/tools/vector-search-test.sh $replace_openmp
     # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
@@ -157,7 +158,8 @@ vector-test-tsan:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
 
-vector-test-msan:
+# disable MSAN due to #89
+.vector-test-msan:
   stage: memory-leak-test
   needs:
     - job: build_with_sanitizer_msanbinary

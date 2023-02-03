@@ -616,11 +616,11 @@ Status VectorSegmentExecutor::search(
         cv.wait(lock, [] { return count.load() <= num_thread_for_vector; });
         count.fetch_add(1);
         added = true;
-        LOG_DEBUG(log, "[search] index search, num threads: {}", omp_get_max_threads());
+        LOG_DEBUG(log, "[search] index search, num threads: {}", num_thread_for_vector);
         /// a shared lock on a small number of concurrent threads, like 16. this is not hard limit so race is not a problem.
         {
             DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search::vector_index_search");
-            span.addAttribute("vec_search.num_threads", omp_get_max_threads());
+            span.addAttribute("vec_search.num_threads", num_thread_for_vector);
             index->search(dataset, k, distances, labels, params, filter);
         }
 

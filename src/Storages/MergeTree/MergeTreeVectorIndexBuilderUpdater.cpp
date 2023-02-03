@@ -690,8 +690,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
             }
 
-            result.clear();
-
             /// only run in the first read round
             if (training)
             {
