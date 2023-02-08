@@ -1,7 +1,7 @@
 <!--
 
 MR 的标题应该符合 commit message 的标题规范:
-http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/git-workflow/#commit-message
+http://mqdb.page.moqi.ai/myscale-internal-docs/development/get-started/commit-and-submit-a-merge-request/#commit-message
 
 -->
 
@@ -13,7 +13,7 @@ http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/git-workf
 这里必须有一行以 "Issue Number:  " 开头，并且通过
 "close" 或 "ref" 引用相关的 issue。
 
-详情见 http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/git-workflow.md
+详情见 http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/workflow/
 
 -->
 
