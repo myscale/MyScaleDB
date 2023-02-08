@@ -1355,9 +1355,15 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
 
     /// Clear from metadata
     if (containVectorIndex(index_name, col_name))
+    {
+        std::lock_guard lock(vector_indexed_mutex);
         vector_indexed.erase(index_name + "_" + col_name);
+    }
     else if (index_name.empty()) /// Empty index name will clear all vector indices.
+    {
+        std::lock_guard lock(vector_indexed_mutex);
         vector_indexed.clear();
+    }
 
     /// Clear vector index build flags
     vector_index_build_error = false;

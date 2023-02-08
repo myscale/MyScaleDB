@@ -118,12 +118,12 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
         }
     }
 
-    bool bak_remove_prewhere_column = prewhere_info->remove_prewhere_column;
-    prewhere_info->remove_prewhere_column = true;
-
-    /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
-    /// In this case, we need only rows statisfied prewhere conditions.
-    prewhere_info->need_filter = true;
+    /// No need to return prewhere column
+    {
+        std::lock_guard lock(prewhere_info->prewhere_info_mutex);
+        if (!prewhere_info->remove_prewhere_column)
+            prewhere_info->remove_prewhere_column = true;
+    }
 
     auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
         storage,
@@ -172,9 +172,6 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
             new_data[col_data[i]] = 1;
         }
     }
-
-    /// Restore the remove_prewhere_column.
-    prewhere_info->remove_prewhere_column = bak_remove_prewhere_column;
 
     return new_filter;
 }
@@ -568,7 +565,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
     Block res_block;
 
     /// Add prewhere column name to avoid column not found error
-    if (prewhere_info && !prewhere_info->remove_prewhere_column)
+    if (prewhere_info && !original_remove_prewhere_column)
     {
         ColumnWithTypeAndName prewhere_col;
 

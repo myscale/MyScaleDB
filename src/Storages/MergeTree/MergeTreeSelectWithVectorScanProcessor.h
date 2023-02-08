@@ -23,6 +23,10 @@ public:
             data_part->name,
             total_rows,
             data_part->index_granularity.getMarkStartingRow(all_mark_ranges.front().begin));
+
+        /// Save original remove_prewhere_column, which will be changed to true in performPrefilter()
+        if (prewhere_info)
+            original_remove_prewhere_column = prewhere_info->remove_prewhere_column;
     }
 
     String getName() const override { return "MergeTreeReadWithVectorScan"; }
@@ -50,6 +54,10 @@ private:
 
     /// True if the query can use primary key cache.
     bool use_primary_key_cache = false;
+
+    /// Used for vector scan to handle cases when both prewhere and where exist
+    /// remove_prewhere_column is set to true when vector scan try to get _part_offset for rows satisfying prewhere conds.
+    bool original_remove_prewhere_column = false;
 };
 
 }

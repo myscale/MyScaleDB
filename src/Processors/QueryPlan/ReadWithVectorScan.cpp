@@ -162,8 +162,15 @@ Pipe ReadWithVectorScan::readFromParts(
         return {};
 
     const auto & client_info = context->getClientInfo();
-    
-    
+
+    /// Prewhere info should not be changed, because it is shared by parts.
+    if (prewhere_info)
+    {
+        /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
+        /// In this case, we need only rows statisfied prewhere conditions.
+        prewhere_info->need_filter = true;
+    }
+
     for (const auto & part : parts)
     {
         auto vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);

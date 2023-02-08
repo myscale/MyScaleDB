@@ -310,6 +310,7 @@ public:
     Checksums checksums;
 
     /// TODO: move vector index related structures out of data part class
+    mutable std::mutex vector_indexed_mutex;
     mutable std::set<String> vector_indexed;
 
     /// Used for decouple part
@@ -343,11 +344,23 @@ public:
 
     mutable bool lightweight_delete_mask_updated = false;
 
-    bool containAnyVectorIndex() const { return !vector_indexed.empty(); }
+    bool containAnyVectorIndex() const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        return !vector_indexed.empty();
+    }
 
-    bool containVectorIndex(String index_name, String col_name) const { return vector_indexed.contains(index_name + "_" + col_name); }
+    bool containVectorIndex(String index_name, String col_name) const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        return vector_indexed.contains(index_name + "_" + col_name);
+    }
 
-    void addVectorIndex(String index_name) const { vector_indexed.insert(index_name); }
+    void addVectorIndex(String index_name) const
+    {
+        std::lock_guard lock(vector_indexed_mutex);
+        vector_indexed.insert(index_name);
+    }
 
     /// remove specified vector index from part, both disk and metadata.
     void removeVectorIndex(const String & index_name, const String & col_name) const;
