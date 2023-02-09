@@ -142,6 +142,7 @@ protected:
                 {
                     ++rows_count;
 
+                    const auto fail_status = data->getVectorIndexBuildStatus();
                     size_t src_index = 0;
                     size_t res_index = 0;
 
@@ -184,17 +185,18 @@ protected:
                     {
                         size_t built_parts = getBuiltParts(data_parts, index);
                         size_t small_parts = getSmallParts(data, data_parts, index);
-                        if (built_parts + small_parts == 0)
-                        {
-                            res_columns[res_index++]->insert("NoVectorIndexData");
-                        }
-                        else if (built_parts + small_parts == data_parts.size())
+
+                        if (built_parts + small_parts == data_parts.size())
                         {
                             res_columns[res_index++]->insert("Built");
                         }
+                        else if (fail_status.latest_failed_part.empty())
+                        {
+                            res_columns[res_index++]->insert("InProgress");
+                        }
                         else
                         {
-                            res_columns[res_index++]->insert("DataIncomplete");
+                            res_columns[res_index++]->insert("Error");
                         }
                     }
                     /// host
@@ -204,7 +206,6 @@ protected:
                         res_columns[res_index++]->insert(host);
                     }
 
-                    const auto fail_status = data->getVectorIndexBuildStatus();
                     /// latest failed part
                     if (column_mask[src_index++])
                     {

@@ -51,7 +51,7 @@
 15	[15,15,15]	666.02997
 16	[16,16,16]	758.42993
 --- lightweight delete on decoupled part
-test_vector	v1	HNSWFLAT	1	NoVectorIndexData
+test_vector	v1	HNSWFLAT	1	InProgress
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 4	[4,4,4]	45.630005

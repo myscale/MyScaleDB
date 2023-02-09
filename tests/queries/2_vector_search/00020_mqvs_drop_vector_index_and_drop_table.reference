@@ -1,4 +1,4 @@
-test_drop_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	NoVectorIndexData
+test_drop_table	v1	HNSWFLAT	v1 vector TYPE HNSWFLAT	InProgress
 -- Empty result, no vector index v1
 ok
 -- Create a new vector index v2 with different name and different type
