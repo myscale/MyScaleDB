@@ -210,7 +210,7 @@ def evaluate(id, result_id, truth, top_k, nq):
 def createTable(tableName):
     client.execute('drop table if exists {}'.format(tableName))
     client.execute(
-        'CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id'.format(
+        'CREATE TABLE {} (id UInt32, data Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id'.format(
             tableName))
 
 

@@ -119,7 +119,7 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(const ASTPt
 
     /// validate for vector index params
     if (result.data_type->getTypeId() != TypeIndex::Array)
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Vector index can be used only with `FixedArray` column.");
+        throw Exception(ErrorCodes::INCORRECT_QUERY, "Vector index can be used only with `Array` column.");
 
     /*
     const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(result.data_type.get());

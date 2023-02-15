@@ -2,7 +2,7 @@ import os
 
 clickhouse_client = "clickhouse-client"
 
-schema_template = "CREATE TABLE {}(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector FixedArray(Float32, 1280)) engine MergeTree primary key docId"
+schema_template = "CREATE TABLE {}(docId String, headLine String, content String, createDate DateTime64(1, 'Asia/Shanghai'), author String, searchCategoryId String, level UInt16, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 1280) engine MergeTree primary key docId"
 
 select_1_template = "SELECT docId, headLine, distance('topK = 10')(vector, {}) as d FROM {} ORDER BY d ASC"
 

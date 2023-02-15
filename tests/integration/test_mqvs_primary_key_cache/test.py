@@ -19,7 +19,7 @@ def started_cluster():
 def test_primary_key_cache_enabled(started_cluster):
     instance.query(
         """
-        CREATE TABLE test_pk_cache(id UInt32, vector FixedArray(Float32, 3))
+        CREATE TABLE test_pk_cache(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
         engine MergeTree primary key id
         SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
         INSERT INTO test_pk_cache SELECT number, [number, number, number] FROM numbers(2100);
@@ -40,7 +40,7 @@ def test_primary_key_cache_enabled(started_cluster):
 def test_primary_key_cache_disabled(started_cluster):
     instance.query(
         """
-        CREATE TABLE test_pk_cache_disable(id UInt32, vector FixedArray(Float32, 3))
+        CREATE TABLE test_pk_cache_disable(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
         engine MergeTree primary key id
         SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=false;
         INSERT INTO test_pk_cache_disable SELECT number, [number, number, number] FROM numbers(2100);

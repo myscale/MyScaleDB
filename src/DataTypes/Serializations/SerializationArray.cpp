@@ -474,9 +474,6 @@ static void deserializeTextImpl(IColumn & column, ReadBuffer & istr, Reader && r
         throw;
     }
 
-    if (size != 0 && column_array.getDim() != 0 && size != column_array.getDim())
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Array size does not equal to dim: ({} vs {})", size, column_array.getDim());
-
     offsets.push_back(offsets.back() + size);
 }
 

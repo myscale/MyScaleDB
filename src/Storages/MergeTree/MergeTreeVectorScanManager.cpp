@@ -1128,7 +1128,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 size_t vec_end_offset = offsets[row];
                 if (vec_start_offset != vec_end_offset)
                 {
-                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
                     {
                         vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
                     }

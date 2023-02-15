@@ -4,9 +4,10 @@ drop table if exists test_vector;
 create table test_vector
 (
     id    UInt32,
-    data  FixedArray(Float32, 3),
+    data  Array(Float32),
     date  Date,
-    label Enum8('person' = 1, 'building' = 2, 'animal' = 3)
+    label Enum8('person' = 1, 'building' = 2, 'animal' = 3),
+    CONSTRAINT data_len CHECK length(data) = 3
 )
 engine = MergeTree PRIMARY KEY id;
 

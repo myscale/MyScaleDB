@@ -341,6 +341,15 @@ BlockIO InterpreterInsertQuery::execute()
     auto table_lock = table->lockForShare(getContext()->getInitialQueryId(), settings.lock_acquire_timeout);
     auto metadata_snapshot = table->getInMemoryMetadataPtr();
 
+    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    {
+        auto col_name = vec_index.column;
+        if (metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
+        {
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot insert data: column with vector index need correct length constraint");
+        }
+    }
+
     auto query_sample_block = getSampleBlock(query, table, metadata_snapshot);
 
     /// For table functions we check access while executing

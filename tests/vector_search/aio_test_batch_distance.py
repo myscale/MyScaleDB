@@ -92,7 +92,7 @@ def evaluate(id, result_id, query_data, truth, top_k):
 def createTable(tableName, metrics, indexType):
     client = "clickhouse-client --port 10000"
     if (tableName,) not in table:
-        os.system('{} -q \"CREATE TABLE {} (id UInt32, data FixedArray(Float32, 128)) ENGINE = MergeTree primary key id\"'.format(client,tableName))
+        os.system('{} -q \"CREATE TABLE {} (id UInt32, data Array(Float32), CONSTRAINT data_len CHECK length(data) = 128) ENGINE = MergeTree primary key id\"'.format(client,tableName))
         os.system('{} -q \"Alter TABLE {} add vector index v1 data TYPE {}({})\"'.format(client,tableName,indexType,metrics))
 
 async def importSIFT(id, insert_csv, search_data, tableName, query_num=10, k=50,  build=True, search=True,stress_test_time=0,aio_query=1):

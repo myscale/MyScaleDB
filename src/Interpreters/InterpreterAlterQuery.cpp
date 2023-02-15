@@ -217,6 +217,9 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
         StorageInMemoryMetadata metadata = table->getInMemoryMetadata();
         alter_commands.validate(table, getContext());
         alter_commands.prepare(metadata);
+        auto total_rows = table->totalRows(getContext()->getSettingsRef());
+        if (!total_rows.has_value() || total_rows.value() == 0)
+            alter_commands.setTableEmptyFlag(true);
         table->checkAlterIsPossible(alter_commands, getContext());
         table->alter(alter_commands, getContext(), alter_lock);
     }

@@ -6,7 +6,7 @@ max_response_time_drop_table=10
 
 # create table & insert data
 clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
-clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
+clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;"
 clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);"
 clickhouse-client -q "optimize table test_drop_table final;"
 
@@ -33,7 +33,7 @@ fi
 
 # add a new vector index with different name after drop index to confirm sucessully build.
 clickhouse-client -q "DROP TABLE IF EXISTS test_build_index;"
-clickhouse-client -q "CREATE TABLE test_build_index(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
+clickhouse-client -q "CREATE TABLE test_build_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;"
 clickhouse-client -q "INSERT INTO test_build_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(10000);"
 clickhouse-client -q "ALTER TABLE test_build_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;"
 sleep 1

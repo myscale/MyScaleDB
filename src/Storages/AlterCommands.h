@@ -160,6 +160,9 @@ struct AlterCommand
     /// What to remove from column (or TTL)
     RemoveProperty to_remove = RemoveProperty::NO_PROPERTY;
 
+    /// For DROP CONSTRAINT on vector index column
+    bool empty_table = false;
+
     static std::optional<AlterCommand> parse(const ASTAlterCommand * command);
 
     void apply(StorageInMemoryMetadata & metadata, ContextPtr context) const;
@@ -221,6 +224,9 @@ public:
 
     /// All commands modify comments only.
     bool isCommentAlter() const;
+
+    /// Used to determine whether the constraint on the vector index column can be dropped.
+    void setTableEmptyFlag(bool is_empty);
 
     /// Return mutation commands which some storages may execute as part of
     /// alter. If alter can be performed as pure metadata update, then result is

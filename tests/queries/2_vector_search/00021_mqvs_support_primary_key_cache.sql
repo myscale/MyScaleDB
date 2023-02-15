@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS test_pk_cache;
-CREATE TABLE test_pk_cache(id UInt32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
+CREATE TABLE test_pk_cache(id UInt32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000, enable_primary_key_cache=true;
 INSERT INTO test_pk_cache SELECT number, [number, number, number] FROM numbers(2100);
 
 ALTER TABLE test_pk_cache ADD VECTOR INDEX v1 vector TYPE IVFFLAT;

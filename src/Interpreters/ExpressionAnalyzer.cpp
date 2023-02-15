@@ -730,11 +730,16 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         if (!array_type)
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                "Search column {} should be FixedArray type", vector_scan_desc.search_column_name);
+                "Search column {} should be Array type", vector_scan_desc.search_column_name);
 
-        LOG_DEBUG(log, "type dim: {}", array_type->getDim());
-
-        vector_scan_desc.search_column_dim = array_type->getDim();
+        vector_scan_desc.search_column_dim
+            = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
+        if (vector_scan_desc.search_column_dim == 0)
+        {
+            LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
+        }
+        LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
 
         const auto * dag_node = actions->tryFindInOutputs(arguments[1]->getColumnName());
         if (!dag_node)

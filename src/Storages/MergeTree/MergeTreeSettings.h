@@ -178,6 +178,7 @@ struct Settings;
     M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
     M(String, vector_search_metric_type, "L2", "default metric type for brute force search", 0) \
     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
+    M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
     \
     /** Obsolete settings. Kept for backward compatibility only. */ \
     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \

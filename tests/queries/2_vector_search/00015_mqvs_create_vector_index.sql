@@ -4,8 +4,9 @@ drop table if exists test_vector;
 CREATE TABLE test_vector
 (
    id UInt64,
-   vector FixedArray(Float32, 3),
-   label String
+   vector Array(Float32),
+   label String,
+   CONSTRAINT vector_len CHECK length(vector) = 3
 )
 ENGINE = MergeTree PRIMARY KEY id;
 

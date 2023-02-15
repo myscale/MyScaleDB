@@ -24,6 +24,8 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
     extern const int ABORTED;
+    extern const int BAD_ARGUMENTS;
+    extern const int INCORRECT_DATA;
 }
 
 /// minimum interval (seconds) between check if need to remove dropped vector index cache.
@@ -351,6 +353,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
     const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
 {
     LOG_INFO(log, "[buildVectorIndex] part:{}, start checking for build index", part->name);
+
+    bool enforce_fixed_array = data.getSettings()->enforce_fixed_vector_length_constraint;
+
     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
     {
         LOG_INFO(log, "[buildVectorIndex] vec_index_desc data column: {}", vec_index_desc.column);
@@ -378,13 +383,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
                     if (array_type)
                     {
-                        LOG_INFO(log, "[buildVectorIndex] dim: {}", array_type->getDim());
-                        dim = array_type->getDim();
+                        dim = metadata_snapshot->getConstraints().getArrayLengthByColumnName(col).first;
                         if (dim == 0)
                         {
-                            LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0");
-                            throw Exception(ErrorCodes::LOGICAL_ERROR, "wrong dimension: 0");
+                            LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0, please check length constraint on the column.");
+                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
                         }
+                        LOG_INFO(log, "[buildVectorIndex] dim: {}", dim);
                     }
                     ///only reading one column
                     break;
@@ -622,6 +627,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             }
 
             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
+            if (enforce_fixed_array && src_vec.size() != dim * offsets.size())
+            {
+                throw Exception(
+                    ErrorCodes::INCORRECT_DATA,
+                    "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
+                    part->name);
+            }
             if (src_vec.empty())
             {
                 LOG_WARNING(log, "[buildVectorIndex] part:{}, no data read for column {}", part->name, cols.back().name);
@@ -648,9 +660,14 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             {
                 size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
                 size_t vec_end_offset = offsets[row];
+                if (enforce_fixed_array && vec_end_offset - vec_start_offset != dim)
+                    throw Exception(
+                        ErrorCodes::INCORRECT_DATA,
+                        "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
+                        part->name);
                 if (vec_start_offset != vec_end_offset)
                 {
-                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
                     {
                         vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
                     }

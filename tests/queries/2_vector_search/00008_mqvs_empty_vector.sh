@@ -4,6 +4,7 @@
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$CURDIR"/helpers/00000_prepare_data_with_empty_vectors.sh
 
+# no enforce_fixed_vector_length_constraint
 # test empty vector with IVFFLAT
 clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
 
@@ -12,3 +13,6 @@ clickhouse-client -q "ALTER TABLE test_vector DROP VECTOR INDEX v1;"
 clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE FLAT;"
 sleep 1
 clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
+
+# default enforce_fixed_vector_length_constraint
+clickhouse-client -q "select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() and table != 'test_vector' order by table;"

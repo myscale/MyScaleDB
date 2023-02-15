@@ -184,14 +184,9 @@ public:
 
     size_t getNumberOfDimensions() const;
 
-    void setDim(uint64_t dim_) { this->dim = dim_; }
-
-    uint64_t getDim() { return this->dim; }
-
 private:
     WrappedPtr data;
     WrappedPtr offsets;
-    uint64_t dim{0};
 
     size_t ALWAYS_INLINE offsetAt(ssize_t i) const { return getOffsets()[i - 1]; }
     size_t ALWAYS_INLINE sizeAt(ssize_t i) const { return getOffsets()[i] - getOffsets()[i - 1]; }
