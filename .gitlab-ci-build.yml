@@ -9,10 +9,13 @@ build_binary:
     KUBERNETES_MEMORY_LIMIT: 32Gi
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    when: always
     paths:
       - artifacts/*.deb
       - build/programs/clickhouse
       - artifacts/performance_pack_*
+      - build/CMakeFiles/CMakeOutput.log
+      - build/CMakeFiles/CMakeError.log
   retry: 2
   script:
     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
