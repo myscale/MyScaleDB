@@ -905,98 +905,107 @@ void optimizeVectorScan(
     if (vector_scan_funcs.size() == 1)
     {
         const auto * vector_scan_func_node = vector_scan_funcs[0];
-        if (isDistance(vector_scan_func_node->getColumnName()))
+        String param_str = parseVectorScanParameters(vector_scan_func_node, context);
+        VectorIndex::Parameters vec_parameters;
+        if (!param_str.empty())
         {
-            String param_str = parseVectorScanParameters(vector_scan_func_node, context);
-            VectorIndex::Parameters vec_parameters;
-            if (!param_str.empty())
+            try
             {
-                try
-                {
-                    Poco::JSON::Parser json_parser;
-                    auto object = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
-                    vec_parameters = VectorIndex::convertPocoJsonToMap(object);
-                }
-                catch ([[maybe_unused]] const std::exception & e)
-                {
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
-                }
+                Poco::JSON::Parser json_parser;
+                auto object = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
+                vec_parameters = VectorIndex::convertPocoJsonToMap(object);
             }
-
-            if (!select_query->orderBy())
+            catch ([[maybe_unused]] const std::exception & e)
             {
-                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
-                auto order_by_elem = std::make_shared<ASTOrderByElement>();
-                auto order_by_col = std::make_shared<ASTIdentifier>(vector_scan_func_node->getColumnName());
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
+            }
+        }
 
-                /// Basically copy-and-paste from ExpressionAnalyzer, dirty
-                if (!vector_scan_func_node->arguments || vector_scan_func_node->arguments->children.size() != 2)
-                {
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
-                }
-                const auto search_column_name = vector_scan_func_node->arguments->children[0]->getColumnName();
+        const auto vector_scan_func_node_cloumn_name = vector_scan_func_node->getColumnName();
+        std::shared_ptr<ASTFunction> tuple_function_a;
+        if (!select_query->orderBy())
+        {
+            /// Basically copy-and-paste from ExpressionAnalyzer, dirty
+            if (!vector_scan_func_node->arguments || vector_scan_func_node->arguments->children.size() != 2)
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
+            }
+            const auto search_column_name = vector_scan_func_node->arguments->children[0]->getColumnName();
 
-                /// Empty is ok, l2 as default
-                String metric_type = vec_parameters["metric_type"];
-                for (const auto & vector_index_description : vector_indices_description)
+            /// Empty is ok, l2 as default
+            String metric_type = vec_parameters["metric_type"];
+            for (const auto & vector_index_description : vector_indices_description)
+            {
+                /// index metric_type has higher priority
+                if (vector_index_description.column == search_column_name)
                 {
-                    /// index metric_type has higher priority
-                    if (vector_index_description.column == search_column_name)
-                    {
-                        const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_description.parameters);
-                        if(index_parameter.contains("metric_type")){
-                            metric_type = index_parameter.at("metric_type");
-                            break;
-                        }
+                    const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_description.parameters);
+                    if(index_parameter.contains("metric_type")){
+                        metric_type = index_parameter.at("metric_type");
+                        break;
                     }
                 }
-                Poco::toUpperInPlace(metric_type);
+            }
+            Poco::toUpperInPlace(metric_type);
 
+            /// Stored in TreeRewriterResult, pass such info to ExpressionAnalyzer
+            vector_scan_metric_type = metric_type;
+            auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
+            if (isDistance(vector_scan_func_node_cloumn_name))
+            {
+                auto order_by_elem = std::make_shared<ASTOrderByElement>();
+                auto order_by_col = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
                 order_by_elem->children.emplace_back(order_by_col);
                 order_by_elem->direction = metric_type == "IP" ? -1 : 1;
                 order_by_elem->nulls_direction = 1;
 
                 order_by_exp_ast->children.emplace_back(order_by_elem);
                 select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
-
-                /// Stored in TreeRewriterResult, pass such info to ExpressionAnalyzer
-                vector_scan_metric_type = metric_type;
             }
-
-            if (!select_query->limitBy() && !select_query->limitLength() && !select_query->limitOffset() && !select_query->limitByOffset()
-                && !select_query->limitByLength())
+            else if (isBatchDistance(vector_scan_func_node_cloumn_name))
             {
-                if (vec_parameters.contains("topK"))
-                {
-                    auto limit_by_ast = std::make_shared<ASTLiteral>(VectorIndex::StoI(vec_parameters.at("topK")));
-                    select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, limit_by_ast);
-                }
-            }
-        }
-        else if (isBatchDistance(vector_scan_funcs[0]->getColumnName()))
-        {
-            if (!select_query->orderBy())
-            {
-                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
                 auto order_by_elem_a = std::make_shared<ASTOrderByElement>();
-                auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
+                auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
                 auto order_by_literal_a = std::make_shared<ASTLiteral>(1u);
-                auto tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
+                tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
                 order_by_elem_a->children.emplace_back(tuple_function_a);
                 order_by_elem_a->direction = 1;
                 order_by_elem_a->nulls_direction = 1;
 
                 auto order_by_elem_b = std::make_shared<ASTOrderByElement>();
-                auto order_by_col_b = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
+                auto order_by_col_b = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
                 auto order_by_literal_b = std::make_shared<ASTLiteral>(2u);
                 auto tuple_function_b = makeASTFunction("tupleElement", order_by_col_b, order_by_literal_b);
                 order_by_elem_b->children.emplace_back(tuple_function_b);
-                order_by_elem_b->direction = 1;
+                order_by_elem_b->direction = metric_type == "IP" ? -1 : 1;
                 order_by_elem_b->nulls_direction = 1;
 
                 order_by_exp_ast->children.emplace_back(order_by_elem_a);
                 order_by_exp_ast->children.emplace_back(order_by_elem_b);
                 select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
+            }
+        }
+
+        if (!select_query->limitBy() && !select_query->limitLength() && !select_query->limitOffset() && !select_query->limitByOffset()
+            && !select_query->limitByLength() && vec_parameters.contains("topK"))
+        {
+            auto limit_by_ast = std::make_shared<ASTLiteral>(VectorIndex::StoI(vec_parameters.at("topK")));
+            if (isDistance(vector_scan_func_node_cloumn_name))
+            {
+                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, limit_by_ast);
+            }
+            else if (isBatchDistance(vector_scan_func_node_cloumn_name))
+            {
+                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY_LENGTH, limit_by_ast);
+                auto limit_by_exp_ast = std::make_shared<ASTExpressionList>();
+                if(!tuple_function_a)
+                {
+                    auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
+                    auto order_by_literal_a = std::make_shared<ASTLiteral>(1u);
+                    tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
+                }
+                limit_by_exp_ast->children.emplace_back(tuple_function_a);
+                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY, limit_by_exp_ast);
             }
         }
     }
