@@ -418,7 +418,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         command.column_name = ast_vec_index_decl.column;
 
         command.if_not_exists = command_ast->if_not_exists;
-        LOG_DEBUG(log, "vector index name: {}", command.vec_index_name);
+        LOG_DEBUG(log, "Vector index name: {}", command.vec_index_name);
 
         return command;
     }
@@ -1090,7 +1090,7 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
     else if (type == DROP_VECTOR_INDEX) 
     {
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
-        LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
+        LOG_DEBUG(log, "Drop vector index name: {}", vec_index_name);
         result.drop_command = true;
         result.index_name = vec_index_name;
 

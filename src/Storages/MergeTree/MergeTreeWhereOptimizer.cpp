@@ -243,7 +243,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 //        bool require_distance_func = false;
 //        for (const auto & col : queried_columns)
 //        {
-//            LOG_DEBUG(log, "[MergeTreeWhereOptimizer] queried column: {}", col);
+//            LOG_DEBUG(log, "Queried column: {}", col);
 //            if (isVectorScanFunc(col))
 //            {
 //                require_distance_func = true;
@@ -251,7 +251,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 //            }
 //        }
 
-        LOG_DEBUG(log, "[MergeTreeWhereOptimizer] containVectorScanFunc(cond.node): {}", containVectorScanFunc());
+        LOG_DEBUG(log, "containVectorScanFunc(cond.node): {}", containVectorScanFunc());
 
         cond.viable =
             !has_invalid_column &&

@@ -61,14 +61,15 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
     /// distance, data_part_name, label
     std::vector<std::tuple<float, String, uint32_t>> all_result;
     std::unordered_map<String, RangesInDataPart> part_map;
-    LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] parts_with_ranges size: {}", parts_with_ranges.size());
+    Poco::Logger const * log = &Poco::Logger::get("MergeTreeVectorScanUtils");
+    LOG_DEBUG(log, "parts_with_ranges size: {}", parts_with_ranges.size());
 
     for (auto & part_with_ranges : parts_with_ranges)
     {
         VectorScanResultPtr result = part_with_ranges.vector_scan_manager->getVectorScanResult();
         if (!result)
         {
-            LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] result is empty");
+            LOG_DEBUG(log, "Result is empty");
             continue;
         }
         const ColumnUInt32 * label_column = checkAndGetColumn<ColumnUInt32>(result->result_columns[0].get());
@@ -89,8 +90,6 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
     { return std::get<0>(lhs) < std::get<0>(rhs); };
 
     pdqsort(all_result.begin(), all_result.end(), comparator);
-
-    LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] after sort");
 
     for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), all_result.size()); ++i)
     {
@@ -146,7 +145,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
             {
                 LOG_TRACE(
                     &Poco::Logger::get("MergeTreeVectorScanUtils"),
-                    "[need_this_range] keep range: {}-{} in part: {}",
+                    "Keep range: {}-{} in part: {}",
                     begin,
                     end,
                     part->name);

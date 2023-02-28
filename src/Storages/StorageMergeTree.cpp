@@ -290,8 +290,7 @@ void StorageMergeTree::read(
     /// reset them to avoid holding them.
     auto & snapshot_data = assert_cast<MergeTreeData::SnapshotData &>(*storage_snapshot->data);
     snapshot_data.parts = {};
-    LOG_DEBUG(log, "[StorageMergeTree::read] after QueryPlan MergeTree read");
-
+    LOG_DEBUG(log, "After QueryPlan MergeTree read");
 }
 
 std::optional<UInt64> StorageMergeTree::totalRows(const Settings &) const

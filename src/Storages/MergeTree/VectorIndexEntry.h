@@ -14,6 +14,7 @@ struct VectorIndexEntry
     String vector_index_name;
     MergeTreeData & data;
     bool is_replicated;
+    Poco::Logger * log = &Poco::Logger::get("vectorIndexEntry");
 
     VectorIndexEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, const bool is_replicated_)
      : part_name(std::move(part_name_))
@@ -21,7 +22,7 @@ struct VectorIndexEntry
      , data(data_)
      , is_replicated(is_replicated_)
     {
-        LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[constructor] currently_vector_indexing_parts add: {}", part_name);
+        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", part_name);
         /// insert for replicated merge tree to avoid creating log entry multiple times for the same part.
         std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
         data.currently_vector_indexing_parts.insert(part_name);
@@ -32,7 +33,7 @@ struct VectorIndexEntry
         /// VectorIndexEntry will be distroyed for replicated merge tree after create log entry.
         if (!is_replicated)
         {
-            LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[deconstructor] currently_vector_indexing_parts remove: {}", part_name);
+            LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", part_name);
 
             std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
             data.currently_vector_indexing_parts.erase(part_name);

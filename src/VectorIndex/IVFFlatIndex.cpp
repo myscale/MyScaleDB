@@ -39,7 +39,7 @@ void IVFFlatIndex::train(const VectorDatasetPtr dataset, int64_t total)
     faiss::IndexFlat * coarse_quantizer = new faiss::IndexFlat(dimension, metrictype);
     int nlist = ncentroids > dataset->getVectorNum() / min_centroid_size ? dataset->getVectorNum() / min_centroid_size : ncentroids;
     nlist = std::max(1, nlist);
-    LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "[build] nlist: {}", nlist);
+    LOG_DEBUG(log, "Train index: nlist: {}", nlist);
     index = std::make_shared<faiss::IndexIVFFlatFilter>(coarse_quantizer, dimension, nlist, metrictype);
     faiss::IndexIVFFlatFilter * ivfflat = reinterpret_cast<faiss::IndexIVFFlatFilter *>(index.get());
     ivfflat->own_fields = true;
@@ -51,7 +51,7 @@ void IVFFlatIndex::train(const VectorDatasetPtr dataset, int64_t total)
     }
     else
     {
-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "[build] profiler is false, vector num: {}", dataset->getVectorNum());
+        LOG_DEBUG(log, "Profiler is false, vector num: {}", dataset->getVectorNum());
         ivfflat->train(dataset->getVectorNum(), dataset->getData());
     }
 }
@@ -115,7 +115,7 @@ void IVFFlatIndex::search(
         }
         if (!index_real->tuned)
         {
-            LOG_WARNING(&Poco::Logger::get("IVFFlatIndex"), "the index is too small to be tuned, not using accuracy bounding.");
+            LOG_WARNING(log, "The index is too small to be tuned, not using accuracy bounding.");
             nprobe = INT32_MAX; ///since the datapart is too small, we might just search its entirety.
         }
     } 
@@ -157,8 +157,8 @@ void IVFFlatIndex::search(
         }
         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
         LOG_DEBUG(
-            &Poco::Logger::get("IVFFlatIndex"),
-            "[search] nprobe: {}, parallel mode: {}, num_t: {}",
+            log,
+            "Index search: nprobe: {}, parallel mode: {}, num_t: {}",
             nprobe,
             ivf_params.parallel_mode,
             num_thread_for_vector);
@@ -170,8 +170,8 @@ void IVFFlatIndex::search(
         ivf_params.acc = acc;
         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
         LOG_DEBUG(
-            &Poco::Logger::get("IVFFlatIndex"),
-            "[search] acc requirement: {}, parallel mode: {}, num_t: {}",
+            log,
+            "Index search: acc requirement: {}, parallel mode: {}, num_t: {}",
             acc,
             ivf_params.parallel_mode,
             num_thread_for_vector);
@@ -265,7 +265,7 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
         memcpy(query.data(), base->getData(), sizeof(float) * default_query_size * default_topk);
         std::vector<float> gt_dis(default_topk * default_query_size);
         std::vector<int64_t> gt(default_topk * default_query_size);
-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "get gt for {} queries", default_query_size);
+        LOG_DEBUG(log, "Get gt for {} queries", default_query_size);
         faiss::bitMapPtr bits = std::make_shared<faiss::bitMap>(base->getVectorNum());
         memset(bits->bitmap, 255, (base->getVectorNum() / 8) + 1);
         faiss::IVFSearchParameters param;
@@ -279,14 +279,14 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
         index_real->search(default_query_size, query.data(), default_topk, gt_dis.data(), gt.data(), &param, bits.get());
 
         faiss::Error_sys profiled_index(index_real, default_query_size, default_topk);
-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "training profiler");
+        LOG_DEBUG(log, "Training profiler");
         profiled_index.set_gt(gt_dis.data(), gt.data());
         profiled_index.sys_train(default_query_size, query.data(), std_m, multiplier);
         if(me==Metrics::Cosine){
             index_real->metric_type = faiss::METRIC_Cosine;
             index_real->quantizer->metric_type = faiss::METRIC_Cosine;
         }
-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "profiler train completed");
+        LOG_DEBUG(log, "Profiler train completed");
     }
     else
     {

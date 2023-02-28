@@ -15,7 +15,7 @@ void Autotuner::start()
 void Autotuner::run()
 {
     go = true;
-    LOG_INFO(log, "starting index autotuner");
+    LOG_INFO(log, "Start index autotuner");
     while (true)
     {
         if (quit)

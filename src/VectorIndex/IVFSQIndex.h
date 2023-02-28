@@ -49,5 +49,7 @@ private:
 
     int ncentroids = 1024;
     faiss::ScalarQuantizer::QuantizerType quantizer = faiss::ScalarQuantizer::QT_8bit;
+
+    Poco::Logger * log = &Poco::Logger::get("IVFSQ");
 };
 }

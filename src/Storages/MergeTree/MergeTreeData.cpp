@@ -2049,7 +2049,7 @@ void MergeTreeData::clearTemporaryIndexBuildDirectories()
             {
                 if (disk->isDirectory(it->path()))
                 {
-                    LOG_INFO(log, "Removing temporary directory for vector index build {}", full_path);
+                    LOG_DEBUG(log, "Removing temporary directory for vector index build {}", full_path);
                     disk->removeRecursive(it->path());
                 }
             }
@@ -4099,7 +4099,7 @@ void MergeTreeData::forcefullyMovePartToDetachedAndRemoveFromMemory(const MergeT
 
         for (const String & name : restored)
         {
-            LOG_INFO(log, "Activated part {}", name);
+            LOG_DEBUG(log, "Activated part {}", name);
         }
 
         if (error)

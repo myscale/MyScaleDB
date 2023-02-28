@@ -223,8 +223,7 @@ static inline GeneralBitMapPtr mergeBitMap(GeneralBitMapPtr left, GeneralBitMapP
             ++bit_size;
         }
     }
-    Poco::Logger * log = &Poco::Logger::get("mergeBitMap");
-    LOG_DEBUG(log, "[mergeBitMap] bit size: {}, vector_count: {}", bit_size, vector_count);
+    LOG_DEBUG(&Poco::Logger::get("mergeBitMap"), "mergeBitMap: bit size: {}, vector_count: {}", bit_size, vector_count);
     after_merge->bitmap = bits;
     after_merge->size = vector_count;
     return after_merge;

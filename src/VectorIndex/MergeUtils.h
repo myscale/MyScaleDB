@@ -47,7 +47,7 @@ static std::vector<SegmentId> getAllSegmentIds(const String & data_path, const D
 
         for (const auto & old_part : old_parts)
         {
-            LOG_DEBUG(log, "segments: merged-{}-{}", old_part.id, old_part.name);
+            LOG_DEBUG(log, "Segments: merged-{}-{}", old_part.id, old_part.name);
             SegmentId segment_id(data_path, data_part->name, old_part.name, index_name, index_column, old_part.id);
             segment_ids.emplace_back(std::move(segment_id));
         }
@@ -72,12 +72,12 @@ static bool containRowIdsMaps(const String & data_path)
 }
 
 /// Remove old parts' vector index from cache manager and data part.
-static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part)
+static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part, const Poco::Logger * log)
 {
     if (!data_part || !data_part->isStoredOnDisk() || !data_part->containRowIdsMaps())
         return;
 
-    LOG_INFO(&Poco::Logger::get("removeRowIdsMaps"), "try to remove row ids maps files in {}", data_part->getDataPartStorage().getFullPath());
+    LOG_DEBUG(log, "Try to remove row ids maps files in {}", data_part->getDataPartStorage().getFullPath());
     /// currently only consider one vector index
     auto metadata_snapshot = data_part->storage.getInMemoryMetadataPtr();
     auto vec_index_desc = metadata_snapshot->vec_indices[0];

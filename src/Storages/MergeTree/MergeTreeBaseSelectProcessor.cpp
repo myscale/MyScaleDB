@@ -444,7 +444,6 @@ static bool isVectorSearchByPk(const std::vector<String> & a, const std::vector<
 
 IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromPartImpl()
 {
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
     if (task->size_predictor)
         task->size_predictor->startBlock();
 
@@ -473,7 +472,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
     const size_t pk_col_size = pk_description.column_names.size();
 
     const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
-    LOG_DEBUG(log, "[readFromPartImpl] setting: enable_primary_key_cache = {}", enable_primary_key_cache);
+    LOG_DEBUG(log, "Setting enable_primary_key_cache = {}", enable_primary_key_cache);
 
     if (enable_primary_key_cache && task->vector_scan_manager && !task->data_part->hasLightweightDelete())
     {
@@ -490,11 +489,11 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     if (pk_cache_side)
     {
-        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side --- yes");
+        LOG_DEBUG(log, "Entry pk cache side --- yes");
     }
     else
     {
-        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side --- no");
+        LOG_DEBUG(log, "Entry pk cache side --- no");
     }
 
     const String cache_key = task->data_part->getDataPartStorage().getRelativePath()+":"+task->data_part->name;
@@ -505,7 +504,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
         if (cols_opt.has_value())
         {
-            LOG_DEBUG(log, "[readFromPartImpl] hit cache, and key is {}", cache_key);
+            LOG_DEBUG(log, "Hit cache, and key is {}", cache_key);
 
             Columns cols = cols_opt.value();
 
@@ -546,7 +545,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                 std::make_move_iterator(temp_columns.end())
                 );
 
-            LOG_DEBUG(log, "[readFromPartImpl] fetch from cache size = {}", result_columns[0]->size());
+            LOG_DEBUG(log, "Fetch from cache size = {}", result_columns[0]->size());
 
 
             if (task->vector_scan_manager->preComputed())
@@ -560,9 +559,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                     FilterWithCachedCount(),
                     nullptr);
 
-                LOG_DEBUG(log, "[readFromPartImpl] result_columns's size = {}, result_row_num = {}",
-                          result_columns[0]->size(), result_row_num);
-
                 if (result_row_num > 0)
                 {
                     task->mark_ranges.clear();
@@ -573,7 +569,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
         }
         else
         {
-            LOG_DEBUG(log, "[readFromPartImpl] not hit cache, and data part name is {}", cache_key);
+            LOG_DEBUG(log, "Miss cache, and data part name is {}", cache_key);
         }
     }
 
@@ -661,7 +657,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     auto read_end_time = std::chrono::system_clock::now();
 
-    LOG_DEBUG(log, "[readFromPartImpl] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
+    LOG_DEBUG(log, "Read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
 
     /// [MQDB] vector search
     if (task->vector_scan_manager)
@@ -704,7 +700,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     if (!task->vector_scan_manager)
     {
-        LOG_DEBUG(log, "[readFromPartImpl] this task's vector_scan_manager is NIL");
+        LOG_DEBUG(log, "This task's vector_scan_manager is NIL");
 
         Block block;
         if (read_result.num_rows != 0)
@@ -767,8 +763,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
 bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
 {
-    Poco::Logger * const log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
-
     const KeyDescription & primary_key = storage_snapshot->metadata->getPrimaryKey();
     const size_t pk_columns_size = primary_key.column_names.size();
 
@@ -786,11 +780,9 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
 
     if (pk_columns_size == 0 || pk_columns_size != cols_size)
     {
-        LOG_ERROR(log, "[readPrimaryKeyBin]: pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
+        LOG_ERROR(log, "pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
         return false;
     }
-
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: pk_columns_size = {}", pk_columns_size);
 
     MutableColumns buffered_columns;
     buffered_columns.resize(cols_size);
@@ -811,7 +803,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
 
     if (!reader)
     {
-        LOG_ERROR(log, "[readPrimaryKeyBin]: make reader failed");
+        LOG_ERROR(log, "Failed to get reader");
         return false;
     }
 
@@ -825,9 +817,6 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
 
     size_t num_rows_read = 0;
     const size_t num_rows_total = task->data_part->rows_count;
-
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: total_mark = {}", total_mark);
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: num_rows_total = {}", num_rows_total);
 
     bool continue_read = false;
 
@@ -864,7 +853,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
         buffered_column->protect();
     }
 
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: finally, {} rows has been read", buffered_columns[0]->size());
+    LOG_DEBUG(log, "Finally, {} rows has been read", buffered_columns[0]->size());
 
     out_columns.assign(
         std::make_move_iterator(buffered_columns.begin()),

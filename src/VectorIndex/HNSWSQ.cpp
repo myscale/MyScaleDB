@@ -141,7 +141,7 @@ void * HNSWsq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
     return new_map;
 }
 
-BinaryPtr HNSWsq::convertStructToBinary(uint8_t * index_data, size_t written_size)
+BinaryPtr HNSWsq::convertStructToBinary(uint8_t * index_data, uint64_t written_size)
 {
     BinaryPtr serial_index = std::make_shared<Binary>();
     serial_index->data = index_data;

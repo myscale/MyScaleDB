@@ -38,7 +38,6 @@ void HNSWIndex::train(const VectorDatasetPtr dataset, int64_t total)
 
 void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
 {
-    Poco::Logger * log = &Poco::Logger::get("HNSW");
     if (index != nullptr)
     {
         int total_vectors = dataset->getVectorNum();
@@ -62,11 +61,9 @@ void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
 void HNSWIndex::search(
     const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
 {
-    Poco::Logger * log = &Poco::Logger::get("HNSW");
-
     if (index == nullptr)
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not initialized");
     }
     int total_vectors = dataset->getVectorNum();
     float * __restrict data_grid = dataset->getData();
@@ -74,7 +71,7 @@ void HNSWIndex::search(
     hnswlib::bitMapPtr inner_bit_map = std::shared_ptr<hnswlib::bitMap>();
     inner_bit_map.reset(reinterpret_cast<hnswlib::bitMap *>(convertInnerBitMap(filter)));
     //TODO add omp resource control
-    LOG_DEBUG(log, "searching in HNSW, current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
+    LOG_DEBUG(log, "Current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
     int ef_s = 50;
     if (params.contains("ef_s"))
     {
@@ -217,27 +214,22 @@ bool HNSWIndex::compare(const VectorIndex & other)
     const HNSWIndex * other_p = dynamic_cast<const HNSWIndex *>(&other);
     if (other_p == nullptr)
     {
-        LOG_INFO(&Poco::Logger::get("HNSW"), "nullptr");
         return false;
     }
     if (other_p->ef_c != ef_c)
     {
-        LOG_INFO(&Poco::Logger::get("HNSW"), "ef_c");
         return false;
     }
     if (other_p->me != me)
     {
-        LOG_INFO(&Poco::Logger::get("HNSW"), "me");
         return false;
     }
     if (other_p->neighbor != neighbor)
     {
-        LOG_INFO(&Poco::Logger::get("HNSW"), "neighbor");
         return false;
     }
     if (other_p->dimension != dimension)
     {
-        LOG_INFO(&Poco::Logger::get("HNSW"), "dimension");
         return false;
     }
     return true;

@@ -51,7 +51,7 @@ void FlatIndex::search(
     int32_t num_query = dataset->getVectorNum();
     float * query_datas = dataset->getData();
 
-    LOG_DEBUG(log, "[search] raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
+    LOG_DEBUG(log, "Raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
 
     reinterpret_cast<faiss::IndexFlatFilter *>(index.get())
         ->search(num_query, query_datas, topK, distances, result_id, inner_bit_map.get());

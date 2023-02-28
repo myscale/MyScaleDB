@@ -573,7 +573,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
     size_t rows_sources_count = ctx->rows_sources_write_buf->count();
     /// get rows sources info from local file
     auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
-    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
+    LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
     rows_sources_read_buf->seek(0, 0);
     
     /// read data into buffer
@@ -624,7 +624,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         }
     }
     
-    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: after write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
+    LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
 
     if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
     {
@@ -947,7 +947,7 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
             auto& row_ids_map_tmp_file = global_ctx->row_ids_map_files[i]->path();
             /// move and rename row ids map file to new dir
             String row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
-            LOG_DEBUG(ctx->log, "row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
+            LOG_DEBUG(ctx->log, "Row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
             std::filesystem::rename(row_ids_map_tmp_file, row_ids_map_file_path);
             /// move and rename vector index files to new dir
             VectorIndex::renameVectorIndexFiles(toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i]->getDataPartStorage().getFullPath(), global_ctx->new_data_part->getDataPartStorage().getFullPath());

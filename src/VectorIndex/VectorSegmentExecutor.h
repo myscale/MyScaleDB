@@ -210,8 +210,6 @@ private:
             return;
         }
 
-        LOG_DEBUG(log, "[transferToNewRowIds] size: {}", size);
-
         for (int i = 0; i < size; i++)
         {
             if (labels[i] != -1)
@@ -229,7 +227,7 @@ private:
     uint8_t cmb = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
     VectorIndexPtr index = nullptr; // index related to this VectorSegmentExecutor
     SegmentId segment_id; // this index's related segment_id and file write position.
-    Poco::Logger * log;
+    static Poco::Logger * log;
     UInt64 total_vec = 0;
     OPsPtr op_points = nullptr; // operating points precomputed as an <accuracy, parameter> map, ordered by acc.
     GeneralBitMapPtr delete_bitmap = nullptr; // manage deletion from database

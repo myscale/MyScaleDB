@@ -1424,7 +1424,7 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
             // this index is in metadata and found in vector_index_ready
             if (size != -1)
             {
-                LOG_TRACE(storage.log, "read from vector_index_ready:{},{}", index_name, size);
+                LOG_TRACE(storage.log, "Read from vector_index_ready:{},{}", index_name, size);
                 VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
                 ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
                 if (!single_params_from_record.empty())
@@ -1439,14 +1439,14 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
                             VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
                             VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
                     {
-                        LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                        LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
                         addVectorIndex(index_name);
                     }
                 }
                 // second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
                 else
                 {
-                    LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
+                    LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
                     addVectorIndex(index_name);
                 }
             }
@@ -1479,7 +1479,7 @@ void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
         boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
         if (tokens.size() != 4)
         {
-            LOG_INFO(storage.log, "merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
+            LOG_INFO(storage.log, "Merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
             removeAllRowIdsMaps(true);
             return;
         }
@@ -1542,7 +1542,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
 
     if (getMarksCount() == 0)
     {
-        LOG_WARNING(storage.log, "[readRowExistsColumn] skip empty part");
+        LOG_WARNING(storage.log, "Skip empty part");
         return std::nullopt;
     }
 
@@ -1558,7 +1558,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
 
     if (!reader)
     {
-        LOG_ERROR(storage.log, "[readRowExistsColumn] create reader failed");
+        LOG_ERROR(storage.log, "Create reader failed");
         return std::nullopt;
     }
 
@@ -1568,23 +1568,17 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
     size_t num_rows_read = 0;
     const size_t num_rows_total = rows_count;
 
-    LOG_DEBUG(storage.log, "[readRowExistsColumn] total_mark = {}", total_mark);
-    LOG_DEBUG(storage.log, "[readRowExistsColumn] num_rows_total = {}", num_rows_total);
-
     bool continue_read = false;
     while (num_rows_read < num_rows_total)
     {
         const size_t remaining_size = num_rows_total - num_rows_read;
-
-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: num_rows_read = {}", num_rows_read);
-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: remaining_size = {}", remaining_size);
 
         Columns result;
         result.resize(1);
 
         size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
 
-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop, count rows have be read = {}", num_rows);
+        LOG_DEBUG(storage.log, "Read {} rows", num_rows);
 
         continue_read = true;
         num_rows_read += num_rows;
@@ -1625,14 +1619,14 @@ void IMergeTreeDataPart::onLightweightDelete() const
     std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
     if (!row_exists_column_opt.has_value())
     {
-        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column is empty in part {}", name);
+        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
         return;
     }
 
     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
     if (row_exists_col == nullptr)
     {
-        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column type is not UInt8 in part {}", name);
+        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
         return;
     }
 
@@ -1647,7 +1641,7 @@ void IMergeTreeDataPart::onLightweightDelete() const
 
     if (del_row_ids.empty())
     {
-        LOG_DEBUG(storage.log, "[onLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
+        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
         return;
     }
     /// currently only consider one vector index
@@ -1674,14 +1668,14 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
     std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
     if (!row_exists_column_opt.has_value())
     {
-        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column is empty in part {}", name);
+        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
         return;
     }
 
     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
     if (row_exists_col == nullptr)
     {
-        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column type is not UInt8 in part {}", name);
+        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
         return;
     }
 
@@ -1697,7 +1691,7 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
 
     if (new_del_ids.empty())
     {
-        LOG_DEBUG(storage.log, "[onDecoupledLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
+        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
         return;
     }
 

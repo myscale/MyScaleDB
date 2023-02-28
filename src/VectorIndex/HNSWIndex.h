@@ -68,6 +68,8 @@ private:
     int neighbor = 16;
     int ef_c = 100;
 
+    Poco::Logger * log = &Poco::Logger::get("HNSW");
+
     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
     BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
 };

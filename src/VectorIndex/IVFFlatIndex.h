@@ -25,7 +25,8 @@ namespace VectorIndex
 class IVFFlatIndex : public FaissIndex
 {
 public:
-    IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
+    IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters)
+        : FaissIndex(it_, im_, me_, dimension_), log(&Poco::Logger::get("IVFFlat"))
     {
         getMyParameters(parameters);
     }
@@ -52,5 +53,6 @@ private:
     float std_m = 6.0;
     float multiplier = 1.3;
     bool profiler = false;
+    Poco::Logger * log;
 };
 }

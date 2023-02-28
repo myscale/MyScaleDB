@@ -74,6 +74,6 @@ private:
     int pq_m = 8;
     int bit_size = 8;
     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
-    BinaryPtr convertStructToBinary(uint8_t * index_data, size_t written_size) override;
+    BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
 };
 }

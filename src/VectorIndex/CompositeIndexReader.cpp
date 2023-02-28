@@ -64,20 +64,20 @@ void CompositeIndexReader::read_part()
     reader.seekg(sizeof(int64_t));
     int64_t binary_length;
     reader.read(&binary_length, sizeof(binary_length));
-    LOG_INFO(log, "[readPart] compressed data size: {}", binary_length);
+    LOG_DEBUG(log, "Compressed data size: {}", binary_length);
 
     /// third 8 bytes are meta recording uncompressed binary size of index
     reader.seekg(sizeof(int64_t) * 2);
     int64_t binary_length_original;
     reader.read(&binary_length_original, sizeof(binary_length_original));
     buffer.resize(binary_length_original + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER);
-    LOG_INFO(log, "[readPart] uncompressed data size: {}", binary_length_original);
+    LOG_DEBUG(log, "Uncompressed data size: {}", binary_length_original);
 
     /// fourth 8 bytes records total vectors stored, this is repeated many times. Could be d, or not.
     reader.seekg(sizeof(int64_t) * 3);
     int64_t total_vec_bin;
     reader.read(&total_vec_bin, sizeof(total_vec_bin));
-    LOG_INFO(log, "[readPart] total vectors: {}", total_vec_bin);
+    LOG_DEBUG(log, "Total vectors: {}", total_vec_bin);
 
     /// finally we have the compressed binaries
     reader.seekg(sizeof(int64_t) * 4);
@@ -90,7 +90,7 @@ void CompositeIndexReader::read_part()
 
     current_buffer_start = current_loaded_size;
     current_loaded_size += binary_length_original;
-    LOG_INFO(log, "[readPart] current_buffer_start: {}, current_loaded_size: {}", current_buffer_start, current_loaded_size);
+    LOG_DEBUG(log, "current_buffer_start: {}, current_loaded_size: {}", current_buffer_start, current_loaded_size);
 
     if (final_mark && current_loaded_size != original_binary_size)
     {
@@ -112,7 +112,6 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
         if (offset < static_cast<size_t>(current_loaded_size))
         {
             size_t len = current_loaded_size - offset;
-            LOG_DEBUG(log, "offset: {}, len: {}, to_read: {}", offset, len, to_read);
             memcpy(ptr, &buffer[offset - current_buffer_start], len);
             offset += len;
             ret += len;
@@ -126,7 +125,6 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
 
     if (offset + to_read <= static_cast<size_t>(current_loaded_size))
     {
-        LOG_DEBUG(log, "offset: {}, to_read: {}", offset, to_read);
         memcpy(ptr, &buffer[offset - current_buffer_start], to_read);
         offset += to_read;
         ret += to_read;

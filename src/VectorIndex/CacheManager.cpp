@@ -51,7 +51,7 @@ void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
-    LOG_INFO(log, "VectorIndexCache put cache_key={}", cache_key.toString());
+    LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
 
     IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
 
@@ -65,7 +65,7 @@ size_t CacheManager::countItem() const
 
 void CacheManager::forceExpire(const CacheKey& cache_key)
 {
-    LOG_INFO(log, "VectorIndexCache forceExpire cache_key={}", cache_key.toString());
+    LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
     return cache_->remove(cache_key);
 }
 
@@ -75,7 +75,7 @@ void CacheManager::startLoading(const CacheKey& cache_key)
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
     }
-    LOG_INFO(log, "VectorIndexCache startLoading cache_key={}", cache_key.toString());
+    LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
     std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
 
     std::shared_ptr<IndexAndMutex> im_ptr = std::make_shared<IndexAndMutex>(nullptr, new_mutex);

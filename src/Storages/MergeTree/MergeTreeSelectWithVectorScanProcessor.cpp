@@ -64,9 +64,6 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
     initializeMergeTreeReadersForPart(data_part, task_columns, storage_snapshot->getMetadataForQuery(),
         all_mark_ranges, {}, {});
 */
-
-    LOG_DEBUG(log, "[initializeReadersWithVectorScan] task column: {}", task_columns.columns.toString());
-
     reader = data_part->getReader(task_columns.columns, storage_snapshot->getMetadataForQuery(),
         all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), reader_settings,
         {}, {});
@@ -193,11 +190,9 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
 
     if (pk_columns_size == 0 || pk_columns_size != cols_size)
     {
-        LOG_ERROR(log, "[readPrimaryKeyBin]: pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
+        LOG_ERROR(log, "pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
         return false;
     }
-
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: pk_columns_size = {}", pk_columns_size);
 
     MutableColumns buffered_columns;
     buffered_columns.resize(cols_size);
@@ -218,7 +213,7 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
 
     if (!reader)
     {
-        LOG_ERROR(log, "[readPrimaryKeyBin]: make reader failed");
+        LOG_ERROR(log, "Failed to get reader");
         return false;
     }
 
@@ -230,9 +225,6 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
 
     size_t num_rows_read = 0;
     const size_t num_rows_total = task->data_part->rows_count;
-
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: total_mark = {}", total_mark);
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: num_rows_total = {}", num_rows_total);
 
     bool continue_read = false;
 
@@ -269,7 +261,7 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
         buffered_column->protect();
     }
 
-    LOG_DEBUG(log, "[readPrimaryKeyBin]: finally, {} rows has been read", buffered_columns[0]->size());
+    LOG_DEBUG(log, "Finally, {} rows has been read", buffered_columns[0]->size());
 
     out_columns.assign(
         std::make_move_iterator(buffered_columns.begin()),
@@ -291,7 +283,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
         /// Initialize primary key cache
         const auto & primary_key = storage_snapshot->metadata->getPrimaryKey();
         const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
-        LOG_DEBUG(log, "[initializeRangeReaders] reader setting: enable_primary_key_cache = {}", enable_primary_key_cache);
+        LOG_DEBUG(log, "Reader setting: enable_primary_key_cache = {}", enable_primary_key_cache);
 
         /// consider cache if and only if
         /// 1. this task is vector search and no prewhere info
@@ -355,7 +347,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
     if (use_primary_key_cache)
     {
-        LOG_DEBUG(log, "[readFromPartWithVectorScan] use primary key cache");
+        LOG_DEBUG(log, "Use primary key cache");
 
         const String cache_key = task->data_part->getDataPartStorage().getRelativePath() + ":" + task->data_part->name;
 
@@ -363,11 +355,11 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
         if (pk_cache_cols_opt.has_value())
         {
-            LOG_DEBUG(log, "[readFromPartWithVectorScan] hit primary key cache, and key is {}", cache_key);
+            LOG_DEBUG(log, "Hit primary key cache, and key is {}", cache_key);
         }
         else
         {
-            LOG_DEBUG(log, "[readFromPartWithVectorScan] miss primary key cache for part {}, will load", task->data_part->name);
+            LOG_DEBUG(log, "Miss primary key cache for part {}, will load", task->data_part->name);
 
             /// load pk's bin to memory
             Columns pk_columns;
@@ -375,13 +367,13 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
             if (result)
             {
-                LOG_DEBUG(log, "[readFromPartWithVectorScan] load primary key column and will put into cache");
+                LOG_DEBUG(log, "Load primary key column and will put into cache");
                 PrimaryKeyCacheManager::getMgr().setPartPkCache(cache_key, std::move(pk_columns));
                 pk_cache_cols_opt = PrimaryKeyCacheManager::getMgr().getPartPkCache(cache_key);
             }
             else
             {
-                LOG_DEBUG(log, "[readFromPartWithVectorScan] failed to load primary key column for part {}, will back to normal read",  task->data_part->name);
+                LOG_DEBUG(log, "Failed to load primary key column for part {}, will back to normal read",  task->data_part->name);
             }
         }
 
@@ -436,7 +428,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
                 std::make_move_iterator(result_pk_cols.end())
                 );
 
-            LOG_DEBUG(log, "[readFromPartWithVectorScan] fetch from primary key cache size = {}", result_columns[0]->size());
+            LOG_DEBUG(log, "Fetch from primary key cache size = {}", result_columns[0]->size());
 
             /// Get _part_offset if exists.
             if (mutable_part_offset_col)
@@ -459,9 +451,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
                     FilterWithCachedCount(),
                     part_offset);
 
-                LOG_DEBUG(log, "[readFromPartImpl] result_columns's size = {}, result_row_num = {}",
-                          result_columns[0]->size(), result_row_num);
-
                 task->mark_ranges.clear();
                 if (result_row_num > 0)
                 {
@@ -474,11 +463,11 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
         }
     }
 
-    LOG_DEBUG(log, "[readFromPartWithVectorScan] begin read, mark_ranges size = {}", task->mark_ranges.size());
+    LOG_DEBUG(log, "Begin read, mark_ranges size = {}", task->mark_ranges.size());
     auto read_result = task->range_reader.read(rows_to_read, task->mark_ranges);
     for (auto it = task->mark_ranges.begin(); it != task->mark_ranges.cend(); ++it)
     {
-        LOG_DEBUG(log, "[readFromPartWithVectorScan] mark_range begin = {}, end = {}", it->begin, it->end);
+        LOG_DEBUG(log, "Mark range begin = {}, end = {}", it->begin, it->end);
     }
 
     /// All rows were filtered. Repeat.
@@ -496,8 +485,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
     /// TODO: check columns have the same types as in header.
 
     UInt64 num_filtered_rows = read_result.numReadRows() - read_result.num_rows;
-
-    LOG_DEBUG(log, "[readFromPartWithVectorScan] num_rows: {}, read_rows: {}", read_result.num_rows, read_result.numReadRows());
 
     /// progress({ read_result.numReadRows(), read_result.numBytesRead() });
     size_t num_read_rows = read_result.numReadRows();
@@ -527,7 +514,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
     {
         auto & col_name = sample_block.getByPosition(ps).name;
-        LOG_DEBUG(log, "[readFromPartWithVectorScan]: read column: {}", col_name);
+        LOG_DEBUG(log, "Read column: {}", col_name);
         /// TODO: not add distance column to header_without_virtual_columns
         if (isVectorScanFunc(col_name))
         {
@@ -548,7 +535,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
     auto read_end_time = std::chrono::system_clock::now();
 
-    LOG_DEBUG(log, "[readFromPartWithVectorScan] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
+    LOG_DEBUG(log, "Read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
 
     /// [MQDB] vector search
     if (task->vector_scan_manager && task->vector_scan_manager->preComputed())
@@ -662,7 +649,7 @@ try
 
     for (const auto & range : mark_ranges_for_task)
     {
-        LOG_DEBUG(log, "[getNewTaskImpl] keep range: {} - {}", range.begin, range.end);
+        LOG_DEBUG(log, "Keep range: {} - {}", range.begin, range.end);
     }
     
     if (mark_ranges_for_task.empty())

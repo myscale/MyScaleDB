@@ -66,7 +66,7 @@ private:
     faiss::ScalarQuantizer::QuantizerType quantizer = faiss::ScalarQuantizer::QT_8bit;
 
     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
-    BinaryPtr convertStructToBinary(uint8_t * index_data, size_t written_size) override;
+    BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
     faiss::ScalarQuantizer::QuantizerType parse_SQ_string(String bits);
 };
 }

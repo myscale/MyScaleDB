@@ -37,7 +37,7 @@ void IVFSQIndex::train(VectorDatasetPtr dataset, int64_t total)
     nlist = std::max(1, nlist);
     index = std::make_shared<faiss::IndexIVFSQFilter>(coarse_quantizer, dimension, nlist, quantizer, metrictype);
     reinterpret_cast<faiss::IndexIVFSQFilter *>(index.get())->own_fields = true;
-    LOG_DEBUG(&Poco::Logger::get("IVFSQIndex"), "vector num: {}, raw data size: {}, dim: {}",
+    LOG_DEBUG(log, "Vector num: {}, raw data size: {}, dim: {}",
         dataset->getVectorNum(), dataset->getRawVector().size(), dimension);
     index->train(dataset->getVectorNum(), dataset->getData());
 }
