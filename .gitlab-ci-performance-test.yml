@@ -4,7 +4,7 @@ performance_test0:
   needs:
     - job: build_binary
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
   parallel:
     matrix:
       - ARCH: amd64
@@ -28,7 +28,7 @@ performance_test1:
   needs:
     - job: build_binary
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
   parallel:
     matrix:
       - ARCH: amd64
@@ -52,7 +52,7 @@ performance_test2:
   needs:
     - job: build_binary
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
   parallel:
     matrix:
       - ARCH: amd64

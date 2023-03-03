@@ -1,5 +1,5 @@
 # docker build -t clickhouse/integration-tests-runner .
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
 
 # ARG for quick switch to a given ubuntu mirror
 ARG apt_archive="http://archive.ubuntu.com"
@@ -33,10 +33,10 @@ RUN apt-get update --allow-releaseinfo-change \
     krb5-user \
     g++ \
     && rm -rf \
-        /var/lib/apt/lists/* \
-        /var/cache/debconf \
-        /tmp/*
-    # && apt-get clean
+    /var/lib/apt/lists/* \
+    /var/cache/debconf \
+    /tmp/*
+# && apt-get clean
 
 # ENV TZ=Etc/UTC
 # RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -47,12 +47,12 @@ RUN add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_relea
 
 RUN apt-get update \
     && env DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-        docker-ce \
+    docker-ce \
     && rm -rf \
-        /var/lib/apt/lists/* \
-        /var/cache/debconf \
-        /tmp/*
-    # && apt-get clean
+    /var/lib/apt/lists/* \
+    /var/cache/debconf \
+    /tmp/*
+# && apt-get clean
 
 RUN dockerd --version; docker --version
 
@@ -94,10 +94,10 @@ COPY compose/ /compose/
 COPY misc/ /misc/
 
 RUN set -x \
-  && addgroup --system dockremap \
+    && addgroup --system dockremap \
     && adduser --system dockremap \
-  && adduser dockremap dockremap \
-  && echo 'dockremap:165536:65536' >> /etc/subuid \
+    && adduser dockremap dockremap \
+    && echo 'dockremap:165536:65536' >> /etc/subuid \
     && echo 'dockremap:165536:65536' >> /etc/subgid
 
 ENV DOCKER_CLIENT_TIMEOUT=300

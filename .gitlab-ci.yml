@@ -10,7 +10,7 @@ include:
   - "/.gitlab-ci-build.yml"
   - "/.gitlab-ci-functional-test.yml"
   - "/.gitlab-ci-integration-test.yml"
-  - "/.gitlab-ci-memory-leak-test.yml"
+  - "/.gitlab-ci-sanitizer-test.yml"
   - "/.gitlab-ci-performance-test.yml"
 
 stages:
@@ -19,7 +19,7 @@ stages:
   - functional-test
   - performance-test
   - failover-test
-  - memory-leak-test
+  - sanitizer-test
   - package
   - image
   - deploy
@@ -52,6 +52,7 @@ style_check:
 
 build_package:
   stage: package
+  when: manual
   dependencies: []
   variables:
     KUBERNETES_CPU_REQUEST: 8
@@ -71,14 +72,13 @@ build_package:
 
 build_package_with_license:
   stage: package
+  when: manual
   dependencies: []
   variables:
     KUBERNETES_CPU_REQUEST: 8
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
-  rules:
-    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-license"
     paths:
@@ -92,6 +92,7 @@ build_package_with_license:
 
 build_image:
   stage: image
+  when: manual
   dependencies: ["build_package"]
   before_script:
     - docker/builder/tools/docker-info.sh
@@ -101,9 +102,8 @@ build_image:
 
 build_saas_image:
   stage: image
+  when: manual
   dependencies: ["build_package"]
-  # only:
-  #   - mqdb-stable
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
@@ -124,69 +124,3 @@ upload_performance_file_to_s3:
   script:
     # - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
     - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
-# deploy_to_staging:
-#   stage: deploy
-#   dependencies: ["build_x86_64_package"]
-#   rules:
-#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
-#   variables:
-#     deploy_to_host: 10.10.1.48
-#   script:
-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
-#     - scp artifacts/clickhouse-*.tgz root@$deploy_to_host:/moqi.ai/mqdb-deploy/packages/mqdb/x86_64/
-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && git fetch --all && git reset --hard origin/master'
-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy/environment && git fetch --all && git reset --hard origin/master'
-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && ./start.sh'
-#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/init.yaml -l deploy'
-#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/mqdb.yaml'
-
-# deploy_to_s3:
-#   stage: deploy
-#   image:
-#     name: minio/mc
-#     entrypoint: [""]
-#   rules:
-#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
-#   before_script:
-#     - mkdir -pv ~/.mc
-#     - cp -fv $mc_config ~/.mc/config.json
-#   script:
-#     - mc cp artifacts/* cos/mqdb-release-1253802058/packages/mqdb/x86_64/$CI_COMMIT_SHORT_SHA/
-
-# benchmark_staging:
-#   stage: benchmark
-#   dependencies: []
-#   only:
-#     - schedules
-#   variables:
-#     deploy_to_host: 10.10.1.48
-#   before_script:
-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
-#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
-#     - sleep 10
-#   after_script:
-#     - ssh root@$deploy_to_host 'supervisorctl restart mqdb'
-#   script:
-#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
-#     - scp tests/vector_search/benchmark.py root@$deploy_to_host:~/benchmark
-#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 benchmark.py"'
-# generate_report:
-#   stage: benchmark
-#   dependencies: []
-#   only:
-#     - schedules
-#   artifacts:
-#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-report"
-#     paths:
-#       - ./*.png
-#   variables:
-#     deploy_to_host: 10.10.1.48
-#   before_script:
-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
-#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
-#     - sleep 10
-#   script:
-#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
-#     - scp tests/vector_search/plot.py root@$deploy_to_host:~/benchmark
-#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 plot.py"'
-#     - scp "root@10.10.1.48:~/benchmark/*.png" ./

@@ -8,7 +8,7 @@ RUN mkdir -pv /builder/mqdb
 ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
 
 
-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1 as runtime
+FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
 
 ARG TARGETARCH
 ARG version=22.3.7.5

@@ -12,24 +12,20 @@ build_binary:
     when: always
     paths:
       - artifacts/*.deb
-      - build/programs/clickhouse
+      - artifacts/clickhouse
       - artifacts/performance_pack_*
       - build/CMakeFiles/CMakeOutput.log
       - build/CMakeFiles/CMakeError.log
   retry: 2
   script:
     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
-    - apt-get update -y && apt-get install rsync -y
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-x86_64 --package
+    - mv build/programs/clickhouse artifacts/.
     - docker/builder/tools/package_performance.sh all
     - tar -zcf performance_pack_amd64.tar.gz performance_pack
-    # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
-    # - docker/builder/tools/package_performance.sh all
-    # - tar -zcf performance_pack_arm64.tar.gz performance_pack
     - mv performance_pack_amd64.tar.gz artifacts/.
-    # - mv performance_pack_arm64.tar.gz artifacts/.
-    - ls -al artifacts
+    # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
   rules:
     - if: '$CI_TEST_VECTOR_DB != "true"'
 
@@ -59,7 +55,7 @@ build_with_sanitizer_asanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_tsanbinary:
   stage: build
@@ -87,7 +83,7 @@ build_with_sanitizer_tsanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_ubsanbinary:
   stage: build
@@ -115,7 +111,7 @@ build_with_sanitizer_ubsanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_msanbinary:
   stage: build
@@ -143,7 +139,7 @@ build_with_sanitizer_msanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_for_integration_test:
   stage: build
@@ -159,7 +155,6 @@ build_for_integration_test:
   retry: 2
   script:
     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
-    - apt-get update -y && apt-get install rsync -y
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-x86_64
   rules:

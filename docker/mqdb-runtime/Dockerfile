@@ -1,4 +1,4 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.3 . --push
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.4 . --push
 FROM ubuntu:20.04
 
 ARG TARGETARCH
@@ -20,10 +20,10 @@ RUN apt update && apt install ca-certificates pip --yes --verbose-versions \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/
 
-RUN apt update \
+RUN apt update && apt upgrade --yes --verbose-versions \
     && apt install bash ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common apt-utils --yes \
     && apt install vim git curl expect perl pkg-config tzdata pip dirmngr locales jq tree dnsutils sysstat psmisc htop --yes \
-    && apt install tmux net-tools tcpdump telnet iftop iotop nload python3 python3-lxml python3-requests python3-termcolor --yes \
+    && apt install tmux net-tools rsync tcpdump telnet iftop iotop nload python3 python3-lxml python3-requests python3-termcolor --yes \
     && ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \
@@ -33,7 +33,7 @@ RUN apt update \
 RUN locale-gen en_US.UTF-8
 
 RUN wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
-    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
+    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list \
     && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
@@ -42,8 +42,6 @@ RUN wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW
     && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then apt install intel-oneapi-mkl-${INTEL_ONEAPI_VERSION} --yes --verbose-versions ; fi \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
-
-RUN if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo 'source /opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/env/vars.sh' >> /root/.bashrc ; fi
 
 
 

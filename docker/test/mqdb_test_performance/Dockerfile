@@ -1,30 +1,30 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.1 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
 
 RUN apt-get update --allow-releaseinfo-change \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
-            bash \
-            curl \
-            dmidecode \
-            g++ \
-            git \
-            gnuplot \
-            imagemagick \
-            libc6-dbg \
-            numactl \
-            p7zip-full \
-            parallel \
-            psmisc \
-            python3 \
-            python3-dev \
-            python3-pip \
-            python3-setuptools \
-            rsync \
-            tree \
-            tzdata \
-            vim \
-            wget \
+    bash \
+    curl \
+    dmidecode \
+    g++ \
+    git \
+    gnuplot \
+    imagemagick \
+    libc6-dbg \
+    numactl \
+    p7zip-full \
+    parallel \
+    psmisc \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    rsync \
+    tree \
+    tzdata \
+    vim \
+    wget \
     && pip3 --no-cache-dir install 'clickhouse-driver==0.2.1' scipy \
     && apt-get purge --yes python3-dev g++
 

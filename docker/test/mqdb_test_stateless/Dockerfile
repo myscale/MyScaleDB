@@ -1,6 +1,6 @@
 # docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4 .
 # docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.3
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4
 
 ARG TARGETARCH
 
@@ -32,6 +32,9 @@ RUN arch=${TARGETARCH:-amd64} \
 RUN wget 'https://dlcdn.apache.org/hadoop/common/hadoop-3.3.1/hadoop-3.3.1.tar.gz' \
     && tar -xvf hadoop-3.3.1.tar.gz \
     && rm -rf hadoop-3.3.1.tar.gz
+
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --upgrade cmake
 
 ENV MINIO_ROOT_USER="clickhouse"
 ENV MINIO_ROOT_PASSWORD="clickhouse"

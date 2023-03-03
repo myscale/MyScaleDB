@@ -249,7 +249,6 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
     target_os, target_arch = arch.split("-", maxsplit=1)
 
     warp = [
-        'PATH="/usr/lib/ccache:$PATH"',
         'LD_LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LD_LIBRARY_PATH}'
     ]
 
@@ -548,4 +547,5 @@ if __name__ == "__main__":
     cmake = prepare_build(args.compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
 
     build(args.arch, args.build_jobs, cmake)
+    ccache_show_stats()
     package(args.name, args.arch, args.package, args.with_sanitizer, args.build_type, args.output)
