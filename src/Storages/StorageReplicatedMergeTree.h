@@ -354,6 +354,8 @@ private:
     friend class MergeFromLogEntryTask;
     friend class MutateFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
+    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class ReplicatedVectorIndexTask;
 
     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
     using LogEntry = ReplicatedMergeTreeLogEntry;
@@ -883,8 +885,13 @@ private:
     /// If no connection to zookeeper, shutdown, readonly -- return std::nullopt.
     /// If somebody already holding the lock -- return unlocked ZeroCopyLock object (not std::nullopt).
     std::optional<ZeroCopyLock> tryCreateZeroCopyExclusiveLock(const String & part_name, const DiskPtr & disk) override;
-    void finishVectorIndexJob(const std::vector<String> & processed_parts) override;
-    /// mutable std::mutex currently_processing_in_background_mutex;
+
+    /// Create log entry for vector index build.
+    CreateMergeEntryResult createLogEntryToBuildVIndexForPart(
+        const String & part_name,
+        const String & vector_index_name,
+        int32_t log_version,
+        bool slow_mode = false);
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

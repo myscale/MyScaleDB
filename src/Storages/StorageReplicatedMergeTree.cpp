@@ -42,8 +42,7 @@
 #include <Storages/MergeTree/ReplicatedMergeTreeQuorumEntry.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeSink.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeTableMetadata.h>
-#include <Storages/MergeTree/VectorIndexEntry.h>
-#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
+#include <Storages/MergeTree/ReplicatedVectorIndexTask.h>
 #include <Storages/PartitionCommands.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/VirtualColumnUtils.h>
@@ -133,6 +132,8 @@ namespace ProfileEvents
     extern const Event CreatedLogEntryForMutation;
     extern const Event NotCreatedLogEntryForMutation;
     extern const Event ReplicaPartialShutdown;
+    extern const Event CreatedLogEntryForBuildVIndex;
+    extern const Event NotCreatedLogEntryForBuildVIndex;
 }
 
 namespace CurrentMetrics
@@ -1661,6 +1662,8 @@ bool StorageReplicatedMergeTree::executeLogEntry(LogEntry & entry)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Merge has to be executed by another function");
         case LogEntry::MUTATE_PART:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Mutation has to be executed by another function");
+        case LogEntry::BUILD_VECTOR_INDEX:
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Building vector index has to be executed by another function");
         case LogEntry::ALTER_METADATA:
             return executeMetadataAlter(entry);
         case LogEntry::SYNC_PINNED_PART_UUIDS:
@@ -3128,36 +3131,8 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
 
         /// remove dropped vector indices
         vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
-        {
-            std::unique_lock lock(currently_processing_in_background_mutex);
-            auto vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
-                metadata_snapshot, 1, false);
 
-            if (vector_index_entry)
-            {
-                auto & parts = vector_index_entry->data_part_names;
-                LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
-                auto task = std::make_shared<VectorIndexMergeTreeTask>(
-                    *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
-                assignee.scheduleVectorIndexTask(task);
-                return true;
-            }
-            else
-            {
-                auto slow_mode_vector_index_entry = vec_index_builder_updater.selectPartsToBuildVectorIndex(
-                    metadata_snapshot, 1, true);
-                if (slow_mode_vector_index_entry)
-                {
-                    auto & parts = slow_mode_vector_index_entry->data_part_names;
-                    LOG_DEBUG(log, "get {} data parts to build vector index", parts.size());
-                    auto task = std::make_shared<VectorIndexMergeTreeTask>(
-                        *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
-                    assignee.scheduleSlowModeVectorIndexTask(task);
-                    return true;
-                }
-                return false;   
-            }
-        }
+        return false;
     }
 
 
@@ -3183,6 +3158,13 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
     {
         auto task = std::make_shared<MutateFromLogEntryTask>(selected_entry, *this, common_assignee_trigger);
         assignee.scheduleMergeMutateTask(task);
+        return true;
+    }
+    else if (job_type == LogEntry::BUILD_VECTOR_INDEX)
+    {
+        auto task = std::make_shared<ReplicatedVectorIndexTask>(
+            *this, selected_entry, vec_index_builder_updater, common_assignee_trigger);
+        assignee.scheduleVectorIndexTask(task);
         return true;
     }
     else
@@ -3318,6 +3300,39 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                     if (create_result == CreateMergeEntryResult::Ok ||
                         create_result == CreateMergeEntryResult::LogUpdated)
                         break;
+                }
+            }
+            /// Consider vector index building when no merge / mutations selected.
+            /// TODO: control index building by memory limit ...
+            if ((create_result == CreateMergeEntryResult::Other) && !getInMemoryMetadataPtr()->vec_indices.empty())
+            {
+                /// Limit the number of build vector index entries in queue.
+                auto settings = getContext()->getSettingsRef();
+                auto metadata_snapshot = getInMemoryMetadataPtr();
+
+                VectorIndexEntryPtr vector_index_entry = nullptr;
+                bool slow_mode = false;
+
+                /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
+                if (vec_index_builder_updater.allowToBuildVectorIndex(false, merges_and_mutations_queued.vector_index_builds))
+                {
+                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
+                }
+
+                if (!vector_index_entry && vec_index_builder_updater.allowToBuildVectorIndex(true, merges_and_mutations_queued.slow_vector_index_builds))
+                {
+                    /// No fast build index selected, try to select slow build index.
+                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
+                    slow_mode = true;
+                }
+
+                if (vector_index_entry)
+                {
+                    create_result = createLogEntryToBuildVIndexForPart(
+                                vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred.getVersion(), slow_mode);
+
+                    std::lock_guard lock(currently_vector_indexing_parts_mutex);
+                    currently_vector_indexing_parts.insert(vector_index_entry->part_name);
                 }
             }
         }
@@ -3521,6 +3536,66 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
     return CreateMergeEntryResult::Ok;
 }
 
+StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::createLogEntryToBuildVIndexForPart(
+    const String & part_name,
+    const String & vector_index_name,
+    int32_t log_version,
+    bool slow_mode)
+{
+    auto zookeeper = getZooKeeper();
+
+    /// If there is no information about part in ZK, we will not build vector index for it.
+    if (!zookeeper->exists(fs::path(replica_path) / "parts" / part_name))
+    {
+        LOG_WARNING(log, "Part {} (that was selected for vector index building) exists locally but not in ZooKeeper."
+                         " Won't build vector index for that part and will check it.", part_name);
+        enqueuePartForCheck(part_name);
+
+        return CreateMergeEntryResult::MissingPart;
+    }
+
+    ReplicatedMergeTreeLogEntryData entry;
+    entry.type = LogEntry::BUILD_VECTOR_INDEX;
+    entry.source_replica = replica_name;
+    entry.create_time = time(nullptr);
+
+    entry.source_parts.push_back(part_name);
+    entry.index_name = vector_index_name;
+    entry.slow_mode = slow_mode;
+
+    Coordination::Requests ops;
+    Coordination::Responses responses;
+
+    ops.emplace_back(zkutil::makeCreateRequest(
+        fs::path(zookeeper_path) / "log/log-", entry.toString(),
+        zkutil::CreateMode::PersistentSequential));
+
+    ops.emplace_back(zkutil::makeSetRequest(
+        fs::path(zookeeper_path) / "log", "", log_version)); /// Check and update version.
+
+    Coordination::Error code = zookeeper->tryMulti(ops, responses);
+
+    if (code == Coordination::Error::ZOK)
+    {
+        String path_created = dynamic_cast<const Coordination::CreateResponse &>(*responses.front()).path_created;
+        entry.znode_name = path_created.substr(path_created.find_last_of('/') + 1);
+
+        ProfileEvents::increment(ProfileEvents::CreatedLogEntryForBuildVIndex);
+        LOG_TRACE(log, "Created log entry {} for building vector index {} in part {}", path_created, vector_index_name, part_name);
+    }
+    else if (code == Coordination::Error::ZBADVERSION)
+    {
+        ProfileEvents::increment(ProfileEvents::NotCreatedLogEntryForBuildVIndex);
+        LOG_TRACE(log, "Log entry is not created for building vector index {} in part {} because log was updated", vector_index_name, part_name);
+        return CreateMergeEntryResult::LogUpdated;
+    }
+    else
+    {
+        zkutil::KeeperMultiException::check(code, ops, responses);
+    }
+
+    return CreateMergeEntryResult::Ok;
+}
 
 void StorageReplicatedMergeTree::getRemovePartFromZooKeeperOps(const String & part_name, Coordination::Requests & ops, bool has_children)
 {
@@ -4416,6 +4491,9 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
         startBackgroundMovesIfNeeded();
 
         part_moves_between_shards_orchestrator.start();
+
+        /// Temporary directories contain incomplete results of vector index building.
+        clearTemporaryIndexBuildDirectories();
     }
     catch (...)
     {
@@ -4496,7 +4574,7 @@ void StorageReplicatedMergeTree::shutdown()
     fetcher.blocker.cancelForever();
     merger_mutator.merges_blocker.cancelForever();
     parts_mover.moves_blocker.cancelForever();
-    vec_index_builder_updater.builds_blocker.cancelForever();
+    vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancel background vector index build tasks
     mutations_finalizing_task->deactivate();
     stopBeingLeader();
 
@@ -4525,6 +4603,15 @@ void StorageReplicatedMergeTree::shutdown()
         /// Wait for all of them
         std::lock_guard lock(data_parts_exchange_ptr->rwlock);
     }
+
+    /// Temporary directories contain incomplete results of vector index building.
+    clearTemporaryIndexBuildDirectories();
+
+    /// Clear cached vector index
+    clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
+
+    /// Clear primary key cache if exists.
+    clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
 }
 
 
@@ -5078,14 +5165,46 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
         LOG_INFO(log, "Metadata changed in ZooKeeper. Applying changes locally.");
 
         auto metadata_diff = ReplicatedMergeTreeTableMetadata(*this, getInMemoryMetadataPtr()).checkAndFindDiff(metadata_from_entry, getInMemoryMetadataPtr()->getColumns(), getContext());
+        /// Save old vector indices to check if drop/add vector index happens.
+        auto old_vec_indices = getInMemoryMetadataPtr()->getVectorIndices();
+
         setTableStructure(table_id, alter_context, std::move(columns_from_entry), metadata_diff);
         metadata_version = entry.alter_version;
 
         LOG_INFO(log, "Applied changes to the metadata of the table. Current metadata version: {}", metadata_version);
         if (metadata_diff.vector_indices_changed)
         {
-            LOG_INFO(log, "Get vector index change, start background job immediately");
-            background_operations_assignee.trigger();
+            /// Compare old and new vector_indices to determine add or drop vector index
+            /// Currently only ONE vector index is supported.
+            auto new_vec_indices = getInMemoryMetadataPtr()->getVectorIndices();
+            if (old_vec_indices.empty())
+            {
+                /// Add vector index case.
+                LOG_INFO(log, "Get add vector index, start background job immediately");
+                background_operations_assignee.trigger();
+            }
+            else if (new_vec_indices.empty())
+            {
+                /// Drop vector index case.
+                LOG_INFO(log, "Get drop vector index, clear index cache and stop building vector index immediately");
+
+                /// Delete vector index files.
+                for (const auto & part : getDataPartsForInternalUsage())
+                {
+                    // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+
+                    /// Clear cache first, now getAllSegementIds() is based on vector index files
+                    for (auto & vec_index_desc : old_vec_indices)
+                    {
+                        auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+                        for (auto & segment_id : segment_ids)
+                            VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+
+                        /// Delete files in part directory if exists and metadata
+                        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column);
+                    }
+                }
+            }
         }
     }
 
@@ -8046,15 +8165,6 @@ void StorageReplicatedMergeTree::startBackgroundMovesIfNeeded()
 std::unique_ptr<MergeTreeSettings> StorageReplicatedMergeTree::getDefaultSettings() const
 {
     return std::make_unique<MergeTreeSettings>(getContext()->getReplicatedMergeTreeSettings());
-}
-
-void StorageReplicatedMergeTree::finishVectorIndexJob(const std::vector<String> & processed_parts)
-{
-    std::unique_lock lock(currently_processing_in_background_mutex);
-    for (auto & part : processed_parts)
-    {
-        currently_vector_indexing_parts.erase(part);
-    }
 }
 
 

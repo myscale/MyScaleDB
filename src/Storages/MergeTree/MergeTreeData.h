@@ -1050,8 +1050,6 @@ public:
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
 
-    virtual void finishVectorIndexJob(const std::vector<String> & processed_parts) = 0;
-
     /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
     struct MergeTreeVectorIndexStatus
     {
@@ -1081,6 +1079,9 @@ public:
     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
     /// Mutex for currently_submerging_parts and currently_emerging_parts
     mutable std::mutex currently_submerging_emerging_mutex;
+
+    /// Mutex for currently_vector_indexing_parts
+    mutable std::mutex currently_vector_indexing_parts_mutex;
     std::set<String> currently_vector_indexing_parts;
 
     /// Mutex for parts currently processing in background
@@ -1105,6 +1106,7 @@ protected:
     friend class MergeTask;
     friend class IPartMetadataManager;
     friend class IMergedBlockOutputStream; // for access to log
+    friend class MergeTreeVectorIndexBuilderUpdater;
 
     bool require_part_metadata;
 

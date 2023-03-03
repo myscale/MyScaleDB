@@ -1,0 +1,11 @@
+0
+Test merge on part with vector index and part w/o index built
+test_replicated_vector_merge	all_0_0_0
+test_replicated_vector_merge	all_1_1_0
+0
+Test merge on all parts with vector index built
+Built
+test_replicated_vector_merge	all_0_1_1
+Test merge on decoupled part
+test_replicated_vector_merge	all_0_1_1
+test_replicated_vector_merge	all_2_2_0

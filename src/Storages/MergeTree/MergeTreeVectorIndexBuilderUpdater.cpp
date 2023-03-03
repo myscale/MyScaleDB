@@ -1,3 +1,4 @@
+#include <Core/ServerSettings.h>
 #include <DataTypes/DataTypeArray.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
@@ -7,12 +8,19 @@
 #include <VectorIndex/VectorIndexCommon.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
+#include <Common/StringUtils/StringUtils.h>
 
 /// #define build_fail_test
 
 namespace ProfileEvents
 {
 extern const Event VectorIndexBuildFailEvents;
+}
+
+namespace CurrentMetrics
+{
+    extern const Metric BackgroundVectorIndexPoolTask;
+    extern const Metric BackgroundSlowModeVectorIndexPoolTask;
 }
 
 namespace DB
@@ -47,6 +55,8 @@ namespace BuildIndexHelpers
 MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
     : data(data_), log(&Poco::Logger::get(data.getLogName() + " (VectorIndexUpdater)"))
 {
+    if (startsWith(data.getName(), "Replicated"))
+        is_replicated = true;
 }
 
 void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot)
@@ -136,30 +146,61 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
     }
 }
 
-VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVectorIndex(
+bool MergeTreeVectorIndexBuilderUpdater::allowToBuildVectorIndex(const bool slow_mode, const size_t builds_count_in_queue) const
+{
+    ServerSettings server_settings;
+    server_settings.loadSettingsFromConfig(data.getContext()->getConfigRef());
+    size_t occupied = 0;
+
+    /// Allow build vector index only if there are enough threads.
+    if (slow_mode)
+    {
+        /// Check slow mode build vector index log entry in queue
+        if (builds_count_in_queue >= server_settings.background_slow_mode_vector_pool_size)
+            return false;
+
+        occupied = CurrentMetrics::values[CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask].load(std::memory_order_relaxed);
+
+        if (occupied < server_settings.background_slow_mode_vector_pool_size)
+            return true;
+    }
+    else
+    {
+        /// Check build vector index log entry in queue
+        if (builds_count_in_queue >= server_settings.background_vector_pool_size)
+            return false;
+
+        occupied = CurrentMetrics::values[CurrentMetrics::BackgroundVectorIndexPoolTask].load(std::memory_order_relaxed);
+
+        if (occupied < server_settings.background_vector_pool_size)
+            return true;
+    }
+
+    return false;
+}
+
+VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorIndex(
     const StorageMetadataPtr & metadata_snapshot,
-    size_t max_parts_number,
-    bool select_slow_mode_parts,
+    bool select_slow_mode_part,
     const MergeTreeData::DataParts & currently_merging_mutating_parts)
 {
     if (metadata_snapshot->vec_indices.empty())
-    {
         return {};
-    }
-
-    std::vector<String> part_names;
 
     size_t min_rows_to_build_vector_index = data.getSettings()->min_rows_to_build_vector_index;
     for (const auto & part : data.getDataPartsForInternalUsage())
     {
-        /// LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] part name: {}, count: {}", part->name, currently_vector_indexing_parts.count(part->name));
+        /// TODO: Support atomic insert, avoid to select active data parts in an uncommited transaction.
 
         /// Skip empty part
         if (part->isEmpty())
             continue;
 
-        /// need to check currently_vector_indexing_parts.count(part) > 0
-        if (data.currently_vector_indexing_parts.count(part->name) > 0 || part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
+        if (part->vector_index_build_error || currently_merging_mutating_parts.count(part) > 0)
+            continue;
+
+        /// ReplicatedMergeTree depends on virtual_parts for merge, MergeTree depends on currently_merging_mutating_parts
+        if (is_replicated && data.partIsAssignedToBackgroundOperation(part))
             continue;
 
         if (part->containRowIdsMaps() && data.getSettings()->distable_rebuild_for_decouple)
@@ -167,67 +208,58 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartsToBuildVector
 
         /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
         /// The new part already blocked merge to select it, hence it's safe here. all_1_1_0 can avoid index build selection for future parts all_1_1_0_*
-        bool skip_build_index = false;
-        for (const auto & part_name : data.currently_vector_indexing_parts)
         {
-            auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
-            if (part->info.contains(info))
-            {
-                LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
-                skip_build_index = true;
-                break;
-            }
-        }
+            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
+            if (data.currently_vector_indexing_parts.count(part->name) > 0)
+                continue;
 
-        if (skip_build_index)
-            continue;
+            bool skip_build_index = false;
+            for (const auto & part_name : data.currently_vector_indexing_parts)
+            {
+                auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
+                if (part->info.contains(info))
+                {
+                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
+                    skip_build_index = true;
+                    break;
+                }
+            }
+
+            if (skip_build_index)
+                continue;
+        }
 
         for (const auto & vec_index : metadata_snapshot->vec_indices)
         {
             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
             {
-                if (select_slow_mode_parts)
+                if (select_slow_mode_part)
                 {
                     if (!isSlowModePart(part))
                         continue;
 
-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
-                    part_names.emplace_back(part->name);
+                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}", part->name);
+                    return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
                 }
                 else /// normal fast mode
                 {
                     if (isSlowModePart(part))
                         continue;
 
-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}, count: {}", part->name, data.currently_vector_indexing_parts.count(part->name));
-                    part_names.emplace_back(part->name);
+                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}", part->name);
+                    return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
                 }
-
-                LOG_TRACE(log, "this part will get built index: {}", part->name);
-                ///since each index building task is time-consuming, it's pointless to have a long list
-                if (part_names.size() >= max_parts_number)
-                {
-                    return std::make_shared<VectorIndexEntry>(part_names, data);
-                }
-                break;
             }
         }
     }
 
-    if (part_names.empty())
-    {
-        return {};
-    }
-    else
-    {
-        return std::make_shared<VectorIndexEntry>(part_names, data);
-    }
+    return {};
 }
 
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
-    const StorageMetadataPtr & metadata_snapshot, const std::vector<String> & part_names, bool tune, bool slow_mode)
+    const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool tune, bool slow_mode)
 {
-    if (part_names.empty())
+    if (part_name.empty())
     {
         LOG_INFO(log, "no data");
         return BuildVectorIndexStatus::NO_DATA_PART;
@@ -242,26 +274,27 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
     Stopwatch watch;
     /// build vector index part by part
     /// we may consider building vector index in parallel in the future.
-    if (!part_names.empty())
-        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_names[0], slow_mode);
-    for (auto & part_name : part_names)
+    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_name, slow_mode);
+
+    /// One part is selected to build index.
     {
         MergeTreeDataPartPtr part = data.getActiveContainingPart(part_name);
         if (!part)
         {
-            continue;
+            LOG_INFO(log, "[buildVectorIndex] part:{} is not active, no need to build index", part_name);
+            return BuildVectorIndexStatus::SUCCESS;
         }
 
         if (part->vector_index_build_cancelled)
         {
-            LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled.", part->name);
-            continue;
+            LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled", part->name);
+            return BuildVectorIndexStatus::BUILD_FAIL;
         }
 
         /// Check latest metadata
         if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
         {
-            LOG_INFO(log, "Vector index has been dropped, no need to build it.");
+            LOG_INFO(log, "Vector index has been dropped, no need to build it");
             return BuildVectorIndexStatus::SUCCESS;
         }
 
@@ -338,8 +371,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
     }
 
     watch.stop();
-    if (!part_names.empty())
-        LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_names[0], watch.elapsedSeconds(), slow_mode);
+    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
 
 #ifdef build_fail_test
     LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask increment VectorIndexBuildFailEvents.");

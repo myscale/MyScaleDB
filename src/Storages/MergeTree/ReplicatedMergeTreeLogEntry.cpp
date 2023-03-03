@@ -163,6 +163,15 @@ void ReplicatedMergeTreeLogEntryData::writeText(WriteBuffer & out) const
             out << "sync_pinned_part_uuids\n";
             break;
 
+        case BUILD_VECTOR_INDEX:
+            out << "build_vector_index\n"
+                << escape << index_name
+                << "\nfrom\n"
+                << source_parts.at(0)
+                << "\nslow_mode:\n"
+                << slow_mode;
+            break;
+
         default:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown log entry type: {}", static_cast<int>(type));
     }
@@ -354,6 +363,15 @@ void ReplicatedMergeTreeLogEntryData::readText(ReadBuffer & in, MergeTreeDataFor
         in >> new_part_name;
         in >> "\nsource_shard: " >> source_shard;
     }
+    else if (type_str == "build_vector_index")
+    {
+        type = BUILD_VECTOR_INDEX;
+        String source_part;
+        in >> escape >> index_name
+           >> "\nfrom\n" >> source_part;
+        source_parts.push_back(source_part);
+        in >> "\nslow_mode:\n" >> slow_mode;
+    }
 
     if (!trailing_newline_found)
         in >> "\n";
@@ -520,6 +538,10 @@ Strings ReplicatedMergeTreeLogEntryData::getVirtualPartNames(MergeTreeDataFormat
 
     /// Doesn't produce any part by itself.
     if (type == CLONE_PART_FROM_SHARD)
+        return {};
+
+    /// Doesn't produce any part.
+    if (type == BUILD_VECTOR_INDEX)
         return {};
 
     return {new_part_name};

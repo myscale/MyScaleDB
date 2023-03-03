@@ -470,7 +470,8 @@ public:
 
     /// Return set of metadata file names without checksums. For example,
     /// columns.txt or checksums.txt itself.
-    NameSet getFileNamesWithoutChecksums() const;
+    /// Mutations should not skip vector index files.
+    NameSet getFileNamesWithoutChecksums(bool include_vector_files = true) const;
 
     /// File with compression codec name which was used to compress part columns
     /// by default. Some columns may have their own compression codecs, but
@@ -487,6 +488,8 @@ public:
     static inline constexpr auto SERIALIZATION_FILE_NAME = "serialization.json";
 
     static inline constexpr auto TXN_VERSION_METADATA_FILE_NAME = "txn_version.txt";
+
+    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx";
 
     /// One of part files which is used to check how many references (I'd like
     /// to say hardlinks, but it will confuse even more) we have for the part

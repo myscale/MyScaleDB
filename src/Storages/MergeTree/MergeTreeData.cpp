@@ -6112,7 +6112,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
 
                     part->remove_time.store(0, std::memory_order_relaxed); /// The part will be removed without waiting for old_parts_lifetime seconds.
                     data.modifyPartState(part, DataPartState::Outdated);
-                    part->cancelBuild();
+                    /// part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
                 }
                 else
                 {
@@ -6128,6 +6128,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
                         reduce_rows += covered_part->rows_count;
 
                         data.modifyPartState(covered_part, DataPartState::Outdated);
+                        /// covered_part->cancelBuild(); /// Commented out due mutation is not blocked by build vector index
                         data.removePartContributionToColumnAndSecondaryIndexSizes(covered_part);
 
                         if (settings->in_memory_parts_enable_wal)

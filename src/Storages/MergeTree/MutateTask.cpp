@@ -514,7 +514,8 @@ static NameSet collectFilesToSkip(
     const String & mrk_extension,
     const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc)
 {
-    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums();
+    /// Don't skip to create hard links for vector index files in mutations.
+    NameSet files_to_skip = source_part->getFileNamesWithoutChecksums(false);
 
     /// Do not hardlink this file because it's always rewritten at the end of mutation.
     files_to_skip.insert(IMergeTreeDataPart::SERIALIZATION_FILE_NAME);

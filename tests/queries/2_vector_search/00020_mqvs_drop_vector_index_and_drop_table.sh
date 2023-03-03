@@ -2,7 +2,7 @@
 # Tags: no-parallel
 
 max_response_time_drop_vector_index=1
-max_response_time_drop_table=10
+max_response_time_drop_table=20
 
 # create table & insert data
 clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"

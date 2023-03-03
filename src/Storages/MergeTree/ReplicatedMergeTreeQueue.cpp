@@ -281,6 +281,13 @@ void ReplicatedMergeTreeQueue::insertUnlocked(
         LOG_TRACE(log, "Adding alter metadata version {} to the queue", entry->alter_version);
         alter_sequence.addMetadataAlter(entry->alter_version, state_lock);
     }
+
+    /// Update currently scheduled build index part, avoid to create duplicate build index entry in case of restart.
+    if (entry->type == LogEntry::BUILD_VECTOR_INDEX)
+    {
+        std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
+        storage.currently_vector_indexing_parts.insert(entry->source_parts.at(0));
+    }
 }
 
 
@@ -1520,6 +1527,16 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
     if (entry.type == LogEntry::BUILD_VECTOR_INDEX)
     {
         LOG_TRACE(log, "Get vector index build log entry {} of type {}", entry.znode_name, entry.typeToString());
+        String part_name = entry.source_parts.at(0);
+        if (future_parts.count(part_name))
+        {
+            out_postpone_reason = fmt::format(
+                "Not executing log entry {} of type {} for part {} "
+                "because the part is not ready yet (log entry for that part is being processed).",
+                entry.znode_name, entry.typeToString(), part_name);
+            LOG_TRACE(log, fmt::runtime(out_postpone_reason));
+            return false;
+        }
     }
 
     return true;
@@ -1711,6 +1728,8 @@ ReplicatedMergeTreeQueue::OperationsInQueue ReplicatedMergeTreeQueue::countMerge
     size_t count_merges = 0;
     size_t count_mutations = 0;
     size_t count_merges_with_ttl = 0;
+    size_t count_vector_index_builds = 0;
+    size_t count_slow_vector_index_builds = 0;
     for (const auto & entry : queue)
     {
         if (entry->type == ReplicatedMergeTreeLogEntry::MERGE_PARTS)
@@ -1721,9 +1740,16 @@ ReplicatedMergeTreeQueue::OperationsInQueue ReplicatedMergeTreeQueue::countMerge
         }
         else if (entry->type == ReplicatedMergeTreeLogEntry::MUTATE_PART)
             ++count_mutations;
+        else if (entry->type == ReplicatedMergeTreeLogEntry::BUILD_VECTOR_INDEX)
+        {
+            if (entry->slow_mode)
+                ++count_slow_vector_index_builds;
+            else
+                ++count_vector_index_builds;
+        }
     }
 
-    return OperationsInQueue{count_merges, count_mutations, count_merges_with_ttl};
+    return OperationsInQueue{count_merges, count_mutations, count_merges_with_ttl, count_vector_index_builds, count_slow_vector_index_builds};
 }
 
 
@@ -2292,6 +2318,10 @@ bool ReplicatedMergeTreeMergePredicate::canMergeTwoParts(
         return false;
     }
 
+    /// Checks related to vector index
+    if (!canMergeWithVectorIndex(left, right))
+        return false;
+
     return MergeTreeData::partsContainSameProjections(left, right);
 }
 
@@ -2356,6 +2386,47 @@ bool ReplicatedMergeTreeMergePredicate::partParticipatesInReplaceRange(const Mer
         }
     }
     return false;
+}
+
+bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
+    const MergeTreeData::DataPartPtr & left,
+    const MergeTreeData::DataPartPtr & right) const
+{
+    /// Check if part contains merged vector index
+    if (left->containRowIdsMaps() || right->containRowIdsMaps())
+        return false;
+
+    /// Check if part is building vector index
+    {
+        std::lock_guard lock(left->storage.currently_vector_indexing_parts_mutex);
+        for (const auto & part_name : left->storage.currently_vector_indexing_parts)
+        {
+            auto info = MergeTreePartInfo::fromPartName(part_name, queue.format_version);
+            if (left->info.contains(info) || right->info.contains(info))
+                return false;
+        }
+    }
+
+    /// Check if two parts contain vector index files.
+    /// Two parts can be merged when both have built vector index or both not.
+    auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
+    bool can_merge = true;
+    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    {
+        if ((left->containVectorIndex(vec_index.name, vec_index.column) && right->containVectorIndex(vec_index.name, vec_index.column))
+            || (!left->containVectorIndex(vec_index.name, vec_index.column) && !right->containVectorIndex(vec_index.name, vec_index.column)))
+        {
+            /// can merge case
+            continue;
+        }
+        else
+        {
+            can_merge = false;
+            break;
+        }
+    }
+
+    return can_merge;
 }
 
 

@@ -536,7 +536,10 @@ The server successfully detected this situation and will download merged part fr
     M(MergeTreeAllRangesAnnouncementsSentElapsedMicroseconds, "Time spent in sending the announcement from the remote server to the initiator server about the set of data parts (for MergeTree tables). Measured on the remote server side.") \
     \
     M(VectorIndexBuildFailEvents, "Number of vector index build fail events.") \
-    M(VectorIndexLoadFailEvents, "Number of vector index load fail events")
+    M(VectorIndexLoadFailEvents, "Number of vector index load fail events") \
+    M(CreatedLogEntryForBuildVIndex, "Successfully created log entry to build vector index for part in ReplicatedMergeTree.") \
+    M(NotCreatedLogEntryForBuildVIndex, \
+      "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.")
 
 namespace ProfileEvents
 {

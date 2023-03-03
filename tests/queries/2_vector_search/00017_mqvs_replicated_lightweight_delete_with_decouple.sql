@@ -1,0 +1,46 @@
+-- Tags: no-parallel
+
+DROP TABLE IF EXISTS test_replicated_vector SYNC;
+DROP TABLE IF EXISTS test_replicated_vector2 SYNC;
+CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+CREATE TABLE test_replicated_vector2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r2') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(100);
+ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
+
+SELECT sleep(3);
+
+INSERT INTO test_replicated_vector SELECT number + 100, [number + 100, number + 100, number + 100] FROM numbers(100);
+INSERT INTO test_replicated_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
+
+SELECT sleep(3);
+SELECT '--- Original topK result';
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
+
+set allow_experimental_lightweight_delete=1;
+set mutations_sync=2;
+
+SELECT '--- Lightweight delete on parts with vector index';
+delete from test_replicated_vector where id = 2;
+delete from test_replicated_vector where id = 10;
+
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2;
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector prewhere id > 5;
+
+SELECT '--- Decoupled part when source parts contain lightweight delete';
+optimize table test_replicated_vector final;
+SELECT sleep(2);
+
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2 prewhere id > 5;
+
+SELECT '--- Lightweight delete on decoupled part';
+delete from test_replicated_vector where id = 3;
+delete from test_replicated_vector where id = 15;
+
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_replicated_vector';
+
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector2;
+SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector prewhere id > 5;
+
+DROP TABLE IF EXISTS test_replicated_vector SYNC;
+DROP TABLE IF EXISTS test_replicated_vector2 SYNC;

@@ -790,7 +790,7 @@ void IMergeTreeDataPart::appendFilesOfIndex(Strings & files) const
     }
 }
 
-NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums() const
+NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums(bool include_vector_files) const
 {
     if (!isStoredOnDisk())
         return {};
@@ -802,6 +802,16 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums() const
 
     if (getDataPartStorage().exists(TXN_VERSION_METADATA_FILE_NAME))
         result.emplace(TXN_VERSION_METADATA_FILE_NAME);
+
+    /// Get vector index files
+    if (include_vector_files && (containAnyVectorIndex() || containRowIdsMaps()))
+    {
+        for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+        {
+            if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
+                result.emplace(it->name());
+        }
+    }
 
     return result;
 }
