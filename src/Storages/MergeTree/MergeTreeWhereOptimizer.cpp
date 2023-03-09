@@ -6,6 +6,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Interpreters/IdentifierSemantic.h>
+#include <Interpreters/TreeRewriter.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
@@ -66,6 +67,10 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.array_joined_names = determineArrayJoinedNames(select);
     where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().move_all_conditions_to_prewhere;
     where_optimizer_context.is_final = select.final();
+
+    /// Move as much as possible where conditions to prewhere for vector search
+    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->vector_scan_funcs.empty())
+        has_vector_func = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
     RPNBuilderTreeNode node(select.where().get(), tree_context);
@@ -356,7 +361,7 @@ std::optional<MergeTreeWhereOptimizer::OptimizeResult> MergeTreeWhereOptimizer::
         if (!it->viable)
             break;
 
-        if (!where_optimizer_context.move_all_conditions_to_prewhere)
+        if (!where_optimizer_context.move_all_conditions_to_prewhere && !has_vector_func)
         {
             bool moved_enough = false;
             if (total_size_of_queried_columns > 0)
