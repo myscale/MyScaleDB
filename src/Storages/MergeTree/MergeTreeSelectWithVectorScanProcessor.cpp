@@ -288,7 +288,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
         /// consider cache if and only if
         /// 1. this task is vector search and no prewhere info
         /// 2. primary key is only a column, and select columns are (pk, distance) or (pk, batch_distance)
-        /// 3. primary key's type is UInt32 or UInt64
+        /// 3. primary key's value is represented by number
         if (enable_primary_key_cache)
         {
             use_primary_key_cache = PrimaryKeyCacheManager::isSupportedPrimaryKey(primary_key)

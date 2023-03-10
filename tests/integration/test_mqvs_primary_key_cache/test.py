@@ -29,10 +29,10 @@ def test_primary_key_cache_enabled(started_cluster):
     time.sleep(2)
 
     instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
-    assert instance.contains_in_log("miss primary key cache")
+    assert instance.contains_in_log("Miss primary key cache")
 
     instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
-    assert instance.contains_in_log("hit primary key cache")
+    assert instance.contains_in_log("Hit primary key cache")
 
     instance.query("DROP TABLE IF EXISTS test_pk_cache")
 

@@ -45,8 +45,7 @@ bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & primar
     if (primary_key.data_types.size() != 1)
         return false;
 
-    String type_name = primary_key.data_types[0]->getName();
-    return type_name == "UInt32" || type_name == "UInt64";
+    return primary_key.data_types[0]->isValueRepresentedByNumber();
 }
 
 

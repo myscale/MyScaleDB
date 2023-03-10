@@ -480,7 +480,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
         /// if and only if
         /// 1. this task is vector search
         /// 2. primary key is only a column, and select columns is (pk, distance) or (pk, batch_distance)
-        /// 3. primary key's type is UInt32 or UInt64
+        /// 3. primary key's value is represented by number
         bool match = PrimaryKeyCacheManager::isSupportedPrimaryKey(pk_description)
             && isVectorSearchByPk(pk_description.column_names, task->task_columns.columns.getNames());
 
