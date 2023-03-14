@@ -3,7 +3,7 @@ import time
 from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
-instance = cluster.add_instance("instance", stay_alive=True)
+instance = cluster.add_instance("instance", stay_alive=True, main_configs=["configs/config_information.xml"])
 
 
 @pytest.fixture(scope="module")
