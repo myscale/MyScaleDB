@@ -439,6 +439,10 @@ void removeUnneededColumnsFromSelectClause(ASTSelectQuery * select_query, const 
                 if (!data.aggregates.empty())
                     new_elements.push_back(elem);
             }
+
+            /// Removing vector search function can change number of rows.
+            if (func && isVectorScanFunc(func->name))
+                new_elements.push_back(elem);
         }
     }
 

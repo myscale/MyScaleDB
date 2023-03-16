@@ -27,6 +27,78 @@
 
 namespace DB
 {
+
+template <typename FloatType>
+std::vector<float> getQueryVector(const IColumn * query_vector_column, int dim, bool is_batch)
+{
+    const auto * query_data_concrete = checkAndGetColumn<ColumnVector<FloatType>>(query_vector_column);
+
+    if (!query_data_concrete)
+    {
+        if (is_batch)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float32 or Float64 inside Array(Array()) in batch distance function");
+        else
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float32 or Float64 inside Array() in distance function");
+    }
+
+    const auto & query_vec = query_data_concrete->getData();
+
+    size_t dim_of_query = query_vec.size();
+
+    /// in batch distance case, dim_of_query = dim * offsets. dim in query is already checked in getQueryVectorInBatch().
+    if (!is_batch && (dim_of_query != dim))
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR,
+            "Dimension is not equal: query: {} vs search column: {}",
+            std::to_string(dim_of_query),
+            std::to_string(dim));
+
+    /// TODO: effectively transform float64 array to float32 array
+    std::vector<float> query_new_data(dim_of_query);
+
+    for (size_t i = 0; i < dim_of_query; ++i)
+    {
+        query_new_data[i] = static_cast<float>(query_vec[i]);
+    }
+
+    return query_new_data;
+}
+
+std::vector<float> getQueryVectorInBatch(const IColumn * query_vectors_column, const int dim, int & query_vector_num)
+{
+    const ColumnArray * query_vectors_col = checkAndGetColumn<ColumnArray>(query_vectors_column);
+
+    if (!query_vectors_col)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array)) in batch distance function");
+
+    const IColumn & query_vectors = query_vectors_col->getData();
+    auto & offsets = query_vectors_col->getOffsets();
+
+    query_vector_num = offsets.size();
+    for (size_t row = 0; row < offsets.size(); ++row)
+    {
+        size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
+        size_t vec_end_offset = offsets[row];
+        size_t vec_size = vec_end_offset - vec_start_offset;
+        if (vec_size != dim)
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Having query vector with wrong dimension: {} vs search column dimension: {}",
+                std::to_string(vec_size),
+                std::to_string(dim));
+    }
+
+    std::vector<float> query_new_data;
+    if (checkColumn<ColumnFloat32>(&query_vectors))
+        query_new_data = getQueryVector<Float32>(&query_vectors, dim, true);
+    else if (checkColumn<ColumnFloat64>(&query_vectors))
+        query_new_data = getQueryVector<Float64>(&query_vectors, dim, true);
+    else
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float64 or Float32 inside Array(Array()) in batch distance function");
+
+    return query_new_data;
+}
+
 void MergeTreeVectorScanManager::eraseResult()
 {
     if (vector_scan_result->is_batch)
@@ -56,45 +128,12 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
     if (is_batch)
     {
         if (!query_col)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array(float64))");
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array in batch distance function");
 
         const IColumn & query_data = query_col->getData();
 
-        const ColumnArray * query_vectors_col = checkAndGetColumn<ColumnArray>(&query_data);
-
-        if (!query_vectors_col)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array(float64))");
-
-        const IColumn & query_vectors = query_vectors_col->getData();
-
-        const ColumnFloat64 * query_data_concrete = checkAndGetColumn<ColumnFloat64>(&query_vectors);
-
-        if (!query_data_concrete)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array(float64))");
-
-        const PaddedPODArray<Float64> & query_vec = query_data_concrete->getData();
-        size_t elem_num = query_vec.size();
-        auto & offsets = query_vectors_col->getOffsets();
-
-        int query_vector_num = offsets.size();
-        for (size_t row = 0; row < offsets.size(); ++row)
-        {
-            size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
-            size_t vec_end_offset = offsets[row];
-            size_t vec_size = vec_end_offset - vec_start_offset;
-            if (vec_size != dim)
-                throw Exception(
-                    ErrorCodes::LOGICAL_ERROR,
-                    "Having query vector with wrong dimension: {} vs search column dimension: {}",
-                    std::to_string(vec_size),
-                    std::to_string(dim));
-        }
-
-        std::vector<float> query_new_data(elem_num);
-        for (size_t i = 0; i < elem_num; ++i)
-        {
-            query_new_data[i] = static_cast<float>(query_vec[i]);
-        }
+        int query_vector_num = 0;
+        std::vector<float> query_new_data = getQueryVectorInBatch(&query_data, dim, query_vector_num);
 
         // default value
         VectorIndex::Parameters vec_parameters = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
@@ -106,40 +145,24 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
         }
 
         LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
+
         return std::make_shared<VectorIndex::VectorDataset>(
             query_vector_num, static_cast<int32_t>(dim), const_cast<float *>(query_new_data.data()));
     }
     else
     {
         if (!query_col)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(float64)");
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array in distance function");
 
         const IColumn & query_data = query_col->getData();
 
-        // const ColumnArray::Offsets & offsets = src_col->getOffsets();
-        const ColumnFloat64 * query_data_concrete = checkAndGetColumn<ColumnFloat64>(&query_data);
-
-        if (!query_data_concrete)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(float64)");
-
-        const PaddedPODArray<Float64> & query_vec = query_data_concrete->getData();
-
-        size_t dim_of_query = query_vec.size();
-
-        if (dim_of_query != dim)
-            throw Exception(
-                ErrorCodes::LOGICAL_ERROR,
-                "Dimension is not equal: query: {} vs search column: {}",
-                std::to_string(dim_of_query),
-                std::to_string(dim));
-
-        /// TODO: effectively transform float64 array to float32 array
-        std::vector<float> query_new_data(dim);
-
-        for (size_t i = 0; i < dim; ++i)
-        {
-            query_new_data[i] = static_cast<float>(query_vec[i]);
-        }
+        std::vector<float> query_new_data;
+        if (checkColumn<ColumnFloat32>(&query_data))
+            query_new_data = getQueryVector<Float32>(&query_data, false, dim);
+        else if (checkColumn<ColumnFloat64>(&query_data))
+            query_new_data = getQueryVector<Float64>(&query_data, false, dim);
+        else
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float32 or Float64 inside Array() in distance function");
 
         return std::make_shared<VectorIndex::VectorDataset>(1, static_cast<int32_t>(dim), const_cast<float *>(query_new_data.data()));
     }

@@ -748,11 +748,13 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 "Unknown identifier '{}' in distance function", arguments[1]->getColumnName());
         }
 
-        if (!dag_node->column)
+      /// In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
+        if (dag_node->column)
         {
-           throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
-                "Wrong query vector type in distance function"); 
+            if (!isColumnConst(*dag_node->column))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
         }
+
         vector_scan_desc.query_column = dag_node->column;
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
         //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
@@ -773,9 +775,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
             }
         }
-        // String test = vector_scan_desc.parameters->get("metric");
-        // LOG_DEBUG(&Poco::Logger::get("test select parse arg"), test);
-        // txh added
+
         LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
         vector_scan_descriptions.push_back(vector_scan_desc);

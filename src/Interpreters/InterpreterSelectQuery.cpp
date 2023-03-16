@@ -594,9 +594,6 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 
         }
 
-        /// LOG_DEBUG(log, "[analyze] before analyze: source header: {}, required_result_column_names size: {}",
-        ///     source_header.getNamesAndTypesList().toString(), required_result_column_names.size());
-
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, storage_snapshot),
