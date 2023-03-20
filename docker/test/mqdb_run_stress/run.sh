@@ -308,7 +308,8 @@ clickhouse-local --structure "test String, res String" -q "SELECT 'failure', tes
 
 # Core dumps (see gcore)
 # Default filename is 'core.PROCESS_ID'
-for core in core.*; do
-    pigz $core ||:
-    mv $core.gz $WORKPATH/test_output/ ||:
-done
+# skip save core file
+# for core in core.*; do
+#     pigz $core ||:
+#     mv $core.gz $WORKPATH/test_output/ ||:
+# done

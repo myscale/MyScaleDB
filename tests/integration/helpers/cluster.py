@@ -385,7 +385,7 @@ class ClickHouseCluster:
             "CLICKHOUSE_TESTS_DOCKERD_HOST"
         )
         self.docker_api_version = os.environ.get("DOCKER_API_VERSION")
-        self.docker_base_tag = os.environ.get("DOCKER_BASE_TAG", "1.0")
+        self.docker_base_tag = os.environ.get("DOCKER_BASE_TAG", "1.6")
 
         self.base_cmd = ["docker-compose"]
         if custom_dockerd_host:
@@ -3080,7 +3080,7 @@ class ClickHouseInstance:
         copy_common_configs=True,
         hostname=None,
         env_variables=None,
-        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration",
+        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration-runner",
         tag="1.6",
         # tag="latest",
         stay_alive=False,

@@ -83,6 +83,7 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
+    extern const int SYNTAX_ERROR;
     extern const int UNKNOWN_IDENTIFIER;
 }
 
@@ -1439,7 +1440,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     result.vector_scan_funcs = getVectorScanFunctions(query, *select_query);
     
     if (result.vector_scan_funcs.size() > 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Not support multiple distance funcs in one query now.");
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support multiple distance funcs in one query now.");
 
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 

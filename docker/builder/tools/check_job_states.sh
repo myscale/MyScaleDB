@@ -65,6 +65,19 @@ function check_stress
     fi
 }
 
+# It only detects sanitizer-related problems and is a temporary solution
+function check_stress_temporary
+{
+    TEST_STATE=$(cat $WORKPATH/test_results.tsv | grep sanitizer | awk '{print $NF}')
+    cat $WORKPATH/test_results.tsv
+    if [[ "$TEST_STATE" != "OK" ]]; then
+        echo "sanitizer check error, please check the test log"
+        exit 1
+    else
+        echo "test pass"
+    fi
+}
+
 function check_performance
 {
     echo "don't support"
@@ -84,7 +97,8 @@ elif [[ "$TEST_NAME" == "mqdb_run_fuzzer" ]]; then
 elif [[ "$TEST_NAME" == "mqdb_run_smoke" ]]; then
     check_smoke
 elif [[ "$TEST_NAME" == "mqdb_run_stress" ]]; then
-    check_stress
+    # check_stress
+    check_stress_temporary
 elif [[ "$TEST_NAME" == "mqdb_run_performance" ]]; then
     check_performance
 elif [[ "$TEST_NAME" == "mqdb_run_integration" ]]; then

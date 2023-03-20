@@ -1,4 +1,4 @@
-# docker build -t clickhouse/integration-tests-runner .
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-integration-runner:1.6 .
 FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
 
 # ARG for quick switch to a given ubuntu mirror
@@ -80,6 +80,7 @@ RUN python3 -m pip install \
     pytest-timeout \
     pytest-xdist \
     pytest-repeat \
+    pytest-html \
     pytz \
     redis \
     tzlocal==2.1 \
@@ -103,8 +104,6 @@ RUN set -x \
 ENV DOCKER_CLIENT_TIMEOUT=300
 ENV COMPOSE_HTTP_TIMEOUT=600
 ENV XTABLES_LOCKFILE=/run/host/xtables.lock
-ENV USER='shanfengp'
-ENV PASSWORD='Psf00401..'
 
 EXPOSE 2375
 ENTRYPOINT ["dockerd-entrypoint.sh"]
