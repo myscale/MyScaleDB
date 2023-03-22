@@ -1,13 +1,8 @@
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: "vector-db-test"
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ssh
-  namespace: "vector-db-test"
+  namespace: "vector-db-ci"
 data:
   authorized_keys: |
     ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDavaHYcj+lc7pNOtnJijxdiLT/rsuCdHEoF4Anj6/il2fWUVKg9OIZc/6PCRC3HY+GRjsdQ3sifjiAftV0qnW+KhlzcYp0hJfrTz8g5MJL+3sZ2pgvW1QEXvJzaQ3E68YxK0yLWioIUPB/fla3bc2iyYUhtV3EUwEvXNV6OLjPUf4fJYTjR8R0bczttU8s6v+6wgSyeT7xV3jgNWavQt8+uY8h2J+3UAKmt9AQoesZUgzxVfUQfqRam9/JZ+EepED7uJl635Obp/4hZ2dxlMfFZzURWko+vJx1NPttoD1Y6oU3tfGuf3oNAuoVmP2uUoE9vUz++BI7B79mskW5ypZF yim@moqi.ai
@@ -23,12 +18,14 @@ data:
     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPyTd+Xjqy/oA6qtKc1tS9WIbvg4RIig6eH8a9YMJJHz moqi_dev_vm_peer_mac
 
     ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1fp4AowQfheVR9ex54IuYOKp8t1Zub8iJCgxlBlcTlCkSv/yWO8fty0EysMq0QEgZIsa3j5sF3l6+HLkoR2CJ360k0q+TgAEoC6uEZYnwlxtybRCj0c36YP3Ttmn21dhazAZ+AOWCdrXh8rOthEqtR3gZ+IZ4mJAc6UEXIKbXp4etO6Nswpr04Z4Z6T0735p1Un42FDJ35x7UHKPP1ItNXEhrnNin/dq81Yi6KtiaZICpxOOMpH6MQngtxzfM+q1BfExf5XWyKKeMeZv5+iYAkcg8nzSmAgSg32CBvkxoi6TJOIGzcgJRxBjBcFRTA8JwaMa5HuSjNAl/40OVCUvjSoORA/k5WUWbwy9QVfXPDapiHuqGdJgbqmkkwSzZgebTNIv6W0YsXKW/mGnyfIOwbNWFtS06afr7/V8TZ8x2NfqbNZM5mMZbkfeXF0NEGFftFHaIpwnaVZh1ktOS7w5Qt2wqILzjQ0bqFpDh4kEwAewJpawkTh+smkSI3hpC4N0= jianmeiz@kaiydeMacBook-Pro.local
+
+    ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCgv9qrP/B/ho1IDo47uVoUQPQNrr4AEtUbeJf6ZUkq+Zm2t6hxaFrNiiO3CKG/Ii1GiJxrzVf1ypN6Hj5nJl/rRYzJTJM/4imONUW4YWVPBzQusSZuqd7u8C+eNanwy1d1iazYHbz3OiiVd3KpXeOUTr1QttsCko2uryKr8ZS1sc6k85E/NW635LSzOhSKTEEIWihMvtLprYA2vinDDEXbh9IywUEEhTXZzeip0INY7IxaAamLlYkfv2r4h1di322ThqygHNY6GCevYKqcGXx/WBNRDVeC0hQ0R543IdOHbvcpZRNhC/puI7pb3mnYRO29zZ5/H5lBpj04dLi7tiefbCoYyD5wyHwSi/mHTLnRpaK27V8+UWlEeAXtKMo14kWSIVSkZ1eqvYksD3w7v+kfYgGjbPRuaaDzPQLgkRLMd8cqrPqJSdHvpzyk55lKyc3wA7INCi7AntpTFwJ7HdJK+pQu9oFTzVu8qcx2oBI1XWC6EoHzPAJGqz6nCTTxKzU= “shanfengp@moqi.ai”
 ---
 apiVersion: "clickhouse.altinity.com/v1"
 kind: "ClickHouseInstallation"
 metadata:
   name: "testing"
-  namespace: "vector-db-test"
+  namespace: "vector-db-ci"
 spec:
   defaults:
     templates:
@@ -55,11 +52,6 @@ spec:
         - "127.0.0.1"
         - "::1"
         - "0.0.0.0/0"
-      admin/password: "moqi#233"
-      admin/networks/ip:
-        - "127.0.0.1"
-        - "::1"
-        - "0.0.0.0/0"
     profiles:
       default/allow_experimental_lightweight_delete: true
       default/mutations_sync: 1
@@ -73,6 +65,11 @@ spec:
   templates:
     serviceTemplates:
       - name: service-template
+        metadata:
+          annotations:
+            # service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-ezx6t8lt
+            # service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-q5eu0w59
+            service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-itzzzhyz
         spec:
           type: LoadBalancer
           ports:
@@ -115,7 +112,7 @@ spec:
           containers:
             - name: clickhouse
               image: harbor.internal.moqi.ai/mqdb/mqdb:IMAGE_VERSION
-              # image: harbor.internal.moqi.ai/mqdb/mqdb:22.3.7.5-69e19076
+              # image: harbor.internal.moqi.ai/mqdb/mqdb:22.3.7.5-dc6971d6e
               ports:
                 - containerPort: 9000
                   name: tcp
@@ -131,33 +128,16 @@ spec:
                   protocol: TCP
               resources:
                 requests:
-                  cpu: 8
-                  memory: 16Gi
+                  cpu: 4
+                  memory: 8Gi
                 limits:
-                  cpu: 8
-                  memory: 16Gi
-            - name: client
-              image: harbor.internal.moqi.ai/mqdb/mqdb:IMAGE_VERSION
-              # image: harbor.internal.moqi.ai/mqdb/mqdb-ssh-client:22.3.7.5-69e19076
-              ports:
-                - containerPort: 22
-                  name: ssh
-                  protocol: TCP
-              volumeMounts:
-                - name: ssh
-                  subPath: authorized_keys
-                  mountPath: /root/.ssh/authorized_keys
-          # nodeSelector:
-          #   test_type: lwd
+                  cpu: 4
+                  memory: 8Gi
           volumes:
             - name: ssh
               configMap:
                 name: ssh
                 defaultMode: 0600
-          # tolerations:
-          #   - key: "key2"
-          #     operator: "Exists"
-          #     effect: "NoSchedule"
 
     volumeClaimTemplates:
       - name: data-volume-claim-template

@@ -77,27 +77,19 @@ vector_db_test:
   dependencies: ["build_image"]
   image: harbor.internal.moqi.ai/tools/k8s-gitlab-ci:2.0.1
   script:
+    - source docker/builder/tools/version.sh
     - mkdir -p $HOME/Downloads/
     - cp $KUBECONFIG_CONTENT $HOME/Downloads/cls-config
     - export KUBECONFIG=$KUBECONFIG:$HOME/Downloads/cls-config
-    - kubectl get pods -n vector-db-test
+    - 'kubectl get pods -n vector-db-ci ||:'
     - cd docker/test/mqdb_run_vector_db_test
-    - cp setup_mqdb.yaml setup_mqdb_tmp.yaml
-    - sed -i "s/IMAGE_VERSION/${VERSION_STRING}-${GIT_COMMIT}/" setup_mqdb_tmp.yaml
-    - "kubectl delete ns vector-db-test ||:"
-    - kubectl create ns vector-db-test
-    - kubectl apply -f setup_mqdb_tmp.yaml
+    - 'kubectl delete ns vector-db-ci ||:'
+    - kubectl create ns vector-db-ci
+    - bash config.sh "$VERSION_STRING" "$GIT_COMMIT" "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA" "$CI_COMMIT_MESSAGE"
+    - kubectl apply -f mqdb_server_tmp.yaml
     - sleep 60
-    - if ! kubectl wait pods chi-testing-testing-0-0-0 -n vector-db-test --for=condition=ready --timeout=3000s; then echo "setup mqdb timeout" && kubectl delete ns vector-db-test; exit 1; fi
-    - HOST=$(kubectl get service -n vector-db-test | grep "clickhouse-testing" | awk '{print $4}')
-    - bash config.sh $HOST ${VERSION_STRING}_${GIT_COMMIT}
-    - kubectl apply -f vector-db-test-job_tmp.yaml
-    - sleep 60
-    - WORK_POD_NAME=$(kubectl get pods -n vector-db-test | grep "process-vector-db-tests" | awk '{print $1}')
-    - if ! kubectl wait pods $WORK_POD_NAME -n vector-db-test --for=condition=ready --timeout=300s; then echo "setup mqdb timeout" && kubectl delete ns vector-db-test; exit 1; fi
-    - cp $mc_config config.json
-    - kubectl cp config.json vector-db-test/$WORK_POD_NAME:/home/.
-    - timeout 300 kubectl logs -f $WORK_POD_NAME
+    - if ! kubectl wait pods chi-testing-testing-0-0-0 -n vector-db-ci --for=condition=ready --timeout=3000s; then echo "setup vector-db-benchmark faild" && kubectl delete ns vector-db-ci; exit 1; fi
+    - kubectl apply -f vector_db_benchmark_tmp.yaml
   rules:
-    # [TODO] Add more policy
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+  # [TODO] Add more policy
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB == "true"' # Trigger pipline during scheduled tasks

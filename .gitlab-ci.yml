@@ -52,7 +52,6 @@ style_check:
 
 build_package:
   stage: package
-  when: manual
   dependencies: []
   variables:
     KUBERNETES_CPU_REQUEST: 8
@@ -68,7 +67,11 @@ build_package:
     - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --profile release --arch linux-x86_64 --package --compiler "clang-15"
-    # - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15"
+    # - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
 
 build_package_with_license:
   stage: package
@@ -92,13 +95,16 @@ build_package_with_license:
 
 build_image:
   stage: image
-  when: manual
   dependencies: ["build_package"]
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
   script:
     - docker/builder/tools/image.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
 
 build_saas_image:
   stage: image

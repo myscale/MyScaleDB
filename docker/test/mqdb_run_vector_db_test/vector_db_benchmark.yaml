@@ -1,0 +1,78 @@
+apiVersion: v1
+data:
+  config.yaml: |-
+    meta:
+      - "version": "VERSION_STRING"
+      - "branch": "GIT_BRANCH"
+      - "commit": "CI_COMMIT_SHA"
+      - "remark": "CI_COMMIT_MESSAGE"
+      - "other": "vector-db on ci"
+      - "link": "https://git.moqi.ai/mqdb/ClickHouse/-/commit/CI_COMMIT_SHA"
+      - "datasets":
+          - "name": "gist-960-euclidean-l2"
+    connection_params:
+      - "host": "chi-testing-testing-0-0-0.chi-testing-testing-0-0.vector-db-ci.svc.cluster.local"
+      - "port": 8123
+      - "http_type": "http"
+      - "user": "default"
+      - "password": ""
+    collection_params:
+      - "shard": 1
+      - "replicate": 1
+    index_types:
+      - "IVFFLAT"
+      - "HNSWFLAT"
+      - "HNSWSQ"
+    hnsw_m_list: [16, 32, 64]
+    hnsw_efc_list: [128, 256, 512]
+    hnsw_efs_list: [64, 128, 256, 512]
+    nlist: [1024, 2048, 4096, 6144]
+    parallel: [1, 2, 4, 8, 16, 32]
+    topK: [100]
+    platform:
+      - "K8S_4c_8g_Tencent"
+    upload_parallel: 16
+    upload_batch_size: 64
+kind: ConfigMap
+metadata:
+  name: benchmark-config
+  namespace: vector-db-ci
+  selfLink: /api/v1/namespaces/vector-db-ci/configmaps/config
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vector-db-benchmark
+  namespace: vector-db-ci
+  labels:
+    app: vector-db-benchmark
+spec:
+  ttlSecondsAfterFinished: 10
+  template:
+    metadata:
+      labels:
+        app: vector-db-benchmark
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: vector-db-benchmark
+        image: harbor.internal.moqi.ai/mqdb/vector-db-benchmark-full:latest
+        imagePullPolicy: Always
+        command: ["bash", "-c", "--"]
+        args: ["tar -xzvf vector-db-benchmark.tar.gz; cp /home/config/config.yaml /home/vector-db-benchmark/generate_configs/mqdb/config.yaml; cd /home/vector-db-benchmark && python3 run.py --regenerate-mqdb --s3-auto-upload --wait-server-online --host chi-testing-testing-0-0-0.chi-testing-testing-0-0.vector-db-ci.svc.cluster.local && tail -f /dev/null"]
+        workingDir: /home
+        volumeMounts:
+          - name: config-volume
+            mountPath: /home/config
+        resources:
+          limits:
+            cpu: 4
+            memory: 8Gi
+          requests:
+            cpu: 4
+            memory: 8Gi
+      volumes:
+        - name: config-volume
+          configMap:
+            name: benchmark-config
+---
