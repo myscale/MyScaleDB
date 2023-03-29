@@ -19,10 +19,10 @@ stress_test_asan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_stress
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 stress_test_tsan:
@@ -44,10 +44,10 @@ stress_test_tsan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_stress
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 stress_test_ubsan:
@@ -69,10 +69,10 @@ stress_test_ubsan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_stress
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 stress_test_msan:
@@ -94,10 +94,10 @@ stress_test_msan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/stress-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_stress
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 vector-test-asan:
@@ -125,7 +125,7 @@ vector-test-asan:
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 # disable TSAN due to #89
@@ -155,7 +155,7 @@ vector-test-asan:
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 # disable MSAN due to #89
@@ -184,7 +184,7 @@ vector-test-asan:
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 vector-test-ubsan:
@@ -212,7 +212,7 @@ vector-test-ubsan:
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 fuzzer_test-asan:
@@ -234,10 +234,10 @@ fuzzer_test-asan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/fuzz-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 fuzzer_test-ubsan:
   stage: sanitizer-test
@@ -258,8 +258,8 @@ fuzzer_test-ubsan:
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+    - docker/builder/tools/fuzz-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"

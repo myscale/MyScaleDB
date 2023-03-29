@@ -27,7 +27,7 @@ build_binary:
     - mv performance_pack_amd64.tar.gz artifacts/.
     # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
   rules:
-    - if: '$CI_TEST_VECTOR_DB != "true"'
+    - if: '$CI_TEST_IN_K8S == "false"'
 
 build_with_sanitizer_asanbinary:
   stage: build
@@ -54,7 +54,7 @@ build_with_sanitizer_asanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_tsanbinary:
@@ -82,7 +82,7 @@ build_with_sanitizer_tsanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_ubsanbinary:
@@ -110,7 +110,7 @@ build_with_sanitizer_ubsanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_with_sanitizer_msanbinary:
@@ -138,7 +138,7 @@ build_with_sanitizer_msanbinary:
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
     - mv build/programs/clickhouse artifacts/.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
 
 build_for_integration_test:
@@ -158,5 +158,5 @@ build_for_integration_test:
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-x86_64
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "test-integration"

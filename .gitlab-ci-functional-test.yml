@@ -17,7 +17,7 @@ vector_search_test:
     - docker/builder/tools/vector-search-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
   rules:
-    - if: '$CI_TEST_VECTOR_DB != "true"'
+    - if: '$CI_TEST_IN_K8S == "false"'
 
 ###################################### FUNCTIONAL TESTS ######################################
 ########## SMOKE TESTS ###########
@@ -43,7 +43,7 @@ smoke_test:
     - docker/builder/tools/smoke-test.sh CI_TEST ${CI_COMMIT_SHA}
     - docker/builder/tools/check_job_states.sh mqdb_run_smoke
   rules:
-    - if: '$CI_TEST_VECTOR_DB != "true"'
+    - if: '$CI_TEST_IN_K8S == "false"'
 
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
@@ -69,7 +69,7 @@ stateless_test:
     - docker/builder/tools/stateless-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
   rules:
-    - if: '$CI_TEST_VECTOR_DB != "true"'
+    - if: '$CI_TEST_IN_K8S == "false"'
 
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
@@ -94,4 +94,4 @@ stateful_test:
     - docker/builder/tools/stateful-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
   rules:
-    - if: '$CI_TEST_VECTOR_DB != "true"'
+    - if: '$CI_TEST_IN_K8S == "false"'
