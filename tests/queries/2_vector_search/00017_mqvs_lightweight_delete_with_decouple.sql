@@ -12,7 +12,7 @@ INSERT INTO test_vector SELECT number + 200, [number + 200, number + 200, number
 
 SELECT sleep(3);
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 
 set allow_experimental_lightweight_delete=1;
 set mutations_sync=1;
@@ -20,12 +20,12 @@ set mutations_sync=1;
 delete from test_vector where id = 2;
 delete from test_vector where id = 10;
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector prewhere id > 5;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector prewhere id > 5 order by d limit 10;
 optimize table test_vector final;
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector prewhere id > 5;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector prewhere id > 5 order by d limit 10;
 
 SELECT '--- lightweight delete on decoupled part';
 delete from test_vector where id = 3;
@@ -33,7 +33,7 @@ delete from test_vector where id = 15;
 
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_vector';
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector prewhere id > 5;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector prewhere id > 5 order by d limit 10;
 
 drop table test_vector;

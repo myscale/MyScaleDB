@@ -24,27 +24,37 @@ SELECT 'explain syntax for sql w/o vector search';
 EXPLAIN SYNTAX SELECT id FROM test_vector WHERE toYear(date) >= 2000 AND label = 'animal';
 
 SELECT 'explain syntax for sql with vector search';
-EXPLAIN SYNTAX SELECT id, date, label, distance('topK=10')(data, [0,1.0,2.0]) as dist
+EXPLAIN SYNTAX SELECT id, date, label, distance(data, [0,1.0,2.0]) as dist
 FROM test_vector
-WHERE toYear(date) >= 2000 AND label = 'animal';
+WHERE toYear(date) >= 2000 AND label = 'animal'
+order by dist
+limit 10;
 
-SELECT id, date, label, distance('topK=10')(data, [0,1.0,2.0]) as dist
+SELECT id, date, label, distance(data, [0,1.0,2.0]) as dist
 FROM test_vector
-WHERE toYear(date) >= 2000 AND label = 'animal';
+WHERE toYear(date) >= 2000 AND label = 'animal'
+order by dist
+limit 10;
 
 SELECT 'explain syntax for sql with vector search and dist in where conditions';
-EXPLAIN SYNTAX SELECT id, date, label, distance('topK=10')(data, [0,1.0,2.0]) as dist
+EXPLAIN SYNTAX SELECT id, date, label, distance(data, [0,1.0,2.0]) as dist
 FROM test_vector
-WHERE toYear(date) >= 2000 AND label = 'animal' AND dist < 10;
+WHERE toYear(date) >= 2000 AND label = 'animal' AND dist < 10
+order by dist
+limit 10;
 
-SELECT id, date, label, distance('topK=10')(data, [0,1.0,2.0]) as dist
+SELECT id, date, label, distance(data, [0,1.0,2.0]) as dist
 FROM test_vector
-WHERE toYear(date) >= 2000 AND label = 'animal' AND dist < 10;
+WHERE toYear(date) >= 2000 AND label = 'animal' AND dist < 10
+order by dist
+limit 10;
 
 SELECT 'set optimize_move_to_prewhere_for_vector_search = 0';
 SET optimize_move_to_prewhere_for_vector_search=0;
-EXPLAIN SYNTAX SELECT id, date, label, distance('topK=10')(data, [0,1.0,2.0]) as dist
+EXPLAIN SYNTAX SELECT id, date, label, distance(data, [0,1.0,2.0]) as dist
 FROM test_vector
-WHERE toYear(date) >= 2000 AND label = 'animal';
+WHERE toYear(date) >= 2000 AND label = 'animal'
+order by dist
+limit 10;
 
 DROP TABLE test_vector;

@@ -9,6 +9,7 @@
 #include <QueryPipeline/SizeLimits.h>
 #include <DataTypes/getLeastSupertype.h>
 #include <Interpreters/IKeyValueEntity.h>
+#include <Interpreters/VectorScanDescription.h>
 
 #include <Common/Exception.h>
 #include <Parsers/IAST_fwd.h>
@@ -122,6 +123,8 @@ private:
       *     to the subquery will be added expression `expr(t2 columns)`.
       * It's possible to use name `expr(t2 columns)`.
       */
+    friend struct TreeRewriterResult;
+
     SizeLimits size_limits;
     const size_t default_max_bytes = 0;
     const bool join_use_nulls = false;
@@ -147,6 +150,9 @@ private:
     /// It's a subset of columns_from_joined_table
     /// Note: without corrected Nullability or type, see correctedColumnsAddedByJoin
     NamesAndTypesList columns_added_by_join;
+
+    /// vector scan functions from joined table
+    mutable std::optional<VectorScanDescription> vector_scan_description;
 
     /// Target type to convert key columns before join
     NameToTypeMap left_type_map;
@@ -353,6 +359,10 @@ public:
     bool isSpecialStorage() const { return !right_storage_name.empty() || right_storage_join || right_kv_storage; }
 
     std::shared_ptr<const IKeyValueEntity> getStorageKeyValue() { return right_kv_storage; }
+
+    /// Used for vector scan functions
+    std::optional<VectorScanDescription> getVecScanDescription() const;
+    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
 };
 
 }

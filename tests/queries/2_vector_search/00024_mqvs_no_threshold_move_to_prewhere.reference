@@ -9,10 +9,10 @@ SELECT
     id,
     date,
     label,
-    distance(\'topK=10\')(data, [0, 1., 2.]) AS dist
+    distance(data, [0, 1., 2.]) AS dist
 FROM test_vector
 PREWHERE (toYear(date) >= 2000) AND (label = \'animal\')
-ORDER BY distance_func ASC
+ORDER BY dist ASC
 LIMIT 10
 1001	2022-12-29	animal	2
 1000	2022-12-29	animal	5
@@ -29,11 +29,11 @@ SELECT
     id,
     date,
     label,
-    distance(\'topK=10\')(data, [0, 1., 2.]) AS dist
+    distance(data, [0, 1., 2.]) AS dist
 FROM test_vector
 PREWHERE (toYear(date) >= 2000) AND (label = \'animal\')
 WHERE ((toYear(date) >= 2000) AND (label = \'animal\')) AND (dist < 10)
-ORDER BY distance_func ASC
+ORDER BY dist ASC
 LIMIT 10
 1001	2022-12-29	animal	2
 1000	2022-12-29	animal	5
@@ -43,9 +43,9 @@ SELECT
     id,
     date,
     label,
-    distance(\'topK=10\')(data, [0, 1., 2.]) AS dist
+    distance(data, [0, 1., 2.]) AS dist
 FROM test_vector
 PREWHERE toYear(date) >= 2000
 WHERE (toYear(date) >= 2000) AND (label = \'animal\')
-ORDER BY distance_func ASC
+ORDER BY dist ASC
 LIMIT 10

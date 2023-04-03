@@ -48,3 +48,5 @@ test_keeper_three_nodes_two_alive
 test_keeper_two_nodes_cluster
 test_keeper_znode_time
 test_keeper_zookeeper_converter
+test_mqvs_load_vector_index_failed
+test_mqvs_cancel_building_vector_index

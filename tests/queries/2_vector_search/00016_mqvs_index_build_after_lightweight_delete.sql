@@ -13,6 +13,6 @@ ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 
 SELECT sleep(2);
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_vector;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 
 drop table test_vector;

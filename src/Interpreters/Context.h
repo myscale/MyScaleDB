@@ -19,6 +19,7 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/MergeTreeTransactionHolder.h>
+#include <Interpreters/VectorScanDescription.h>
 #include <IO/IResourceManager.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/IAST_fwd.h>
@@ -406,6 +407,10 @@ private:
     /// Temporary data for query execution accounting.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;
 
+    /// TODO: will be enhanced similar as scalars.
+    /// Used when vector scan func exists in right joined table
+    mutable std::optional<VectorScanDescription> vector_scan_description;
+
 public:
     /// Some counters for current query execution.
     /// Most of them are workarounds and should be removed in the future.
@@ -429,6 +434,8 @@ public:
     KitchenSink kitchen_sink;
 
     ParallelReplicasReadingCoordinatorPtr parallel_reading_coordinator;
+
+
 
 private:
     using SampleBlockCache = std::unordered_map<std::string, Block>;
@@ -1137,6 +1144,11 @@ public:
     };
 
     ParallelReplicasMode getParallelReplicasMode() const;
+
+    /// Used for vector scan functions
+    std::optional<VectorScanDescription> getVecScanDescription() const;
+    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    void resetVecScanDescription() const;
 
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;

@@ -143,11 +143,8 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
         // default value
         VectorIndex::Parameters vec_parameters = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
         int k = 50;
-        if (vec_parameters.contains("topK"))
-        {
-            k = VectorIndex::StoI(vec_parameters.at("topK"));
-            vec_parameters.erase("topK");
-        }
+        if (desc.topk > 0)
+            k = desc.topk;
 
         LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
 
@@ -161,11 +158,13 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
 
         const IColumn & query_data = query_col->getData();
 
+        LOG_DEBUG(log, "dim to {}", dim);
+
         std::vector<float> query_new_data;
         if (checkColumn<ColumnFloat32>(&query_data))
-            query_new_data = getQueryVector<Float32>(&query_data, false, dim);
+            query_new_data = getQueryVector<Float32>(&query_data, dim, false);
         else if (checkColumn<ColumnFloat64>(&query_data))
-            query_new_data = getQueryVector<Float64>(&query_data, false, dim);
+            query_new_data = getQueryVector<Float64>(&query_data, dim, false);
         else
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float32 or Float64 inside Array() in distance function");
 
@@ -254,11 +253,10 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     VectorIndex::Parameters vec_parameters = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
 
     int k = 50;
-    if (vec_parameters.contains("topK"))
-    {
-        k = VectorIndex::StoI(vec_parameters.at("topK"));
-        vec_parameters.erase("topK");
-    }
+    if (desc.topk > 0)
+        k = desc.topk;
+
+    LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
 
     String metrics_str = data_part->storage.getSettings()->vector_search_metric_type;
 

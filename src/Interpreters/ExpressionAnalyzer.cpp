@@ -203,7 +203,7 @@ ExpressionAnalyzer::ExpressionAnalyzer(
     /// will contain out-of-date information, which will lead to an error when the query is executed.
     analyzeAggregation(temp_actions);
 
-    analyzeVectorScan();
+    analyzeVectorScan(temp_actions);
 }
 
 NamesAndTypesList ExpressionAnalyzer::getColumnsAfterArrayJoin(ActionsDAGPtr & actions, const NamesAndTypesList & src_columns)
@@ -450,11 +450,32 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAGPtr & temp_actions)
 }
 
 /// put vector scan ops column name into aggregated_columns
-void ExpressionAnalyzer::analyzeVectorScan()
+void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
 {
-    auto temp_actions = std::make_shared<ActionsDAG>(sourceColumns());
-    // auto * select_query = query->as<ASTSelectQuery>();
-    has_vector_scan = makeVectorScanDescriptions(temp_actions);
+    if (!syntax->vector_scan_funcs.empty())
+        has_vector_scan = makeVectorScanDescriptions(temp_actions);
+    else if (auto vec_scan_desc = getContext()->getVecScanDescription())
+    {
+        /// vector search column exists in right joined table
+        vector_scan_descriptions.emplace_back(*vec_scan_desc);
+        has_vector_scan = true;
+    }
+    /// Fill in dim from metadata
+    if (has_vector_scan)
+    {
+        if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+        {
+            auto & vector_scan_desc = vector_scan_descriptions[0];
+            vector_scan_desc.search_column_dim
+                = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
+            if (vector_scan_desc.search_column_dim == 0)
+            {
+                LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
+            }
+            LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
+        }
+    }
 }
 
 void ExpressionAnalyzer::initGlobalSubqueriesAndExternalTables(bool do_global, bool is_explain)
@@ -713,8 +734,15 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         vector_scan_desc.search_column_name = arguments[0]->getColumnName();
 
         std::optional<NameAndTypePair> search_column_type = std::nullopt;
-        if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+        if (syntax->vector_from_right_table)
+        {
+            search_column_type = analyzedJoin().columnsFromJoinedTable().tryGetByName(vector_scan_desc.search_column_name);
+        }
+        else if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+        {
+            /// Cannot use sourceColumns() as vector column is not needed
             search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
+        }
 
         if (search_column_type)
         {
@@ -731,15 +759,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         if (!array_type)
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
                 "Search column {} should be Array type", vector_scan_desc.search_column_name);
-
-        vector_scan_desc.search_column_dim
-            = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
-        if (vector_scan_desc.search_column_dim == 0)
-        {
-            LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
-        }
-        LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
+        /// Not initialize dim here
 
         const auto * dag_node = actions->tryFindInOutputs(arguments[1]->getColumnName());
         if (!dag_node)
@@ -776,12 +796,20 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
             }
         }
 
+        /// top_k is get from limit N
+        vector_scan_desc.topk = syntax->limit_length;
+
         LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
-        vector_scan_descriptions.push_back(vector_scan_desc);
+        if (syntax->vector_from_right_table)
+        {
+            analyzedJoin().setVecScanDescription(vector_scan_desc);
+        }
+        else
+            vector_scan_descriptions.push_back(vector_scan_desc);
     }
 
-    return !vector_scan_funcs().empty();
+    return !vector_scan_descriptions.empty();
 }
 
 void ExpressionAnalyzer::makeWindowDescriptionFromAST(const Context & context_,
@@ -1227,6 +1255,14 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
     TableJoin & analyzed_join,
     SelectQueryOptions query_options)
 {
+    /// Add vector scan description to Context for subquery of joined table
+    bool has_vector_scan = false;
+    if (auto vec_scan_desc = analyzed_join.getVecScanDescription())
+    {
+        has_vector_scan = true;
+        context->setVecScanDescription(*vec_scan_desc);
+    }
+
     /// Actions which need to be calculated on joined block.
     auto joined_block_actions = createJoinedBlockActions(context, analyzed_join);
     NamesWithAliases required_columns_with_aliases = analyzed_join.getRequiredColumns(
@@ -1270,6 +1306,10 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
     auto joined_actions_step = std::make_unique<ExpressionStep>(joined_plan->getCurrentDataStream(), std::move(joined_block_actions));
     joined_actions_step->setStepDescription("Joined actions");
     joined_plan->addStep(std::move(joined_actions_step));
+
+    /// Reset vector scan description
+    if (has_vector_scan)
+        context->resetVecScanDescription();
 
     return joined_plan;
 }

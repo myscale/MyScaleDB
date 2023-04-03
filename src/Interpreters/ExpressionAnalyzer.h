@@ -214,7 +214,7 @@ protected:
     void analyzeAggregation(ActionsDAGPtr & temp_actions);
     void makeAggregateDescriptions(ActionsDAGPtr & actions, AggregateDescriptions & descriptions);
 
-    void analyzeVectorScan();
+    void analyzeVectorScan(ActionsDAGPtr & temp_actions);
     bool makeVectorScanDescriptions(ActionsDAGPtr & actions);
 
     const ASTSelectQuery * getSelectQuery() const;

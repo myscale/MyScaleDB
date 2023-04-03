@@ -4091,6 +4091,21 @@ ReadSettings Context::getReadSettings() const
     return res;
 }
 
+std::optional<VectorScanDescription> Context::getVecScanDescription() const
+{
+    return vector_scan_description;
+}
+
+void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+{
+    vector_scan_description = vec_scan_desc;
+}
+
+void Context::resetVecScanDescription() const
+{
+    vector_scan_description.reset();
+}
+
 WriteSettings Context::getWriteSettings() const
 {
     WriteSettings res;

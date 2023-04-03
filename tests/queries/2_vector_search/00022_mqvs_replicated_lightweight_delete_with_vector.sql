@@ -14,7 +14,7 @@ delete from test_replicated_vector where id = 2;
 
 SELECT sleep(2);
 
-SELECT id, vector, distance('topK=10')(vector, [0.1, 0.1, 0.1]) FROM test_replicated_vector;
+SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
 
 SELECT 'Test build vector index for new inserted part after lightweight delete';
 INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(2100,1001);

@@ -129,6 +129,7 @@ void TableJoin::resetCollected()
     renames.clear();
     left_type_map.clear();
     right_type_map.clear();
+    vector_scan_description.reset();
 }
 
 void TableJoin::addUsingKey(const ASTPtr & ast)
@@ -740,6 +741,16 @@ void TableJoin::resetToCross()
 {
     this->resetKeys();
     this->table_join.kind = JoinKind::Cross;
+}
+
+std::optional<VectorScanDescription> TableJoin::getVecScanDescription() const
+{
+    return vector_scan_description;
+}
+
+void TableJoin::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+{
+    vector_scan_description = vec_scan_desc;
 }
 
 bool TableJoin::allowParallelHashJoin() const
