@@ -1097,6 +1097,8 @@ public:
     void waitForOutdatedPartsToBeLoaded() const;
     bool canUsePolymorphicParts() const;
 
+    virtual bool isShutdown() const { return false; }
+
 protected:
     friend class IMergeTreeDataPart;
     friend class MergeTreeDataMergerMutator;

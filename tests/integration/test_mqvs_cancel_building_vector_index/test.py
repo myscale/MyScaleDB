@@ -67,4 +67,4 @@ def test_drop_table_release_index_cache(started_cluster):
     assert instance.query("select status from system.vector_indices where database = currentDatabase() and table = 'test_drop_table_release_cache'") == "Built\n"
     instance.query("DROP TABLE test_drop_table_release_cache SYNC")
 
-    assert instance.contains_in_log("num of cache items after forceExpire 0")
+    assert instance.contains_in_log("Num of cache items after forceExpire 0")

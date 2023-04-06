@@ -11,14 +11,14 @@ extern const int LOGICAL_ERROR;
 namespace VectorIndex
 {
 
-CacheManager::CacheManager(int): log(&Poco::Logger::get("CacheManager"))
+CacheManager::CacheManager(int) : log(&Poco::Logger::get("CacheManager"))
 {
     while (!m)
     {
         sleep(100);
     }
 
-    cache_ = std::make_unique<VectorIndexCache>(cache_size_in_bytes);
+    cache = std::make_unique<VectorIndexCache>(cache_size_in_bytes);
 }
 
 CacheManager * CacheManager::getInstance()
@@ -28,79 +28,47 @@ CacheManager * CacheManager::getInstance()
     return &cache_mgr;
 }
 
-IndexWithMetaPtr CacheManager::get(const CacheKey& cache_key)
+IndexWithMetaHolderPtr CacheManager::get(const CacheKey & cache_key)
 {
-    if (!cache_)
+    if (!cache)
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
-    IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
-    if (iam_ptr)
-    {
-        return iam_ptr->index_ptr;
-    }
-    else
-    {
-        return nullptr;
-    }
+
+    return cache->get(cache_key);
 }
 
-void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
+void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
 {
-    if (!cache_)
+    if (!cache)
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
     LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
 
-    IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
-
-    cache_->set(cache_key, iam_ptr);
+    cache->getOrSet(cache_key, [&]() { return index; });
 }
 
 size_t CacheManager::countItem() const
 {
-    return cache_->count();
+    return cache->size();
 }
 
-void CacheManager::forceExpire(const CacheKey& cache_key)
+void CacheManager::forceExpire(const CacheKey & cache_key)
 {
     LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
-    return cache_->remove(cache_key);
+    return cache->tryRemove(cache_key);
 }
 
-void CacheManager::startLoading(const CacheKey& cache_key)
+IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, std::function<IndexWithMetaPtr()> load_func)
 {
-    if (!cache_)
+    if (!cache)
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "load: cache not allocated");
     }
     LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
-    std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
 
-    std::shared_ptr<IndexAndMutex> im_ptr = std::make_shared<IndexAndMutex>(nullptr, new_mutex);
-
-    cache_->getOrSet(cache_key, [&](){
-        return im_ptr;
-    });
-}
-
-std::shared_ptr<std::mutex> CacheManager::getMutex(const CacheKey& cache_key)
-{
-    if (!cache_)
-    {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "getMutex: cache not allocated");
-    }
-
-    IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
-    if (iam_ptr)
-    {
-        return iam_ptr->mu_ptr;
-    }
-    else
-    {
-        return nullptr;
-    }
+    return cache->getOrSet(cache_key, load_func);
 }
 
 void CacheManager::setCacheSize(size_t size_in_bytes)
@@ -113,16 +81,13 @@ std::list<std::pair<CacheKey, Parameters>> CacheManager::getAllItems()
 {
     std::list<std::pair<CacheKey, Parameters>> result;
 
-    std::list<std::pair<CacheKey, std::shared_ptr<IndexAndMutex>>> cache_list = cache_->getCacheList();
+    std::list<std::pair<CacheKey, std::shared_ptr<IndexWithMeta>>> cache_list = cache->getCacheList();
 
-    for (auto im_ptr : cache_list)
+    for (auto cache_item : cache_list)
     {
         // key   --- string
-        // value --- std::shared_ptr<IndexAndMutex>
-        if (im_ptr.second->index_ptr)
-        {
-            result.emplace_back(std::make_pair(im_ptr.first, im_ptr.second->index_ptr->des));
-        }
+        // value --- std::shared_ptr<IndexWithMeta>
+        result.emplace_back(std::make_pair(cache_item.first, cache_item.second->des));
     }
     return result;
 }

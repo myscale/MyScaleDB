@@ -1347,7 +1347,7 @@ void IMergeTreeDataPart::loadColumns(bool require)
     setColumns(loaded_columns, infos);
 }
 
-void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
+void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple) const
 {
     /// No need to check metadata of table, because for drop index, the metadata has erased it.
     /// Remove all the files which end with .vidx
@@ -1356,7 +1356,7 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
     {
         String file_name = it->name();
 
-        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX) || (skip_decouple && startsWith(file_name, "merged-")))
             continue;
 
         IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());

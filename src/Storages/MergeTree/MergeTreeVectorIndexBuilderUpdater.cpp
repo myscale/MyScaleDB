@@ -876,9 +876,24 @@ void MergeTreeVectorIndexBuilderUpdater::undoBuildVectorIndexForOnePart(
     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
     {
         String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column);
+        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column, true);
         VectorIndex::SegmentId segment_id(part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column, 0);
         VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+    }
+
+    const DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+    }
+    auto disk = part_storage->getDisk();
+    String part_name_prefix = part->info.getPartNameWithoutMutation();
+    String vector_tmp_relative_path = data.getRelativeDataPath() + "vector_tmp_" + part_name_prefix + "/";
+    String vector_index_ready_file_name = DB::toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
+    if (disk->exists(vector_tmp_relative_path) && !disk->exists(vector_tmp_relative_path + "/" + vector_index_ready_file_name))
+    {
+        disk->removeRecursive(vector_tmp_relative_path);
     }
 }
 

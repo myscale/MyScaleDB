@@ -362,8 +362,9 @@ public:
         vector_indexed.insert(index_name);
     }
 
-    /// remove specified vector index from part, both disk and metadata.
-    void removeVectorIndex(const String & index_name, const String & col_name) const;
+    /// Remove specified vector index from part, both disk and metadata.
+    /// If skip_decouple, skip the vector index of old part in decouple part.
+    void removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple = false) const;
 
     void setBuildError() const { vector_index_build_error = true; }
 

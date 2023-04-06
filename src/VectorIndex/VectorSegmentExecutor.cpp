@@ -177,12 +177,13 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
     }
     CacheKey cache_key = segment_id.getCacheKey();
     CacheManager * mgr = CacheManager::getInstance();
-    IndexWithMetaPtr index = mgr->get(cache_key);
-    if (index != nullptr)
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (index_holder)
     {
-        index->row_ids_map = this->row_ids_map;
-        index->inverted_row_ids_map = this->inverted_row_ids_map;
-        index->inverted_row_sources_map = this->inverted_row_sources_map;
+        IndexWithMeta & index = index_holder->value();
+        index.row_ids_map = this->row_ids_map;
+        index.inverted_row_ids_map = this->inverted_row_ids_map;
+        index.inverted_row_sources_map = this->inverted_row_sources_map;
     }
     /// not handle empty cache case here.
 }
@@ -423,36 +424,16 @@ Status VectorSegmentExecutor::load()
     LOG_DEBUG(log, "segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
     LOG_DEBUG(log, "cache_key_str = {}", cache_key_str);
 
-    IndexWithMetaPtr new_index = mgr->get(cache_key);
-    if (new_index == nullptr)
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (index_holder == nullptr)
     {
         LOG_DEBUG(log, "Miss cache, cache_key_str = {}", cache_key_str);
-        /// We don't want many execution engine reading disk and preserving multiple copies of index, so we use a unique lock to
-        /// ensure that only one execution engine may read from disk at any time.
+        /// We don't want multiple execution engines loading index concurrently, so we use getOrSet method of LRUResourceCache
+        /// to ensure that only one execution engine may read from disk at any time.
         LOG_DEBUG(log, "Num of item before cache {}", mgr->countItem());
-        mgr->startLoading(cache_key);
-        std::shared_ptr<std::mutex> this_segment_mutex = mgr->getMutex(cache_key);
-        if (this_segment_mutex != nullptr)
-        {
-            LOG_TRACE(log, "entering critical area");
-            const std::lock_guard<std::mutex> lock(*this_segment_mutex);
-            LOG_TRACE(log, "acquired lock");
-            /// when it acquires the lock, it has to double check if the index was cached by its previous execution engine
-            IndexWithMetaPtr new_index = mgr->get(cache_key);
-            if (new_index != nullptr)
-            {
-                index = new_index->index;
-                total_vec = new_index->total_vec;
-                op_points = new_index->op_points;
-                delete_bitmap = new_index->getDeleteBitmap();
-                des = new_index->des;
-                if (auto_tune && getOps().getCode() != 0)
-                {
-                    LOG_WARNING(log, "Index not autotuned");
-                }
-                return Status();
-            }
 
+        auto load_func = [&]() -> IndexWithMetaPtr
+        {
             DiskIOReader reader;
             /// TODO this is really funky... have to change it later
             String ready_file_path = segment_id.getVectorReadyFilePath();
@@ -464,19 +445,19 @@ Status VectorSegmentExecutor::load()
             if (original_binary_sizes.find(index_name) == original_binary_sizes.end())
             {
                 LOG_DEBUG(log, "Unable to parse the original index size {}", ready_file_path);
-                return Status(5, "unable to parse the original index size " + ready_file_path);
+                throw IndexException("Unable to parse the original index size " + ready_file_path, 5);
             }
             int64_t original_binary_size = original_binary_sizes.find(index_name)->second;
             if (original_binary_size < 0)
             {
-                return Status(5, "unable to parse the original index size " + ready_file_path);
+                throw IndexException("Unable to parse the original index size " + ready_file_path, 5);
             }
             des = params.at(index_name);
 
             if (!readBitMap())
             {
                 LOG_ERROR(log, "Failed to read vector index bitmap: {}", segment_id.getFullPath());
-                return Status(5, "corrupted data: " + segment_id.getFullPath());
+                throw IndexException("Corrupted data: " + segment_id.getFullPath(), 5);
             }
 
             if (des.contains("metric_type"))
@@ -494,7 +475,7 @@ Status VectorSegmentExecutor::load()
             catch (const IndexException & e)
             {
                 LOG_ERROR(log, "failed to load index: {}", e.message());
-                return Status(e.code(), e.message());
+                throw;
             }
             index->setTrained();
             des.erase("type");
@@ -510,33 +491,67 @@ Status VectorSegmentExecutor::load()
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();
             }
-            catch(const DB::Exception & e)
+            catch (const DB::Exception & e)
             {
                 LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
-                return Status(e.code(), e.message());
+                throw IndexException(e.message(), e.code());
             }
 
-            return cache();
-        }
-        else
+            if (index == nullptr)
+            {
+                LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
+                throw IndexException(segment_id.getCacheKey().toString() + " index is null, not caching", 3);
+            }
+            if (!des.contains("type"))
+            {
+                des.insert(std::make_pair("type", VectorIndexFactory::typeToString(type)));
+            }
+
+            return std::make_shared<IndexWithMeta>(
+                index, total_vec, op_points, delete_bitmap, des, row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
+        };
+
+        try
         {
-            return Status(4, "can't lock this segment, aborting: " + segment_id.getCacheKey().toString());
+            IndexWithMetaHolderPtr index_holder_ = mgr->load(cache_key, load_func);
+            LOG_DEBUG(log, "Num of item after cache {}", mgr->countItem());
+            if (index_holder_)
+            {
+                IndexWithMeta & new_index = index_holder_->value();
+                index = new_index.index;
+                total_vec = new_index.total_vec;
+                op_points = new_index.op_points;
+                delete_bitmap = new_index.getDeleteBitmap();
+                des = new_index.des;
+                if (auto_tune && getOps().getCode() != 0)
+                {
+                    LOG_WARNING(log, "Index not autotuned");
+                }
+                return Status();
+            }
         }
+        catch (const IndexException & e)
+        {
+            return Status(e.statusCode(), e.statusMessage());
+        }
+
+        return Status(2, "Load failed");
     }
     else
     {
         LOG_DEBUG(log, "Hit cache, cache_key_str = {}", cache_key_str);
-        index = new_index->index;
-        total_vec = new_index->total_vec;
-        op_points = new_index->op_points;
-        delete_bitmap = new_index->getDeleteBitmap();
+        IndexWithMeta & new_index = index_holder->value();
+        index = new_index.index;
+        total_vec = new_index.total_vec;
+        op_points = new_index.op_points;
+        delete_bitmap = new_index.getDeleteBitmap();
 
-        des = new_index->des;
-        if (!new_index->row_ids_map->empty())
+        des = new_index.des;
+        if (!new_index.row_ids_map->empty())
         {
-            row_ids_map = new_index->row_ids_map;
-            inverted_row_ids_map = new_index->inverted_row_ids_map;
-            inverted_row_sources_map = new_index->inverted_row_sources_map;
+            row_ids_map = new_index.row_ids_map;
+            inverted_row_ids_map = new_index.inverted_row_ids_map;
+            inverted_row_sources_map = new_index.inverted_row_sources_map;
         }
         else
         {
@@ -988,9 +1003,9 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_
     CacheManager * mgr = CacheManager::getInstance();
     CacheKey cache_key = segment_id.getCacheKey();
 
-    IndexWithMetaPtr cache_index = mgr->get(cache_key);
-    if (cache_index)
-        cache_index->setDeleteBitmap(delete_bitmap);
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (index_holder)
+        index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
 void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& deleted_row_ids)
@@ -1047,9 +1062,9 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
     CacheManager * mgr = CacheManager::getInstance();
     CacheKey cache_key = segment_id.getCacheKey();
 
-    IndexWithMetaPtr cache_index = mgr->get(cache_key);
-    if (cache_index)
-        cache_index->setDeleteBitmap(delete_bitmap);
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (index_holder)
+        index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
 

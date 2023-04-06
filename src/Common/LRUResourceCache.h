@@ -9,6 +9,10 @@
 #include <unordered_set>
 #include <Common/logger_useful.h>
 
+namespace VectorIndex
+{
+class VectorIndexCache;
+}
 namespace DB
 {
 template <typename T>
@@ -206,6 +210,7 @@ private:
     };
 
     friend struct InsertTokenHolder;
+    friend class VectorIndex::VectorIndexCache;
     InsertTokenById insert_tokens;
     WeightFunction weight_function;
     ReleaseFunction release_function;

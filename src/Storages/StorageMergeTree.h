@@ -57,6 +57,8 @@ public:
 
     std::string getName() const override { return merging_params.getModeName() + "MergeTree"; }
 
+    bool isShutdown() const override { return shutdown_called.load(); }
+
     bool supportsParallelInsert() const override { return true; }
 
     bool supportsIndexForIn() const override { return true; }

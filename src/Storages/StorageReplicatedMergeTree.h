@@ -121,6 +121,8 @@ public:
 
     std::string getName() const override { return "Replicated" + merging_params.getModeName() + "MergeTree"; }
 
+    bool isShutdown() const override { return shutdown_called.load(); }
+
     bool supportsParallelInsert() const override { return true; }
     bool supportsReplication() const override { return true; }
     bool supportsDeduplication() const override { return true; }

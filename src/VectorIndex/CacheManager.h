@@ -5,7 +5,7 @@
 #include <list>
 #include <functional>
 
-#include <Common/CacheBase.h>
+#include <Common/LRUResourceCache.h>
 
 #include <VectorIndex/VectorIndex.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
@@ -28,52 +28,47 @@ namespace VectorIndex
 static bool m = false;
 static size_t cache_size_in_bytes = 0;
 
-struct IndexAndMutex
-{
-    IndexWithMetaPtr index_ptr;
-    std::shared_ptr<std::mutex> mu_ptr;
-
-    IndexAndMutex(IndexWithMetaPtr index_ptr_, std::shared_ptr<std::mutex> mu_ptr_) : index_ptr(index_ptr_), mu_ptr(mu_ptr_) { }
-};
-using IndexAndMutexPtr = std::shared_ptr<IndexAndMutex>;
-
-class IndexAndMutexWeightFunc
+class IndexWithMetaWeightFunc
 {
 public:
-    size_t operator()(const IndexAndMutex & iam) const
+    size_t operator()(const IndexWithMeta & index_meta) const
     {
-        if (iam.index_ptr == nullptr)
-        {
-            return 0;
-        }
-
-        return iam.index_ptr->index->sizeInBytes();
+        return index_meta.index->sizeInBytes();
     }
 };
 
-class VectorIndexCache : public DB::CacheBase<CacheKey, IndexAndMutex, std::hash<CacheKey>, IndexAndMutexWeightFunc>
+class IndexWithMetaReleaseFunction
 {
 public:
-    using Base = DB::CacheBase<CacheKey, IndexAndMutex, std::hash<CacheKey>, IndexAndMutexWeightFunc>;
+    void operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr)
+    {
+        if (index_meta_ptr)
+            index_meta_ptr.reset();
+    }
+};
 
-    explicit VectorIndexCache(size_t max_size) : Base("LRU", max_size) { }
+using VectorIndexCacheType
+    = DB::LRUResourceCache<CacheKey, IndexWithMeta, IndexWithMetaWeightFunc, IndexWithMetaReleaseFunction, std::hash<CacheKey>>;
+using IndexWithMetaHolderPtr = VectorIndexCacheType::MappedHolderPtr;
 
-    std::list<std::pair<CacheKey, IndexAndMutexPtr>> getCacheList()
+class VectorIndexCache
+    : public DB::LRUResourceCache<CacheKey, IndexWithMeta, IndexWithMetaWeightFunc, IndexWithMetaReleaseFunction, std::hash<CacheKey>>
+{
+public:
+    explicit VectorIndexCache(size_t max_size) : VectorIndexCacheType(max_size) { }
+
+    std::list<std::pair<CacheKey, IndexWithMetaPtr>> getCacheList()
     {
         std::lock_guard lock(mutex);
 
-        std::list<std::pair<CacheKey, IndexAndMutexPtr>> l;
+        std::list<std::pair<CacheKey, IndexWithMetaPtr>> res;
 
-        auto cache = dynamic_cast<LRUPolicy *>(cache_policy.get());
-        if (cache)
+        for (auto it = cells.begin(); it != cells.cend(); ++it)
         {
-            for (auto it = cache->cells.begin(); it != cache->cells.cend(); ++it)
-            {
-                l.push_back(std::make_pair(it->first, it->second.value));
-            }
+            res.push_back(std::make_pair(it->first, it->second.value));
         }
 
-        return l;
+        return res;
     }
 };
 
@@ -88,22 +83,19 @@ private:
     explicit CacheManager(int);
 
 public:
-    void put(const CacheKey& cache_key, IndexWithMetaPtr index);
-    IndexWithMetaPtr get(const CacheKey& cache_key);
+    void put(const CacheKey & cache_key, IndexWithMetaPtr index);
+    IndexWithMetaHolderPtr get(const CacheKey & cache_key);
     size_t countItem() const;
-    void forceExpire(const CacheKey& cache_key);
-    void startLoading(const CacheKey& cache_key);
-    std::shared_ptr<std::mutex> getMutex(const CacheKey& cache_key);
+    void forceExpire(const CacheKey & cache_key);
+    IndexWithMetaHolderPtr load(const CacheKey & cache_key, std::function<IndexWithMetaPtr()> load_func);
     std::list<std::pair<CacheKey, Parameters>> getAllItems();
-    void updateKey(const CacheKey& old_key, const CacheKey& new_key);
 
     static CacheManager * getInstance();
     static void setCacheSize(size_t size_in_bytes);
 
 protected:
-    mutable std::unique_ptr<VectorIndexCache> cache_;
-    Poco::Logger *log;
-
+    mutable std::unique_ptr<VectorIndexCache> cache;
+    Poco::Logger * log;
 };
 
 }

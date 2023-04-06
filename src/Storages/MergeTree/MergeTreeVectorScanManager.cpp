@@ -28,6 +28,11 @@
 namespace DB
 {
 
+namespace ErrorCodes
+{
+    extern const int QUERY_WAS_CANCELLED;
+}
+
 template <typename FloatType>
 std::vector<float> getQueryVector(const IColumn * query_vector_column, int dim, bool is_batch)
 {
@@ -357,6 +362,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
         std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
         bool retry = false;
         bool brute_force = false;
+        bool is_shutdown = false;
 
         for (VectorIndex::SegmentId & segment_id : segment_ids)
         {
@@ -366,19 +372,36 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 segment_id,
                 vec_parameters,
                 dim);
-            VectorIndex::Status status = vec_executor->load();
-            LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
-            LOG_DEBUG(log, "Load vector index: {}", status.getCode());
-
-            if (!status.fine())
+            is_shutdown = data_part->storage.isShutdown();
+            if (!is_shutdown)
             {
-                /// case of merged vector indices had been removed, we need to use new vector index files
-                LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
-                retry = true;
-                brute_force = true;
+                VectorIndex::Status status = vec_executor->load();
+                LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
+                LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+
+                if (!status.fine())
+                {
+                    /// case of merged vector indices had been removed, we need to use new vector index files
+                    LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
+                    retry = true;
+                    brute_force = true;
+                    break;
+                }
+            }
+            else
+            {
                 break;
             }
             vec_executors.emplace_back(vec_executor);
+        }
+
+        if (!is_shutdown && data_part->storage.isShutdown())
+        {
+            retry = false;
+            for (VectorIndex::SegmentId & segment_id : segment_ids)
+            {
+                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+            }
         }
 
         if (retry)
@@ -399,20 +422,35 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                     segment_ids[0],
                     vec_parameters,
                     dim);
-                VectorIndex::Status status = vec_executor->load();
-                LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
-                LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+                is_shutdown = data_part->storage.isShutdown();
+                if (!is_shutdown)
+                {
+                    VectorIndex::Status status = vec_executor->load();
+                    LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
+                    LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
-                if (!status.fine())
-                {
-                    LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
-                }
-                else
-                {
-                    vec_executors.emplace_back(vec_executor);
-                    brute_force = false;
+                    if (!status.fine())
+                    {
+                        LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
+                    }
+                    else
+                    {
+                        vec_executors.emplace_back(vec_executor);
+                        brute_force = false;
+                    }
                 }
             }
+        }
+
+        if (is_shutdown || data_part->storage.isShutdown())
+        {
+            if (retry && !is_shutdown && segment_ids.size() == 1)
+            {
+                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_ids[0].getCacheKey());
+            }
+            LOG_WARNING(log, "Query using vector index was canceled due to a concurrent detach or drop table or database query.");
+            context->getQueryContext()->killCurrentQuery();
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
         }
 
         if (brute_force)
