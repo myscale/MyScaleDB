@@ -85,6 +85,8 @@ public:
 
     bool trainStatus() { return trained; }
 
+    void setIndexSize(size_t index_size_) { index_size = index_size_; }
+
     size_t sizeInBytes() const { return index_size; }
 
     /// If possible, get uncompressed vectors stored in memory

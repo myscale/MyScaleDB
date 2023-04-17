@@ -466,6 +466,7 @@ Status VectorSegmentExecutor::load()
             }
             Parameters place_holder;
             index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
+            index->setIndexSize(original_binary_size);
             LOG_DEBUG(log, "Start loading index: total_vec: {}", total_vec);
             CompositeIndexReader index_reader(segment_id, original_binary_size);
             try
