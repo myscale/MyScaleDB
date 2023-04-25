@@ -2334,7 +2334,7 @@ void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
     }
 }
 
-void MergeTreeData::regularClearCachedIndex(const DataPartsVector & parts)
+void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
     //    for (const auto & part : parts)

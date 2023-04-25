@@ -1,2 +1,0 @@
-add_executable(test_exe EXCLUDE_FROM_ALL testVectorSegmentExecutor.cpp)
-target_link_libraries(test_exe PUBLIC VectorIndex)

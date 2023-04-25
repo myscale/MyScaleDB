@@ -59,7 +59,7 @@ bool ReplicatedVectorIndexTask::executeStep()
         {
             try
             {
-                build_status = builder.buildVectorIndex(metadata_snapshot, source_part->name, false, entry.slow_mode);
+                build_status = builder.buildVectorIndex(metadata_snapshot, source_part->name, entry.slow_mode);
                 storage.updateVectorIndexBuildStatus(entry.source_parts[0], true, "");
 
                 /// For memory limit failure, try to run build 3 times.

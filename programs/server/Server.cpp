@@ -100,10 +100,10 @@
 #include <filesystem>
 #include <unordered_set>
 
+#include <VectorIndex/VectorSegmentExecutor.h>
+
 #include "config.h"
 #include "config_version.h"
-#include <VectorIndex/Autotuner.h>
-#include <VectorIndex/VectorSegmentExecutor.h>
 
 
 #if defined(OS_LINUX)
@@ -694,7 +694,7 @@ std::string getHexDigest(const std::string & content)
 {
     std::string salt_content = content + STRING_SUFFIX_FOR_DIGEST;
     unsigned char digest[33];
-    SHA256((unsigned char *)salt_content.c_str(), salt_content.size(), digest);
+    SHA256(reinterpret_cast<const uint8_t *>(salt_content.c_str()), salt_content.size(), digest);
     int len = 32;
     std::string result;
     result.resize(2 * len);
@@ -783,9 +783,9 @@ bool checkLicenseSign(const std::string & public_key_path, const std::string & c
         LOG_DEBUG(log, "Read license public key failed.");
         return false;
     }
-    char digest[33];
-    SHA256((unsigned char *)content.c_str(), content.size(), (unsigned char *)digest);
-    int result = RSA_verify(NID_sha256, (unsigned char *)digest, 32, (unsigned char *)sign.c_str(), sign.size(), rsa_public_key);
+    uint8_t digest[33];
+    SHA256(reinterpret_cast<const uint8_t *>(content.c_str()), content.size(), digest);
+    int result = RSA_verify(NID_sha256, digest, 32, reinterpret_cast<const uint8_t *>(sign.c_str()), sign.size(), rsa_public_key);
     RSA_free(rsa_public_key);
     return result == 1;
 }
@@ -881,7 +881,7 @@ void checkLicenseImpl(
         }
 
         std::string cpu_count_xml = license_doc->getNodeByPath(CPU_COUNT_PATH_XML)->innerText();
-        if (cpu_count <= std::stoi(cpu_count_xml))
+        if (cpu_count <= std::stoul(cpu_count_xml))
         {
             LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, cpu_count_xml);
         }
@@ -1556,6 +1556,12 @@ try
         fs::create_directories(user_scripts_path);
     }
 
+    {
+        std::string vector_index_cache_path = config().getString("vector_index_cache_path", path / "vector_index_cache/");
+        global_context->setVectorIndexCachePath(vector_index_cache_path);
+        fs::create_directories(vector_index_cache_path);
+    }
+
     /// top_level_domains_lists
     {
         const std::string & top_level_domains_path = config().getString("top_level_domains_path", path / "top_level_domains/");
@@ -2097,13 +2103,6 @@ try
     const size_t vector_index_cache_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_ratio);
     LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", vector_index_cache_max_size_in_bytes);
     VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size_in_bytes);
-
-    size_t max_permitted = global_context->getConfigRef().getUInt64("serialized_index_segment_max_byte", 500000000);
-    LOG_INFO(log, "max size of serializaed segment of vector index set to {}", max_permitted);
-    VectorIndex::VectorSegmentExecutor::setSerializeSegmentSize(max_permitted);
-    ///To turn on autotuner, turn it on here.
-//        VectorIndex::Autotuner* tuner = VectorIndex::Autotuner::getInstance();
-//        tuner->start();
 
     LOG_INFO(log, "Loading metadata from {}", path_str);
 

@@ -490,7 +490,7 @@ public:
 
     static inline constexpr auto TXN_VERSION_METADATA_FILE_NAME = "txn_version.txt";
 
-    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx";
+    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx2";
 
     /// One of part files which is used to check how many references (I'd like
     /// to say hardlinks, but it will confuse even more) we have for the part

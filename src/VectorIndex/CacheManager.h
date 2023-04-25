@@ -1,24 +1,20 @@
 #pragma once
 
+#include <functional>
+#include <list>
 #include <memory>
 #include <string>
-#include <list>
-#include <functional>
 
 #include <Common/LRUResourceCache.h>
 
-#include <VectorIndex/VectorIndex.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 
 namespace std
 {
-template<>
+template <>
 struct hash<VectorIndex::CacheKey>
 {
-    std::size_t operator()(VectorIndex::CacheKey const& key) const noexcept
-    {
-        return std::hash<std::string>{}(key.toString());
-    }
+    std::size_t operator()(VectorIndex::CacheKey const & key) const noexcept { return std::hash<std::string>{}(key.toString()); }
 };
 }
 
@@ -33,7 +29,7 @@ class IndexWithMetaWeightFunc
 public:
     size_t operator()(const IndexWithMeta & index_meta) const
     {
-        return index_meta.index->sizeInBytes();
+        return index_meta.index->getResourceUsage().memory_usage_bytes;
     }
 };
 
@@ -88,7 +84,7 @@ public:
     size_t countItem() const;
     void forceExpire(const CacheKey & cache_key);
     IndexWithMetaHolderPtr load(const CacheKey & cache_key, std::function<IndexWithMetaPtr()> load_func);
-    std::list<std::pair<CacheKey, Parameters>> getAllItems();
+    std::list<std::pair<CacheKey, Search::Parameters>> getAllItems();
 
     static CacheManager * getInstance();
     static void setCacheSize(size_t size_in_bytes);

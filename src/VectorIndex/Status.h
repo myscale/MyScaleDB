@@ -6,7 +6,7 @@ struct Status
 {
     Status() : code(0) { }
     Status(int c) : code(c) { }
-    Status(int c, const String& msg) : code(c), message(std::move(msg)) { }
+    Status(int c, const String & msg) : code(c), message(std::move(msg)) { }
 
     bool fine() { return code == 0; }
 
@@ -14,7 +14,7 @@ struct Status
 
     void setCode(int error) { code = error; }
 
-    void setMessage(const String& s) { message = s; }
+    void setMessage(const String & s) { message = s; }
 
     String getMessage() { return message; }
 

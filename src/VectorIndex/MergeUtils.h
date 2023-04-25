@@ -1,54 +1,80 @@
 #pragma once
-#pragma GCC diagnostic ignored "-Wunused-function"
+
+#include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <filesystem>
-#include <boost/algorithm/string.hpp>
-#include <Disks/IDisk.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/IMergeTreeDataPart.h>
-#include <VectorIndex/VectorIndexCommon.h>
-#include <VectorIndex/SegmentId.h>
 
+#include <boost/algorithm/string.hpp>
+
+#include <Disks/IDisk.h>
+#include <Storages/MergeTree/IMergeTreeDataPart.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Common/logger_useful.h>
 
+#include <VectorIndex/SegmentId.h>
+#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
+
+#pragma GCC diagnostic ignored "-Wunused-function"
 namespace VectorIndex
 {
 
 /// used to rename and move vector indices files of one old data part
 /// to new data part's path
-static inline void renameVectorIndexFiles(const String & part_id, const String & part_name, const String & old_path, const String & new_path)
+static inline void 
+renameVectorIndexFiles(const String & part_id, const String & part_name, const String & old_path, const String & new_path)
 {
     /// first get all vector indices related files
     String ext(VECTOR_INDEX_FILE_SUFFIX);
-    for (auto &p : fs::recursive_directory_iterator(old_path))
+    for (auto & p : fs::recursive_directory_iterator(old_path))
     {
         if (p.path().extension() == ext)
         {
             String new_file_path = new_path + "merged-" + part_id + "-" + part_name + "-" + DB::fileName(p.path());
             fs::rename(p.path(), new_file_path);
         }
-    }   
+    }
 }
 
-static std::vector<SegmentId> getAllSegmentIds(const String & data_path, const DB::MergeTreeDataPartPtr & data_part, const String & index_name, const String & index_column)
+static std::vector<SegmentId> getAllSegmentIds(
+    const String & data_path, const DB::MergeTreeDataPartPtr & data_part, const String & index_name, const String & index_column)
 {
     std::vector<SegmentId> segment_ids;
 
     if (!data_part)
         return segment_ids;
 
+    const DB::DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DB::DataPartStorageOnDiskBase *>(data_part->getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        return segment_ids;
+    }
+    auto volume = getVolumeFromPartStorage(*part_storage);
+
     /// TODO: Should we add a new function getAllOldSegementIds() to get list of old parts, no matter there is built vector index or not.
     /// decide whether we have merged old data parts‘ index files
     if (data_part->containRowIdsMaps())
     {
-        auto log = &Poco::Logger::get("getAllSegmentIds");
         auto old_parts = data_part->getMergedSourceParts();
 
         for (const auto & old_part : old_parts)
         {
-            LOG_DEBUG(log, "Segments: merged-{}-{}", old_part.id, old_part.name);
-            SegmentId segment_id(data_path, data_part->name, old_part.name, index_name, index_column, old_part.id);
+            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
+                / data_part->storage.getRelativeDataPath()
+                / DB::MergeTreePartInfo::fromPartName(old_part.name, DB::MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
+                      .getPartNameWithoutMutation()
+                / "";
+            SegmentId segment_id(
+                volume,
+                data_path,
+                data_part->name,
+                old_part.name,
+                index_name,
+                index_column,
+                vector_index_cache_prefix,
+                old_part.id);
             segment_ids.emplace_back(std::move(segment_id));
         }
     }
@@ -56,7 +82,9 @@ static std::vector<SegmentId> getAllSegmentIds(const String & data_path, const D
     /// If no merged old parts' index files, decide whether we have simple built vector index.
     if (segment_ids.empty() && data_part->containVectorIndex(index_name, index_column))
     {
-        SegmentId segment_id(data_path, data_part->name, data_part->name, index_name, index_column, 0);
+        String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
+            / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
+        SegmentId segment_id(volume, data_path, data_part->name, index_name, index_column, vector_index_cache_prefix);
         segment_ids.emplace_back(std::move(segment_id));
     }
     return segment_ids;

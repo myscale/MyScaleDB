@@ -207,7 +207,7 @@ Pipe ReadWithVectorScan::readFromParts(
             reader_settings,
             nullptr,
             virt_column_names,
-            (size_t)0,
+            0UL,
             false,
             vector_scan_manager);
 

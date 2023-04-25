@@ -1,12 +1,10 @@
-#cmake_minimum_required(VERSION 3.17)
-#project(
-#VectorIndex
-#VERSION 0.0.1
-#)
-#set(CMAKE_CXX_STANDARD 17)
-#file(GLOB SRCS *.cpp *.h)
-#add_library(VectorIndex ${SRCS})
-#target_compile_options(faiss PRIVATE - Wall - Wextra)
-#
-#add_subdirectory(test)
-#target_link_libraries(VectorIndex libfaiss.a)
+add_headers_and_sources(clickhouse_vector_index .)
+add_library(clickhouse_vector_index ${clickhouse_vector_index_sources})
+include_directories(${ClickHouse_SOURCE_DIR}/contrib/search-index/contrib/google-research/scann/contrib/tensorflow/include)
+include_directories(${ClickHouse_SOURCE_DIR}/contrib/search-index/contrib/google-research/scann/contrib/tensorflow/include/src)
+target_link_libraries(clickhouse_vector_index
+    PUBLIC
+	dbms
+    PRIVATE
+	ch_contrib::search_index
+)

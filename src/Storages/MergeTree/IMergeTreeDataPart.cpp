@@ -17,6 +17,7 @@
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
 #include <Storages/MergeTree/PartMetadataManagerWithCache.h>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Core/NamesAndTypes.h>
 #include <Storages/ColumnsDescription.h>
 #include <Common/StringUtils/StringUtils.h>
@@ -1350,7 +1351,7 @@ void IMergeTreeDataPart::loadColumns(bool require)
 void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple) const
 {
     /// No need to check metadata of table, because for drop index, the metadata has erased it.
-    /// Remove all the files which end with .vidx
+    /// Remove all the files which end with .vidx2
 
     for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
     {
@@ -1405,52 +1406,11 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
     for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
         index_name_to_verify.emplace_back(vec_index_desc.name + "_" + vec_index_desc.column);
 
-    String read_file_path = getDataPartStorage().getFullPath() + "vector_index_ready" + VECTOR_INDEX_FILE_SUFFIX;
-
-    VectorIndex::DiskIOReader reader;
-    std::unordered_map<std::string, VectorIndex::Parameters> para;
-    std::unordered_map<String, int64_t> sizes = VectorIndex::readVectorIndexReadyFile(reader, read_file_path, index_name_to_verify, para);
-
-    if (sizes.empty())
-        return;
-
     for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
     {
         String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-        auto index_size = sizes.find(index_name);
-        if (index_size != sizes.end())
-        {
-            int64_t size = index_size->second;
-            // this index is in metadata and found in vector_index_ready
-            if (size != -1)
-            {
-                LOG_TRACE(storage.log, "Read from vector_index_ready:{},{}", index_name, size);
-                VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
-                ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
-                if (!single_params_from_record.empty())
-                {
-                    VectorIndex::IndexType t
-                            = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
-                    single_params_from_record.erase("type");
-
-                    if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
-                            t,
-                            single_params_from_record,
-                            VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
-                            VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
-                    {
-                        LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
-                        addVectorIndex(index_name);
-                    }
-                }
-                // second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
-                else
-                {
-                    LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
-                    addVectorIndex(index_name);
-                }
-            }
-        }
+        LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
+        addVectorIndex(index_name);
     }
 }
 
@@ -1474,7 +1434,7 @@ void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
         if (!endsWith(file_name, ready_file_name))
             continue;
 
-        /// Found merged files, merged-0-<part name>-vector_index_ready.vidx
+        /// Found merged files, merged-0-<part name>-vector_index_ready.vidx2
         Strings tokens;
         boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
         if (tokens.size() != 4)
@@ -1647,7 +1607,13 @@ void IMergeTreeDataPart::onLightweightDelete() const
     /// currently only consider one vector index
     auto vec_index_desc = metadata_snapshot->vec_indices[0];
 
-    VectorIndex::SegmentId segment_id(getDataPartStorage().getFullPath(), name, name, vec_index_desc.name, vec_index_desc.column, 0);
+    const DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+    }
+    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column, "");
     VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
 
     /// Update vector index deleted bitmap for the part on disk and cache if exists.
@@ -1702,9 +1668,15 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
     String data_path = getDataPartStorage().getFullPath();
 
     const auto old_parts = getMergedSourceParts();
+    const DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+    }
     for (const auto & old_part : old_parts)
     {
-        VectorIndex::SegmentId segment_id(data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, old_part.id);
+        VectorIndex::SegmentId segment_id(part_storage->volume, data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, "", old_part.id);
         VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
         /// Update merged deleted bitmap for the old part on disk and cache if exists.
         vec_executor.updateMergedBitMap(new_del_ids);

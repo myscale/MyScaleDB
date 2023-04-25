@@ -1,5 +1,5 @@
-#include <VectorIndex/CacheManager.h>
 #include <memory>
+#include <VectorIndex/CacheManager.h>
 
 #include <VectorIndex/IndexException.h>
 
@@ -77,9 +77,9 @@ void CacheManager::setCacheSize(size_t size_in_bytes)
     m = true;
 }
 
-std::list<std::pair<CacheKey, Parameters>> CacheManager::getAllItems()
+std::list<std::pair<CacheKey, Search::Parameters>> CacheManager::getAllItems()
 {
-    std::list<std::pair<CacheKey, Parameters>> result;
+    std::list<std::pair<CacheKey, Search::Parameters>> result;
 
     std::list<std::pair<CacheKey, std::shared_ptr<IndexWithMeta>>> cache_list = cache->getCacheList();
 

@@ -26,7 +26,6 @@
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/VectorIndexFactory.h>
 #include <VectorIndex/Status.h>
 
 #include <city.h>
@@ -791,7 +790,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
         buffered_columns[i] = primary_key.data_types[i]->createColumn();
     }
 
-    MergeTreeReaderPtr reader = task->data_part->getReader(
+    MergeTreeReaderPtr pk_reader = task->data_part->getReader(
         cols,
         storage_snapshot->metadata,
         MarkRanges{MarkRange(0, task->data_part->getMarksCount())},
@@ -801,7 +800,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
         {},
         {});
 
-    if (!reader)
+    if (!pk_reader)
     {
         LOG_ERROR(log, "Failed to get reader");
         return false;
@@ -827,7 +826,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
         Columns result;
         result.resize(cols_size);
 
-        size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+        size_t num_rows = pk_reader->readRows(current_mark, 0, continue_read, remaining_size, result);
 
         continue_read = true;
         num_rows_read += num_rows;

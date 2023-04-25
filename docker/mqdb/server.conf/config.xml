@@ -148,4 +148,9 @@
             <replace>\1(???)</replace>
         </rule>
     </query_masking_rules>
+
+    <merge_tree>
+        <enable_primary_key_cache>true</enable_primary_key_cache>
+        <min_bytes_to_build_vector_index>10485760</min_bytes_to_build_vector_index>
+    </merge_tree>
 </clickhouse>

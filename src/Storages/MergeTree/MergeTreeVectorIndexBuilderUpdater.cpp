@@ -1,16 +1,16 @@
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 #include <Core/ServerSettings.h>
 #include <DataTypes/DataTypeArray.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 #include <VectorIndex/DiskIOReader.h>
+#include <VectorIndex/PartReader.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/VectorIndexCommon.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
+#include <Common/ActionBlocker.h>
 #include <Common/StringUtils/StringUtils.h>
-
-/// #define build_fail_test
 
 namespace ProfileEvents
 {
@@ -73,7 +73,7 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
     last_cache_check_time = now;
 
     ///check existing parts to see if any cached vector index need cleaning
-    std::list<std::pair<VectorIndex::CacheKey, VectorIndex::Parameters>> cached_item_list
+    std::list<std::pair<VectorIndex::CacheKey, Search::Parameters>> cached_item_list
         = VectorIndex::VectorSegmentExecutor::getAllCacheNames();
 
     /// getRelativeDataPath() contains '/' in the tail, but table_path in cache key doesn't have.
@@ -104,22 +104,12 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
                 (part && (part->containVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name) || part->containRowIdsMaps())))
             {
                 LOG_DEBUG(log, "Find Vector Index in metadata");
-                VectorIndex::Parameters params = cache_item.second;
-                VectorIndex::IndexType t = VectorIndex::VectorIndexFactory::createIndexType(params.find("type")->second);
-                params.erase("type");
+                Search::Parameters params = cache_item.second;
 
                 LOG_DEBUG(log, "Params: {}, desc params: {}", VectorIndex::ParametersToString(params),
                     VectorIndex::ParametersToString(VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)));
-                
-                if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
-                        t,
-                        params,
-                        VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
-                        VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
-                {
-                    LOG_DEBUG(log, "Vector Index parameters match!");
-                    existed = true;
-                }
+
+                existed = true;
             }
         }
 
@@ -203,7 +193,7 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
         if (is_replicated && data.partIsAssignedToBackgroundOperation(part))
             continue;
 
-        if (part->containRowIdsMaps() && data.getSettings()->distable_rebuild_for_decouple)
+        if (part->containRowIdsMaps() && data.getSettings()->disable_rebuild_for_decouple)
             continue;
 
         /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
@@ -256,8 +246,8 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
     return {};
 }
 
-BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
-    const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool tune, bool slow_mode)
+BuildVectorIndexStatus
+MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool slow_mode)
 {
     if (part_name.empty())
     {
@@ -281,20 +271,20 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
         MergeTreeDataPartPtr part = data.getActiveContainingPart(part_name);
         if (!part)
         {
-            LOG_INFO(log, "[buildVectorIndex] part:{} is not active, no need to build index", part_name);
+            LOG_INFO(log, "Part {} is not active, no need to build index", part_name);
             return BuildVectorIndexStatus::SUCCESS;
         }
 
         if (part->vector_index_build_cancelled)
         {
-            LOG_INFO(log, "Part: {}, build index job has been cancelled", part->name);
+            LOG_INFO(log, "The index build job for Part {} has been cancelled", part_name);
             return BuildVectorIndexStatus::BUILD_FAIL;
         }
 
         /// Check latest metadata
         if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
         {
-            LOG_INFO(log, "Vector index has been dropped, no need to build it");
+            LOG_INFO(log, "Skip build for cancelled vector index {}.", metadata_snapshot->vec_indices[0].name);
             return BuildVectorIndexStatus::SUCCESS;
         }
 
@@ -321,7 +311,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
             if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
             {
                 LOG_INFO(log, "Build vector index for one part {}", part->name);
-                status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
+                status = buildVectorIndexForOnePart(metadata_snapshot, part, slow_mode);
             }
         }
         catch (Exception & e)
@@ -373,16 +363,12 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
     watch.stop();
     LOG_INFO(log, "Vector index build task for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
 
-#ifdef build_fail_test
-    LOG_INFO(log, "Vector index build task increment VectorIndexBuildFailEvents.");
-    ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
-#endif
     // TODO: handle fail case
     return BuildVectorIndexStatus::SUCCESS;
 }
 
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOnePart(
-    const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
+    const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool slow_mode)
 {
     LOG_TRACE(log, "Start checking for build index for part {}", part->name);
 
@@ -394,7 +380,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         NamesAndTypesList cols;
 
         /// only one column to build vector index, using a large dimension as default value.
-        uint64_t dim = 960;
+        uint64_t dim = 0;
 
         /// read all the columns which are marked as having vector index from the part
         /// there should only be one column here
@@ -456,6 +442,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         String vector_tmp_relative_path = data.getRelativeDataPath() + "vector_tmp_" + part_name_prefix + "/";
         String vector_tmp_full_path = data.getFullPathOnDisk(disk) + "vector_tmp_" + part_name_prefix + "/";
 
+        String vector_index_cache_prefix = fs::path(data.getContext()->getVectorIndexCachePath()) / data.getRelativeDataPath() / part_name_prefix / "";
+
         /// Since the vector index is stored in a temporary directory, add check for it too.
         if (disk->exists(part->getDataPartStorage().getRelativePath() + vector_index_ready_file_name))
             read_file_path = part->getDataPartStorage().getFullPath() + vector_index_ready_file_name;
@@ -477,328 +465,82 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             }
         }
 
-        VectorIndex::Parameters parameters = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
-        std::unordered_map<std::string, VectorIndex::Parameters> params_from_record;
-        VectorIndex::DiskIOReader disk_reader;
-        std::vector<String> index_names;
-        std::string index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-        index_names.emplace_back(index_name);
+        Search::Parameters parameters = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
 
         if (!read_file_path.empty())
         {
-            std::unordered_map<String, int64_t> original_binary_sizes
-                    = readVectorIndexReadyFile(disk_reader, read_file_path, index_names, params_from_record);
-
-            if (!original_binary_sizes.empty())
+            if (from_part)
             {
-                VectorIndex::Parameters & single_params_from_record = params_from_record.find(index_name)->second;
-                if (!single_params_from_record.empty() && original_binary_sizes.find(index_name)->second != -1)
+                LOG_DEBUG(log, "Vector index is built for part: {}", part->name);
+                part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+            }
+            else /// Need to move built vector index files to the part.
+            {
+                LOG_DEBUG(log, "Vector index is built for part: {} and stored in temporary directory {}", part->name, vector_tmp_full_path);
+                MergeTreeDataPartPtr future_part = nullptr;
+                if (part->getState() == DB::MergeTreeDataPartState::Active)
+                    future_part = part;
+                else
                 {
-                    VectorIndex::IndexType t = VectorIndex::VectorIndexFactory::createIndexType(single_params_from_record.find("type")->second);
-                    single_params_from_record.erase("type");
-                    if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
-                            t, single_params_from_record, VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type), parameters))
+                    /// Find future active part
+                    future_part = data.getActiveContainingPart(part->name);
+                    if (!future_part)
                     {
-                        if (from_part)
-                        {
-                            LOG_DEBUG(log, "Vector index is built for part: {}", part->name);
-                            part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                        }
-                        else /// Need to move built vector index files to the part.
-                        {
-                            LOG_DEBUG(log, "Vector index is built for part: {} and stored in temporary directory {}", part->name, vector_tmp_full_path);
-                            MergeTreeDataPartPtr future_part = nullptr;
-                            if (part->getState() == DB::MergeTreeDataPartState::Active)
-                                future_part = part;
-                            else
-                            {
-                                /// Find future active part
-                                future_part = data.getActiveContainingPart(part->name);
-                                if (!future_part)
-                                {
-                                    LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
-                                    return BuildVectorIndexStatus::SUCCESS;
-                                }
-                            }
-
-                            if (future_part && !future_part->getPartIsMutating())
-                            {
-                                moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
-
-                                if (future_part->containRowIdsMaps())
-                                {
-                                    auto lock = data.lockParts();
-                                    VectorIndex::removeRowIdsMaps(future_part, log);
-                                }
-                            }
-                            /// else future part will pick up later at the next time when index built for it.
-                        }
-
+                        LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
                         return BuildVectorIndexStatus::SUCCESS;
                     }
                 }
-            }
-        }
-
-        MergeTreeReaderSettings reader_settings;
-        auto reader = part->getReader(
-            cols,
-            metadata_snapshot,
-            MarkRanges{MarkRange(0, part->getMarksCount())},
-            /* uncompressed_cache = */ nullptr,
-            data.getContext()->getMarkCache().get(),
-            reader_settings,
-            {},
-            {});
-
-        size_t num_rows_read = 0;
-        /// max read block rows for each round
-        /// size_t read_block_rows_num = std::max(max_build_index_block_size_rows, static_cast<size_t>(part->rows_count * incremental_ratio));
-
-        /// try to control memory usage only use max_build_index_add_block_size and min_build_index_train_block_size
-        size_t max_build_index_add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
-        size_t min_build_index_train_block_size = data.getContext()->getSettingsRef().min_build_index_train_block_size;
-        if (min_build_index_train_block_size < max_build_index_add_block_size)
-        {
-            LOG_DEBUG(log, "min_build_index_train_block_size {} is smaller than max_build_index_add_block_size {}, will be updated",
-                     min_build_index_train_block_size, max_build_index_add_block_size);
-            min_build_index_train_block_size = max_build_index_add_block_size;
-        }
-
-        /// never divide a zero
-        size_t read_block_rows_num = max_build_index_add_block_size / 4 / std::max(static_cast<uint64_t>(1), dim);
-        size_t train_block_rows_num = min_build_index_train_block_size / 4 / std::max(static_cast<uint64_t>(1), dim);
-        LOG_DEBUG(log, "Set read_block_rows_num to {}, train_block_rows_num to {}", read_block_rows_num, train_block_rows_num);
-
-        bool continue_read = false;
-        bool training = true;
-
-        VectorIndex::VectorDatasetPtr vec_data;
-        VectorIndex::VectorSegmentExecutorPtr vec_index_builder;
-        std::vector<int64_t> empty_ids;
-        size_t current_round_start_row = 0;
-
-        size_t current_mask = 0;
-        size_t total_mask = part->getMarksCount();
-
-        auto & index_granularity = part->index_granularity;
-
-        size_t num_rows_train = 0;
-        int32_t dataset_offsets_size_train = 0;
-        std::vector<float> vector_raw_data_train;
-
-        /// process data block by block
-        while (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker) && num_rows_read < part->rows_count)
-        {
-            if (part->vector_index_build_cancelled)
-            {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index build is cancelled for part {}", part->name);
-            }
-
-            auto & latest_vec_indices = part->storage.getInMemoryMetadataPtr()->vec_indices;
-            if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
-            {
-                LOG_INFO(log, "Vector index has been dropped, no need to build it.");
-                disk->removeRecursive(vector_tmp_relative_path);
-                return BuildVectorIndexStatus::SUCCESS;
-            }
-
-            /// traning size is bigger than add vector size, may call several times before training.
-            if (!training)
-                empty_ids.clear();
-
-            size_t remaining_size = part->rows_count - num_rows_read;
-            size_t max_read_row = std::min(remaining_size, read_block_rows_num);
-
-            Columns result(cols.size());
-            size_t num_rows = reader->readRows(current_mask, 0, continue_read, max_read_row, result);
-
-            continue_read = true;
-
-            num_rows_read += num_rows;
-
-            for (size_t mask = current_mask; mask < total_mask - 1; ++mask)
-            {
-                if (index_granularity.getMarkStartingRow(mask) >= num_rows_read
-                    && index_granularity.getMarkStartingRow(mask + 1) < num_rows_read)
+                if (future_part && !future_part->getPartIsMutating())
                 {
-                    current_mask = mask;
-                }
-            }
+                    moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
 
-            LOG_DEBUG(log, "Part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
-
-            if (num_rows == 0)
-            {
-                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
-                part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                break;
-            }
-
-            const auto & one_column = result.back();
-            const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
-            if (!array)
-            {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector column type is not Array in part {}", part->name);
-            }
-
-            const IColumn & src_data = array->getData();
-            const ColumnArray::Offsets & offsets = array->getOffsets();
-            const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-            if (!src_data_concrete)
-            {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector column inner type in Array is not Float32 in part {}", part->name);
-            }
-
-            const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
-            if (enforce_fixed_array && src_vec.size() != dim * offsets.size())
-            {
-                throw Exception(
-                    ErrorCodes::INCORRECT_DATA,
-                    "Part: {}, vector column data length does not meet constraint",
-                    part->name);
-            }
-            if (src_vec.empty())
-            {
-                LOG_WARNING(log, "Part:{}, no data read for column {}", part->name, cols.back().name);
-                part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-                return BuildVectorIndexStatus::SUCCESS;
-            }
-
-            size_t i = 0;
-
-            /// skip empty arrays, to compute dimension of vector data
-            /// offsets.size(): vector data number
-            while (i < offsets.size() && offsets[i] == 0)
-            {
-                ++i;
-            }
-
-            /// the real dimension created from data
-            int32_t dim = static_cast<int32_t>(offsets[i]);
-
-            std::vector<float> vector_raw_data(dim * offsets.size(), 0.0);
-            current_round_start_row = num_rows_read - num_rows;
-
-            for (size_t row = 0; row < offsets.size(); ++row)
-            {
-                size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
-                size_t vec_end_offset = offsets[row];
-                if (enforce_fixed_array && vec_end_offset - vec_start_offset != dim)
-                    throw Exception(
-                        ErrorCodes::INCORRECT_DATA,
-                        "Part: {}, vector column data length does not meet constraint",
-                        part->name);
-                if (vec_start_offset != vec_end_offset)
-                {
-                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
+                    if (future_part->containRowIdsMaps())
                     {
-                        vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                        auto lock = data.lockParts();
+                        VectorIndex::removeRowIdsMaps(future_part, log);
                     }
                 }
-                else
-                {
-                    /// add this read round empty ids
-                    empty_ids.emplace_back(current_round_start_row + row);
-                }
+                /// else future part will pick up later at the next time when index built for it.
             }
 
+            return BuildVectorIndexStatus::SUCCESS;
+        }
+
+        /// Create temp directory before serialize.
+        if (disk->exists(vector_tmp_relative_path))
+        {
             LOG_DEBUG(
-                log,
-                "Part:{}, raw_data size: {}, empty_ids size: {}",
-                part->name,
-                vector_raw_data.size(),
-                empty_ids.size());
-
-            /// Checks for read rows >= minimum rows for training
-            if (training)
-            {
-                num_rows_train += num_rows;
-                dataset_offsets_size_train += offsets.size();
-                vector_raw_data_train.insert(vector_raw_data_train.end(), vector_raw_data.begin(), vector_raw_data.end());
-
-                if (num_rows_train < train_block_rows_num && part->rows_count - num_rows_read > 0)
-                    continue;
-                else
-                {
-                    vec_data = std::make_shared<VectorIndex::VectorDataset>(
-                        static_cast<int32_t>(dataset_offsets_size_train), static_cast<int32_t>(dim), std::move(vector_raw_data_train));
-                }
-            }
-            else /// Normal add vectors after training
-            {
-                vec_data = std::make_shared<VectorIndex::VectorDataset>(
-                    static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), std::move(vector_raw_data));
-            }
-
-            /// only run in the first read round
-            if (training)
-            {
-                LOG_DEBUG(
-                    log,
-                    "Train vector index: part_name: {}, num_rows_train: {}, vector index name: {}, path: {}",
-                    part->name,
-                    num_rows_train,
-                    vec_index_desc.name,
-                    vector_tmp_relative_path + index_name);
-
-                /// Create temp directory before serialize.
-                if (disk->exists(vector_tmp_relative_path))
-                {
-                    LOG_DEBUG(log, "The temporary directory to store vector index files already exists, will be removed {}", vector_tmp_relative_path);
-                    disk->removeRecursive(vector_tmp_relative_path);
-                }
-
-                disk->createDirectories(vector_tmp_relative_path);
-
-                VectorIndex::SegmentId segment_id(vector_tmp_full_path, part->name, part->name, vec_index_desc.name, vec_index_desc.column, 0);
-
-                vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
-                    VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
-                    segment_id,
-                    parameters,
-                    dim);
-                VectorIndex::Status build_status = vec_index_builder->buildIndex(vec_data, part->rows_count, slow_mode);
-
-                if (!build_status.fine())
-                {
-                    LOG_ERROR(log, "Failed to build vector index for part {}", part->name);
-                    disk->removeRecursive(vector_tmp_relative_path);
-                    throw Exception(build_status.getCode(), build_status.getMessage().data());
-                }
-                training = false;
-            }
-
-            LOG_DEBUG(log, "Add vectors to index: read vector num: {}", vec_data->getVectorNum());
-            vec_index_builder->addVectors(vec_data);
-
-            if (!empty_ids.empty())
-                vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
-
-            LOG_DEBUG(log, "After adding vectors: read vector num: {}", vec_data->getVectorNum());
-        }
-
-        if (num_rows_read == 0 && part->rows_count == 0)
-        {
-            LOG_WARNING(log, "Part {} is empty", part->name);
-            continue;
-        }
-        else if (num_rows_read < part->rows_count)
-        {
-            LOG_ERROR(log, "Failed to build vector index for part {}", part->name);
+                log, "The temporary directory to store vector index files already exists, will be removed {}", vector_tmp_relative_path);
             disk->removeRecursive(vector_tmp_relative_path);
-            return BuildVectorIndexStatus::BUILD_FAIL;
         }
+
+        disk->createDirectories(vector_tmp_relative_path);
+
+        VectorIndex::SegmentId segment_id(
+            part_storage->volume, vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
+        VectorIndex::PartReader part_reader(
+            builds_blocker, part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), dim, enforce_fixed_array);
+        Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
+        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string("L2")));
+        VectorIndex::VectorSegmentExecutorPtr vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+            segment_id,
+            index_type,
+            metric,
+            dim,
+            part->rows_count,
+            parameters,
+            data.getSettings()->min_bytes_to_build_vector_index,
+            data.getSettings()->default_mstg_disk_mode);
+        size_t max_build_index_add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
+        size_t max_build_index_train_block_size = data.getContext()->getSettingsRef().max_build_index_train_block_size;
+        vec_index_builder->buildIndex(&part_reader, slow_mode, max_build_index_train_block_size, max_build_index_add_block_size);
+
+        const auto empty_ids = part_reader.emptyIds();
+        if (!empty_ids.empty())
+            vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
 
         if (!part->vector_index_build_cancelled && BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
         {
-            if (tune)
-            {
-                vec_index_builder->dispathAutoTuneTask(vec_data);
-            }
-            /// zili's profiler tuning logic
-            vec_index_builder->tune(vec_data, empty_ids, current_round_start_row);
-
             /// remove empty vectors
             LOG_DEBUG(log, "Serialize vector index");
             VectorIndex::Status seri_status = vec_index_builder->serialize();
@@ -845,8 +587,21 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
                 /// Second, update delete bitmap in memory in currently builder, which will be put in cache.
                 /// Update segment id with correct part name and path.
-                VectorIndex::SegmentId segment_id(future_part->getDataPartStorage().getFullPath(), future_part->name, future_part->name, vec_index_desc.name, vec_index_desc.column, 0);
-                vec_index_builder->updateSegmentId(segment_id);
+                const DataPartStorageOnDiskBase * future_part_storage
+                    = dynamic_cast<const DataPartStorageOnDiskBase *>(future_part->getDataPartStoragePtr().get());
+                if (future_part_storage == nullptr)
+                {
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+                }
+
+                VectorIndex::SegmentId future_segment(
+                    future_part_storage->volume,
+                    future_part->getDataPartStorage().getFullPath(),
+                    future_part->name,
+                    vec_index_desc.name,
+                    vec_index_desc.column,
+                    vector_index_cache_prefix);
+                vec_index_builder->updateSegmentId(future_segment);
 
                 /// Need to reload delete bitmap from disk. The delete_bitmap in vec_index_builder doesn't contain rows deleted by lightweight.
                 if (future_part->hasLightweightDelete())
@@ -873,20 +628,21 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 void MergeTreeVectorIndexBuilderUpdater::undoBuildVectorIndexForOnePart(
     const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part)
 {
-    for (auto & vec_index_desc : metadata_snapshot->vec_indices)
-    {
-        String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column, true);
-        VectorIndex::SegmentId segment_id(part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column, 0);
-        VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
-    }
-
     const DataPartStorageOnDiskBase * part_storage
         = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
     if (part_storage == nullptr)
     {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
     }
+
+    for (auto & vec_index_desc : metadata_snapshot->vec_indices)
+    {
+        String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
+        part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column, true);
+        VectorIndex::SegmentId segment_id(part_storage->volume, part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column, "");
+        VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+    }
+
     auto disk = part_storage->getDisk();
     String part_name_prefix = part->info.getPartNameWithoutMutation();
     String vector_tmp_relative_path = data.getRelativeDataPath() + "vector_tmp_" + part_name_prefix + "/";

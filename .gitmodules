@@ -335,9 +335,6 @@
 [submodule "contrib/liburing"]
 	path = contrib/liburing
 	url = https://github.com/axboe/liburing
-[submodule "contrib/faiss"]
-	path = contrib/faiss
-	url = git@git.moqi.ai:mqdb/faiss.git
-[submodule "contrib/hnswlib"]
-	path = contrib/hnswlib
-	url = git@git.moqi.ai:mqdb/hnswlib.git
+[submodule "contrib/search-index"]
+	path = contrib/search-index
+	url = git@git.moqi.ai:mqdb/search-index.git

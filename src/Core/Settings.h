@@ -114,12 +114,8 @@ class IColumn;
     M(Bool, extremes, false, "Calculate minimums and maximums of the result columns. They can be output in JSON-formats.", IMPORTANT) \
     M(Bool, use_uncompressed_cache, false, "Whether to use the cache of uncompressed blocks.", 0) \
     M(Bool, replace_running_query, false, "Whether the running request should be canceled with the same id as the new one.", 0) \
-    M(Float, incremental_build_index_ratio, 0.1, "the ratio which data in a datapart is being added to vector index, also is the ratio of data being used for training index", 0)   \
-    M(UInt64, max_build_index_block, 100000, "number of rows to build index in one round", 0)     \
-    M(UInt64, max_build_index_block_size_rows, 160000, "number of rows to build index in one round", 0) \
-    M(UInt64, min_build_index_train_block_size, 100 * 1024 * 1024, "Minimum block size in bytes for training in build index", 0) \
+    M(UInt64, max_build_index_train_block_size, 100 * 1024 * 1024, "Maximum block size in bytes for training in build index", 0) \
     M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
-    M(UInt64, serialized_index_segment_max_byte, 50000000,"the number of bytes each segment of a vector index can occupy. lower value generate more segments, resulting in longer build index time but smaller memory consumption.",0)        \
     M(Bool, optimize_move_to_prewhere_for_vector_search, true, "Enables or disables special PREWHERE optimization for vector search in SELECT queries which move all viable WHERE to PREWHERE.", 0) \
     M(UInt64, max_replicated_fetches_network_bandwidth_for_server, 0, "The maximum speed of data exchange over the network in bytes per second for replicated fetches. Zero means unlimited. Only has meaning at server startup.", 0) \
     M(UInt64, max_replicated_sends_network_bandwidth_for_server, 0, "The maximum speed of data exchange over the network in bytes per second for replicated sends. Zero means unlimited. Only has meaning at server startup.", 0) \

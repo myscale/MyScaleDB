@@ -10,7 +10,10 @@ namespace VectorIndex
 struct VectorDataset
 {
 public:
-    VectorDataset(int64_t total_vectors_, int64_t dimension_, std::vector<float> && data): total_vectors(total_vectors_), dimension(dimension_), vec_data(std::move(data)) {}
+    VectorDataset(int64_t total_vectors_, int64_t dimension_, std::vector<float> && data)
+        : total_vectors(total_vectors_), dimension(dimension_), vec_data(std::move(data))
+    {
+    }
 
     VectorDataset(int64_t total_vectors_, int64_t dimension_, float * data_) : total_vectors(total_vectors_), dimension(dimension_)
     {
@@ -43,6 +46,26 @@ public:
             result += "\n";
         }
         return result;
+    }
+
+    void normalize()
+    {
+        for (int idx = 0; idx < total_vectors; idx++)
+        {
+            float sum = 0;
+            float * ptr = static_cast<float *>(getData() + idx * dimension);
+            for (int d = 0; d < dimension; d++)
+            {
+                sum += ptr[d] * ptr[d];
+            }
+            if (sum < std::numeric_limits<float>::epsilon())
+                continue;
+            sum = std::sqrt(sum);
+            for (int d = 0; d < dimension; d++)
+            {
+                ptr[d] /= sum;
+            }
+        }
     }
 
 private:

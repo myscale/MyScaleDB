@@ -8,8 +8,8 @@ ALTER TABLE test_success_vector ADD VECTOR INDEX v1_success vector TYPE HNSWFLAT
 DROP TABLE IF EXISTS test_fail_vector;
 CREATE TABLE test_fail_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
 INSERT INTO test_fail_vector SELECT number, [number, number, number] FROM numbers(2100);
--- Unsupported parameter: metric_type = cosine
-ALTER TABLE test_fail_vector ADD VECTOR INDEX v1_fail vector TYPE HNSWSQ('metric_type = cosine', 'ef_c=256');
+-- Unsupported parameter: metric_type = unknown
+ALTER TABLE test_fail_vector ADD VECTOR INDEX v1_fail vector TYPE HNSWSQ('metric_type = unknown', 'ef_c=256');
 
 DROP TABLE IF EXISTS test_fail_vector_2;
 CREATE TABLE test_fail_vector_2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;

@@ -39,7 +39,7 @@ public:
 
     bool executeStep() override;
     StorageID getStorageID() override;
-    UInt64 getPriority() override { return priority; };
+    UInt64 getPriority() override { return priority; }
     void onCompleted() override;
 
     ~ReplicatedVectorIndexTask() override;

@@ -1,9 +1,15 @@
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <random>
+
 #include <thread>
+#include <sys/resource.h>
 #include <omp.h>
+
 #include <boost/algorithm/string/split.hpp>
 
+#include <Common/Exception.h>
+#include <Common/HashTable/HashMap.h>
+#include <Common/getNumberOfPhysicalCPUCores.h>
+#include <Common/MemoryStatisticsOS.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/CompressedReadBufferFromFile.h>
 #include <Compression/CompressedWriteBuffer.h>
@@ -13,17 +19,50 @@
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
-#include <VectorIndex/CompositeIndexReader.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/DiskIOWriter.h>
 #include <VectorIndex/IndexException.h>
 #include <VectorIndex/MergeUtils.h>
-#include <VectorIndex/VectorIndexFactory.h>
+#include <VectorIndex/Metadata.h>
 #include <VectorIndex/VectorIndexCommon.h>
-#include <Common/Exception.h>
-#include <Common/HashTable/HashMap.h>
 
 #include <Common/logger_useful.h>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wextra-semi-stmt"
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wc++20-compat"
+#pragma GCC diagnostic ignored "-Walloca"
+#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+#pragma GCC diagnostic ignored "-Wgcc-compat"
+#pragma GCC diagnostic ignored "-Wcovered-switch-default"
+#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#pragma GCC diagnostic ignored "-Wextra-semi"
+#pragma GCC diagnostic ignored "-Wfinal-dtor-non-final-class"
+#pragma GCC diagnostic ignored "-Wundef"
+#pragma GCC diagnostic ignored "-Wsuggest-override"
+#pragma GCC diagnostic ignored "-Wshadow-field-in-constructor"
+#pragma GCC diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
+#pragma GCC diagnostic ignored "-Wmismatched-tags"
+#pragma GCC diagnostic ignored "-Wundefined-reinterpret-cast"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wshadow-uncaptured-local"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-private-field"
+#pragma GCC diagnostic ignored "-Wshadow-field"
+#pragma GCC diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#pragma GCC diagnostic ignored "-Wrange-loop-bind-reference"
+#pragma GCC diagnostic ignored "-Wenum-compare-switch"
+#pragma GCC diagnostic ignored "-Wnewline-eof"
+#pragma GCC diagnostic ignored "-Wreorder-ctor"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#include <SearchIndex/Common/Utils.h>
+#include <SearchIndex/IndexDataFileIO.h>
+#pragma GCC diagnostic pop
 
 namespace DB::ErrorCodes
 {
@@ -33,13 +72,49 @@ extern const int CORRUPTED_DATA;
 
 namespace VectorIndex
 {
-std::once_flag once;
-std::shared_mutex mu;
-std::condition_variable_any cv;
-int num_thread_for_vector;
-std::atomic_int count;
 
-auto VectorSegmentExecutor::log = &Poco::Logger::get("VectorSegmentExecutor");
+void printMemoryInfo(const Poco::Logger * log, std::string msg)
+{
+#if defined(OS_LINUX) || defined(OS_FREEBSD)
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    DB::MemoryStatisticsOS memory_stat;
+    DB::MemoryStatisticsOS::Data data = memory_stat.get();
+    LOG_INFO(
+        log,
+        "{}: peak resident memory {} MB, resident memory {} MB, virtual memory {} MB",
+        msg,
+        usage.ru_maxrss / 1024,
+        data.resident / 1024 / 1024,
+        data.virt / 1024 / 1024);
+#endif
+}
+
+class SearchThreadLimiter
+{
+public:
+    SearchThreadLimiter(const Poco::Logger * log, int max_threads)
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex);
+        cv.wait(lock, [&] { return count.load() < max_threads; });
+        count.fetch_add(1);
+        LOG_DEBUG(log, "Index search uses {}/{} threads", count.load(), max_threads);
+    }
+
+    ~SearchThreadLimiter()
+    {
+        count.fetch_sub(1);
+        cv.notify_one();
+    }
+private:
+    static std::shared_mutex mutex;
+    static std::condition_variable_any cv;
+    static std::atomic_int count;
+};
+
+std::shared_mutex SearchThreadLimiter::mutex;
+std::condition_variable_any SearchThreadLimiter::cv;
+std::atomic_int SearchThreadLimiter::count(0);
 
 String cutMutVer(const String & part_name)
 {
@@ -53,109 +128,100 @@ String cutMutVer(const String & part_name)
         return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
 }
 
-static String dumpBitmap(GeneralBitMapPtr bit_map_ptr)
+std::once_flag VectorSegmentExecutor::once;
+int VectorSegmentExecutor::max_threads = 0;
+
+void VectorSegmentExecutor::init()
 {
-    if (bit_map_ptr == nullptr)
-    {
-        return "";
-    }
-
-    String r;
-
-    const int size = bit_map_ptr->size;
-    for (int i = 0; i < 10 && i < size; ++i)
-    {
-        if (i > 0)
+    std::call_once(
+        once,
+        [&]
         {
-            r += ",";
-        }
-        r += (bit_map_ptr->test(i) ? "1" : "0");
-    }
-
-    return r;
+            max_threads = getNumberOfPhysicalCPUCores() * 2;
+            LOG_INFO(log, "Max threads for vector index: {}", max_threads);
+        });
 }
 
-/// TODO segment_id needs to be dynamic in the future
-VectorSegmentExecutor::VectorSegmentExecutor(IndexType type_, const SegmentId & segment_id_, Parameters des_, size_t dimension_)
-    : dimension(dimension_), type(type_), segment_id(segment_id_), des(des_)
-{
-    std::call_once(once, [&] {
-        int num_threads = omp_get_max_threads();
-        if (num_threads <= 0)
-        {
-            num_threads = 16;
-        }
-        num_thread_for_vector = num_threads;
-        omp_set_num_threads(num_thread_for_vector);
-        count.store(0);
-        LOG_DEBUG(log, "Set omp_num_threads to {}", num_threads);
-    });
-}
-
-VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_)
-    : dimension(0)
-    , type(IndexType::FLAT)
-    , mode(IndexMode::CPU)
-    , me(Metrics::L2)
+VectorSegmentExecutor::VectorSegmentExecutor(
+    const SegmentId & segment_id_,
+    Search::IndexType type_,
+    Search::Metric metric_,
+    size_t dimension_,
+    size_t total_vec_,
+    Search::Parameters des_,
+    size_t min_bytes_to_build_vector_index_,
+    bool DEFAULT_DISK_MODE_)
+    : DEFAULT_DISK_MODE(DEFAULT_DISK_MODE_)
     , segment_id(segment_id_)
+    , type(type_)
+    , metric(metric_)
+    , dimension(dimension_)
+    , total_vec(total_vec_)
+    , des(des_)
+    , min_bytes_to_build_vector_index(min_bytes_to_build_vector_index_)
 {
+    init();
 }
 
-Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t total_vectors_expected, bool slow_mode)
+VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_) : DEFAULT_DISK_MODE(false), segment_id(segment_id_)
 {
-    Parameters para_copy = des;
+    init();
+}
+
+void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size)
+{
+    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::buildIndex");
+
+    auto num_threads = max_threads;
+    if (slow_mode)
+        num_threads = num_threads / 2;
+    if (num_threads == 0)
+        num_threads = 1;
+
+    if (total_vec * dimension * sizeof(float) < min_bytes_to_build_vector_index)
+    {
+        fallback_to_flat = true;
+        type = Search::IndexType::FLAT;
+        std::erase_if(
+            des,
+            [](const auto & item)
+            {
+                auto const & [key, value] = item;
+                return key != "metric_type";
+            });
+    }
+
     try
     {
-        if (!index)
-        {
-            LOG_DEBUG(log, "Index type actually created {}", VectorIndexFactory::typeToString(type));
-            if (para_copy.contains("metric_type"))
-            {
-                me = VectorIndexFactory::createIndexMetrics(para_copy.at("metric_type"));
-                para_copy.erase("metric_type");
-            }
-            if (para_copy.contains("mode"))
-            {
-                mode = VectorIndexFactory::createIndexMode(para_copy.at("mode"));
-                para_copy.erase("mode");
-            }
-            if (para_copy.contains("compression_scheme"))
-            {
-                cmb = DB::CompressionCodecFactory::instance().get(para_copy.find("compression_scheme")->second, {})->getMethodByte();
-                para_copy.erase("compression_scheme");
-            }
-            index = VectorIndexFactory::createIndex(type, mode, me, this->dimension, para_copy);
-
-            {
-                /// slow mode
-                if (slow_mode)
-                {
-                    int num_procs = omp_get_num_procs();
-                    /// only use half cores
-                    omp_set_num_threads(std::max(1, num_procs / 4));
-                    LOG_DEBUG(log, "Build index in slow mode, set num threads to {} with omp_get_num_procs {}", std::max(1, num_procs / 4), num_procs);
-                }
-            }
-
-            index->train(data_set, total_vectors_expected);
-            if (delete_bitmap == nullptr)
-            {
-                delete_bitmap = std::make_shared<GeneralBitMap>(total_vectors_expected);
-                memset(delete_bitmap->bitmap, 255, (total_vectors_expected / 8) + 1);
-            }
-            return Status();
-        }
-        else
-        {
-            /// maybe can never reach here
-            return Status(5, "vector index already built!");
-        }
+        configureDiskMode();
+        index = Search::
+            createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                segment_id.getIndexNameWithColumn(),
+                type,
+                metric,
+                dimension,
+                total_vec,
+                des,
+                true,
+                vector_index_cache_prefix,
+                getDiskIOManager(),
+                true);
+        index->setTrainDataChunkSize(train_block_size);
+        index->setAddDataChunkSize(add_block_size);
+        printMemoryInfo(log, "Before build");
+        index->build(reader, num_threads);
+        printMemoryInfo(log, "After build");
     }
-    catch (const IndexException & e)
+    catch (const SearchIndexException & e)
     {
-        LOG_ERROR(log, "IndexException: {}, {}", e.code(), e.message());
-        return Status(e.code(), e.message());
+        throw IndexException(e.getCode(), e.what());
     }
+    catch (const DB::Exception & e)
+    {
+        throw e;
+    }
+
+    delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
 }
 
 void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
@@ -165,7 +231,7 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
     {
         handleMergedMaps();
     }
-    catch(const DB::Exception & e)
+    catch (const DB::Exception & e)
     {
         LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
         return;
@@ -180,10 +246,11 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
     IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
     if (index_holder)
     {
-        IndexWithMeta & index = index_holder->value();
-        index.row_ids_map = this->row_ids_map;
-        index.inverted_row_ids_map = this->inverted_row_ids_map;
-        index.inverted_row_sources_map = this->inverted_row_sources_map;
+        IndexWithMeta & index_with_meta = index_holder->value();
+        index_with_meta.fallback_to_flat = fallback_to_flat;
+        index_with_meta.row_ids_map = this->row_ids_map;
+        index_with_meta.inverted_row_ids_map = this->inverted_row_ids_map;
+        index_with_meta.inverted_row_sources_map = this->inverted_row_sources_map;
     }
     /// not handle empty cache case here.
 }
@@ -197,13 +264,18 @@ Status VectorSegmentExecutor::cache()
         LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
         return Status(3);
     }
-    if (!des.contains("type"))
-    {
-        des.insert(std::make_pair("type", VectorIndexFactory::typeToString(type)));
-    }
     /// when cacheIndexAndMeta() is called, related files should have already been loaded.
-    IndexWithMetaPtr cache_item = std::make_shared<IndexWithMeta>(index, total_vec, op_points, delete_bitmap, des,
-        row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
+    IndexWithMetaPtr cache_item = std::make_shared<IndexWithMeta>(
+        index,
+        total_vec,
+        delete_bitmap,
+        des,
+        row_ids_map,
+        inverted_row_ids_map,
+        inverted_row_sources_map,
+        disk_mode,
+        fallback_to_flat,
+        vector_index_cache_prefix);
 
     LOG_DEBUG(log, "Cache key: {}", segment_id.getCacheKey().toString());
     mgr->put(segment_id.getCacheKey(), cache_item);
@@ -213,147 +285,35 @@ Status VectorSegmentExecutor::cache()
 
 Status VectorSegmentExecutor::serialize()
 {
-    /// Serialization contains three steps:
-    /// 1. write vector_index_ready file to mark that we start writting
-    /// 2. incrementally write index file
-    /// 3. write vector_index_ready file to mark that we finished writting
-    ///    vector_index_ready file is a binary_log which can only be appended
-    ///    to but not altered
     try
     {
-        int64_t binary_total_size = 0;
-        bool last_part = false;
-        int segment_count = 0;
-        BinaryPtr index_binary;
-        startWrite();
-        while (!last_part)
-        {
-            /// Even though we set the max bytes to serialize for serialization,
-            /// it could exceed this amount by accident,then we need to handle the exceeded part.
-            LOG_DEBUG(log, "expected segment_size: {}", optimal_segment_size);
-            index_binary = index->serialize(optimal_segment_size, last_part);
-            if (index_binary->size <= 0)
-            {
-                break;
-            }
-            binary_total_size += index_binary->size;
-            LOG_DEBUG(log, "binary_total_size: {}", binary_total_size);
-            int64_t actual_all = index_binary->size;
-            int64_t written = 0;
-            while (actual_all > 0)
-            {
-                size_t max_allowed_per_write = compressBound(actual_all, cmb);
-                bool last_sub_part = (last_part & (max_allowed_per_write == actual_all));
-                /// write index loop, compress and write index in small parts
-                Status stat = writePart(last_sub_part, segment_count, index_binary->data + written, max_allowed_per_write);
-                if (!stat.fine())
-                {
-                    return stat;
-                }
-                segment_count++;
-                actual_all -= max_allowed_per_write;
-                written += max_allowed_per_write;
-            }
-        }
+        auto file_writer = Search::IndexDataFileWriter<Search::AbstractOStream>(
+            segment_id.getFullPath(),
+            [](const std::string & name, std::ios::openmode mode) { return std::make_shared<Search::FileBasedOStream>(name, mode); });
+
+        index->serialize(&file_writer);
+        index->saveDataID(&file_writer);
+        printMemoryInfo(log, "After serialization");
 
         writeBitMap();
-        return finishWrite(binary_total_size);
+
+        std::string version = index->getVersion().toString();
+        Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des);
+        auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorReadyFilePath(), 4096);
+        metadata.writeText(*buf);
+
+        return Status(0);
+    }
+    catch (const SearchIndexException & e)
+    {
+        LOG_ERROR(log, "SearchIndexException: {}", e.what());
+        return Status(e.getCode(), e.what());
     }
     catch (const std::exception & e)
     {
         LOG_ERROR(log, "Failed to serialize due to {}", e.what());
         return Status(1, e.what());
     }
-}
-
-Status VectorSegmentExecutor::startWrite()
-{
-    DiskIOWriter ready_flag_writer;
-    String ready_file_path = segment_id.getVectorReadyFilePath();
-    String index_type = VectorIndexFactory::typeToString(type);
-    String paras = "";
-    String index_name = segment_id.getIndexNameWithColumn();
-    /// -1 means the index is invalid in disk
-    String binary_total_size_str = "-1";
-    String nextline = "\n";
-    
-    if (!ready_flag_writer.open(ready_file_path + VECTOR_INDEX_FILE_SUFFIX, true))
-    {
-        if (!ready_flag_writer.open(ready_file_path, true))
-        {
-            LOG_ERROR(log, "Fail to open {}", ready_file_path);
-            return Status(5, "not able to open ready flag for write!");
-        }
-    }
-    String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
-    LOG_DEBUG(log, "{}, length: {}", all_string_together, all_string_together.length());
-    ready_flag_writer.seekp(0, seekdir::end);
-    ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
-    ready_flag_writer.close();
-    return Status();
-}
-
-Status VectorSegmentExecutor::writePart(bool final, int segment_count, uint8_t * index_segment_offset, size_t index_segment_size)
-{
-    std::string part_id = segment_id.getFullPath() + "_" + ItoS(segment_count) + VECTOR_INDEX_FILE_SUFFIX;
-    BinaryPtr index_binary_compressed = std::make_shared<Binary>();
-    LOG_DEBUG(log, "Size of binary before compress: {}", index_segment_size);
-    compressWithCheckSum(cmb, index_segment_offset, index_segment_size, index_binary_compressed);
-    LOG_DEBUG(log, "Size of binary after compress: {}", index_binary_compressed->size);
-    DiskIOWriter writer;
-    if (!writer.open(part_id, false))
-    {
-        LOG_ERROR(log, "fail to open {}", part_id);
-        return Status(5, "not able to open file!");
-    }
-    int64_t final_mark = final ? 1 : 0;
-    int64_t binary_length_compressed = index_binary_compressed->size;
-    int64_t binary_length_original = index_segment_size;
-    /// When this is the last part to write, the mark will be 1, else 0.
-    writer.write(&final_mark, sizeof(final_mark));
-    /// Compressed size of binaries of index
-    writer.write(&binary_length_compressed, sizeof(binary_length_compressed));
-    /// Uncompressed size of binaries of index
-    writer.write(&binary_length_original, sizeof(binary_length_original));
-    /// Total vector
-    writer.write(&total_vec, sizeof(total_vec));
-    /// Compressed binaries of index
-    writer.write(index_binary_compressed->data, binary_length_compressed);
-    writer.close();
-    /// After serializing the index, we write a ready flag to mark future
-    /// TODO with checksum, we can possiblly drop this
-    return Status();
-}
-
-Status VectorSegmentExecutor::finishWrite(int64_t binary_total_size)
-{
-    DiskIOWriter ready_flag_writer;
-    String ready_file_path = segment_id.getVectorReadyFilePath();
-    String index_type;
-    index_type = VectorIndexFactory::typeToString(type);
-    String paras;
-    for (auto & s : des)
-    {
-        paras = paras + s.first + ",";
-        paras = paras + s.second + ",";
-    }
-    String index_name = segment_id.getIndexNameWithColumn();
-    String binary_total_size_str = ItoS(binary_total_size);
-    String nextline = "\n";
-    if (!ready_flag_writer.open(ready_file_path + VECTOR_INDEX_FILE_SUFFIX, true))
-    {
-        if (!ready_flag_writer.open(ready_file_path, true))
-        {
-            LOG_ERROR(log, "Fail to open {}", ready_file_path);
-            return Status(5, "not able to open ready flag for write!");
-        }
-    }
-    String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
-    LOG_DEBUG(log, "{}, length: {}", all_string_together, all_string_together.length());
-    ready_flag_writer.seekp(0, seekdir::end);
-    ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
-    ready_flag_writer.close();
-    return Status();
 }
 
 void VectorSegmentExecutor::handleMergedMaps()
@@ -366,9 +326,12 @@ void VectorSegmentExecutor::handleMergedMaps()
 
     try
     {
-        auto row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getRowIdsMapFilePath()));
-        auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowIdsMapFilePath()));
-        auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowSourcesMapFilePath()));
+        auto row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
+            std::make_unique<DB::ReadBufferFromFile>(segment_id.getRowIdsMapFilePath()));
+        auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
+            std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowIdsMapFilePath()));
+        auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
+            std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowSourcesMapFilePath()));
 
         while (!inverted_row_sources_map_buf->eof())
         {
@@ -420,7 +383,7 @@ Status VectorSegmentExecutor::load()
     CacheKey cache_key = segment_id.getCacheKey();
     const String cache_key_str = cache_key.toString();
 
-    LOG_DEBUG(log, "segment_id.getPathSuffix() = {}", segment_id.getPathSuffix());
+    LOG_DEBUG(log, "segment_id.getPathPrefix() = {}", segment_id.getPathPrefix());
     LOG_DEBUG(log, "segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
     LOG_DEBUG(log, "cache_key_str = {}", cache_key_str);
 
@@ -434,106 +397,105 @@ Status VectorSegmentExecutor::load()
 
         auto load_func = [&]() -> IndexWithMetaPtr
         {
-            DiskIOReader reader;
-            /// TODO this is really funky... have to change it later
-            String ready_file_path = segment_id.getVectorReadyFilePath();
-            String index_name = segment_id.getIndexNameWithColumn();
-            std::vector<String> index_names{index_name};
-            std::unordered_map<std::string, Parameters> params;
-            std::unordered_map<String, int64_t> original_binary_sizes
-                = readVectorIndexReadyFile(reader, ready_file_path, index_names, params);
-            if (original_binary_sizes.find(index_name) == original_binary_sizes.end())
-            {
-                LOG_DEBUG(log, "Unable to parse the original index size {}", ready_file_path);
-                throw IndexException("Unable to parse the original index size " + ready_file_path, 5);
-            }
-            int64_t original_binary_size = original_binary_sizes.find(index_name)->second;
-            if (original_binary_size < 0)
-            {
-                throw IndexException("Unable to parse the original index size " + ready_file_path, 5);
-            }
-            des = params.at(index_name);
-
-            if (!readBitMap())
-            {
-                LOG_ERROR(log, "Failed to read vector index bitmap: {}", segment_id.getFullPath());
-                throw IndexException("Corrupted data: " + segment_id.getFullPath(), 5);
-            }
-
-            if (des.contains("metric_type"))
-            {
-                me = VectorIndexFactory::createIndexMetrics(des.at("metric_type"));
-            }
-            Parameters place_holder;
-            index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
-            index->setIndexSize(original_binary_size);
-            LOG_DEBUG(log, "Start loading index: total_vec: {}", total_vec);
-            CompositeIndexReader index_reader(segment_id, original_binary_size);
             try
             {
-                index->load(index_reader);
-            }
-            catch (const IndexException & e)
-            {
-                LOG_ERROR(log, "failed to load index: {}", e.message());
-                throw;
-            }
-            index->setTrained();
-            des.erase("type");
-            index->parseParameter(des);
-            LOG_DEBUG(log, "Finish loading index");
-            if (auto_tune && getOps().getCode() != 0)
-            {
-                LOG_WARNING(log, "Index not autotuned");
-            }
+                Metadata metadata(segment_id);
+                auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+                metadata.readText(*buf);
+                fallback_to_flat = metadata.fallback_to_flat;
+                if (fallback_to_flat)
+                {
+                    type = Search::IndexType::FLAT;
+                    std::erase_if(
+                        des,
+                        [](const auto & item)
+                        {
+                            auto const & [key, value] = item;
+                            return key != "metric_type";
+                        });
+                }
+                des.setParam("load_index_version", metadata.version);
 
-            try
-            {
+                configureDiskMode();
+                index = Search::
+                    createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                        segment_id.getIndexNameWithColumn(),
+                        type,
+                        metric,
+                        dimension,
+                        total_vec,
+                        des,
+                        true,
+                        vector_index_cache_prefix,
+                        getDiskIOManager(),
+                        true);
+
+                LOG_INFO(log, "loading vector index from {}", segment_id.getFullPath());
+                auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
+                    segment_id.getFullPath(),
+                    [](const std::string & name, std::ios::openmode mode)
+                    { return std::make_shared<Search::FileBasedIStream>(name, mode); });
+                printMemoryInfo(log, "Before load");
+                index->load(&file_reader);
+                index->loadDataID(&file_reader);
+                printMemoryInfo(log, "After load");
+                total_vec = index->numData();
+                LOG_INFO(log, "load total_vec={}", total_vec);
+                readBitMap();
+
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();
+
+                return std::make_shared<IndexWithMeta>(
+                    index,
+                    total_vec,
+                    delete_bitmap,
+                    des,
+                    row_ids_map,
+                    inverted_row_ids_map,
+                    inverted_row_sources_map,
+                    disk_mode,
+                    fallback_to_flat,
+                    vector_index_cache_prefix);
+            }
+            catch (const SearchIndexException & e)
+            {
+                LOG_ERROR(log, "SearchIndexException: {}", e.what());
+                throw IndexException(e.getCode(), e.what());
             }
             catch (const DB::Exception & e)
             {
                 LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
-                throw IndexException(e.message(), e.code());
+                throw e;
             }
-
-            if (index == nullptr)
-            {
-                LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
-                throw IndexException(segment_id.getCacheKey().toString() + " index is null, not caching", 3);
-            }
-            if (!des.contains("type"))
-            {
-                des.insert(std::make_pair("type", VectorIndexFactory::typeToString(type)));
-            }
-
-            return std::make_shared<IndexWithMeta>(
-                index, total_vec, op_points, delete_bitmap, des, row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
         };
 
         try
         {
-            IndexWithMetaHolderPtr index_holder_ = mgr->load(cache_key, load_func);
+            index_holder = mgr->load(cache_key, load_func);
             LOG_DEBUG(log, "Num of item after cache {}", mgr->countItem());
-            if (index_holder_)
+            if (index_holder)
             {
-                IndexWithMeta & new_index = index_holder_->value();
+                IndexWithMeta & new_index = index_holder->value();
                 index = new_index.index;
                 total_vec = new_index.total_vec;
-                op_points = new_index.op_points;
                 delete_bitmap = new_index.getDeleteBitmap();
                 des = new_index.des;
-                if (auto_tune && getOps().getCode() != 0)
-                {
-                    LOG_WARNING(log, "Index not autotuned");
-                }
+                fallback_to_flat = new_index.fallback_to_flat;
                 return Status();
             }
         }
         catch (const IndexException & e)
         {
-            return Status(e.statusCode(), e.statusMessage());
+            return Status(e.code(), e.message());
+        }
+        catch (const DB::Exception & e)
+        {
+            return Status(e.code(), e.message());
+        }
+        catch (const std::exception & e)
+        {
+            return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
         }
 
         return Status(2, "Load failed");
@@ -544,7 +506,7 @@ Status VectorSegmentExecutor::load()
         IndexWithMeta & new_index = index_holder->value();
         index = new_index.index;
         total_vec = new_index.total_vec;
-        op_points = new_index.op_points;
+        fallback_to_flat = new_index.fallback_to_flat;
         delete_bitmap = new_index.getDeleteBitmap();
 
         des = new_index.des;
@@ -560,105 +522,102 @@ Status VectorSegmentExecutor::load()
             updateCacheValueWithRowIdsMaps();
         }
 
-        if (auto_tune && getOps().getCode() != 0)
-        {
-            LOG_WARNING(log, "Index not autotuned");
-        }
-
         return Status();
     }
 }
 
-Status VectorSegmentExecutor::addVectors(VectorDatasetPtr dataset)
+Status VectorSegmentExecutor::search(
+    VectorDatasetPtr dataset, \
+    int32_t k, 
+    float *& distances, 
+    int64_t *& labels, 
+    Search::DenseBitmapPtr & filter, 
+    Search::Parameters & parameters)
 {
-    LOG_TRACE(log, "Adding {} vectors", dataset->getVectorNum());
-    index->addWithoutId(dataset);
-    total_vec += dataset->getVectorNum();
-    index->setTrained();
-    /// Index is only searchable after the first call to addVector.
-    /// this bypassed some concurrency problem.
+    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
+    
+    // Check if the index is initialized and ready for searching
+    if (index == nullptr)
+    {
+        return Status(3, "Index not initialized before searching!");
+    }
+    if (!index->ready())
+    {
+        return Status(7, "Index not ready before searching!");
+    }
+
+    // Check if the dimensions of the searched index and input match
+    if (dataset->getDimension() != static_cast<int64_t>(dimension))
+    {
+        return Status(10, "The dimension of searched index and input doesn't match.");
+    }
+
+    LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
+
+    SearchThreadLimiter limiter(log, max_threads);
+
+    // Merge filter and delete_bitmap
+    if (!delete_bitmap->all())
+        filter = Search::mergeDenseBitmap(filter, delete_bitmap);
+
+    // Perform the search and handle the results
+    try
+    {
+        if (fallback_to_flat)
+            parameters.clear();
+        performSearch(dataset, k, distances, labels, filter, parameters);
+    }
+    catch (const SearchIndexException & e)
+    {
+        LOG_ERROR(log, "SearchIndexException: {}", e.what());
+        return Status(e.getCode(), e.what());
+    }
+    catch (const std::exception & e)
+    {
+        return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
+    }
+
     return Status();
 }
 
-Status VectorSegmentExecutor::search(
-    VectorDatasetPtr dataset, int32_t k, float *& distances, int64_t *& labels, GeneralBitMapPtr filter, Parameters parameters)
+void VectorSegmentExecutor::performSearch(
+    VectorDatasetPtr dataset,
+    int32_t k,
+    float *& distances,
+    int64_t *& labels,
+    Search::DenseBitmapPtr & filter,
+    Search::Parameters & parameters)
 {
-    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
-    bool added = false;
-    try
+    // Perform the actual search
     {
-        if (index == nullptr)
-        {
-            return Status(3, "index not initialized before searching!");
-        }
-        if (!index->trainStatus())
-        {
-            return Status(7, "index not trained before searching!");
-        }
-        if (dataset->getDimension() != dimension)
-        {
-            return Status(10, "the dimension of searched index and input doesn't match.");
-        }
-        LOG_DEBUG(log, "{} vectors in engine {}", this->total_vec, this->segment_id.getFullPath());
-        Parameters params = parameters;
-        if (op_points != nullptr)
-        {
-            ///TODO pass acc_req in from user
-            float acc_req = 0.9;
-            bool satisfied = false;
-            for (auto & acc_parameters : *op_points)
-            {
-                LOG_DEBUG(log, "op point tested with acc {},", acc_parameters.first);
-                if (acc_parameters.first >= acc_req)
-                {
-                    params = acc_parameters.second->op_point;
-                    satisfied = true;
-                    break;
-                }
-            }
-            if (!satisfied)
-            {
-                LOG_WARNING(log, "Index can't satisfy the required accuracy, switching to brute force search.");
-                return Status(200);
-            }
-        }
-
-        filter = mergeBitMap(filter, this->getDeleteBitMap());
-
-        std::shared_lock<std::shared_mutex> lock(mu);
-        cv.wait(lock, [] { return count.load() <= num_thread_for_vector; });
-        count.fetch_add(1);
-        added = true;
-        LOG_DEBUG(log, "Index search, num threads: {}", num_thread_for_vector);
-        /// a shared lock on a small number of concurrent threads, like 16. this is not hard limit so race is not a problem.
-        {
-            DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search::vector_index_search");
-            span.addAttribute("vec_search.num_threads", num_thread_for_vector);
-            index->search(dataset, k, distances, labels, params, filter);
-        }
-
-        transferToNewRowIds(labels, k * dataset->getVectorNum());
+        DB::OpenTelemetry::SpanHolder span2("VectorSegmentExecutor::search::vector_index_search");
+        span2.addAttribute("vec_search.max_threads", max_threads);
+        auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
+        index->search(query_dataset, k, distances, labels, parameters, false, filter.get());
     }
-    catch (const IndexException & e)
-    {
-        LOG_ERROR(log, "IndexException: {}", e.message());
-        if (added)
-            count.fetch_sub(1);
-        cv.notify_one();
-        return Status(e.code(), e.message());
-    }
-    if (added)
-        count.fetch_sub(1);
-    cv.notify_one();
-    return Status();
+
+    // Transfer the results to newRowIds
+    transferToNewRowIds(labels, k * dataset->getVectorNum());
 }
 
 Status VectorSegmentExecutor::searchWithoutIndex(
-    VectorDatasetPtr query_data, VectorDatasetPtr base_data, int32_t k, float *& distances, int64_t *& labels, const Metrics& metrics)
+    VectorDatasetPtr query_data, 
+    VectorDatasetPtr base_data, 
+    int32_t k, 
+    float *& distances, 
+    int64_t *& labels, 
+    const Search::Metric & metric)
 {
-    LOG_DEBUG(log, "Search without index: query_data {}", query_data->printVectors());
     omp_set_num_threads(1);
-    return tryBruteForceSearch(
+    auto metric2 = metric;
+    if (metric == Search::Metric::Cosine)
+    {
+        LOG_DEBUG(&Poco::Logger::get("VectorSegmentExecutor"), "Normalize vectors for cosine similarity brute force search");
+        metric2 = Search::Metric::IP;
+        query_data->normalize();
+        base_data->normalize();
+    }
+    auto status = tryBruteForceSearch(
         query_data->getData(),
         base_data->getData(),
         query_data->getDimension(),
@@ -667,16 +626,20 @@ Status VectorSegmentExecutor::searchWithoutIndex(
         base_data->getVectorNum(),
         labels,
         distances,
-        metrics);
-}
-
-IndexType VectorSegmentExecutor::indexType()
-{
-    return index->indexType();
+        metric2);
+    if (metric == Search::Metric::Cosine)
+    {
+        for (int64_t i = 0; i < k * query_data->getVectorNum(); i++)
+        {
+            distances[i] = 1 - distances[i];
+        }
+    }
+    return status;
 }
 
 Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
 {
+    Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
     CacheManager * mgr = CacheManager::getInstance();
     LOG_DEBUG(log, "Num of cache items before forceExpire {} ", mgr->countItem());
     mgr->forceExpire(cache_key);
@@ -689,164 +652,36 @@ int64_t VectorSegmentExecutor::getRawDataSize()
     return total_vec;
 }
 
-void VectorSegmentExecutor::setIndexParameters(Parameters p)
-{
-    index->getMyParameters(p);
-}
-
-
-Status VectorSegmentExecutor::dispathAutoTuneTask(VectorDatasetPtr base)
-{
-    if (base->getDimension() != dimension)
-    {
-        return Status(10, "dimension of base vector no matching index");
-    }
-    if (base->getVectorNum() < MAX_BRUTE_FORCE_SEARCH_SIZE)
-    {
-        return Status(0, "base too small, no need to tune, just brute force.");
-    }
-    ///TODO make this user-defined
-    int default_topk = 50;
-    int default_query_size = 1000 < base->getVectorNum() ? 1000 : base->getVectorNum();
-    Metrics default_metrics = me;
-    ///These two vectors are deconstrcuted by Autotuner
-    std::vector<float> * query = new std::vector<float>(default_query_size * dimension);
-    /// gt_dis here is just a place holder, we don't need the data.
-    std::vector<float> gt_dis(default_topk * default_query_size);
-    std::vector<int64_t> * gt = new std::vector<int64_t>(default_topk * default_query_size);
-    getQueryandGt(base, gt_dis.data(), gt->data(), query->data(), default_topk, default_query_size, default_metrics);
-    TuningPackPtr pack = std::make_shared<TuningPack>(index, query, gt, default_topk, default_query_size, false);
-    Autotuner * tuner = Autotuner::getInstance();
-    tuner->addTask(segment_id.getFullPath(), pack);
-    return Status();
-}
-
-/// base here is just used as query, not search base.
-Status VectorSegmentExecutor::tune(VectorDatasetPtr base, std::vector<int64_t> & empty_ids, size_t current_round_start_row)
-{
-    if (auto * ivfflat = dynamic_cast<IVFFlatIndex *>(index.get()))
-    {
-        int default_query_size = std::min(base->getVectorNum(), (int64_t)2000);
-        int default_topk = 50;
-        int dimension = base->getDimension();
-        if (default_query_size < 2000)
-        {
-            LOG_WARNING(log, "Not enough data points to train this data part.");
-            return Status();
-        }
-        std::vector<float> remove_empty;
-        size_t non_empty_size = 0;
-        auto empty_id = empty_ids.begin();
-        /// we need to filter out empty data because there are just 0.
-        for (int i = 0; i < default_query_size; i++)
-        {
-            if (empty_id != empty_ids.end() && i == *empty_id - current_round_start_row)
-            {
-                empty_id++;
-                continue;
-            }
-            remove_empty.insert(remove_empty.end(), base->getData() + i * dimension, base->getData() + (i + 1) * dimension);
-            non_empty_size++;
-        }
-
-        VectorDatasetPtr non_empty = std::make_shared<VectorDataset>(non_empty_size, dimension, remove_empty.data());
-        ivfflat->tune(non_empty, default_topk);
-    }
-    return Status();
-}
-
-
-/// If the autoTuning has finished, we try to get the points from the disk
-/// and load them into op_points
-Status VectorSegmentExecutor::getOps()
-{
-    if (op_points == nullptr)
-    {
-        DiskIOReader reader;
-        ///TODO this should be changed to checking hash of file
-        if (reader.open(segment_id.getFullPath() + PARAMETER_PACK_NAME))
-        {
-            op_points = std::make_shared<std::vector<std::pair<float, OperatingPointPtr>>>();
-            LOG_INFO(log, "{} successfully found the parameters pack", segment_id.getFullPath());
-            int64_t bin_size;
-            reader.read(&bin_size, sizeof(bin_size));
-            reader.seekg(sizeof(bin_size));
-            BinaryPtr ops_bin = std::make_shared<Binary>();
-            ops_bin->data = new uint8_t[bin_size];
-            ops_bin->size = bin_size;
-            reader.read(ops_bin->data, bin_size);
-            std::string params(reinterpret_cast<const char *>(ops_bin->data));
-            LOG_TRACE(log, "param: {}", params);
-            AccParametersPack pack = StringToAccParametersPack(params, log);
-            for (auto & m : pack)
-            {
-                OperatingPointPtr op = std::make_shared<OperatingPoint>();
-                for (auto & one_parameter : m.second)
-                {
-                    op->insertPoint(one_parameter.first, one_parameter.second);
-                }
-                LOG_INFO(log, "{} added op point {}", segment_id.getFullPath(), m.first);
-                op_points->emplace_back(std::make_pair(m.first, op));
-            }
-            std::sort(
-                op_points->begin(),
-                op_points->end(),
-                [](const std::pair<float, OperatingPointPtr> & a, const std::pair<float, OperatingPointPtr> & b) {
-                    return a.first < b.first;
-                });
-        }
-        else
-        {
-            LOG_WARNING(log, "The tuning for this index haven't finished.");
-        }
-    }
-    else
-    {
-        LOG_INFO(log, "op points already exist");
-    }
-    return Status();
-}
-
 Status VectorSegmentExecutor::cancelBuild()
 {
     /// TODO implement
     return Status();
 }
 
-Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
+Status VectorSegmentExecutor::removeByIds(size_t n, const size_t * ids)
 {
-    LOG_DEBUG(log, "Need to remove {} ids", n);
-    int64_t removed = 0;
-    for (int64_t i = 0; i < n; i++)
+    for (size_t i = 0; i < n; i++)
     {
-        if (delete_bitmap->test(ids[i]))
+        if (delete_bitmap->is_member(ids[i]))
         {
-            removed++;
             delete_bitmap->unset(ids[i]);
         }
     }
-    LOG_DEBUG(log, "Removed {} ids", removed);
-    if (removed == n)
-    {
-        return Status();
-    }
-    else
-    {
-        return Status(10, "error during remove by id, removed item num: " + ItoS(removed) + ", needed to remove num:" + ItoS(n));
-    }
+    return Status();
 }
 
 bool VectorSegmentExecutor::writeBitMap()
 {
     DiskIOWriter bit_map_writer;
-    String bitMap_path = segment_id.getBitMapFilePath() + VECTOR_INDEX_FILE_SUFFIX;
-    bit_map_writer.open(bitMap_path, false);
+    String bitmap_path = segment_id.getBitMapFilePath();
+    bit_map_writer.open(bitmap_path, false);
 
-    int64_t total_vec = delete_bitmap->size;
-    int64_t byte_count = (total_vec >> 3) + 1;
-    bit_map_writer.write(&byte_count, sizeof(int64_t));
+    if (delete_bitmap == nullptr)
+        delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
+    size_t size = delete_bitmap->get_size();
+    bit_map_writer.write(&size, sizeof(size_t));
 
-    bit_map_writer.write(delete_bitmap->bitmap, byte_count);
+    bit_map_writer.write(delete_bitmap->get_bitmap(), delete_bitmap->byte_size());
     bit_map_writer.close();
 
     return true;
@@ -854,32 +689,29 @@ bool VectorSegmentExecutor::writeBitMap()
 
 bool VectorSegmentExecutor::readBitMap()
 {
-    readTotalVec();
-
     DiskIOReader bit_map_reader;
     String read_file_path = segment_id.getBitMapFilePath();
 
-    if (!bit_map_reader.open(read_file_path + VECTOR_INDEX_FILE_SUFFIX))
+    if (!bit_map_reader.open(read_file_path))
     {
-        if (!bit_map_reader.open(read_file_path))
-        {
-            return false;
-        }
+        return false;
     }
 
-    int64_t bit_map_size;
-    bit_map_reader.read(&bit_map_size, sizeof(int64_t));
-    if (bit_map_size != (total_vec >> 3) + 1)
-    {
-        LOG_ERROR(log, "Bitmap file {} is corrupted: bit_map_size {}, total_vec {}", read_file_path, bit_map_size, total_vec);
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "vector index bitmap on disk is corrupted");
-    }
-
+    size_t size;
+    bit_map_reader.read(&size, sizeof(size_t));
     if (delete_bitmap == nullptr)
-        delete_bitmap = std::make_shared<GeneralBitMap>(total_vec);
+        delete_bitmap = std::make_shared<Search::DenseBitmap>(size);
 
-    bit_map_reader.seekg(sizeof(int64_t));
-    bit_map_reader.read(delete_bitmap->bitmap, bit_map_size);
+    size_t bit_map_size = delete_bitmap->byte_size();
+
+    if (total_vec != 0 && size != total_vec)
+    {
+        LOG_ERROR(log, "Bitmap file {} is corrupted: size {}, total_vec {}", read_file_path, size, total_vec);
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
+    }
+
+    bit_map_reader.seekg(sizeof(size_t));
+    bit_map_reader.read(delete_bitmap->get_bitmap(), bit_map_size);
 
     return true;
 }
@@ -889,87 +721,13 @@ void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
     CacheManager::setCacheSize(size);
 }
 
-void VectorSegmentExecutor::setSerializeSegmentSize(size_t size)
-{
-    optimal_segment_size = size > MIN_SEGMENT_SIZE ? size : MIN_SEGMENT_SIZE;
-}
-
-bool VectorSegmentExecutor::compareVectorIndexParameters(IndexType t1, Parameters p1, IndexType t2, Parameters p2)
-{
-    Metrics me = L2;
-    IndexMode mode = CPU;
-    char cmb = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
-    if (p1.contains("metric_type"))
-    {
-        me = VectorIndexFactory::createIndexMetrics(p1.at("metric_type"));
-        p1.erase("metric_type");
-    }
-    if (p1.contains("mode"))
-    {
-        mode = VectorIndexFactory::createIndexMode(p1.at("mode"));
-        p1.erase("mode");
-    }
-    if (p1.contains("compression_scheme"))
-    {
-        cmb = DB::CompressionCodecFactory::instance().get(p1.at("compression_scheme"), {})->getMethodByte();
-        p1.erase("compression_scheme");
-    }
-
-    Metrics me2 = L2;
-    IndexMode mode2 = CPU;
-    char cmb2 = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
-    if (p2.contains("metric_type"))
-    {
-        me2 = VectorIndexFactory::createIndexMetrics(p2.at("metric_type"));
-        p2.erase("metric_type");
-    }
-    if (p2.contains("mode"))
-    {
-        mode2 = VectorIndexFactory::createIndexMode(p2.at("mode"));
-        p2.erase("mode");
-    }
-    if (p2.contains("compression_scheme"))
-    {
-        cmb2 = DB::CompressionCodecFactory::instance().get(p2.at("compression_scheme"), {})->getMethodByte();
-        p2.erase("compression_scheme");
-    }
-
-    if (cmb != cmb2)
-    {
-        return false;
-    }
-    int dimension = 1;
-    if (VectorIndexFactory::typeToString(t1).find("PQ") != -1 || VectorIndexFactory::typeToString(t2).find("PQ") != -1)
-    {
-        dimension = -1;
-    }
-    VectorIndexPtr index1 = VectorIndexFactory::createIndex(t1, mode, me, dimension, p1);
-    VectorIndexPtr index2 = VectorIndexFactory::createIndex(t2, mode2, me2, dimension, p2);
-    return (index1->compare(*index2));
-}
-
-std::list<std::pair<CacheKey, Parameters>> VectorSegmentExecutor::getAllCacheNames()
+std::list<std::pair<CacheKey, Search::Parameters>> VectorSegmentExecutor::getAllCacheNames()
 {
     ///from this list, we get <segment_id, vectorindex description> pair
     return CacheManager::getInstance()->getAllItems();
 }
 
-void VectorSegmentExecutor::readTotalVec()
-{
-    DiskIOReader reader;
-    String path = segment_id.getFullPath() + "_" + ItoS(0) + VECTOR_INDEX_FILE_SUFFIX;
-    if (!reader.open(path))
-    {
-        LOG_ERROR(log, "Failed to open {}", path);
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "failed to open " + path);
-    }
-
-    reader.seekg(sizeof(int64_t) * 3);
-    reader.read(&total_vec, sizeof(total_vec));
-    LOG_DEBUG(log, "Total vectors read: {}", total_vec);
-}
-
-void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_ids)
+void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64> & deleted_row_ids)
 {
     if (segment_id.fromMergedParts())
         return;
@@ -985,7 +743,7 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_
     bool need_update = false;
     for (auto & del_row_id : deleted_row_ids)
     {
-        if (delete_bitmap->test(del_row_id))
+        if (delete_bitmap->is_member(del_row_id))
         {
             delete_bitmap->unset(del_row_id);
 
@@ -1009,7 +767,7 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_
         index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
-void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& deleted_row_ids)
+void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids)
 {
     if (!segment_id.fromMergedParts())
         return;
@@ -1030,7 +788,7 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
     {
         handleMergedMaps();
     }
-    catch(const DB::Exception & e)
+    catch (const DB::Exception & e)
     {
         LOG_DEBUG(log, "Skip to update vector bitmap due to failure when read inverted row ids map entries, error: {}", e.what());
         return;
@@ -1043,7 +801,7 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
         if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
         {
             UInt64 old_row_id = (*inverted_row_ids_map)[new_row_id];
-            if (delete_bitmap->test(old_row_id))
+            if (delete_bitmap->is_member(old_row_id))
             {
                 delete_bitmap->unset(old_row_id);
 
@@ -1068,5 +826,33 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
         index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
+std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
+{
+    static std::mutex mutex;
+    static std::shared_ptr<Search::DiskIOManager> io_manager = nullptr;
 
+    if (type != Search::IndexType::MSTG || !disk_mode)
+        return nullptr;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    if (io_manager == nullptr)
+        io_manager = std::make_shared<Search::DiskIOManager>(4);
+    return io_manager;
+}
+
+void VectorSegmentExecutor::configureDiskMode()
+{
+    if (type == Search::IndexType::MSTG)
+    {
+        disk_mode = des.getParam("disk_mode", DEFAULT_DISK_MODE);
+        if (!des.contains("disk_mode"))
+            des.setParam("disk_mode", disk_mode);
+        if (disk_mode)
+        {
+            vector_index_cache_prefix = segment_id.getVectorIndexCachePrefix();
+            LOG_INFO(log, "vector_index_cache_prefix: {}", vector_index_cache_prefix);
+            fs::create_directories(vector_index_cache_prefix);
+        }
+    }
+}
 }

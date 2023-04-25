@@ -127,7 +127,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
         part->index_granularity_info.fixed_index_granularity,
         part->index_granularity_info.index_granularity_bytes);
 
-    auto need_this_range = [&](MergeTreeData::DataPartPtr part, MergeTreeVectorScanManagerPtr vector_scan_mgr, MarkRanges & mark_ranges, MarkRange & range)
+    auto need_this_range = [&](MarkRange & range)
     {
         auto begin = range.begin;
         auto end = range.end;
@@ -166,7 +166,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
 
         /// steps++;
 
-        if (!need_this_range(part, vector_scan_mgr, mark_ranges, range))
+        if (!need_this_range(range))
             continue;
 
         if (range.end == range.begin + 1)

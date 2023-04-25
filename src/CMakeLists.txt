@@ -76,6 +76,7 @@ add_subdirectory (Bridge)
 add_subdirectory (Daemon)
 add_subdirectory (Loggers)
 add_subdirectory (Formats)
+add_subdirectory (VectorIndex)
 
 
 set(dbms_headers)
@@ -189,9 +190,6 @@ list (APPEND dbms_headers
     Dictionaries/DictionarySourceFactory.h
     Dictionaries/DictionaryStructure.h
     Dictionaries/getDictionaryConfigurationFromAST.h)
-
-add_headers_and_sources(dbms VectorIndex)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 
 if (NOT ENABLE_SSL)
     list (REMOVE_ITEM clickhouse_common_io_sources Common/OpenSSLHelpers.cpp)
@@ -408,6 +406,7 @@ dbms_target_link_libraries (
         ch_contrib::lz4
         Poco::JSON
         string_utils
+        clickhouse_vector_index
     PUBLIC
         boost::system
         clickhouse_common_io
@@ -539,8 +538,6 @@ if (TARGET ch_contrib::datasketches)
 endif ()
 
 target_link_libraries (clickhouse_common_io PRIVATE ch_contrib::lz4)
-dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/faiss")
-dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/hnswlib")
 dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/rapidjson/include")
 dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/lz4/lib")
 
@@ -549,7 +546,6 @@ dbms_target_link_libraries(PUBLIC ch_contrib::qpl)
 endif ()
 
 dbms_target_link_libraries(PRIVATE _boost_context)
-dbms_target_link_libraries(PUBLIC faiss)
 
 if (ENABLE_NLP)
     dbms_target_link_libraries (PUBLIC ch_contrib::stemmer)
@@ -588,8 +584,8 @@ if (TARGET ch_rust::skim)
     dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::skim,INTERFACE_INCLUDE_DIRECTORIES>)
     dbms_target_link_libraries(PUBLIC ch_rust::skim)
 endif()
-find_package(OpenMP REQUIRED)
-dbms_target_link_libraries(PUBLIC OpenMP::OpenMP_CXX)
+
+dbms_target_link_libraries(PUBLIC ch_contrib::search_index)
 
 include ("${ClickHouse_SOURCE_DIR}/cmake/add_check.cmake")
 

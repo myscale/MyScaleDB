@@ -16,7 +16,7 @@ time=0
 while [[ $status != "Built" && $time != 5 ]]
 do
         status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_mutation' and name = 'replia_ind'"`
-        sleep 2
+        sleep 8
         ((++time))
 done
 if [ $time -eq 5 ]; then
@@ -47,7 +47,7 @@ time=0
 while [[ $status != "Built" && $time != 5 ]]
 do
         status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_replica_mutation' and name = 'replia_ind'"`
-        sleep 2
+        sleep 8
         ((++time))
 done
 if [ $time -eq 5 ]; then
@@ -77,7 +77,7 @@ time=0
 while [[ $status != "Built" && $status != "Error" && $time < 5 ]]
 do
         status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_replica_mutation_cancel' and name = 'replia_ind'"`
-        sleep 2
+        sleep 5
         ((++time))
 done
 

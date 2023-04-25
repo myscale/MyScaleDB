@@ -608,7 +608,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
     }
 
     /// write row_ids_map_bufs
-    for (int source_num = 0; source_num < old_parts_num; source_num++)
+    for (size_t source_num = 0; source_num < old_parts_num; source_num++)
     {
         UInt64 old_row_id = 0;
         while (old_row_id < global_ctx->future_part->parts[source_num]->rows_count)

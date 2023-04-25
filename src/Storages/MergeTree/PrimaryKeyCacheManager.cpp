@@ -35,7 +35,6 @@ std::optional<Columns> PrimaryKeyCacheManager::getPartPkCache(String cache_key)
 
 void PrimaryKeyCacheManager::removeFromPKCache(const String & cache_key)
 {
-    LOG_INFO(log, "PrimaryKeyCache remove cache_key={}", cache_key);
     return cache_ex.remove(cache_key);
 }
 

@@ -9,9 +9,16 @@
 #include <Storages/MergeTree/VectorScanResult.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageInMemoryMetadata.h>
-#include <VectorIndex/VectorSegmentExecutor.h>
 
 #include <Common/logger_useful.h>
+
+#include <VectorIndex/Dataset.h>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#include <SearchIndex/VectorIndex.h>
+#pragma GCC diagnostic pop
 
 namespace DB
 {
@@ -92,13 +99,13 @@ private:
         int dim,
         int k,
         bool is_batch,
-        const VectorIndex::Metrics& metrics);
+        const Search::Metric & metric);
 
     void mergeBatchVectorScanResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
-        VectorScanResultPtr vector_scan_result = nullptr,
+        VectorScanResultPtr tmp_result = nullptr,
         const FilterWithCachedCount & filter = FilterWithCachedCount{},
         const ColumnUInt64 * part_offset = nullptr);
 
@@ -106,7 +113,7 @@ private:
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
-        VectorScanResultPtr vector_scan_result = nullptr,
+        VectorScanResultPtr tmp_result = nullptr,
         const FilterWithCachedCount & filter = FilterWithCachedCount{},
         const ColumnUInt64 * part_offset = nullptr);
 
@@ -121,8 +128,8 @@ private:
         std::vector<int64_t> & final_id,
         std::vector<float> & final_distance,
         std::vector<size_t> & actual_id_in_range,
-        const VectorIndex::Metrics& metrics,
-        VectorIndex::GeneralBitMapPtr& row_exists,
+        const Search::Metric & metric,
+        Search::DenseBitmapPtr & row_exists,
         int delete_id_nums);
 };
 

@@ -37,7 +37,7 @@ public:
         , slow_mode(slow_mode_)
         , log(&Poco::Logger::get("VectorIndexMergeTreeTask"))
     {
-        LOG_INFO(log, "Create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
+        LOG_DEBUG(log, "Create VectorIndexMergeTreeTask for {}, slow mode: {}", vector_index_entry->part_name, slow_mode);
     }
 
     bool executeStep() override;

@@ -19,7 +19,6 @@
 #include <VectorIndex/Dataset.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/Status.h>
-#include <VectorIndex/VectorIndexFactory.h>
 #include <Common/logger_useful.h>
 #include <VectorIndex/MergeUtils.h>
 #include <Common/ActionBlocker.h>
@@ -54,8 +53,7 @@ public:
     void removeDroppedVectorIndices(const StorageMetadataPtr & metadata_snapshot);
 
     /// handle build index task
-    BuildVectorIndexStatus
-    buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool tune, bool slow_mode);
+    BuildVectorIndexStatus buildVectorIndex(const StorageMetadataPtr & metadata_snapshot, const String & part_name, bool slow_mode);
 
     /** Is used to cancel all index builds. On cancel() call all currently running actions will throw exception soon.
       * All new attempts to start a vector index build will throw an exception until all 'LockHolder' objects will be destroyed.
@@ -86,7 +84,7 @@ private:
     time_t last_cache_check_time = 0;
 
     BuildVectorIndexStatus
-    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode);
+    buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool slow_mode);
 
     /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
     bool moveVectorIndexFilesToFuturePart(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part);

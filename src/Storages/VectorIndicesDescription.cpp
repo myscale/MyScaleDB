@@ -13,7 +13,7 @@
 #include <Storages/VectorIndicesDescription.h>
 #include <Common/quoteString.h>
 
-#include <VectorIndex/VectorIndexFactory.h>
+#include <VectorIndex/VectorIndexCommon.h>
 
 namespace DB
 {
@@ -97,12 +97,8 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(const ASTPt
     result.name = vec_index_definition->name;
     result.column = vec_index_definition->column;
     result.data_type = columns.get(result.column).type;
-
-    result.type = Poco::toUpper(vec_index_definition->type->name);
-    if (!VectorIndex::VectorIndexFactory::typeExist(result.type)) {
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Index type {} is unknown", result.type);
-    }
-
+    result.type = vec_index_definition->type->name;
+    VectorIndex::getIndexType(result.type);
 
     /// currently not used
     const auto & definition_arguments = vec_index_definition->type->arguments;

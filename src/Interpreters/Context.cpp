@@ -225,6 +225,7 @@ struct ContextSharedPart : boost::noncopyable
     String user_files_path;                                 /// Path to the directory with user provided files, usable by 'file' table function.
     String dictionaries_lib_path;                           /// Path to the directory with user provided binaries and libraries for external dictionaries.
     String user_scripts_path;                               /// Path to the directory with user provided scripts.
+    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MSTG disk mode
     ConfigurationPtr config;                                /// Global configuration settings.
 
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
@@ -737,6 +738,12 @@ String Context::getUserScriptsPath() const
     return shared->user_scripts_path;
 }
 
+String Context::getVectorIndexCachePath() const
+{
+    auto lock = getLock();
+    return shared->vector_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -799,6 +806,9 @@ void Context::setPath(const String & path)
 
     if (shared->user_scripts_path.empty())
         shared->user_scripts_path = shared->path + "user_scripts/";
+    
+    if (shared->vector_index_cache_path.empty())
+        shared->vector_index_cache_path = shared->path + "vector_index_cache/";
 }
 
 static void setupTmpPath(Poco::Logger * log, const std::string & path)
@@ -934,6 +944,12 @@ void Context::setUserScriptsPath(const String & path)
 {
     auto lock = getLock();
     shared->user_scripts_path = path;
+}
+
+void Context::setVectorIndexCachePath(const String & path)
+{
+    auto lock = getLock();
+    shared->vector_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const

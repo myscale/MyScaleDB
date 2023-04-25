@@ -21,16 +21,16 @@ bool VectorIndexMergeTreeTask::executeStep()
 {
     if (vector_index_entry != nullptr)
     {
-        LOG_DEBUG(log, "Execute vector index build for : {} slow_mode: {}", vector_index_entry->part_name, slow_mode);
+        LOG_DEBUG(log, "Execute vector index build for {}, slow_mode: {}", vector_index_entry->part_name, slow_mode);
         try
         {
-            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, false, slow_mode);
+            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, slow_mode);
             storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, true, "");
         }
         catch (...)
         {
             String exception_message = getCurrentExceptionMessage(false);
-            LOG_ERROR(log, "Something went wrong during index building: {}", exception_message);
+            LOG_ERROR(log, "Something went wrong for {} during index building: {}", vector_index_entry->part_name, exception_message);
             storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, false, exception_message);
 
             auto part = storage.getActiveContainingPart(vector_index_entry->part_name);
