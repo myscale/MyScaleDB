@@ -36,6 +36,7 @@
 #include <Storages/extractKeyExpressionList.h>
 #include <Storages/PartitionCommands.h>
 #include <Interpreters/PartLog.h>
+#include <VectorIndex/SegmentId.h>
 
 
 #include <boost/multi_index_container.hpp>
@@ -225,6 +226,7 @@ public:
 
     using DataPartsLock = std::unique_lock<std::mutex>;
     DataPartsLock lockParts() const { return DataPartsLock(data_parts_mutex); }
+    DataPartsLock tryLockParts() const { return DataPartsLock(data_parts_mutex, std::try_to_lock); }
 
     using OperationDataPartsLock = std::unique_lock<std::mutex>;
     OperationDataPartsLock lockOperationsWithParts() const { return OperationDataPartsLock(operation_with_data_parts_mutex); }
@@ -663,8 +665,11 @@ public:
     size_t clearOldPartsFromFilesystem(bool force = false);
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
-    void clearCachedVectorIndex(const DataPartsVector & parts);
+    void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
     void clearPrimaryKeyCache(const DataPartsVector & parts);
+    /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
+    std::pair<bool, bool> needClearVectorIndexCacheAndFile(
+        const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
 
     ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
     void regularClearCachedIndex(const DataPartsVector & parts);

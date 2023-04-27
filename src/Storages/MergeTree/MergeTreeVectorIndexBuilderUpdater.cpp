@@ -80,8 +80,6 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
     std::string relative_data_path = fs::path(data.getRelativeDataPath()).parent_path().string();
     for (const auto & cache_item : cached_item_list)
     {
-        bool existed = false;
-
         /// not this table
         if (cache_item.first.table_path.find(relative_data_path) == std::string::npos)
             continue;
@@ -89,37 +87,28 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
         const auto cache_key = cache_item.first;
 
         /// Need to check part no matter exists or not exists.
-        MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_item.first.part_name_no_mutation);
+        MergeTreeDataPartPtr part = data.getActiveContainingPart(cache_key.part_name_no_mutation);
+        auto [clear_cache, clear_file] = data.needClearVectorIndexCacheAndFile(part, metadata_snapshot, cache_key);
 
-        /// Check vector index in cache is same as metadata
-        if (!metadata_snapshot->vec_indices.empty())
+        if (!clear_cache)
         {
-            /// Currently only one vector index is allowed.
-            const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+            LOG_DEBUG(log, "Find Vector Index in metadata");
+            Search::Parameters params = cache_item.second;
 
-            LOG_DEBUG(log, "Cache: {} {}, metadata: {} {}", cache_item.first.vector_index_name, cache_item.first.column_name, vec_index_desc.name, vec_index_desc.column);
-
-            /// Further check the part status, decouple part or VPart with single vector index
-            if (cache_item.first.vector_index_name == vec_index_desc.name && cache_item.first.column_name == vec_index_desc.column &&
-                (part && (part->containVectorIndex(cache_item.first.vector_index_name, cache_item.first.column_name) || part->containRowIdsMaps())))
-            {
-                LOG_DEBUG(log, "Find Vector Index in metadata");
-                Search::Parameters params = cache_item.second;
-
-                LOG_DEBUG(log, "Params: {}, desc params: {}", VectorIndex::ParametersToString(params),
-                    VectorIndex::ParametersToString(VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)));
-
-                existed = true;
-            }
+            LOG_DEBUG(
+                log,
+                "Params: {}, desc params: {}",
+                VectorIndex::ParametersToString(params),
+                VectorIndex::ParametersToString(VectorIndex::convertPocoJsonToMap(metadata_snapshot->vec_indices[0].parameters)));
         }
 
-        if (!existed)
+        if (clear_cache)
         {
             LOG_DEBUG(log, "Find not existed cache, remove it: {}", cache_key.toString());
             VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
 
             /// Clear vector files in active part
-            if (part)
+            if (part && clear_file)
             {
                 if (part->containVectorIndex(cache_key.vector_index_name, cache_key.column_name))
                 {

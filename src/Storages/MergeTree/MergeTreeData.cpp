@@ -95,7 +95,6 @@
 #include <Poco/Logger.h>
 
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/VectorIndexCommon.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/MergeUtils.h>
 
@@ -2299,23 +2298,88 @@ size_t MergeTreeData::clearOldPartsFromFilesystem(bool force)
     return parts_to_remove.size();
 }
 
-void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts)
+void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool force)
 {
     StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
-    if(meta_snapshot->getVectorIndices().empty())
+    if (meta_snapshot->getVectorIndices().empty())
         return;
 
-    /// TODO: how to remove old parts' caches
     for (const auto & part : parts)
     {
-        for(const auto & vec_index_desc : meta_snapshot->vec_indices)
+        for (const auto & vec_index_desc : meta_snapshot->vec_indices)
         {
             auto segment_ids
                 = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
             for (auto & segment_id : segment_ids)
-                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+            {
+                auto cache_key = segment_id.getCacheKey();
+
+                if (force)
+                {
+                    VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
+                }
+                else
+                {
+                    /// Try to remove old parts' caches.
+                    LOG_DEBUG(log, "Try to remove old part' cache, part name: {}.", part->info.getPartNameV1());
+
+                    bool can_do_clear = false;
+                    {
+                        auto lock = tryLockParts();
+                        if (lock.owns_lock() == true)
+                            can_do_clear = true;
+                    }
+
+                    if (can_do_clear)
+                    {
+                        auto active_part = getActiveContainingPart(cache_key.part_name_no_mutation);
+                        auto [clear_cache, _] = needClearVectorIndexCacheAndFile(active_part, meta_snapshot, cache_key);
+                        if (clear_cache)
+                            VectorIndex::VectorSegmentExecutor::removeFromCache(cache_key);
+                    }
+                }
+            }
         }
     }
+}
+
+std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
+    const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const
+{
+    if (!part)
+    {
+        return std::make_pair(true, false);
+    }
+
+    bool existed = false;
+    auto old_part_info = MergeTreePartInfo::fromPartName(cache_key.part_name_no_mutation, format_version);
+    bool is_same = part->info == old_part_info;
+    bool is_mutate = !is_same && part->info.getPartNameWithoutMutation() == cache_key.part_name_no_mutation;
+
+    /// Check vector index in cache is same as metadata
+    if (!metadata_snapshot->vec_indices.empty())
+    {
+        /// Currently only one vector index is allowed.
+        const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+
+        LOG_DEBUG(
+            log,
+            "Cache: {} {}, metadata: {} {}",
+            cache_key.vector_index_name,
+            cache_key.column_name,
+            vec_index_desc.name,
+            vec_index_desc.column);
+
+        /// Further check the part status, decouple part or VPart with single vector index
+        if (cache_key.vector_index_name == vec_index_desc.name && cache_key.column_name == vec_index_desc.column
+            && ((is_same && part->containVectorIndex(cache_key.vector_index_name, cache_key.column_name))
+                || (!is_same && (part->containRowIdsMaps() || is_mutate))))
+        {
+            existed = true;
+        }
+    }
+
+    return std::make_pair(!existed, is_same);
 }
 
 void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
@@ -2393,9 +2457,8 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     if (parts_to_remove.empty())
         return;
 
-    /// The old part's vector index is reused by new part, no need to clear cache.
-    /// clearCachedVectorIndex(parts_to_remove);
     clearPrimaryKeyCache(parts_to_remove);
+    clearCachedVectorIndex(parts_to_remove, false);
 
     const auto settings = getSettings();
 
