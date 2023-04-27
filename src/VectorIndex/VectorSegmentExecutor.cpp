@@ -298,7 +298,12 @@ Status VectorSegmentExecutor::serialize()
         writeBitMap();
 
         std::string version = index->getVersion().toString();
-        Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des);
+        auto usage = index->getResourceUsage();
+        LOG_INFO(log, "memory_usage_bytes: {}, disk_usage_bytes: {}", usage.memory_usage_bytes, usage.disk_usage_bytes);
+        std::unordered_map<std::string, std::string> infos;
+        infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
+        infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
+        Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
         auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorReadyFilePath(), 4096);
         metadata.writeText(*buf);
 
@@ -836,7 +841,7 @@ std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
 
     std::lock_guard<std::mutex> lock(mutex);
     if (io_manager == nullptr)
-        io_manager = std::make_shared<Search::DiskIOManager>(4);
+        io_manager = std::make_shared<Search::DiskIOManager>(4, 64);
     return io_manager;
 }
 

@@ -63,20 +63,35 @@ void Metadata::readText(DB::ReadBuffer & buf)
     DB::readIntText(owner_part_id, buf);
     DB::assertChar('\n', buf);
 
+    String key;
+    String value;
+
     size_t num_params = 0;
     DB::assertString("num_params: ", buf);
     DB::readIntText(num_params, buf);
     DB::assertChar('\n', buf);
 
-    String key;
-    String value;
     for (size_t i = 0; i < num_params; i++)
     {
         readBackQuotedStringWithSQLStyle(key, buf);
         assertChar(' ', buf);
         readString(value, buf);
         assertChar('\n', buf);
-        des.setParam(key, value);
+        build_params.setParam(key, value);
+    }
+
+    size_t num_infos = 0;
+    DB::assertString("num_infos: ", buf);
+    DB::readIntText(num_infos, buf);
+    DB::assertChar('\n', buf);
+
+    for (size_t i = 0; i < num_infos; i++)
+    {
+        readBackQuotedStringWithSQLStyle(key, buf);
+        assertChar(' ', buf);
+        readString(value, buf);
+        assertChar('\n', buf);
+        infos[key] = value;
     }
 
     assertEOF(buf);
@@ -132,10 +147,22 @@ void Metadata::writeText(DB::WriteBuffer & buf) const
     DB::writeChar('\n', buf);
 
     DB::writeString("num_params: ", buf);
-    DB::writeIntText(des.size(), buf);
+    DB::writeIntText(build_params.size(), buf);
     DB::writeChar('\n', buf);
 
-    for (const auto & it : des)
+    for (const auto & it : build_params)
+    {
+        DB::writeBackQuotedString(it.first, buf);
+        DB::writeChar(' ', buf);
+        DB::writeString(it.second, buf);
+        DB::writeChar('\n', buf);
+    }
+
+    DB::writeString("num_infos: ", buf);
+    DB::writeIntText(infos.size(), buf);
+    DB::writeChar('\n', buf);
+
+    for (const auto & it : infos)
     {
         DB::writeBackQuotedString(it.first, buf);
         DB::writeChar(' ', buf);

@@ -21,7 +21,8 @@ public:
         size_t dimension_,
         size_t total_vec_,
         bool fallback_to_flat_,
-        Search::Parameters des_)
+        Search::Parameters build_params_,
+        std::unordered_map<std::string, std::string> infos_)
         : segment_id(segment_id_)
         , version(version_)
         , type(type_)
@@ -29,7 +30,8 @@ public:
         , dimension(dimension_)
         , total_vec(total_vec_)
         , fallback_to_flat(fallback_to_flat_)
-        , des(des_)
+        , build_params(build_params_)
+        , infos(infos_)
     {
     }
 
@@ -43,6 +45,7 @@ public:
     size_t dimension;
     size_t total_vec;
     bool fallback_to_flat;
-    Search::Parameters des;
+    Search::Parameters build_params;
+    std::unordered_map<std::string, std::string> infos;
 };
 }
