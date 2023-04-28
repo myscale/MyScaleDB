@@ -559,7 +559,7 @@ Status VectorSegmentExecutor::search(
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
 
-    SearchThreadLimiter limiter(log, max_threads);
+    // SearchThreadLimiter limiter(log, max_threads);
 
     // Merge filter and delete_bitmap
     if (!delete_bitmap->all())
@@ -596,7 +596,6 @@ void VectorSegmentExecutor::performSearch(
     // Perform the actual search
     {
         DB::OpenTelemetry::SpanHolder span2("VectorSegmentExecutor::search::vector_index_search");
-        span2.addAttribute("vec_search.max_threads", max_threads);
         auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
         index->search(query_dataset, k, distances, labels, parameters, false, filter.get());
     }
@@ -841,7 +840,7 @@ std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
 
     std::lock_guard<std::mutex> lock(mutex);
     if (io_manager == nullptr)
-        io_manager = std::make_shared<Search::DiskIOManager>(4, 64);
+        io_manager = std::make_shared<Search::DiskIOManager>(max_threads, 64);
     return io_manager;
 }
 
