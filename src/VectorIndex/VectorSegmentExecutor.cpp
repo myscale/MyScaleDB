@@ -569,9 +569,6 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     {
         if (fallback_to_flat)
             parameters.clear();
-        if (filter)
-            LOG_DEBUG(
-                log, "searching with filter count: {}, filter ratio: {}", filter->count(), filter->count() / static_cast<float>(total_vec));
         return performSearch(dataset, k, filter, parameters);
     }
     catch (const SearchIndexException & e)
