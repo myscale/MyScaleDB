@@ -502,26 +502,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
             LOG_DEBUG(log, "Start search: vector num: {}", vec_data->getVectorNum());
 
-            std::vector<float> per_distance(k * vec_data->getVectorNum(), 0.0);
-            std::vector<int64_t> per_id(k * vec_data->getVectorNum(), -1);
-            float * distance_data = per_distance.data();
-            int64_t * id_data = per_id.data();
-
-            auto search_status = vec_executor->search(vec_data, k, distance_data, id_data, bits, search_params);
-            if (search_status.getCode() == 10)
-            {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong dimension parameter");
-            }
-            else if (search_status.getCode() != 0)
-            {
-                LOG_WARNING(log, "Fail to search with vector index. code {}", search_status.getCode());
-                /// TODO: default vector search without vector index
-                throw Exception(
-                    ErrorCodes::LOGICAL_ERROR,
-                    "fail to search with vector index. code: {} message: {}",
-                    std::to_string(search_status.getCode()),
-                    search_status.getMessage());
-            }
+            auto search_results = vec_executor->search(vec_data, k, bits, search_params);
+            auto per_id = search_results->getResultIndices();
+            auto per_distance = search_results->getResultDistances();
 
             if (is_batch)
             {

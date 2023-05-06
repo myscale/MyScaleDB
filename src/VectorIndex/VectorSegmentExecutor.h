@@ -137,13 +137,10 @@ public:
     /// If hit in cache then simply redirect pointer.
     Status load();
 
-    /// A C style method that wraps VectorIndex::Search function and does some preprocessing.
-    /// Distance and labels are the pointers to expected results and should be declared before calling this method with proper size.
-    Status search(
+    /// A method that wraps VectorIndex::search() and does some check and post-process.
+    std::shared_ptr<Search::SearchResult> search(
         VectorDatasetPtr dataset,
         int32_t k,
-        float *& distances,
-        int64_t *& labels,
         Search::DenseBitmapPtr & filter,
         Search::Parameters & parameters);
 
@@ -224,11 +221,9 @@ private:
 
     void handleMergedMaps();
 
-    void performSearch(
+    std::shared_ptr<Search::SearchResult> performSearch(
         VectorDatasetPtr dataset,
         int32_t k,
-        float *& distances,
-        int64_t *& labels,
         Search::DenseBitmapPtr & filter,
         Search::Parameters & parameters);
 

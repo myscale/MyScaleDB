@@ -68,6 +68,7 @@ namespace DB::ErrorCodes
 {
 extern const int STD_EXCEPTION;
 extern const int CORRUPTED_DATA;
+extern const int LOGICAL_ERROR;
 }
 
 namespace VectorIndex
@@ -531,11 +532,9 @@ Status VectorSegmentExecutor::load()
     }
 }
 
-Status VectorSegmentExecutor::search(
+std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     VectorDatasetPtr dataset, \
-    int32_t k, 
-    float *& distances, 
-    int64_t *& labels, 
+    int32_t k,
     Search::DenseBitmapPtr & filter, 
     Search::Parameters & parameters)
 {
@@ -544,22 +543,22 @@ Status VectorSegmentExecutor::search(
     // Check if the index is initialized and ready for searching
     if (index == nullptr)
     {
-        return Status(3, "Index not initialized before searching!");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not initialized before searching!");
     }
     if (!index->ready())
     {
-        return Status(7, "Index not ready before searching!");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not ready before searching!");
     }
 
     // Check if the dimensions of the searched index and input match
     if (dataset->getDimension() != static_cast<int64_t>(dimension))
     {
-        return Status(10, "The dimension of searched index and input doesn't match.");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "The dimension of searched index and input doesn't match.");
     }
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
 
-    // SearchThreadLimiter limiter(log, max_threads);
+    SearchThreadLimiter limiter(log, max_threads);
 
     // Merge filter and delete_bitmap
     if (!delete_bitmap->all())
@@ -570,38 +569,43 @@ Status VectorSegmentExecutor::search(
     {
         if (fallback_to_flat)
             parameters.clear();
-        performSearch(dataset, k, distances, labels, filter, parameters);
+        if (filter)
+            LOG_DEBUG(
+                log, "searching with filter count: {}, filter ratio: {}", filter->count(), filter->count() / static_cast<float>(total_vec));
+        return performSearch(dataset, k, filter, parameters);
     }
     catch (const SearchIndexException & e)
     {
         LOG_ERROR(log, "SearchIndexException: {}", e.what());
-        return Status(e.getCode(), e.what());
+        throw IndexException(e.getCode(), e.what());
     }
     catch (const std::exception & e)
     {
-        return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
+        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
     }
-
-    return Status();
 }
 
-void VectorSegmentExecutor::performSearch(
+std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::performSearch(
     VectorDatasetPtr dataset,
     int32_t k,
-    float *& distances,
-    int64_t *& labels,
     Search::DenseBitmapPtr & filter,
     Search::Parameters & parameters)
 {
+    std::shared_ptr<Search::SearchResult> ret;
     // Perform the actual search
     {
-        DB::OpenTelemetry::SpanHolder span2("VectorSegmentExecutor::search::vector_index_search");
+        DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::performSearch()::search");
         auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
-        index->search(query_dataset, k, distances, labels, parameters, false, filter.get());
+        ret = index->search(query_dataset, k, parameters, false, filter.get());
     }
 
     // Transfer the results to newRowIds
-    transferToNewRowIds(labels, k * dataset->getVectorNum());
+    {
+        DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
+        auto labels = ret->getResultIndices();
+        transferToNewRowIds(labels, k * dataset->getVectorNum());
+    }
+    return ret;
 }
 
 Status VectorSegmentExecutor::searchWithoutIndex(
