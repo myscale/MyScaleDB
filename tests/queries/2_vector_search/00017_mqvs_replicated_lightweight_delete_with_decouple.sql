@@ -13,22 +13,27 @@ INSERT INTO test_replicated_vector SELECT number + 100, [number + 100, number + 
 INSERT INTO test_replicated_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
 
 SELECT sleep(3);
+SELECT sleep(3);
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+
 SELECT '--- Original topK result';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
 
+SELECT '--- Lightweight delete on parts with vector index';
 set allow_experimental_lightweight_delete=1;
 set mutations_sync=2;
-
-SELECT '--- Lightweight delete on parts with vector index';
 delete from test_replicated_vector where id = 2;
 delete from test_replicated_vector where id = 10;
+
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
 
 SELECT '--- Decoupled part when source parts contain lightweight delete';
 optimize table test_replicated_vector final;
-SELECT sleep(2);
+SELECT sleep(3);
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 prewhere id > 5 order by d limit 10;
@@ -37,7 +42,7 @@ SELECT '--- Lightweight delete on decoupled part';
 delete from test_replicated_vector where id = 3;
 delete from test_replicated_vector where id = 15;
 
-select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_replicated_vector';
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
