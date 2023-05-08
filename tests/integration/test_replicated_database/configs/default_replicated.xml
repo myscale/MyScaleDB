@@ -1,0 +1,14 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <allow_experimental_database_replicated>1</allow_experimental_database_replicated>
+            <default_database_engine>Replicated</default_database_engine>
+            <database_replicated_default_zk_path_prefix>/clickhouse/test/databases/</database_replicated_default_zk_path_prefix>
+        </default>
+    </profiles>
+    <users>
+        <default>
+            <profile>default</profile>
+        </default>
+    </users>
+</clickhouse>

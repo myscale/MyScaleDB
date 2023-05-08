@@ -159,7 +159,18 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
             throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE, "Database engine must be specified for ATTACH DATABASE query");
         auto engine = std::make_shared<ASTFunction>();
         auto storage = std::make_shared<ASTStorage>();
-        engine->name = "Atomic";
+        auto default_database_engine = getContext()->getSettingsRef().default_database_engine.value;
+        switch (default_database_engine) {
+            case DefaultDatabaseEngine::Ordinary:
+                engine->name = "Ordinary";
+                break;
+            case DefaultDatabaseEngine::Replicated:
+                engine->name = "Replicated";
+                break;
+            default:
+                engine->name = "Atomic";
+                break;
+        }
         engine->no_empty_args = true;
         storage->set(storage->engine, engine);
         create.set(create.storage, storage);
@@ -190,6 +201,25 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         if (!create.attach && fs::exists(metadata_path))
             throw Exception(ErrorCodes::DATABASE_ALREADY_EXISTS, "Metadata directory {} already exists", metadata_path.string());
     }
+
+    if (create.storage->engine->name == "Replicated" && !create.attach)
+    {
+        if (!create.storage->engine->arguments) {
+            create.storage->engine->arguments = std::make_shared<ASTExpressionList>();
+        }
+
+        /// Fill in default parameters
+        String default_zk_path_prefix = getContext()->getSettingsRef().database_replicated_default_zk_path_prefix.value;
+        if (create.storage->engine->arguments->children.size() == 0 && default_zk_path_prefix.size() > 0)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>(default_zk_path_prefix + database_name));
+
+        if (create.storage->engine->arguments->children.size() == 1)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{shard}"));
+
+        if (create.storage->engine->arguments->children.size() == 2)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{replica}"));
+    }
+
     else if (create.storage->engine->name == "MaterializeMySQL"
         || create.storage->engine->name == "MaterializedMySQL")
     {
@@ -242,7 +272,7 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
 
     if (create.storage->engine->name == "Replicated"
         && !getContext()->getSettingsRef().allow_experimental_database_replicated
-        && !internal && !create.attach)
+        && !create.attach)
     {
         throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
                         "Replicated is an experimental database engine. "
@@ -1110,6 +1140,16 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
 
     String current_database = getContext()->getCurrentDatabase();
     auto database_name = create.database ? create.getDatabase() : current_database;
+
+    bool need_convert_table = !create.attach && create.storage && create.storage->engine &&
+                              getContext()->getSettingsRef().database_replicated_always_convert_table_to_replicated &&
+                              DatabaseCatalog::instance().getDatabase(database_name)->getEngineName() == "Replicated" &&
+                              !startsWith(create.storage->engine->name, "Replicated") && endsWith(create.storage->engine->name, "MergeTree");
+
+    if (need_convert_table) {
+        /// Convert *MergeTree to Replicated*MergeTree for table in database with engine Replicated when creating table
+        create.storage->engine->name = "Replicated" + create.storage->engine->name;
+    }    
 
     DDLGuardPtr ddl_guard;
 

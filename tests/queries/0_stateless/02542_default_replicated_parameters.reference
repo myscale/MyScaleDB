@@ -1,0 +1,2 @@
+CREATE DATABASE replicated_database_params\nENGINE = Replicated(\'/clickhouse/test1/databases/replicated_database_params\', \'{shard}\', \'{replica}\')
+CREATE DATABASE replicated_database_params\nENGINE = Replicated(\'/clickhouse/test/databases/replicated_database_params\', \'{shard}\', \'{replica}\')
