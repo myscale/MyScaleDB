@@ -2377,12 +2377,19 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         ASTPtr subquery = extractTableExpression(query, 0);
         if (!subquery)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Subquery expected");
+        
+        /// If there is vector scan in the outer query and main table is subquery, save the vector scan description to subquery.
+        if (query_analyzer->hasVectorScan())
+            context->setVecScanDescription(query_analyzer->vectorScanDescs().front());
 
         interpreter_subquery = std::make_unique<InterpreterSelectWithUnionQuery>(
             subquery, getSubqueryContext(context),
             options.copy().subquery().noModify(), required_columns);
 
         interpreter_subquery->addStorageLimits(storage_limits);
+
+        if (query_analyzer->hasVectorScan())
+            context->resetVecScanDescription();
 
         if (query_analyzer->hasAggregation())
             interpreter_subquery->ignoreWithTotals();

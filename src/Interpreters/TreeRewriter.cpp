@@ -66,6 +66,9 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeTuple.h>
 
+#include <DataTypes/DataTypeArray.h>
+#include <Functions/FunctionHelpers.h>
+
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageInMemoryMetadata.h>
 
@@ -1284,6 +1287,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         if (limit_length == 0)
             throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
 
+        /// There is no vector scan function, hence the checks like input paramters are put here.
         /// Check if vector column in vector scan func exists in left table or right joined table
         /// Insert distance func columns into source columns here
         const ASTFunction * node = vector_scan_funcs[0];
@@ -1296,12 +1300,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         String distance_col_name = node->getColumnName();
         StorageMetadataPtr metadata_snapshot = nullptr;
 
+        std::optional<NameAndTypePair> search_column_type = std::nullopt;
+
         if (storage_snapshot && storage_snapshot->metadata->getColumns().has(vec_col_name))
         {
             /// distance func column name should add to left table's source_columns
             /// Will be added inside collectUsedColumns() after erase unrequired columns.
             /// addDistanceFuncColName(distance_col_name, source_columns);
             metadata_snapshot = storage_snapshot->metadata;
+
+            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vec_col_name);
         }
         else if (tables_with_columns.size() > 1)
         {
@@ -1309,11 +1317,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             const auto & right_table = tables_with_columns[1];
             String table_name = right_table.table.getQualifiedNamePrefix(false);
 
+            /// Handle cases where left table and right table both have the same vector column.
+            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
+                vec_col_name = identifier->shortName();
+
             if (!right_table.hasColumn(vec_col_name))
             {
                 throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
             }
 
+            search_column_type = right_table.columns.tryGetByName(vec_col_name);
             vector_from_right_table = true;
 
             /// distance func column name should add to right joined table's source columns
@@ -1328,9 +1341,37 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
             metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
         }
+        else if (tables_with_columns.size() == 1)
+        {
+            /// Left table is subquery
+            const auto & left_table = tables_with_columns[0];
+            String table_name = left_table.table.getQualifiedNamePrefix(false);
+
+            if (!left_table.hasColumn(vec_col_name))
+            {
+                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
+            }
+
+            /// Unable get metadata for left table, because the table name and UUID are empty.
+            search_column_type = left_table.columns.tryGetByName(vec_col_name);
+        }
         else
         {
             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", vec_col_name);
+        }
+
+        /// Check vector column data type
+        if (search_column_type)
+        {
+            const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
+
+            if (!array_type)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Search column {} should be Array type", vec_col_name);
+        }
+        else
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", vec_col_name);
         }
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.

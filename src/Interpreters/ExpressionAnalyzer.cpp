@@ -17,7 +17,6 @@
 #include <Parsers/ASTInterpolateElement.h>
 
 #include <DataTypes/DataTypeNullable.h>
-#include <DataTypes/DataTypeArray.h>
 #include <Columns/IColumn.h>
 
 #include <Interpreters/Aggregator.h>
@@ -40,8 +39,6 @@
 
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
-
-#include <Functions/FunctionHelpers.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/parseAggregateFunctionParameters.h>
@@ -731,34 +728,11 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                     "wrong argument number in distance function");
         }
 
-        vector_scan_desc.search_column_name = arguments[0]->getColumnName();
-
-        std::optional<NameAndTypePair> search_column_type = std::nullopt;
-        if (syntax->vector_from_right_table)
-        {
-            search_column_type = analyzedJoin().columnsFromJoinedTable().tryGetByName(vector_scan_desc.search_column_name);
-        }
-        else if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
-        {
-            /// Cannot use sourceColumns() as vector column is not needed
-            search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
-        }
-
-        if (search_column_type)
-        {
-            LOG_DEBUG(log, "search column type name: {}", (*search_column_type).type->getName());
-        }
+        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
+        if (auto * identifier = arguments[0]->as<ASTIdentifier>())
+            vector_scan_desc.search_column_name = identifier->shortName();
         else
-        {
-            LOG_DEBUG(log, "search column name: {}, type not exist", vector_scan_desc.search_column_name);
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong search column name '{}'", vector_scan_desc.search_column_name);
-        }
-
-        const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
-
-        if (!array_type)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                "Search column {} should be Array type", vector_scan_desc.search_column_name);
+            vector_scan_desc.search_column_name = arguments[0]->getColumnName();
         /// Not initialize dim here
 
         const auto * dag_node = actions->tryFindInOutputs(arguments[1]->getColumnName());
