@@ -181,7 +181,7 @@ void MergeTreeVectorScanManager::executeAfterRead(
     size_t & read_rows,
     const ReadRanges & read_ranges,
     bool has_prewhere,
-    const FilterWithCachedCount & filter)
+    const Search::DenseBitmapPtr filter)
 {
     if (vector_scan_info->is_batch)
     {
@@ -215,7 +215,7 @@ void MergeTreeVectorScanManager::executeVectorScanWithFilter(
     const String& data_path,
     const MergeTreeData::DataPartPtr & data_part,
     const ReadRanges & read_ranges,
-    const FilterWithCachedCount & filter)
+    const Search::DenseBitmapPtr filter)
 {
     this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_path, data_part, read_ranges, filter);
 }
@@ -225,7 +225,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     const String & data_path,
     const MergeTreeData::DataPartPtr & data_part,
     const ReadRanges & read_ranges,
-    const FilterWithCachedCount & filter)
+    const Search::DenseBitmapPtr filter)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScan()");
     VectorIndexDescription index;
@@ -321,49 +321,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
         Search::IndexType index_type = VectorIndex::getIndexType(index.type);
         Search::Parameters index_params = VectorIndex::convertPocoJsonToMap(index.parameters);
         index_params.erase("metric_type");
-        DB::OpenTelemetry::SpanHolder span2("MergeTreeVectorScanManager::vectorScan::find_index");
+        DB::OpenTelemetry::SpanHolder span2("MergeTreeVectorScanManager::vectorScan()::find_index");
         span2.addAttribute("vectorScan.segment_ids", segment_ids.size());
-
-        std::vector<uint64_t> selected_row_ids;
-        if (filter.present())
-        {
-            OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::proc_filter");
-            auto & filter_data = filter.getData();
-            int range_index = 0;
-            size_t start_pos = read_ranges[range_index].start_row;
-            size_t offset = 0;
-            size_t filter_data_size = 0;
-            for (size_t i = 0; i < filter_data.size(); ++i)
-            {
-                /// to another read range
-                if (offset >= read_ranges[range_index].row_num)
-                {
-                    ++range_index;
-                    start_pos = read_ranges[range_index].start_row;
-                    offset = 0;
-                }
-                if (filter_data[i])
-                {
-                    ++filter_data_size;
-                    // LOG_DEBUG(log, "set filter: i: {}, start_pos: {}, offset: {}", i, start_pos, offset);
-                    selected_row_ids.emplace_back(start_pos + offset);
-                }
-                ++offset;
-            }
-            LOG_DEBUG(log, "Filter size: {}, read_range size: {}", filter_data_size, read_ranges.size());
-            span3.addAttribute("vectorScan.filter_sizes", filter_data_size);
-            span3.addAttribute("vectorScan.read_ranges", read_ranges.size());
-        }
-        else if (!read_ranges.empty()) /// having prewhere, but this read round does not generate a filter
-        {
-            OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::generate_row_ids");
-            size_t start_pos = read_ranges[0].start_row;
-            size_t read_row_num = read_ranges[0].row_num;
-            for (size_t i = start_pos; i < start_pos + read_row_num; ++i)
-            {
-                selected_row_ids.emplace_back(i);
-            }
-        }
 
         std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
         bool retry = false;
@@ -477,24 +436,15 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
         for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
         {
-            OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan::build_bitmap_search_segment");
-            Search::DenseBitmapPtr bits;
+            OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::search");
 
-            /// have no filter
-            if (selected_row_ids.empty() && read_ranges.empty())
+            Search::DenseBitmapPtr real_filter = nullptr;
+            if (filter != nullptr)
             {
-                OpenTelemetry::SpanHolder span4("MergeTreeVectorScanManager::vectorScan()::find_index::segment_set_empty_bitmap");
-                bits = nullptr;
-            }
-            else 
-            {
-                OpenTelemetry::SpanHolder span4("MergeTreeVectorScanManager::vectorScan()::find_index::segment_get_real_bitmap");
-                /// handle filter case
-                bits = vec_executor->getRealBitMap(selected_row_ids);
-                span4.addAttribute("selected_row_ids.size", selected_row_ids.size());
+                real_filter = vec_executor->getRealBitmap(filter);
             }
 
-            if (bits != nullptr && !bits->any())
+            if (real_filter != nullptr && !real_filter->any())
             {
                 /// don't perform vector search if the segment is completely filtered out
                 continue;
@@ -502,7 +452,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
             LOG_DEBUG(log, "Start search: vector num: {}", vec_data->getVectorNum());
 
-            auto search_results = vec_executor->search(vec_data, k, bits, search_params);
+            auto search_results = vec_executor->search(vec_data, k, real_filter, search_params);
             auto per_id = search_results->getResultIndices();
             auto per_distance = search_results->getResultDistances();
 
@@ -566,7 +516,7 @@ void MergeTreeVectorScanManager::mergeResult(
     Columns & pre_result,
     size_t & read_rows,
     const ReadRanges & read_ranges,
-    const FilterWithCachedCount & filter,
+    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
     if (vector_scan_info->is_batch)
@@ -584,7 +534,7 @@ void MergeTreeVectorScanManager::mergeBatchVectorScanResult(
     size_t & read_rows,
     const ReadRanges & read_ranges,
     VectorScanResultPtr tmp_result,
-    const FilterWithCachedCount & filter,
+    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::mergeBatchVectorScanResult()");
@@ -602,15 +552,14 @@ void MergeTreeVectorScanManager::mergeBatchVectorScanResult(
         final_result.emplace_back(col->cloneEmpty());
     }
 
-    if (filter.present())
+    if (filter)
     {
         /// merge label and distance result into result columns
-        auto & filter_data = filter.getData();
         size_t current_column_pos = 0;
         int range_index = 0;
         size_t start_pos = read_ranges[range_index].start_row;
         size_t offset = 0;
-        for (size_t i = 0; i < filter_data.size(); ++i)
+        for (size_t i = 0; i < filter->get_size(); ++i)
         {
             if (offset >= read_ranges[range_index].row_num)
             {
@@ -619,7 +568,7 @@ void MergeTreeVectorScanManager::mergeBatchVectorScanResult(
                 offset = 0;
             }
 
-            if (filter_data[i])
+            if (filter->unsafe_test(i))
             {
                 for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
@@ -746,7 +695,7 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
     size_t & read_rows,
     const ReadRanges & read_ranges,
     VectorScanResultPtr tmp_result,
-    const FilterWithCachedCount & filter,
+    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::mergeVectorScanResult()");
@@ -768,14 +717,13 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
         final_result.emplace_back(col->cloneEmpty());
     }
 
-    if (filter.present())
+    if (filter)
     {
-        auto & filter_data = filter.getData();
         size_t current_column_pos = 0;
         int range_index = 0;
         size_t start_pos = read_ranges[range_index].start_row;
         size_t offset = 0;
-        for (size_t i = 0; i < filter_data.size(); ++i)
+        for (size_t i = 0; i < filter->get_size(); ++i)
         {
             if (offset >= read_ranges[range_index].row_num)
             {
@@ -783,9 +731,8 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
                 start_pos = read_ranges[range_index].start_row;
                 offset = 0;
             }
-            if (filter_data[i])
+            if (filter->unsafe_test(i))
             {
-                /// LOG_DEBUG(log, "range_index: {}, start_pos: {}, offset: {}, i: {}, filter_data row id: {}", range_index, start_pos, offset, i, start_pos + offset);
                 /// for each vector search result, try to find if there is one with label equals to row id.
                 for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
@@ -895,7 +842,7 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
 VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const MergeTreeData::DataPartPtr part,
     const ReadRanges & read_ranges,
-    const FilterWithCachedCount & filter,
+    const Search::DenseBitmapPtr filter,
     VectorIndex::VectorDatasetPtr & query_vector,
     const String & search_column,
     int dim,
@@ -918,7 +865,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     }
 
     /// only consider no prewhere case
-    if (part->storage.hasLightweightDeletedMask() && !filter.present())
+    if (part->storage.hasLightweightDeletedMask() && !filter)
     {
         cols.emplace_back(LightweightDeleteDescription::FILTER_COLUMN);
     }
@@ -976,7 +923,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
 
     std::vector<int64_t> final_id(k * nq, -1);
 
-    if (filter.present())
+    if (filter)
     {
         LOG_TRACE(log, "with filter");
         /// for debug
@@ -990,7 +937,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 read_ranges[i].end_mark,
                 read_ranges[i].start_row);
         }
-        LOG_TRACE(log, "filter size: {}", filter.getData().size());
 
         size_t filter_parsed = 0;
         for (const auto & single_range : read_ranges)
@@ -1035,7 +981,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             actual_id_in_range.reserve(single_range.row_num);
 
             /// filter out the data we want to do ANN on using the filter
-            const auto & filter_data = filter.getData();
             size_t start_pos = filter_parsed;
             size_t row_in_range = 0;
 
@@ -1045,7 +990,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             /// each array represents all the rows in a single range
             for (size_t i = start_pos; i < start_pos + single_range.row_num; ++i)
             {
-                if (filter_data[i])
+                if (filter->unsafe_test(i))
                 {
                     size_t vec_start_offset = row_in_range != 0 ? offsets[row_in_range - 1] : 0;
                     size_t vec_end_offset = offsets[row_in_range];
@@ -1222,7 +1167,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             UInt32 vector_id = label / k;
             if (final_id[label] > -1 && row_exists->is_member(final_id[label]))
             {
-                /// LOG_DEBUG(log, "[vectorScan] label: {}, distance: {}", final_id[label], final_distance[label]);
                 label_column->insert(final_id[label]);
                 vector_id_column->insert(vector_id);
                 distance_column->insert(final_distance[label]);

@@ -603,7 +603,7 @@ Status VectorSegmentExecutor::load()
 std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     VectorDatasetPtr dataset, \
     int32_t k,
-    Search::DenseBitmapPtr & filter, 
+    const Search::DenseBitmapPtr & filter,
     Search::Parameters & parameters)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
@@ -628,16 +628,17 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 
     SearchThreadLimiter limiter(log, max_threads);
 
+    auto merged_filter = filter;
     // Merge filter and delete_bitmap
     if (!delete_bitmap->all())
-        filter = Search::mergeDenseBitmap(filter, delete_bitmap);
+        merged_filter = Search::mergeDenseBitmap(filter, delete_bitmap);
 
     // Perform the search and handle the results
     try
     {
         if (fallback_to_flat)
             parameters.clear();
-        return performSearch(dataset, k, filter, parameters);
+        return performSearch(dataset, k, merged_filter, parameters);
     }
     catch (const SearchIndexException & e)
     {
@@ -653,7 +654,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::performSearch(
     VectorDatasetPtr dataset,
     int32_t k,
-    Search::DenseBitmapPtr & filter,
+    const Search::DenseBitmapPtr & filter,
     Search::Parameters & parameters)
 {
     std::shared_ptr<Search::SearchResult> ret;

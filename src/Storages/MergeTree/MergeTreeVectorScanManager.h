@@ -44,19 +44,19 @@ public:
         size_t & read_rows,
         const ReadRanges & read_ranges,
         bool has_prewhere = false,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const Search::DenseBitmapPtr filter = nullptr);
 
     void executeVectorScanWithFilter(
         const String& data_path,
         const MergeTreeData::DataPartPtr & data_part,
         const ReadRanges & read_ranges,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const Search::DenseBitmapPtr filter);
 
     void mergeResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const Search::DenseBitmapPtr filter = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
 
     bool preComputed() { return vector_scan_result != nullptr; }
@@ -87,13 +87,13 @@ private:
         const String& data_path,
         const MergeTreeData::DataPartPtr & data_part = nullptr,
         const ReadRanges & read_ranges = ReadRanges(),
-        const FilterWithCachedCount & filter = FilterWithCachedCount{});
+        const Search::DenseBitmapPtr filter = nullptr);
 
     /// brute force vector search
     VectorScanResultPtr vectorScanWithoutIndex(
         const MergeTreeData::DataPartPtr part,
         const ReadRanges & read_ranges,
-        const FilterWithCachedCount & filter,
+        const Search::DenseBitmapPtr filter,
         VectorIndex::VectorDatasetPtr & query_vector,
         const String & search_column,
         int dim,
@@ -106,7 +106,7 @@ private:
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         VectorScanResultPtr tmp_result = nullptr,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const Search::DenseBitmapPtr = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
 
     void mergeVectorScanResult(
@@ -114,7 +114,7 @@ private:
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         VectorScanResultPtr tmp_result = nullptr,
-        const FilterWithCachedCount & filter = FilterWithCachedCount{},
+        const Search::DenseBitmapPtr = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
 
     void searchWrapper(

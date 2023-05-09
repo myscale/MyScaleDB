@@ -457,14 +457,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                                               current_max_block_size_rows, current_preferred_max_column_in_block_size_bytes, min_filtration_ratio, min_marks_to_read);
     UInt64 rows_to_read = std::max(static_cast<UInt64>(1), std::min(current_max_block_size_rows, recommended_rows));
 
-    /// LOG_DEBUG(log, "[readFromPartImpl] current_max_block_size_rows: {}, recommended_rows: {}",
-    ///             current_max_block_size_rows, recommended_rows);
-
-    /// used for vector scan result merge
-    /// auto start_row = index_granularity.getMarkStartingRow(task->range_reader.currentMark()) + task->range_reader.numReadRowsInCurrentGranule();
-
-    /// LOG_DEBUG(log, "[readFromPartImpl]: start row: {}, current mark: {}", start_row, task->range_reader.currentMark());
-
     bool pk_cache_side = false;
 
     const KeyDescription & pk_description = storage_snapshot->metadata->getPrimaryKey();
@@ -555,7 +547,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                     result_columns, /// _Inout_
                     result_row_num, /// _Out_
                     read_ranges,
-                    FilterWithCachedCount(),
+                    nullptr,
                     nullptr);
 
                 if (result_row_num > 0)
@@ -594,23 +586,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
     size_t num_read_bytes = read_result.numBytesRead();
 
     auto read_ranges = read_result.readRanges();
-
-    /*
-    for (auto range : read_ranges) 
-    {
-        
-        if (read_result.getFilter()) 
-        {
-            LOG_DEBUG(log, "[readFromPartImpl] read range: start_pos: {}, num_rows: {}, start_mark: {}, end_mark: {}, filter size: {}",
-                range.start_row, range.row_num, range.start_mark, range.end_mark, read_result.getFilter()->size());
-        }
-        else
-        {
-            LOG_DEBUG(log, "[readFromPartImpl] read range: start_pos: {}, num_rows: {}, start_mark: {}, end_mark: {}",
-                range.start_row, range.row_num, range.start_mark, range.end_mark);
-        }
-    }
-    */
 
     if (task->size_predictor)
     {
@@ -668,11 +643,23 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                 ordered_columns,
                 read_result.num_rows,
                 read_ranges,
-                FilterWithCachedCount(), // filter
+                nullptr, // filter
                 part_offset);
         }
         else
         {
+            Search::DenseBitmapPtr filter = nullptr;
+            if (read_result.final_filter.present())
+            {
+                filter = std::make_shared<Search::DenseBitmap>(read_result.num_rows);
+                for (size_t i = 0; i < read_result.final_filter.getData().size(); i++)
+                {
+                    if (read_result.final_filter.getData()[i])
+                    {
+                        filter->set(i);
+                    }
+                }
+            }
             task->vector_scan_manager->executeAfterRead(
                 task->data_part->getDataPartStorage().getFullPath(),
                 task->data_part,
@@ -680,7 +667,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                 read_result.num_rows,
                 read_ranges,
                 this->prewhere_info != nullptr,
-                read_result.final_filter);
+                filter);
         }
     }
     part_offset = nullptr; // after merge, it became invalid

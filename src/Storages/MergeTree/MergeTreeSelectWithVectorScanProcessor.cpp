@@ -79,7 +79,7 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
     }
 }
 
-ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & mark_ranges)
+Search::DenseBitmapPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & mark_ranges)
 {
     OpenTelemetry::SpanHolder span("MergeTreeSelectWithVectorScanProcessor::performPrefilter()");
     Names requried_columns;
@@ -148,29 +148,20 @@ ColumnPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(MarkRanges & 
     size_t num_rows = data_part->rows_count;
 
     Block block;
-    auto new_filter = ColumnUInt8::create(num_rows, 0);
-    IColumn::Filter & new_data = new_filter->getData();
-
-    /// new_data.resize_fill(num_rows, 0);
-    OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithVectorScanProcessor::performPrefilter():StartPipe");
-    while (filter_executor.pull(block))
+    Search::DenseBitmapPtr filter = std::make_shared<Search::DenseBitmap>(num_rows);
     {
-        /*
-        LOG_DEBUG(log, "[performPrefilter] block column size: {}", block.getNames().size());
-        for (const auto & name : block.getNames())
+        OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithVectorScanProcessor::performPrefilter()::StartPipe");
+        while (filter_executor.pull(block))
         {
-            LOG_DEBUG(log, "[performPrefilter] block column: {}", name);
-        }
-        */
-        // OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithVectorScanProcessor::performPrefilter():StartPipe::CopyToFilter");
-        const PaddedPODArray<UInt64>& col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
-        for (size_t i = 0; i < block.rows(); ++i)
-        {
-            new_data[col_data[i]] = 1;
+            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+            for (size_t i = 0; i < block.rows(); ++i)
+            {
+                filter->set(col_data[i]);
+            }
         }
     }
 
-    return new_filter;
+    return filter;
 }
 
 bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_columns)
@@ -448,7 +439,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
                     result_columns, /// _Inout_
                     result_row_num, /// _Out_
                     read_ranges,
-                    FilterWithCachedCount(),
+                    nullptr,
                     part_offset);
 
                 task->mark_ranges.clear();
@@ -544,7 +535,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
         task->vector_scan_manager->mergeResult(
             ordered_columns,
             read_result.num_rows,
-            read_ranges, FilterWithCachedCount(), part_offset);
+            read_ranges, nullptr, part_offset);
     }
 
     const size_t final_result_num_rows = read_result.num_rows;
@@ -637,14 +628,12 @@ try
         /// 1 read, then get the filtered part_offsets
         /// 2 perform vector scan based on part_offsets
         /// 3 filter mark_ranges based on vector scan results
-        auto filter_col = performPrefilter(mark_ranges_for_task);
-        /// auto filter = typeid_cast<const ColumnUInt8 *>(filter_col.get());
+        auto filter = performPrefilter(mark_ranges_for_task);
         ReadRanges read_ranges;
         ReadRange read_range{0, data_part->rows_count, 0, data_part->index_granularity.getMarksCount()};
         read_ranges.emplace_back(read_range);
-        vector_scan_manager->executeVectorScanWithFilter(data_part->getDataPartStorage().getFullPath(), data_part, read_ranges, FilterWithCachedCount(filter_col));
+        vector_scan_manager->executeVectorScanWithFilter(data_part->getDataPartStorage().getFullPath(), data_part, read_ranges, filter);
         filterMarkRangesByVectorScanResult(data_part, vector_scan_manager, mark_ranges_for_task);
-        /// prewhere_info = nullptr;
     }
 
     for (const auto & range : mark_ranges_for_task)

@@ -1,8 +1,11 @@
 #pragma once
+
 #include <Storages/MergeTree/MergeTreeSelectProcessor.h>
 #include <Storages/SelectQueryInfo.h>
 
 #include <Common/logger_useful.h>
+
+#include <SearchIndex/Common/DenseBitmap.h>
 
 namespace DB
 {
@@ -42,7 +45,7 @@ private:
 
     BlockAndProgress readFromPartWithVectorScan();
 
-    ColumnPtr performPrefilter(MarkRanges & mark_ranges);
+    Search::DenseBitmapPtr performPrefilter(MarkRanges & mark_ranges);
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeSelectWithVectorScanProcessor");
 

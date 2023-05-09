@@ -141,7 +141,7 @@ public:
     std::shared_ptr<Search::SearchResult> search(
         VectorDatasetPtr dataset,
         int32_t k,
-        Search::DenseBitmapPtr & filter,
+        const Search::DenseBitmapPtr & filter,
         Search::Parameters & parameters);
 
     void buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size);
@@ -176,28 +176,21 @@ public:
     /// expire the related index from cache.
     static Status removeFromCache(const CacheKey & cache_key);
 
-    Search::DenseBitmapPtr getRealBitMap(const std::vector<UInt64> & selected_row_ids)
+    Search::DenseBitmapPtr getRealBitmap(const Search::DenseBitmapPtr & filter)
     {
-        Search::DenseBitmapPtr bits = std::make_shared<Search::DenseBitmap>(total_vec);
-        if (segment_id.fromMergedParts())
+        if (!segment_id.fromMergedParts())
+            return filter;
+
+        Search::DenseBitmapPtr real_filter = std::make_shared<Search::DenseBitmap>(total_vec);
+        /// Transfer row IDs in the decoupled data part to real row IDs of the old data part.
+        for (auto & new_row_id : filter->to_vector())
         {
-            /// need to transfer merged row id to real row id of this old data part.
-            for (auto & new_row_id : selected_row_ids)
+            if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
             {
-                if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
-                {
-                    bits->set((*inverted_row_ids_map)[new_row_id]);
-                }
+                real_filter->set((*inverted_row_ids_map)[new_row_id]);
             }
         }
-        else
-        {
-            for (auto & row_id : selected_row_ids)
-            {
-                bits->set(row_id);
-            }
-        }
-        return bits;
+        return real_filter;
     }
 
     /// Update SegmentId
@@ -224,7 +217,7 @@ private:
     std::shared_ptr<Search::SearchResult> performSearch(
         VectorDatasetPtr dataset,
         int32_t k,
-        Search::DenseBitmapPtr & filter,
+        const Search::DenseBitmapPtr & filter,
         Search::Parameters & parameters);
 
     void transferToNewRowIds(int64_t *& labels, int size)
