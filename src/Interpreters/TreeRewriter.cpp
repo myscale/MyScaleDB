@@ -1299,6 +1299,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         String vec_col_name = arguments[0]->getColumnName();
         String distance_col_name = node->getColumnName();
         StorageMetadataPtr metadata_snapshot = nullptr;
+        bool table_is_remote = false; /// Mark if the storage with vector column is distributed.
 
         std::optional<NameAndTypePair> search_column_type = std::nullopt;
 
@@ -1308,6 +1309,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             /// Will be added inside collectUsedColumns() after erase unrequired columns.
             /// addDistanceFuncColName(distance_col_name, source_columns);
             metadata_snapshot = storage_snapshot->metadata;
+            table_is_remote = is_remote_storage;
 
             search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vec_col_name);
         }
@@ -1340,6 +1342,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             auto table_id = context->resolveStorageID(StorageID(right_table.table.database, right_table.table.table, right_table.table.uuid));
             const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
             metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
+            table_is_remote = right_table_storage->isRemote();
         }
         else if (tables_with_columns.size() == 1)
         {
@@ -1375,7 +1378,8 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         }
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.
-        if (metadata_snapshot)
+        /// Skip the check when table is distributed.
+        if (metadata_snapshot && !table_is_remote)
         {
             /// 1 for ASC, -1 for DESC
             int direction = 1;
