@@ -76,6 +76,7 @@
 #include <Interpreters/InterserverIOHandler.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/SessionLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -116,6 +117,7 @@
 #include <Storages/StorageView.h>
 #include <Parsers/ASTFunction.h>
 #include <base/find_symbols.h>
+#include <VectorIndex/CacheManager.h>
 
 #include <Interpreters/Cache/FileCache.h>
 
@@ -2085,6 +2087,11 @@ ThreadPool & Context::getPrefetchThreadpool() const
     return *shared->prefetch_threadpool;
 }
 
+void Context::flushAllVectorIndexWillUnload() const
+{
+    VectorIndex::CacheManager::flushWillUnloadLog();
+}
+
 void Context::setIndexUncompressedCache(size_t max_size_in_bytes)
 {
     auto lock = getLock();
@@ -3007,6 +3014,19 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
     return shared->system_logs->transactions_info_log;
 }
 
+std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
+{
+    auto lock = getLock();
+
+    if (!shared->system_logs)
+        return {};
+    
+    if (part_database == DatabaseCatalog::SYSTEM_DATABASE)
+        return {};
+
+    return shared->system_logs->vector_index_event_log;
+}
+
 
 std::shared_ptr<ProcessorsProfileLog> Context::getProcessorsProfileLog() const
 {
@@ -3375,6 +3395,10 @@ void Context::shutdown()
     shared->shutdown();
 }
 
+bool Context::isShutdown() const
+{
+    return shared->shutdown_called;
+}
 
 Context::ApplicationType Context::getApplicationType() const
 {

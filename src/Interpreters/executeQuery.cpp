@@ -56,6 +56,7 @@
 #include <Interpreters/ProcessList.h>
 #include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/QueryLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/ReplaceQueryParameterVisitor.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -211,6 +212,34 @@ static void logException(ContextPtr context, QueryLogElement & elem, bool log_er
         LOG_INFO(&Poco::Logger::get("executeQuery"), message);
 }
 
+VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
+{
+    if(ast)
+    {
+        auto * create_query = ast->as<ASTCreateQuery>();
+        auto * alter_query = ast->as<ASTAlterQuery>();
+        if (create_query && 
+            !create_query->attach && 
+            create_query->columns_list && 
+            create_query->columns_list->vec_indices && 
+            !create_query->columns_list->vec_indices->children.empty())
+        {
+            return VectorIndexEventLogElement::DEFINITION_CREATED;
+        }
+        else if (alter_query)
+        {
+            for (const auto & command : alter_query->command_list->children)
+            {
+                if ( command->as<ASTAlterCommand&>().type == ASTAlterCommand::ADD_VECTOR_INDEX )
+                    return VectorIndexEventLogElement::DEFINITION_CREATED;
+                else if (command->as<ASTAlterCommand&>().type == ASTAlterCommand::DROP_VECTOR_INDEX)
+                    return VectorIndexEventLogElement::DEFINITION_DROPPED;
+            }
+        }
+    }
+    return VectorIndexEventLogElement::DEFAULT;
+}
+
 static void onExceptionBeforeStart(
     const String & query_for_logging,
     ContextPtr context,
@@ -230,6 +259,19 @@ static void onExceptionBeforeStart(
 
     /// Log the start of query execution into the table if necessary.
     QueryLogElement elem;
+    VectorIndexEventLogElement vec_elem;
+    auto current_event_type = getQueryWithVectorType(ast);
+    if(current_event_type != VectorIndexEventLogElement::DEFAULT &&
+       current_event_type != VectorIndexEventLogElement::DEFINITION_DROPPED)
+        vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+    vec_elem.part_name = "";
+    vec_elem.partition_id = "";
+    vec_elem.event_time = current_time_us / 1000000;
+    vec_elem.event_time_microseconds = current_time_us;
+    if (const auto * query_with_table_output = dynamic_cast<const ASTQueryWithTableAndOutput *>(ast.get()))
+    {
+        vec_elem.table_name = query_with_table_output->getTable();
+    }
 
     elem.type = QueryLogElementType::EXCEPTION_BEFORE_START;
     elem.event_time = timeInSeconds(query_end_time);
@@ -239,6 +281,7 @@ static void onExceptionBeforeStart(
     elem.query_duration_ms = elapsed_millliseconds;
 
     elem.current_database = context->getCurrentDatabase();
+    vec_elem.database_name = elem.current_database;
     elem.query = query_for_logging;
     elem.normalized_query_hash = normalizedQueryHash<false>(query_for_logging);
 
@@ -253,7 +296,9 @@ static void onExceptionBeforeStart(
     // We don't calculate databases, tables and columns when the query isn't able to start
 
     elem.exception_code = getCurrentExceptionCode();
+    vec_elem.error_code = getCurrentExceptionCode();
     auto exception_message = getCurrentExceptionMessageAndPattern(/* with_stacktrace */ false);
+    vec_elem.exception = getCurrentExceptionMessage(false);
     elem.exception = std::move(exception_message.text);
     elem.exception_format_string = exception_message.format_string;
 
@@ -272,6 +317,10 @@ static void onExceptionBeforeStart(
 
     /// Update performance counters before logging to query_log
     CurrentThread::finalizePerformanceCounters();
+
+    if (auto vector_index_event_log = context->getVectorIndexEventLog())
+        if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+            vector_index_event_log->add(vec_elem);
 
     if (settings.log_queries && elem.type >= settings.log_queries_min_type && !settings.log_queries_min_query_duration_ms.totalMilliseconds())
         if (auto query_log = context->getQueryLog())
@@ -806,6 +855,19 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         /// Everything related to query log.
         {
             QueryLogElement elem;
+            VectorIndexEventLogElement vec_elem;
+            
+            vec_elem.part_name = "";
+            vec_elem.partition_id = "";
+            vec_elem.event_time = timeInSeconds(current_time);
+            vec_elem.event_time_microseconds = timeInMicroseconds(current_time);
+            vec_elem.event_type = VectorIndexEventLogElement::DEFAULT;
+            if (query_database == "")
+                vec_elem.database_name = context->getCurrentDatabase();
+            else
+                vec_elem.database_name = query_database;
+            vec_elem.table_name = query_table;
+            vec_elem.event_type = getQueryWithVectorType(ast);
 
             elem.type = QueryLogElementType::QUERY_START;
 
@@ -921,6 +983,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem,
+                                    vec_elem,
                                     context,
                                     session_context,
                                     ast,
@@ -959,6 +1022,14 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     elem.type = QueryLogElementType::QUERY_FINISH;
 
                     status_info_to_query_log(elem, info, ast, context);
+
+                    if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+                    {
+                        if (auto vec_index_event_log = context->getVectorIndexEventLog())
+                        {
+                            vec_index_event_log->add(vec_elem);
+                        }
+                    }
 
                     if (pulling_pipeline)
                     {
@@ -1068,6 +1139,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
             auto exception_callback = [start_watch,
                                        elem,
+                                       vec_elem,
                                        context,
                                        session_context,
                                        ast,
@@ -1100,6 +1172,14 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 /// Update performance counters before logging to query_log
                 CurrentThread::finalizePerformanceCounters();
                 const auto time_now = std::chrono::system_clock::now();
+                if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+                {
+                    vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+                    if (auto vec_index_event_log = context->getVectorIndexEventLog())
+                    {
+                        vec_index_event_log->add(vec_elem);
+                    }
+                }
                 elem.event_time = timeInSeconds(time_now);
                 elem.event_time_microseconds = timeInMicroseconds(time_now);
 

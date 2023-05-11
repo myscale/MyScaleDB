@@ -1,0 +1,9 @@
+<clickhouse>
+    <vector_index_event_log>
+        <database>system</database>
+        <table>vector_index_event_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </vector_index_event_log>
+</clickhouse>

@@ -16,7 +16,9 @@
 #include <IO/BufferWithOwnMemory.h>
 #include <IO/ReadBufferFromFile.h>
 #include <IO/WriteHelpers.h>
+#include <Interpreters/Context.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
 #include <VectorIndex/DiskIOReader.h>
@@ -131,6 +133,26 @@ String cutMutVer(const String & part_name)
 
 std::once_flag VectorSegmentExecutor::once;
 int VectorSegmentExecutor::max_threads = 0;
+String cutPartitionID(const String & part_name)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, part_name, boost::is_any_of("_"));
+    return tokens[0];
+}
+
+String cutTableUUIDFromCacheKey(const String & cache_key)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, cache_key, boost::is_any_of("/"));
+    return tokens[tokens.size() - 3];
+}
+
+String cutPartNameFromCacheKey(const String & cache_key)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, cache_key, boost::is_any_of("/"));
+    return tokens[tokens.size() - 2];
+}
 
 void VectorSegmentExecutor::init()
 {
@@ -400,6 +422,12 @@ Status VectorSegmentExecutor::load()
         /// We don't want multiple execution engines loading index concurrently, so we use getOrSet method of LRUResourceCache
         /// to ensure that only one execution engine may read from disk at any time.
         LOG_DEBUG(log, "Num of item before cache {}", mgr->countItem());
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_START);
 
         auto load_func = [&]() -> IndexWithMetaPtr
         {
@@ -475,10 +503,21 @@ Status VectorSegmentExecutor::load()
                 throw e;
             }
         };
+        auto global_context = DB::Context::getGlobalContextInstance();
+        auto release_callback = [cache_key, global_context]()
+        {
+            if (!global_context->isShutdown())
+                DB::VectorIndexEventLog::addEventLog(
+                    global_context,
+                    cache_key.getTableUUID(),
+                    cache_key.getPartName(),
+                    cache_key.getPartitionID(),
+                    DB::VectorIndexEventLogElement::UNLOAD);
+        };
 
         try
         {
-            index_holder = mgr->load(cache_key, load_func);
+            index_holder = mgr->load(cache_key, load_func, release_callback);
             LOG_DEBUG(log, "Num of item after cache {}", mgr->countItem());
             if (index_holder)
             {
@@ -488,21 +527,50 @@ Status VectorSegmentExecutor::load()
                 delete_bitmap = new_index.getDeleteBitmap();
                 des = new_index.des;
                 fallback_to_flat = new_index.fallback_to_flat;
+
+                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                     cache_key.getTableUUID(),
+                                                     cache_key.getPartName(),
+                                                     cache_key.getPartitionID(),
+                                                     DB::VectorIndexEventLogElement::LOAD_SUCCEED);
                 return Status();
             }
         }
         catch (const IndexException & e)
         {
+            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                 cache_key.getTableUUID(),
+                                                 cache_key.getPartName(),
+                                                 cache_key.getPartitionID(),
+                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
+                                                 DB::ExecutionStatus(e.code(), e.message()));
             return Status(e.code(), e.message());
         }
         catch (const DB::Exception & e)
         {
+            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                 cache_key.getTableUUID(),
+                                                 cache_key.getPartName(),
+                                                 cache_key.getPartitionID(),
+                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
+                                                 DB::ExecutionStatus(e.code(), e.message()));
             return Status(e.code(), e.message());
         }
         catch (const std::exception & e)
         {
+            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                 cache_key.getTableUUID(),
+                                                 cache_key.getPartName(),
+                                                 cache_key.getPartitionID(),
+                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
+                                                 DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, e.what()));
             return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
         }
+        DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                             cache_key.getTableUUID(),
+                                             cache_key.getPartName(),
+                                             cache_key.getPartitionID(),
+                                             DB::VectorIndexEventLogElement::LOAD_FAILED);
 
         return Status(2, "Load failed");
     }

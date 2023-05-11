@@ -144,6 +144,8 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
         /// Prevents recursive drop from drop database query. The original query must specify a table.
         bool is_drop_or_detach_database = !query_ptr->as<ASTDropQuery>()->table;
 
+        getContext()->setDetachQuery(false);
+
         AccessFlags drop_storage;
 
         if (table->isView())
@@ -170,6 +172,7 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
         if (query.kind == ASTDropQuery::Kind::Detach)
         {
             context_->checkAccess(drop_storage, table_id);
+            getContext()->setDetachQuery(true);
 
             if (table->isDictionary())
             {

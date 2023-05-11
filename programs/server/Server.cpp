@@ -2005,6 +2005,8 @@ try
 
         async_metrics.stop();
 
+        global_context->flushAllVectorIndexWillUnload();
+
         /** Ask to cancel background jobs all table engines,
           *  and also query_log.
           * It is important to do early, not in destructor of Context, because

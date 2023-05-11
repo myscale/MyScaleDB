@@ -46,6 +46,7 @@
 #include <Interpreters/PartLog.h>
 #include <Interpreters/TransactionLog.h>
 #include <Interpreters/TreeRewriter.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <IO/S3Common.h>
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
@@ -2460,6 +2461,20 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     clearPrimaryKeyCache(parts_to_remove);
     clearCachedVectorIndex(parts_to_remove, false);
 
+    auto table_id = getStorageID();
+    VectorIndexEventLogElement vec_elem;
+    bool detach = getContext()->isDetachQuery();
+    auto vec_event_log = getContext()->getVectorIndexEventLog(table_id.database_name);
+    if (vec_event_log && !detach)
+    {
+        vec_elem.event_type = VectorIndexEventLogElement::CLEARED;
+        const auto time_now = std::chrono::system_clock::now();
+        vec_elem.event_time = timeInSeconds(time_now);
+        vec_elem.event_time_microseconds = timeInMicroseconds(time_now);
+        vec_elem.database_name = table_id.database_name;
+        vec_elem.table_name = table_id.table_name;
+    }
+
     const auto settings = getSettings();
 
     auto remove_single_thread = [this, &parts_to_remove, part_names_succeed]()
@@ -2468,6 +2483,15 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
             log, "Removing {} parts from filesystem (serially): Parts: [{}]", parts_to_remove.size(), fmt::join(parts_to_remove, ", "));
         for (const DataPartPtr & part : parts_to_remove)
         {
+            if (part->containAnyVectorIndex() &&
+                vec_event_log &&
+                vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+            {
+                vec_elem.part_name = part->name;
+                vec_elem.partition_id = part->info.partition_id;
+                vec_event_log->add(vec_elem);
+            }
+
             asMutableDeletingPart(part)->remove();
             if (part_names_succeed)
                 part_names_succeed->insert(part->name);
@@ -2503,6 +2527,15 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
         for (const DataPartPtr & part : parts_to_remove)
         {
+            if (part->containAnyVectorIndex() &&
+                vec_event_log &&
+                vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+            {
+                vec_elem.part_name = part->name;
+                vec_elem.partition_id = part->info.partition_id;
+                vec_event_log->add(vec_elem);
+            }
+
             pool.scheduleOrThrowOnError([&part, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup()]
             {
                 SCOPE_EXIT_SAFE(
@@ -2577,6 +2610,15 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
             for (const auto & part : batch)
             {
+                if (part->containAnyVectorIndex() &&
+                    vec_event_log &&
+                    vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+                {
+                    vec_elem.part_name = part->name;
+                    vec_elem.partition_id = part->info.partition_id;
+                    vec_event_log->add(vec_elem);
+                }
+
                 asMutableDeletingPart(part)->remove();
                 if (part_names_succeed)
                 {

@@ -2,6 +2,7 @@
 #include <VectorIndex/CacheManager.h>
 
 #include <VectorIndex/IndexException.h>
+#include <Interpreters/VectorIndexEventLog.h>
 
 namespace DB::ErrorCodes
 {
@@ -46,7 +47,63 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
     }
     LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
 
-    cache->getOrSet(cache_key, [&]() { return index; });
+    auto global_context = DB::Context::getGlobalContextInstance();
+    auto release_callback = [cache_key, global_context]()
+    {
+        if (!global_context->isShutdown())
+            DB::VectorIndexEventLog::addEventLog(
+                global_context,
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::UNLOAD);
+    };
+
+    DB::VectorIndexEventLog::addEventLog(
+        DB::Context::getGlobalContextInstance(),
+        cache_key.getTableUUID(),
+        cache_key.getPartName(),
+        cache_key.getPartitionID(),
+        DB::VectorIndexEventLogElement::LOAD_START);
+
+    if (!cache->getOrSet(
+            cache_key, [&]() { return index; }, release_callback))
+    {
+        LOG_DEBUG(log, "Put into cache: {} failed", cache_key.toString());
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_FAILED);
+    }
+    else
+    {
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_SUCCEED);
+    }
+}
+
+void CacheManager::flushWillUnloadLog()
+{
+    auto cache_mgr = getInstance();
+    auto cache_items = cache_mgr->cache->getCacheList();
+    for (auto item : cache_items)
+    {
+        auto context_ = DB::Context::getGlobalContextInstance();
+        auto cache_key = item.first;
+        if (context_)
+            DB::VectorIndexEventLog::addEventLog(
+                context_,
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::WILLUNLOAD);
+    }
 }
 
 size_t CacheManager::countItem() const
@@ -60,7 +117,9 @@ void CacheManager::forceExpire(const CacheKey & cache_key)
     return cache->tryRemove(cache_key);
 }
 
-IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, std::function<IndexWithMetaPtr()> load_func)
+IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, 
+                                          std::function<IndexWithMetaPtr()> load_func,
+                                          std::function<void()> release_callback)
 {
     if (!cache)
     {
@@ -68,7 +127,7 @@ IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, std::funct
     }
     LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
 
-    return cache->getOrSet(cache_key, load_func);
+    return cache->getOrSet(cache_key, load_func, release_callback);
 }
 
 void CacheManager::setCacheSize(size_t size_in_bytes)

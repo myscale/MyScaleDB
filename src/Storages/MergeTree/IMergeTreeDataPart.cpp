@@ -1352,6 +1352,7 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
 {
     /// No need to check metadata of table, because for drop index, the metadata has erased it.
     /// Remove all the files which end with .vidx2
+    bool with_vector_index_file_remove = false;
 
     for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
     {
@@ -1360,8 +1361,22 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
         if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX) || (skip_decouple && startsWith(file_name, "merged-")))
             continue;
 
+        with_vector_index_file_remove = true;
         IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
         part_storage.removeFileIfExists(file_name);
+    }
+
+    if (with_vector_index_file_remove)
+    {
+        /// add vector index cleared event
+        auto table_id = storage.getStorageID();
+        VectorIndexEventLog::addEventLog(
+            storage.getContext(),
+            table_id.database_name,
+            table_id.table_name,
+            name,
+            info.partition_id,
+            VectorIndexEventLogElement::CLEARED);
     }
 
     /// Clear from metadata

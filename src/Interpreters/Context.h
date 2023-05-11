@@ -103,6 +103,7 @@ class ProcessorsProfileLog;
 class FilesystemCacheLog;
 class FilesystemReadPrefetchesLog;
 class AsynchronousInsertLog;
+class VectorIndexEventLog;
 class IAsynchronousReader;
 struct MergeTreeSettings;
 struct InitialAllRangesAnnouncement;
@@ -401,6 +402,7 @@ private:
 
     /// A flag, used to distinguish between user query and internal query to a database engine (MaterializedPostgreSQL).
     bool is_internal_query = false;
+    bool is_detach_query = false;
 
     inline static ContextPtr global_context_instance;
 
@@ -891,6 +893,8 @@ public:
     /// and make a prefetch by putting a read task to threadpoolReader.
     size_t getPrefetchThreadpoolSize() const;
 
+    void flushAllVectorIndexWillUnload() const;
+
     /// Create a cache of index uncompressed blocks of specified size. This can be done only once.
     void setIndexUncompressedCache(size_t max_size_in_bytes);
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
@@ -980,6 +984,7 @@ public:
     std::shared_ptr<FilesystemCacheLog> getFilesystemCacheLog() const;
     std::shared_ptr<FilesystemReadPrefetchesLog> getFilesystemReadPrefetchesLog() const;
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
+    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     /// Returns an object used to log operations with parts if it possible.
     /// Provide table name to make required checks.
@@ -1023,9 +1028,12 @@ public:
     void reloadConfig() const;
 
     void shutdown();
+    bool isShutdown() const;
 
     bool isInternalQuery() const { return is_internal_query; }
     void setInternalQuery(bool internal) { is_internal_query = internal; }
+    bool isDetachQuery() const { return  is_detach_query; }
+    void setDetachQuery(bool detach) { is_detach_query = detach; }
 
     ActionLocksManagerPtr getActionLocksManager() const;
 

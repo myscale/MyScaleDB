@@ -4,6 +4,7 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <VectorIndex/DiskIOReader.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <VectorIndex/PartReader.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/VectorIndexCommon.h>
@@ -267,6 +268,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         if (part->vector_index_build_cancelled)
         {
             LOG_INFO(log, "The index build job for Part {} has been cancelled", part_name);
+            VectorIndexEventLog::addEventLog(data.getContext(),part,VectorIndexEventLogElement::BUILD_CANCELD);
             return BuildVectorIndexStatus::BUILD_FAIL;
         }
 
@@ -289,6 +291,13 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         if (failed_count >= maxBuildRetryCount)
         {
             part->setBuildError();
+            VectorIndexEventLog::addEventLog(
+                data.getContext(),
+                part,
+                VectorIndexEventLogElement::BUILD_ERROR,
+                ExecutionStatus(
+                    ErrorCodes::MEMORY_LIMIT_EXCEEDED,
+                    "part = " + part->name + ", has MEMORY_LIMIT_EXCEEDED for max retry times " + std::to_string(failed_count)));
             throw Exception(ErrorCodes::MEMORY_LIMIT_EXCEEDED, "part = {}, has MEMORY_LIMIT_EXCEEDED for max retry times {}", part->name, failed_count);
         }
 
@@ -310,10 +319,12 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
                 status = BuildVectorIndexStatus::BUILD_FAIL;
                 int temp_value = counter.increaseAndGet(part->getDataPartStorage().getRelativePath());
                 LOG_WARNING(log, "Vector index build task for part {} has MEMORY_LIMIT_EXCEEDED for {} times", part->name, temp_value);
+                VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
                 mem_limit_happened = true;
             }
             else
             {
+                VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
                 throw;
             }
         }
@@ -397,6 +408,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 else
                 {
                     LOG_WARNING(log, "Found column {} in part and VectorIndexDescription, but not in metadata snapshot.", col);
+                    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus(ErrorCodes::ABORTED, "Found column " + col + " in part and VectorIndexDescription, but not in metadata snapshot"));
                     return BuildVectorIndexStatus::META_ERROR;
                 }
             }
@@ -409,6 +421,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 vec_index_desc.name,
                 part->name);
             part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+            VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
             return BuildVectorIndexStatus::SUCCESS;
         }
 
@@ -476,6 +489,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     if (!future_part)
                     {
                         LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
+                        VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                         return BuildVectorIndexStatus::SUCCESS;
                     }
                 }
@@ -492,6 +506,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// else future part will pick up later at the next time when index built for it.
             }
 
+            VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
             return BuildVectorIndexStatus::SUCCESS;
         }
 
@@ -522,6 +537,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             data.getSettings()->default_mstg_disk_mode);
         size_t max_build_index_add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
         size_t max_build_index_train_block_size = data.getContext()->getSettingsRef().max_build_index_train_block_size;
+
+        VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_START);
         vec_index_builder->buildIndex(&part_reader, slow_mode, max_build_index_train_block_size, max_build_index_add_block_size);
 
         const auto empty_ids = part_reader.emptyIds();
@@ -556,6 +573,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 if (!future_part)
                 {
                     LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
+                    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                     return BuildVectorIndexStatus::SUCCESS;
                 }
             }
@@ -568,6 +586,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 {
                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
                     disk->removeRecursive(vector_tmp_relative_path);
+                    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                     return BuildVectorIndexStatus::SUCCESS;
                 }
 
@@ -611,6 +630,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
     LOG_DEBUG(log, "Vector index build complete");
 
+    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
     return BuildVectorIndexStatus::SUCCESS;
 }
 

@@ -83,11 +83,14 @@ public:
     IndexWithMetaHolderPtr get(const CacheKey & cache_key);
     size_t countItem() const;
     void forceExpire(const CacheKey & cache_key);
-    IndexWithMetaHolderPtr load(const CacheKey & cache_key, std::function<IndexWithMetaPtr()> load_func);
+    IndexWithMetaHolderPtr load(const CacheKey & cache_key,
+                                std::function<IndexWithMetaPtr()> load_func,
+                                std::function<void()> release_callback = {});
     std::list<std::pair<CacheKey, Search::Parameters>> getAllItems();
 
     static CacheManager * getInstance();
     static void setCacheSize(size_t size_in_bytes);
+    static void flushWillUnloadLog();
 
 protected:
     mutable std::unique_ptr<VectorIndexCache> cache;

@@ -16,6 +16,9 @@ namespace VectorIndex
 {
 
 String cutMutVer(const String & part_name);
+String cutPartitionID(const String & part_name);
+String cutTableUUIDFromCacheKey(const String & cache_key);
+String cutPartNameFromCacheKey(const String & cache_key);
 
 struct CacheKey
 {
@@ -31,6 +34,35 @@ struct CacheKey
     }
 
     String toString() const { return table_path + "/" + part_name_no_mutation + "/" + vector_index_name + "-" + column_name; }
+
+    static String getTableUUIDFromCacheKey(const String & cache_key)
+    {
+        return cutTableUUIDFromCacheKey(cache_key);
+    }
+
+    static String getPartNameFromCacheKey(const String & cache_key)
+    {
+        return cutPartNameFromCacheKey(cache_key);
+    }
+
+    static String getPartitionIDFromCacheKey(const String & cache_key)
+    {
+        String part_name = cutPartNameFromCacheKey(cache_key);
+        return cutPartitionID(cache_key);
+    }
+
+    String getTableUUID()  const
+    {
+        fs::path full_path(table_path);
+        return full_path.stem().string();
+    }
+
+    String getPartName() const { return part_name_no_mutation; }
+
+    String getPartitionID() const 
+    {
+        return cutPartitionID(part_name_no_mutation);
+    }
 };
 
 struct SegmentId
