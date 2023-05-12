@@ -272,7 +272,7 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
 
     if (create.storage->engine->name == "Replicated"
         && !getContext()->getSettingsRef().allow_experimental_database_replicated
-        && !create.attach)
+        && !internal && !create.attach)
     {
         throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
                         "Replicated is an experimental database engine. "
