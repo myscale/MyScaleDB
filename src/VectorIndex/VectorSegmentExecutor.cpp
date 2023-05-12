@@ -601,10 +601,11 @@ Status VectorSegmentExecutor::load()
 }
 
 std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
-    VectorDatasetPtr dataset, \
+    VectorDatasetPtr queries,
     int32_t k,
     const Search::DenseBitmapPtr & filter,
-    Search::Parameters & parameters)
+    Search::Parameters & parameters,
+    bool first_stage_only)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
     
@@ -619,7 +620,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     }
 
     // Check if the dimensions of the searched index and input match
-    if (dataset->getDimension() != static_cast<int64_t>(dimension))
+    if (queries->getDimension() != static_cast<int64_t>(dimension))
     {
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "The dimension of searched index and input doesn't match.");
     }
@@ -633,12 +634,27 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     if (!delete_bitmap->all())
         merged_filter = Search::mergeDenseBitmap(filter, delete_bitmap);
 
-    // Perform the search and handle the results
+    if (fallback_to_flat)
+        parameters.clear();
+
     try
     {
-        if (fallback_to_flat)
-            parameters.clear();
-        return performSearch(dataset, k, merged_filter, parameters);
+        std::shared_ptr<Search::SearchResult> ret;
+        // Perform the actual search
+        {
+            DB::OpenTelemetry::SpanHolder span_search("VectorSegmentExecutor::performSearch()::search");
+            auto search_queries
+                = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
+            ret = index->search(search_queries, k, parameters, first_stage_only, merged_filter.get());
+        }
+
+        // Transfer the results to newRowIds
+        if (!first_stage_only)
+        {
+            DB::OpenTelemetry::SpanHolder span_transfer_id("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
+            transferToNewRowIds(ret);
+        }
+        return ret;
     }
     catch (const SearchIndexException & e)
     {
@@ -651,26 +667,12 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     }
 }
 
-std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::performSearch(
-    VectorDatasetPtr dataset,
-    int32_t k,
-    const Search::DenseBitmapPtr & filter,
-    Search::Parameters & parameters)
+std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::computeTopDistanceSubset(
+    VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k)
 {
-    std::shared_ptr<Search::SearchResult> ret;
-    // Perform the actual search
-    {
-        DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::performSearch()::search");
-        auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
-        ret = index->search(query_dataset, k, parameters, false, filter.get());
-    }
-
-    // Transfer the results to newRowIds
-    {
-        DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
-        auto labels = ret->getResultIndices();
-        transferToNewRowIds(labels, k * dataset->getVectorNum());
-    }
+    auto search_queries = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
+    auto ret = index->computeTopDistanceSubset(search_queries, first_stage_result, top_k);
+    transferToNewRowIds(ret);
     return ret;
 }
 

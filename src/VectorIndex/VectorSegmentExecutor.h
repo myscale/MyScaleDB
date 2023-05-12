@@ -139,10 +139,14 @@ public:
 
     /// A method that wraps VectorIndex::search() and does some check and post-process.
     std::shared_ptr<Search::SearchResult> search(
-        VectorDatasetPtr dataset,
+        VectorDatasetPtr queries,
         int32_t k,
         const Search::DenseBitmapPtr & filter,
-        Search::Parameters & parameters);
+        Search::Parameters & parameters,
+        bool first_stage_only = false);
+
+    std::shared_ptr<Search::SearchResult>
+    computeTopDistanceSubset(VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k);
 
     void buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size);
 
@@ -205,6 +209,8 @@ public:
     /// Update merged old part's delete bitmap after lightweight delete on disk and cache if exists.
     void updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids);
 
+    bool supportTwoStageSearch() const { return index->supportTwoStageSearch(); }
+
 private:
     void init();
 
@@ -214,25 +220,18 @@ private:
 
     void handleMergedMaps();
 
-    std::shared_ptr<Search::SearchResult> performSearch(
-        VectorDatasetPtr dataset,
-        int32_t k,
-        const Search::DenseBitmapPtr & filter,
-        Search::Parameters & parameters);
-
-    void transferToNewRowIds(int64_t *& labels, int size)
+    void transferToNewRowIds(std::shared_ptr<Search::SearchResult> & result)
     {
         if (row_ids_map->empty())
         {
             return;
         }
 
-        for (int i = 0; i < size; i++)
+        for (size_t k = 0; k < result->numQueries(); k++)
         {
-            if (labels[i] != -1)
-            {
-                labels[i] = (*row_ids_map)[labels[i]];
-            }
+            for (auto & label : result->getResultIndices(k))
+                if (label != -1)
+                    label = (*row_ids_map)[label];
         }
     }
 
