@@ -63,7 +63,6 @@ all_nodes = [
     competing_node,
     snapshotting_node,
     snapshot_recovering_node,
-    default_replicated_node,
 ]
 
 uuid_regex = re.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -1282,13 +1281,13 @@ def test_recover_digest_mismatch(started_cluster):
     print("Everything Okay")
 
 def test_default_replicated_engine(started_cluster):
-    assert default_replicated_node.query("SHOW CREATE DATABASE default") == "CREATE DATABASE default\nENGINE = Replicated('/clickhouse/test/databases/default', '{shard}', '{replica}')"
+    assert default_replicated_node.query("SHOW CREATE DATABASE default") == "CREATE DATABASE default\\nENGINE = Replicated(\\'/clickhouse/test/databases/default\\', \\'{shard}\\', \\'{replica}\\')\n"
     default_replicated_node.query("DROP DATABASE IF EXISTS testdb")
     default_replicated_node.query("CREATE DATABASE testdb")
-    assert default_replicated_node.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\nENGINE = Replicated('/clickhouse/test/databases/testdb', '{shard}', '{replica}')"
+    assert default_replicated_node.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\\nENGINE = Replicated(\\'/clickhouse/test/databases/testdb\\', \\'{shard}\\', \\'{replica}\\')\n"
 
-    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree")
+    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n")
     assert "MergeTree" in default_replicated_node.query("SHOW CREATE TABLE test")
-    default_replicated_node.query("DROP TABLE test")
-    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree", settings={"database_replicated_always_convert_table_to_replicated": 1})
+    default_replicated_node.query("DROP TABLE IF EXISTS test")
+    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n", settings={"database_replicated_always_convert_table_to_replicated": 1})
     assert "ReplicatedMergeTree" in default_replicated_node.query("SHOW CREATE TABLE test")
