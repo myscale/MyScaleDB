@@ -139,7 +139,7 @@ inline Search::Metric getMetric(const std::string & metric)
         return Search::Metric::IP;
     else if (upper == "COSINE")
         return Search::Metric::Cosine;
-    throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unknown metric: {}", metric);
+    throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unknown metric type: {}", metric);
 }
 
 }

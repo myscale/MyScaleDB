@@ -237,6 +237,7 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size
     }
     catch (const SearchIndexException & e)
     {
+        LOG_WARNING(log, "Failed to build index for {}: {}", segment_id.current_part_name, e.what());
         throw IndexException(e.getCode(), e.what());
     }
     catch (const DB::Exception & e)

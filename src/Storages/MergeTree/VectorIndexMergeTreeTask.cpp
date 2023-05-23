@@ -30,7 +30,6 @@ bool VectorIndexMergeTreeTask::executeStep()
         catch (...)
         {
             String exception_message = getCurrentExceptionMessage(false);
-            LOG_ERROR(log, "Something went wrong for {} during index building: {}", vector_index_entry->part_name, exception_message);
             storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, false, exception_message);
 
             auto part = storage.getActiveContainingPart(vector_index_entry->part_name);

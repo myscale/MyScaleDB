@@ -69,7 +69,6 @@ bool ReplicatedVectorIndexTask::executeStep()
             catch (...)
             {
                 String exception_message = getCurrentExceptionMessage(false);
-                LOG_ERROR(log, "something went wrong during index building: {}", exception_message);
                 storage.updateVectorIndexBuildStatus(entry.source_parts[0], false, exception_message);
 
                 /// Set build error for part, avoid to build it again.
