@@ -5,6 +5,8 @@ vector_search_test:
   needs:
     - job: build_binary
       artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
   parallel:
     matrix:
       - ARCH: amd64
@@ -12,6 +14,9 @@ vector_search_test:
   tags:
     - ${ARCH}
   before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/vector-search-test.sh
@@ -25,6 +30,8 @@ smoke_test:
   stage: functional-test
   needs:
     - job: build_binary
+      artifacts: true
+    - job: check_pipeline_already_running
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.2
   parallel:
@@ -52,6 +59,8 @@ stateless_test:
   needs:
     - job: build_binary
       artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateless-test"
     paths:
@@ -64,6 +73,9 @@ stateless_test:
   tags:
     - ${ARCH}
   before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateless-test.sh
@@ -77,6 +89,8 @@ stateful_test:
   needs:
     - job: build_binary
       artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateful-test"
     paths:
@@ -89,6 +103,9 @@ stateful_test:
   tags:
     - ${ARCH}
   before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
     - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateful-test.sh

@@ -81,6 +81,10 @@ spec:
               port: 9000
               protocol: TCP
               targetPort: tcp
+            - name: ssh
+              port: 22
+              protocol: TCP
+              targetPort: ssh
       - name: replica-service-template
         spec:
           type: ClusterIP
@@ -129,6 +133,11 @@ spec:
                 limits:
                   cpu: 4
                   memory: 8Gi
+          volumes:
+            - name: ssh
+              configMap:
+                name: ssh
+                defaultMode: 0600
 
     volumeClaimTemplates:
       - name: data-volume-claim-template

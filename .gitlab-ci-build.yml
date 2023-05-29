@@ -7,6 +7,7 @@ build_binary:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
     when: always
@@ -42,6 +43,7 @@ build_with_sanitizer_asanbinary:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKAsan"
     paths:
@@ -70,6 +72,7 @@ build_with_sanitizer_tsanbinary:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKTsan"
     paths:
@@ -98,6 +101,7 @@ build_with_sanitizer_ubsanbinary:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKUBsan"
     paths:
@@ -126,6 +130,7 @@ build_with_sanitizer_msanbinary:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKMsan"
     paths:
@@ -148,6 +153,7 @@ build_for_integration_test:
     KUBERNETES_CPU_LIMIT: 32
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
     paths:

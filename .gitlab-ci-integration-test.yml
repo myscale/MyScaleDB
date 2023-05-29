@@ -4,6 +4,8 @@ integration_test0:
   needs:
     - job: build_for_integration_test
       artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-integration0"
@@ -22,6 +24,8 @@ integration_test1:
   needs:
     - job: build_for_integration_test
       artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-integration1"
@@ -39,6 +43,8 @@ integration_test2:
   stage: failover-test
   needs:
     - job: build_for_integration_test
+      artifacts: true
+    - job: check_pipeline_already_running
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-integration:1.0
   artifacts:
