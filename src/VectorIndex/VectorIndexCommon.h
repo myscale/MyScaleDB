@@ -6,10 +6,10 @@
 #include <Poco/JSON/JSON.h>
 #include <Poco/JSON/Object.h>
 
-#include <Common/Exception.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/CompressedWriteBuffer.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Common/Exception.h>
 
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/IOReader.h>

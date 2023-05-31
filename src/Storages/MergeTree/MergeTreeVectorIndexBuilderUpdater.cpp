@@ -5,6 +5,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <VectorIndex/DiskIOReader.h>
 #include <Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Metadata.h>
 #include <VectorIndex/PartReader.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/VectorIndexCommon.h>
@@ -213,6 +214,8 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
         {
             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
             {
+                part->addNewVectorIndex(vec_index);
+
                 if (select_slow_mode_part)
                 {
                     if (!isSlowModePart(part))
@@ -229,6 +232,10 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
                     LOG_DEBUG(log, "Select part name: {}", part->name);
                     return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
                 }
+            }
+            else if (part->isSmallPart(min_rows_to_build_vector_index))
+            {
+                part->addNewVectorIndex(vec_index, true);
             }
         }
     }
@@ -399,7 +406,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         if (dim == 0)
                         {
                             LOG_ERROR(log, "Wrong dimension: 0, please check length constraint on the column.");
-                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
+
+                            String err = "Wrong dimension: 0, please check length constraint on the column.";
+                            part->onVectorIndexBuildError(vec_index_desc.name, err);
+
+                            throw Exception(ErrorCodes::BAD_ARGUMENTS, err.data());
                         }
                     }
                     ///only reading one column
@@ -408,7 +419,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 else
                 {
                     LOG_WARNING(log, "Found column {} in part and VectorIndexDescription, but not in metadata snapshot.", col);
+
+                    part->onVectorIndexBuildError(
+                        vec_index_desc.name, "found column in part and VectorIndexDescription, but not in metadata snapshot.");
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus(ErrorCodes::ABORTED, "Found column " + col + " in part and VectorIndexDescription, but not in metadata snapshot"));
+
                     return BuildVectorIndexStatus::META_ERROR;
                 }
             }
@@ -421,6 +436,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 vec_index_desc.name,
                 part->name);
             part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+            part->onVectorIndexBuildFinish(vec_index_desc.name);
             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
             return BuildVectorIndexStatus::SUCCESS;
         }
@@ -506,7 +522,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// else future part will pick up later at the next time when index built for it.
             }
 
+            part->onVectorIndexBuildFinish(vec_index_desc.name);
             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
+
             return BuildVectorIndexStatus::SUCCESS;
         }
 
@@ -519,6 +537,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         }
 
         disk->createDirectories(vector_tmp_relative_path);
+
+        part->onVectorIndexBuildStart(vec_index_desc.name);
 
         VectorIndex::SegmentId segment_id(
             part_storage->volume, vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
@@ -556,8 +576,16 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// Remove temporay directory
                 disk->removeRecursive(vector_tmp_relative_path);
 
+                part->onVectorIndexBuildError(vec_index_desc.name, seri_status.getMessage());
+
                 throw Exception(seri_status.getCode(), seri_status.getMessage().data());
             }
+
+            VectorIndex::Metadata metadata(segment_id);
+            auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+            metadata.readText(*buf);
+
+            part->onVectorIndexBuildFinish(vec_index_desc.name, &metadata);
 
             /// Done with writing vector index files to temporary directory.
             /// Decide to move index files to which part direcory.
@@ -573,7 +601,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 if (!future_part)
                 {
                     LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
+
+                    part->onVectorIndexBuildError(vec_index_desc.name, "failed to find future part");
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
+
                     return BuildVectorIndexStatus::SUCCESS;
                 }
             }
@@ -586,6 +617,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 {
                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
                     disk->removeRecursive(vector_tmp_relative_path);
+                    part->removeVectorIndexInfo(vec_index_desc.name);
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                     return BuildVectorIndexStatus::SUCCESS;
                 }
@@ -625,6 +657,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     VectorIndex::removeRowIdsMaps(future_part, log);
                 }
             }
+        }
+        else
+        {
+            part->onVectorIndexBuildError(vec_index_desc.name, "build has been cancelled.");
         }
     }
 

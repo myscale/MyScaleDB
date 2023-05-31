@@ -23,6 +23,7 @@
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeDataPartBuilder.h>
 #include <Storages/ColumnsDescription.h>
+#include <Storages/VectorIndexInfo.h>
 #include <Interpreters/TransactionVersionMetadata.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <Storages/MergeTree/IPartMetadataManager.h>
@@ -313,6 +314,53 @@ public:
     mutable std::mutex vector_indexed_mutex;
     mutable std::set<String> vector_indexed;
 
+    mutable std::mutex vector_indices_mutex;
+    mutable std::unordered_map<String, VectorIndexInfoPtr> vector_indices;
+    mutable std::unordered_map<String, VectorIndexInfoPtrList> vector_indices_decoupled;
+
+    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const;
+
+    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part = false) const;
+
+    void onVectorIndexBuildStart(const String & index_name) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+            it->second->onBuildStart();
+    }
+
+    void onVectorIndexBuildFinish(const String & index_name, const VectorIndex::Metadata * metadata = nullptr) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+        {
+            it->second->onBuildFinish(true);
+            if (metadata)
+                it->second->setIndexSize(*metadata);
+        }
+    }
+
+    void onVectorIndexBuildError(const String & index_name, const String & err_msg) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
+            it->second->onError(err_msg);
+    }
+
+    void removeVectorIndexInfo(const String & index_name) const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        vector_indices.erase(index_name);
+        vector_indices_decoupled.erase(index_name);
+    }
+
+    void removeAllVectorIndexInfo() const
+    {
+        std::lock_guard lock(vector_indices_mutex);
+        vector_indices.clear();
+        vector_indices_decoupled.clear();
+    }
+
     /// Used for decouple part
     mutable std::mutex decouple_mutex;
 
@@ -361,6 +409,8 @@ public:
         std::lock_guard lock(vector_indexed_mutex);
         vector_indexed.insert(index_name);
     }
+
+    void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
 
     /// Remove specified vector index from part, both disk and metadata.
     /// If skip_decouple, skip the vector index of old part in decouple part.

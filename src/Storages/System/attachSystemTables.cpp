@@ -86,6 +86,7 @@
 #include <Storages/System/StorageSystemCertificates.h>
 #include <Storages/System/StorageSystemSchemaInferenceCache.h>
 #include <Storages/System/StorageSystemDroppedTables.h>
+#include <Storages/System/StorageSystemVectorIndexSegments.h>
 
 #ifdef OS_LINUX
 #include <Storages/System/StorageSystemStackTrace.h>
@@ -145,6 +146,7 @@ void attachSystemTablesLocal(ContextPtr context, IDatabase & system_database)
     attach<StorageSystemWarnings>(context, system_database, "warnings");
     attach<StorageSystemDataSkippingIndices>(context, system_database, "data_skipping_indices");
     attach<StorageSystemVectorIndices>(context, system_database, "vector_indices");
+    attach<StorageSystemVectorIndexSegments>(context, system_database, "vector_index_segments");
     attach<StorageSystemLicenses>(context, system_database, "licenses");
     attach<StorageSystemTimeZones>(context, system_database, "time_zones");
     attach<StorageSystemBackups>(context, system_database, "backups");
