@@ -155,6 +155,9 @@ upload_performance_file_to_s3:
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"
   before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
     - mkdir -pv ~/.mc
     - cp -fv $mc_config ~/.mc/config.json
   script:
