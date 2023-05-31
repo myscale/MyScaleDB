@@ -77,12 +77,12 @@ static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part)
     if (!data_part || !data_part->isStoredOnDisk() || !data_part->containRowIdsMaps())
         return;
 
-    LOG_INFO(&Poco::Logger::get("removeRowIdsMaps"), "try to remove row ids maps files in {}", data_part->getFullPath());
+    LOG_INFO(&Poco::Logger::get("removeRowIdsMaps"), "try to remove row ids maps files in {}", data_part->getDataPartStorage().getFullPath());
     /// currently only consider one vector index
     auto metadata_snapshot = data_part->storage.getInMemoryMetadataPtr();
     auto vec_index_desc = metadata_snapshot->vec_indices[0];
 
-    auto old_segments = getAllSegmentIds(data_part->getFullPath(), data_part, vec_index_desc.name, vec_index_desc.column);
+    auto old_segments = getAllSegmentIds(data_part->getDataPartStorage().getFullPath(), data_part, vec_index_desc.name, vec_index_desc.column);
     for (auto & old_segment : old_segments)
     {
         VectorSegmentExecutor::removeFromCache(old_segment.getCacheKey());
