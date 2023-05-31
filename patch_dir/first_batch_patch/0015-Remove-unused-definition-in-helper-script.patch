@@ -1,0 +1,24 @@
+From 603e26b61988cce4e31a794edf2c845d793f3c04 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Wed, 14 Dec 2022 14:50:23 +0800
+Subject: [PATCH 015/150] Remove unused definition in helper script
+
+---
+ scripts/config_on_linux_asan.sh | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/scripts/config_on_linux_asan.sh b/scripts/config_on_linux_asan.sh
+index fac7c70253..8b22bc7e09 100644
+--- a/scripts/config_on_linux_asan.sh
++++ b/scripts/config_on_linux_asan.sh
+@@ -24,6 +24,4 @@ cmake -G Ninja .. -DCMAKE_C_COMPILER=$(command -v clang-13) \
+     -DENABLE_TESTS=OFF \
+     -DENABLE_RAPIDJSON=ON \
+     -DENABLE_LICENSE_CHECK=OFF \
+-    -DSANITIZE=address \
+-    -DVERSION_GITHASH=""
+-
++    -DSANITIZE=address
+-- 
+2.32.1 (Apple Git-133)
+

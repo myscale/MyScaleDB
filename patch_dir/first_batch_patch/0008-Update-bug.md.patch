@@ -1,0 +1,24 @@
+From 8d1d2048c6c8118af14665307deb8d3c09495990 Mon Sep 17 00:00:00 2001
+From: Qin Liu <qliu@moqi.ai>
+Date: Thu, 1 Dec 2022 10:58:55 +0000
+Subject: [PATCH 008/150] Update bug.md
+
+---
+ .gitlab/issue_templates/bug.md | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.gitlab/issue_templates/bug.md b/.gitlab/issue_templates/bug.md
+index c8b799f63f..cc3199d333 100644
+--- a/.gitlab/issue_templates/bug.md
++++ b/.gitlab/issue_templates/bug.md
+@@ -30,5 +30,5 @@ it's very hard to read otherwise.)
+ 
+ (If you can, link to the line of code that might be responsible for the problem)
+ 
+-/label ~bug ~reproduced ~needs-investigation
+-/cc @qliu 
++/label ~bug 
++/cc @linpengt @shelly @qliu
+-- 
+2.32.1 (Apple Git-133)
+

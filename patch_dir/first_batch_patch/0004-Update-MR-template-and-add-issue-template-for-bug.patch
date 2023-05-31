@@ -1,0 +1,134 @@
+From 8e4b2a2efe441b0978e980754ea4434a8f8a0a4b Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Tue, 29 Nov 2022 15:15:20 +0800
+Subject: [PATCH 004/150] Update MR template and add issue template for bug
+
+---
+ .gitlab/issue_templates/bug.md                | 34 +++++++++++++++
+ .../myscale_mr_template.md                    | 43 +++++++++++--------
+ 2 files changed, 58 insertions(+), 19 deletions(-)
+ create mode 100644 .gitlab/issue_templates/bug.md
+
+diff --git a/.gitlab/issue_templates/bug.md b/.gitlab/issue_templates/bug.md
+new file mode 100644
+index 0000000000..c8b799f63f
+--- /dev/null
++++ b/.gitlab/issue_templates/bug.md
+@@ -0,0 +1,34 @@
++## Summary
++
++(Summarize the bug encountered concisely)
++
++## Steps to reproduce
++
++(How one can reproduce the issue - this is very important)
++
++## Example Project
++
++(If possible, please create an example project here on GitLab.com that exhibits the problematic
++behavior, and link to it here in the bug report.
++If you are using an older version of GitLab, this will also determine whether the bug has been fixed
++in a more recent version)
++
++## What is the current bug behavior?
++
++(What actually happens)
++
++## What is the expected correct behavior?
++
++(What you should see instead)
++
++## Relevant logs and/or screenshots
++
++(Paste any relevant logs - please use code blocks (```) to format console output, logs, and code, as
++it's very hard to read otherwise.)
++
++## Possible fixes
++
++(If you can, link to the line of code that might be responsible for the problem)
++
++/label ~bug ~reproduced ~needs-investigation
++/cc @qliu 
+diff --git a/.gitlab/merge_request_templates/myscale_mr_template.md b/.gitlab/merge_request_templates/myscale_mr_template.md
+index 444abe184a..c3d7380ca7 100644
+--- a/.gitlab/merge_request_templates/myscale_mr_template.md
++++ b/.gitlab/merge_request_templates/myscale_mr_template.md
+@@ -1,37 +1,42 @@
+ <!--
+ 
+-Thank you for contributing to MyScale!
+-
+-PR Title Format:
+-1. pkg [, pkg2, pkg3]: what's changed
+-2. *: what's changed
++MR 的标题应该符合 commit message 的标题规范:
++http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/git-workflow/#commit-message
+ 
+ -->
+ 
+-### What problem does this PR solve?
++### 背景
+ <!--
+ 
+-Please create an issue first to describe the problem.
++请先创建一个 issue 描述你要解决的问题。
++
++这里必须有一行以 "Issue Number:  " 开头，并且通过
++"close" 或 "ref" 引用相关的 issue。
++
++详情见 http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/git-workflow.md
++
++-->
+ 
+-There MUST be one line starting with "Issue Number:  " and 
+-linking the relevant issues via the "close" or "ref".
++问题描述：...
+ 
+-For more info, check http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/git-workflow.md
++Issue Number: close #xxx, ref #xxx
+ 
+--->Number: close #xxx
++### 描述你的修改和工作原理
+ 
+-Problem Summary:
++### 检查列表
+ 
+-### What is changed and how it works?
++请负责人检查自己是否
+ 
+-### Check List
++1. 完成了必要的测试
++2. 记录了 MR 引发的副作用
++3. 更新了相关的用户手册
+ 
+-Tests <!-- At least one of them must be included. -->
++Tests <!-- 至少应该完成一项 -->
+ 
+ - [ ] Unit test
+ - [ ] Integration test
+ - [ ] Manual test (add detailed scripts or steps below)
+-- [ ] No code
++- [ ] No code is changed
+ 
+ Side effects
+ 
+@@ -45,13 +50,13 @@ Documentation
+ - [ ] Contains syntax changes
+ - [ ] Contains variable changes
+ - [ ] Contains experimental features
+-- [ ] Changes MySQL compatibility
+ 
+-### Release note
++### 发行说明
+ 
+ <!-- compatibility change, improvement, bugfix, and new feature need a release note -->
+ 
+-Please refer to [Release Notes Language Style Guide](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html) to write a quality release note.
++参考[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html)
++写一个高质量的发行说明。
+ 
+ ```release-note
+ None
+-- 
+2.32.1 (Apple Git-133)
+

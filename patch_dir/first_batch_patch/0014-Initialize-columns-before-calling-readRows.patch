@@ -1,0 +1,43 @@
+From 4f35038d36011e35678a40166060019aa8d5f702 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Sat, 26 Nov 2022 14:51:24 +0800
+Subject: [PATCH 014/150] Initialize columns before calling readRows()
+
+reader->readRows() needs a initialized `res_columns`.
+---
+ src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index 5836e23edc..e281f98994 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -451,7 +451,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+         size_t total_mask = part->getMarksCount();
+ 
+         auto & index_granularity = part->index_granularity;
+-        Columns result;
+ 
+         /// process data block by block
+         while (num_rows_read < part->rows_count)
+@@ -463,8 +462,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             empty_ids.clear();
+             size_t remaining_size = part->rows_count - num_rows_read;
+             size_t max_read_row = std::min(remaining_size, read_block_rows_num);
+-            result.resize(cols.size());
+ 
++            Columns result(cols.size());
+             size_t num_rows = reader->readRows(current_mask, 0, continue_read, max_read_row, result);
+ 
+             continue_read = true;
+@@ -535,7 +534,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                     empty_ids.emplace_back(current_round_start_row + row);
+                 }
+             }
+-            result.clear();
+ 
+             LOG_DEBUG(
+                 log,
+-- 
+2.32.1 (Apple Git-133)
+

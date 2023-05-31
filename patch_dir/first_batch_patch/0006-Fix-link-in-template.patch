@@ -1,0 +1,26 @@
+From ad25a944e6cc06fbdd87e831b5d4f5865e6142d9 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Wed, 30 Nov 2022 17:59:09 +0800
+Subject: [PATCH 006/150] Fix link in template
+
+---
+ .gitlab/merge_request_templates/myscale_mr_template.md | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/.gitlab/merge_request_templates/myscale_mr_template.md b/.gitlab/merge_request_templates/myscale_mr_template.md
+index c3d7380ca7..13841cea83 100644
+--- a/.gitlab/merge_request_templates/myscale_mr_template.md
++++ b/.gitlab/merge_request_templates/myscale_mr_template.md
+@@ -55,7 +55,8 @@ Documentation
+ 
+ <!-- compatibility change, improvement, bugfix, and new feature need a release note -->
+ 
+-参考[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-doc/development/how-to-work/release-notes-style-guide.html)
++参考
++[发行说明语言风格指南](http://mqdb.page.moqi.ai/myscale-internal-docs/development/how-to-work/release-notes-style-guide/)
+ 写一个高质量的发行说明。
+ 
+ ```release-note
+-- 
+2.32.1 (Apple Git-133)
+

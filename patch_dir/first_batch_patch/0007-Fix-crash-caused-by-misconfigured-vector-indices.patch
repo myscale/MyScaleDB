@@ -1,0 +1,866 @@
+From e151beaf23bf2a87b02ede04462370734666c6c2 Mon Sep 17 00:00:00 2001
+From: Qin Liu <qliu@moqi.ai>
+Date: Thu, 1 Dec 2022 05:38:53 +0000
+Subject: [PATCH 007/150] Fix crash caused by misconfigured vector indices
+
+---
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    |  8 +---
+ src/VectorIndex/CacheManager.cpp              | 13 ++++--
+ src/VectorIndex/FaissIndex.cpp                | 15 ++++---
+ src/VectorIndex/FlatIndex.cpp                 | 12 +++--
+ src/VectorIndex/HNSWIndex.cpp                 | 16 ++++---
+ src/VectorIndex/HNSWPQ.cpp                    | 40 ++++++++++++++---
+ src/VectorIndex/HNSWPQ.h                      | 36 ++++-----------
+ src/VectorIndex/HNSWSQ.cpp                    | 45 ++++++++++++++++---
+ src/VectorIndex/HNSWSQ.h                      | 28 +-----------
+ src/VectorIndex/IVFFlatIndex.cpp              | 20 ++++++---
+ src/VectorIndex/IVFPQIndex.cpp                | 13 ++++--
+ src/VectorIndex/IVFSQIndex.cpp                | 15 ++++---
+ src/VectorIndex/IndexException.h              |  9 +++-
+ src/VectorIndex/VectorIndex.h                 |  5 ++-
+ src/VectorIndex/VectorIndexFactory.cpp        |  7 ++-
+ src/VectorIndex/VectorSegmentExecutor.cpp     | 20 ++++++---
+ 16 files changed, 184 insertions(+), 118 deletions(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index dd139b4e7a..9b571ba262 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -237,6 +237,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+             }
+             if (status == BuildVectorIndexStatus::BUILD_FAIL)
+             {
++                part->setBuildError();
+                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
+             }
+         } 
+@@ -565,14 +566,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                     dim);
+                 VectorIndex::Status build_status = vec_index_builder->buildIndex(vec_data, part->rows_count, slow_mode);
+ 
+-                if (build_status.getCode() == 11)
+-                {
+-                    part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+-                    return BuildVectorIndexStatus::MISCONFIGURED;
+-                }
+-
+                 if (!build_status.fine())
+                 {
++                    LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
+                     disk->removeRecursive(vector_tmp_relative_path);
+                     return BuildVectorIndexStatus::BUILD_FAIL;
+                 }
+diff --git a/src/VectorIndex/CacheManager.cpp b/src/VectorIndex/CacheManager.cpp
+index a12bf15815..b6e7fb0bf6 100644
+--- a/src/VectorIndex/CacheManager.cpp
++++ b/src/VectorIndex/CacheManager.cpp
+@@ -3,6 +3,11 @@
+ 
+ #include <VectorIndex/IndexException.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++}
++
+ namespace VectorIndex
+ {
+ 
+@@ -27,7 +32,7 @@ IndexWithMetaPtr CacheManager::get(const CacheKey& cache_key)
+ {
+     if (!cache_)
+     {
+-        throw IndexException(100, "cache not allocated");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
+     }
+     IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
+     if (iam_ptr)
+@@ -44,7 +49,7 @@ void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
+ {
+     if (!cache_)
+     {
+-        throw IndexException(4, "cache not allocated");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
+     }
+ 
+     IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
+@@ -66,7 +71,7 @@ void CacheManager::startLoading(const CacheKey& cache_key)
+ {
+     if (!cache_)
+     {
+-        throw IndexException(4, "currently_loading_segments list not allocated");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
+     }
+     std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
+ 
+@@ -81,7 +86,7 @@ std::shared_ptr<std::mutex> CacheManager::getMutex(const CacheKey& cache_key)
+ {
+     if (!cache_)
+     {
+-        throw IndexException(4, "currently_loading_segments list not allocated");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "getMutex: cache not allocated");
+     }
+ 
+     IndexAndMutexPtr iam_ptr = cache_->get(cache_key);
+diff --git a/src/VectorIndex/FaissIndex.cpp b/src/VectorIndex/FaissIndex.cpp
+index ca325558e9..19a4ad2dc4 100644
+--- a/src/VectorIndex/FaissIndex.cpp
++++ b/src/VectorIndex/FaissIndex.cpp
+@@ -8,6 +8,11 @@
+ #include "faiss/impl/AuxIndexStructures.h"
+ #include "faiss/index_io.h"
+ 
++namespace DB::ErrorCodes
++{
++extern const int EMPTY_DATA_PASSED;
++extern const int STD_EXCEPTION;
++}
+ namespace VectorIndex
+ {
+ BinaryPtr FaissIndex::serialize(size_t max_bytes, bool & finished)
+@@ -26,7 +31,7 @@ void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
+     }
+     if (bi->size == 0 || bi->data == nullptr)
+     {
+-        throw IndexException(4, "index load failed with empty data");
++        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
+     }
+     IndexReader reader;
+     reader.data = bi->data;
+@@ -35,13 +40,13 @@ void FaissIndex::load(BinaryPtr & bi, int64_t /*total_vec*/)
+     {
+         index.reset(faiss::read_index(&reader));
+     }
+-    catch (std::runtime_error & e)
++    catch (const std::runtime_error & e)
+     {
+-        throw IndexException(5, e.what());
++        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
+     }
+-    catch (faiss::FaissException & e)
++    catch (const faiss::FaissException & e)
+     {
+-        throw IndexException(5, e.what());
++        throw IndexException(DB::ErrorCodes::STD_EXCEPTION, e.what());
+     }
+     // reinterpret_cast might seem fishy, but when they returned from read_index they initially
+     // created a child class then cast it to Index.
+diff --git a/src/VectorIndex/FlatIndex.cpp b/src/VectorIndex/FlatIndex.cpp
+index 1a10d6df73..8fb819a3f5 100644
+--- a/src/VectorIndex/FlatIndex.cpp
++++ b/src/VectorIndex/FlatIndex.cpp
+@@ -7,6 +7,12 @@
+ #include "faiss/index_io.h"
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++}
++
+ namespace VectorIndex
+ {
+ void FlatIndex::train(VectorDatasetPtr dataset, int64_t total)
+@@ -21,7 +27,7 @@ void FlatIndex::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -36,7 +42,7 @@ void FlatIndex::search(
+     Poco::Logger * log = &Poco::Logger::get("FlatIndex");
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
+     inner_bit_map.reset(reinterpret_cast<faiss::bitMap *>(convertInnerBitMap(filter)));
+@@ -73,7 +79,7 @@ void FlatIndex::getMyParameters(Parameters params)
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::FLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ 
+diff --git a/src/VectorIndex/HNSWIndex.cpp b/src/VectorIndex/HNSWIndex.cpp
+index 7f50eae5d9..ecfbcaff8b 100644
+--- a/src/VectorIndex/HNSWIndex.cpp
++++ b/src/VectorIndex/HNSWIndex.cpp
+@@ -8,6 +8,12 @@
+ #include "IndexException.h"
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++extern const int EMPTY_DATA_PASSED;
++}
+ 
+ namespace VectorIndex
+ {
+@@ -50,7 +56,7 @@ void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -61,7 +67,7 @@ void HNSWIndex::search(
+ 
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+     int total_vectors = dataset->getVectorNum();
+     float * __restrict data_grid = dataset->getData();
+@@ -83,7 +89,7 @@ void HNSWIndex::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::HNSWFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     int num_thread = 1;
+     if (total_vectors > 1)
+@@ -122,7 +128,7 @@ void HNSWIndex::load(BinaryPtr & bi, int64_t total_vec)
+ {
+     if (bi->size == 0 || bi->data == nullptr)
+     {
+-        throw IndexException(4, "index load failed with empty data");
++        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
+     }
+     hnswlib::SpaceInterface<float> * space;
+     Poco::Logger * log = &Poco::Logger::get("HNSW");
+@@ -204,7 +210,7 @@ void HNSWIndex::getMyParameters(Parameters params)
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::HNSWFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ int64_t HNSWIndex::removeWithIds(int64_t n, int64_t * ids)
+diff --git a/src/VectorIndex/HNSWPQ.cpp b/src/VectorIndex/HNSWPQ.cpp
+index c84c02190a..9cc4814883 100644
+--- a/src/VectorIndex/HNSWPQ.cpp
++++ b/src/VectorIndex/HNSWPQ.cpp
+@@ -7,6 +7,34 @@
+ 
+ namespace VectorIndex
+ {
++HNSWpq::HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
++{
++    in_mem = false;
++    //TODO initialized index with dynamic fields
++    faiss::MetricType metrictype;
++
++    getMyParameters(parameters);
++    switch (me)
++    {
++        case (Metrics::L2):
++            metrictype = faiss::METRIC_L2;
++            break;
++        case (Metrics::IP):
++            metrictype = faiss::METRIC_INNER_PRODUCT;
++            break;
++        case (Metrics::Cosine):
++            metrictype = faiss::METRIC_Cosine;
++    }
++
++    if (dimension == -1)
++    {
++        dimension = pq_m;
++    }
++    index = std::make_shared<faiss::IndexHNSWfastPQ>(dimension, pq_m, bit_size, neighbor, metrictype);
++    index->hnsw.efConstruction = ef_c;
++    index->own_fields = true;
++}
++
+ void HNSWpq::train(const VectorDatasetPtr dataset, int64_t total)
+ {
+     if (index != nullptr)
+@@ -16,7 +44,7 @@ void HNSWpq::train(const VectorDatasetPtr dataset, int64_t total)
+     }
+     else
+     {
+-        throw IndexException(1, "vector index uninitialized, can't train");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "train: index not intialized");
+     }
+ }
+ 
+@@ -29,7 +57,7 @@ void HNSWpq::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -43,7 +71,7 @@ void HNSWpq::search(
+ {
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+ 
+     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
+@@ -65,7 +93,7 @@ void HNSWpq::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::HNSWPQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     int num_thread = 1;
+     if (num_query > 1)
+@@ -88,7 +116,7 @@ void HNSWpq::load(BinaryPtr & bi, int64_t /*total_vec*/)
+ {
+     if (bi->size == 0 || bi->data == nullptr)
+     {
+-        throw IndexException(4, "index load failed with empty data");
++        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
+     }
+     setRawData(bi);
+     IndexReader reader;
+@@ -146,7 +174,7 @@ void HNSWpq::getMyParameters(Parameters p)
+     if (!p.empty())
+     {
+         std::string message = generateUnsupportedParameters(p, IndexType::HNSWPQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ VectorDatasetPtr HNSWpq::getInMemVectors()
+diff --git a/src/VectorIndex/HNSWPQ.h b/src/VectorIndex/HNSWPQ.h
+index 9464ad5c52..5a22384d0d 100644
+--- a/src/VectorIndex/HNSWPQ.h
++++ b/src/VectorIndex/HNSWPQ.h
+@@ -17,39 +17,19 @@
+ #include "Binary.h"
+ #include "VectorIndex.h"
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++extern const int EMPTY_DATA_PASSED;
++}
++
+ namespace VectorIndex
+ {
+ class HNSWpq : public VectorIndex
+ {
+ public:
+-    HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
+-    {
+-        in_mem = false;
+-        //TODO initialized index with dynamic fields
+-        faiss::MetricType metrictype;
+-
+-        getMyParameters(parameters);
+-        if (me == Metrics::L2)
+-        {
+-            metrictype = faiss::METRIC_L2;
+-        }
+-        else if (me == Metrics::IP)
+-        {
+-            metrictype = faiss::METRIC_INNER_PRODUCT;
+-        }
+-        else
+-        {
+-            metrictype = faiss::METRIC_Cosine;
+-        }
+-
+-        if (dimension_ == -1)
+-        {
+-            dimension_ = pq_m;
+-        }
+-        index = std::make_shared<faiss::IndexHNSWfastPQ>(dimension_, pq_m, bit_size, neighbor, metrictype);
+-        index->hnsw.efConstruction = ef_c;
+-        index->own_fields = true;
+-    }
++    HNSWpq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
+ 
+     void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
+ 
+diff --git a/src/VectorIndex/HNSWSQ.cpp b/src/VectorIndex/HNSWSQ.cpp
+index 317793b62a..ffa0a9e261 100644
+--- a/src/VectorIndex/HNSWSQ.cpp
++++ b/src/VectorIndex/HNSWSQ.cpp
+@@ -5,8 +5,39 @@
+ #include "IndexWriter.h"
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++extern const int EMPTY_DATA_PASSED;
++}
++
+ namespace VectorIndex
+ {
++HNSWsq::HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
++{
++    in_mem = false;
++    //TODO initialized index with dynamic fields
++    faiss::MetricType metrictype;
++
++    getMyParameters(parameters);
++    switch (me)
++    {
++        case (Metrics::L2):
++            metrictype = faiss::METRIC_L2;
++            break;
++        case (Metrics::IP):
++            metrictype = faiss::METRIC_INNER_PRODUCT;
++            break;
++        case (Metrics::Cosine):
++            // metrictype = faiss::METRIC_Cosine;
++            throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unsupported metric_type COSINE");
++    }
++    index = std::make_shared<faiss::IndexHNSWfastSQ>(dimension, quantizer, neighbor, metrictype);
++    index->hnsw.efConstruction = ef_c;
++    index->own_fields = true;
++}
++
+ void HNSWsq::train(const VectorDatasetPtr dataset, int64_t total)
+ {
+     if (index != nullptr)
+@@ -16,7 +47,7 @@ void HNSWsq::train(const VectorDatasetPtr dataset, int64_t total)
+     }
+     else
+     {
+-        throw IndexException(1, "vector index uninitialized, can't train");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "train: index not intialized");
+     }
+ }
+ 
+@@ -29,7 +60,7 @@ void HNSWsq::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -43,7 +74,7 @@ void HNSWsq::search(
+ {
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+ 
+     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
+@@ -66,7 +97,7 @@ void HNSWsq::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::HNSWSQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     int num_thread = 1;
+     if (num_query > 1)
+@@ -88,7 +119,7 @@ void HNSWsq::load(BinaryPtr & bi, int64_t /*total_vec*/)
+ {
+     if (bi->size == 0 || bi->data == nullptr)
+     {
+-        throw IndexException(4, "index load failed with empty data");
++        throw IndexException(DB::ErrorCodes::EMPTY_DATA_PASSED, "load: failed with empty data");
+     }
+     setRawData(bi);
+     IndexReader reader;
+@@ -142,7 +173,7 @@ void HNSWsq::getMyParameters(Parameters p)
+     if (!p.empty())
+     {
+         std::string message = generateUnsupportedParameters(p, IndexType::HNSWSQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ VectorDatasetPtr HNSWsq::getInMemVectors()
+@@ -204,7 +235,7 @@ faiss::ScalarQuantizer::QuantizerType HNSWsq::parse_SQ_string(String bits)
+     }
+     else
+     {
+-        throw IndexException(11, "unsupported QT bit size in HNSWSQ: " + bits);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unsupported QT bit size in HNSWSQ: {}", bits);
+     }
+ }
+ 
+diff --git a/src/VectorIndex/HNSWSQ.h b/src/VectorIndex/HNSWSQ.h
+index bd192acaf5..b888acd54f 100644
+--- a/src/VectorIndex/HNSWSQ.h
++++ b/src/VectorIndex/HNSWSQ.h
+@@ -23,33 +23,7 @@ namespace VectorIndex
+ class HNSWsq : public VectorIndex
+ {
+ public:
+-    HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : VectorIndex(it_, im_, me_, dimension_)
+-    {
+-        in_mem = false;
+-        //TODO initialized index with dynamic fields
+-        faiss::MetricType metrictype;
+-
+-        getMyParameters(parameters);
+-        if (me == Metrics::L2)
+-        {
+-            metrictype = faiss::METRIC_L2;
+-        }
+-        else if (me == Metrics::IP)
+-        {
+-            metrictype = faiss::METRIC_INNER_PRODUCT;
+-        }
+-        else if (me == Metrics::Cosine)
+-        {
+-            throw IndexException(0, "cosine unsupported in sq");
+-        }
+-        else
+-        {
+-            throw IndexException(0, "unsupported metrics");
+-        }
+-        index = std::make_shared<faiss::IndexHNSWfastSQ>(dimension_, quantizer, neighbor, metrictype);
+-        index->hnsw.efConstruction = ef_c;
+-        index->own_fields = true;
+-    }
++    HNSWsq(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters);
+ 
+     void train(const VectorDatasetPtr, int64_t total) override; //give a dataset for training.
+ 
+diff --git a/src/VectorIndex/IVFFlatIndex.cpp b/src/VectorIndex/IVFFlatIndex.cpp
+index 72c0f5a713..56a6ee2e5f 100644
+--- a/src/VectorIndex/IVFFlatIndex.cpp
++++ b/src/VectorIndex/IVFFlatIndex.cpp
+@@ -12,6 +12,12 @@
+ #include "faiss/profile.h"
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++extern const int INCORRECT_INDEX;
++}
+ 
+ namespace VectorIndex
+ {
+@@ -66,7 +72,7 @@ void IVFFlatIndex::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -76,7 +82,7 @@ void IVFFlatIndex::search(
+ {
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+     auto * index_real = reinterpret_cast<faiss::IndexIVFFlatFilter *>(index.get());
+ 
+@@ -101,11 +107,11 @@ void IVFFlatIndex::search(
+         params.erase("acc");
+         if (!index_real->tuned)
+         {
+-            throw IndexException(11, "profiler off, please turn on profiler and rebuild index");
++            throw IndexException(DB::ErrorCodes::INCORRECT_INDEX, "autotune is off, turn on profiler and rebuild index");
+         }
+         if (acc < 0 || acc > 1)
+         {
+-            throw IndexException(11, "impossible accuracy, check the parameter.");
++            throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "invalid acc {} for autotune", acc);
+         }
+         if (!index_real->tuned)
+         {
+@@ -122,7 +128,7 @@ void IVFFlatIndex::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     faiss::IVFSearchParameters ivf_params;
+     int current_running_task = count.load(std::memory_order_relaxed);
+@@ -211,7 +217,7 @@ void IVFFlatIndex::getMyParameters(Parameters params)
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ 
+@@ -284,7 +290,7 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
+     }
+     else
+     {
+-        throw IndexException(0, "IVFFlat casting failed, this is logic error.");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "IVFFlat casting failed, this is logic error.");
+     }
+ }
+ }
+diff --git a/src/VectorIndex/IVFPQIndex.cpp b/src/VectorIndex/IVFPQIndex.cpp
+index d9a9972675..cc4189ecc1 100644
+--- a/src/VectorIndex/IVFPQIndex.cpp
++++ b/src/VectorIndex/IVFPQIndex.cpp
+@@ -8,6 +8,11 @@
+ #include "faiss/impl/AuxIndexStructures.h"
+ #include <VectorIndex/VectorIndexCommon.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++}
+ 
+ namespace VectorIndex
+ {
+@@ -48,7 +53,7 @@ void IVFPQIndex::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -62,7 +67,7 @@ void IVFPQIndex::search(
+ {
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+ 
+     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
+@@ -84,7 +89,7 @@ void IVFPQIndex::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     faiss::IVFSearchParameters ivf_params;
+     ivf_params.nprobe = nprobe;
+@@ -141,7 +146,7 @@ void IVFPQIndex::getMyParameters(Parameters params)
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFPQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ 
+diff --git a/src/VectorIndex/IVFSQIndex.cpp b/src/VectorIndex/IVFSQIndex.cpp
+index 3e03deebc8..4853d2ccb4 100644
+--- a/src/VectorIndex/IVFSQIndex.cpp
++++ b/src/VectorIndex/IVFSQIndex.cpp
+@@ -9,6 +9,11 @@
+ #include <VectorIndex/VectorIndexCommon.h>
+ #include <base/logger_useful.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int UNSUPPORTED_PARAMETER;
++}
+ 
+ namespace VectorIndex
+ {
+@@ -52,7 +57,7 @@ void IVFSQIndex::addWithoutId(VectorDatasetPtr dataset)
+     }
+     else
+     {
+-        throw IndexException(2, "vector index uninitialized, can't add");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "addWithoutId: index not intialized");
+     }
+ }
+ 
+@@ -66,7 +71,7 @@ void IVFSQIndex::search(
+ {
+     if (index == nullptr)
+     {
+-        throw IndexException(3, "index not initialize, can't search");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
+     }
+ 
+     faiss::bitMapPtr inner_bit_map = std::shared_ptr<faiss::bitMap>();
+@@ -88,7 +93,7 @@ void IVFSQIndex::search(
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFFLAT);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+     faiss::IVFSearchParameters ivf_params;
+     ivf_params.nprobe = nprobe;
+@@ -140,7 +145,7 @@ void IVFSQIndex::getMyParameters(Parameters params)
+     if (!params.empty())
+     {
+         std::string message = generateUnsupportedParameters(params, IndexType::IVFSQ);
+-        throw IndexException(11, message);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, message);
+     }
+ }
+ 
+@@ -176,7 +181,7 @@ faiss::ScalarQuantizer::QuantizerType IVFSQIndex::parse_SQ_string(String bits)
+     }
+     else
+     {
+-        throw IndexException(11, "unsupported QT bit size in IVFSQ: " + bits);
++        throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unsupported QT bit size in IVFSQ: {}", bits);
+     }
+ }
+ 
+diff --git a/src/VectorIndex/IndexException.h b/src/VectorIndex/IndexException.h
+index 8fbcb66d49..701e6c28b4 100644
+--- a/src/VectorIndex/IndexException.h
++++ b/src/VectorIndex/IndexException.h
+@@ -6,7 +6,14 @@ namespace VectorIndex
+ class IndexException : public DB::Exception
+ {
+ public:
+-    IndexException(int code_, const std::string & message_) : DB::Exception(code_, message_) { }
++    IndexException(int code_, const std::string & message_) : DB::Exception(code_, "[VectorIndex] " + message_) { }
++
++    // Format message with fmt::format, like the logging functions.
++    template <typename... Args>
++    IndexException(int code, const std::string & fmt, Args &&... args)
++        : DB::Exception(fmt::format(fmt::runtime("vector index: " + fmt), std::forward<Args>(args)...), code)
++    {
++    }
+ };
+ 
+ }
+diff --git a/src/VectorIndex/VectorIndex.h b/src/VectorIndex/VectorIndex.h
+index 337c7a9918..72e76f4ce9 100644
+--- a/src/VectorIndex/VectorIndex.h
++++ b/src/VectorIndex/VectorIndex.h
+@@ -129,9 +129,10 @@ public:
+         {
+             getMyParameters(param);
+         }
+-        catch (IndexException & e)
++        catch (const IndexException & e)
+         {
+-            (void)e;
++            LOG_WARNING(&Poco::Logger::get("VectorIndex"), "failed to parse parameters: {}", e.what());
++            return false;
+         }
+         return true;
+     }
+diff --git a/src/VectorIndex/VectorIndexFactory.cpp b/src/VectorIndex/VectorIndexFactory.cpp
+index 02e79ba2ba..e61a8bc73d 100644
+--- a/src/VectorIndex/VectorIndexFactory.cpp
++++ b/src/VectorIndex/VectorIndexFactory.cpp
+@@ -8,6 +8,11 @@
+ #include "IVFSQIndex.h"
+ #include "IndexException.h"
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++}
++
+ namespace VectorIndex
+ {
+ VectorIndexPtr VectorIndexFactory::createIndex(IndexType it, IndexMode im, Metrics me, int dimension, Parameters parameters)
+@@ -155,7 +160,7 @@ Metrics VectorIndexFactory::createIndexMetrics(std::string index_metric)
+     {
+         return Metrics::Cosine;
+     }
+-    throw IndexException(0, "wrong metrics");
++    throw IndexException(DB::ErrorCodes::UNSUPPORTED_PARAMETER, "unknown metric_type {}", index_metric);
+ }
+ 
+ std::string VectorIndexFactory::modeToString(IndexMode mode)
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 796c76d00d..95ac3309a9 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -22,6 +22,12 @@
+ 
+ #include <base/logger_useful.h>
+ 
++namespace DB::ErrorCodes
++{
++extern const int LOGICAL_ERROR;
++extern const int STD_EXCEPTION;
++}
++
+ namespace VectorIndex
+ {
+ std::once_flag once;
+@@ -171,7 +177,7 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
+     }
+     catch (const IndexException & e)
+     {
+-        std::cerr << "IndexException: " << e.message();
++        LOG_ERROR(log, "IndexException: {}, {}", e.code(), e.message());
+         return Status(e.code(), e.message());
+     }
+ }
+@@ -275,11 +281,11 @@ Status VectorSegmentExecutor::serialize()
+         writeBitMap();
+         return finishWrite(binary_total_size);
+     }
+-    catch (std::exception & e)
++    catch (const std::exception & e)
+     {
+-        LOG_ERROR(log, "something went wrong during serialzing: {}", e.what());
++        LOG_ERROR(log, "serialze: failed due to {}", e.what());
++        return Status(1, e.what());
+     }
+-    return Status();
+ }
+ 
+ Status VectorSegmentExecutor::startWrite()
+@@ -543,7 +549,7 @@ Status VectorSegmentExecutor::load()
+             {
+                 index->load(index_binary, total_vec);
+             }
+-            catch (IndexException & e)
++            catch (const IndexException & e)
+             {
+                 return Status(e.code(), e.message());
+             }
+@@ -730,7 +736,7 @@ Status VectorSegmentExecutor::search(
+     }
+     catch (const IndexException & e)
+     {
+-        std::cerr << "IndexException: " << e.message();
++        LOG_ERROR(log, "IndexException: {}", e.message());
+         if (added)
+             count.fetch_sub(1);
+         cv.notify_one();
+@@ -961,7 +967,7 @@ uint32_t VectorSegmentExecutor::validateAndDecompress(const BinaryPtr source, si
+     {
+         LOG_ERROR(
+             log, "The binary is corrupted, decompressed size: {}, recorded decompressed sized: {}", size_decompressed, uncompressed_size);
+-        throw IndexException(4, "disk vector index data corrupted");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "vector index on disk is corrupted");
+     }
+     return size_decompressed;
+ }
+-- 
+2.32.1 (Apple Git-133)
+
