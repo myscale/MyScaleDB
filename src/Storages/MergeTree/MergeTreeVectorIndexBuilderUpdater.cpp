@@ -644,7 +644,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 {
                     LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
                     disk->removeRecursive(vector_tmp_relative_path);
-                    throw Exception(build_status.getCode(), build_status.getMessage());
+                    throw Exception(build_status.getCode(), build_status.getMessage().data());
                 }
                 training = false;
             }
@@ -687,7 +687,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// Remove temporay directory
                 disk->removeRecursive(vector_tmp_relative_path);
 
-                throw Exception(seri_status.getCode(), seri_status.getMessage());
+                throw Exception(seri_status.getCode(), seri_status.getMessage().data());
             }
 
             /// Done with writing vector index files to temporary directory.
