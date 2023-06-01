@@ -1,0 +1,344 @@
+From 1e0978c60d45cfec8db20fb87d3c5be40736fd73 Mon Sep 17 00:00:00 2001
+From: shanfengp <shanfengp@moqi.ai>
+Date: Sun, 8 Jan 2023 22:43:16 +0800
+Subject: [PATCH 12/85] Add support for thread sanitizer in vector functional
+ test
+
+---
+ .gitlab-ci-functional-test.yml                |  1 +
+ .gitlab-ci-memory-leak-test.yml               | 53 ++++++++++---------
+ .gitlab-ci-performance-test.yml               |  6 +--
+ .gitlab-ci.yml                                | 15 ++++++
+ docker/builder/tools/vector-search-test.sh    |  5 ++
+ docker/test/mqdb_run_stateless/run.sh         | 13 ++++-
+ docker/test/mqdb_test_stateless/Dockerfile    | 30 +++++------
+ ...s_index_build_after_lightweight_delete.sql |  2 +
+ ..._mqvs_lightweight_delete_with_decouple.sql |  2 +
+ .../00018_mqvs_drop_index_mergetree.sql       |  2 +
+ ...mqvs_add_fail_status_in_vector_indices.sql |  2 +
+ ...drop_vector_index_and_drop_table.reference |  2 +-
+ ...0_mqvs_drop_vector_index_and_drop_table.sh |  6 ++-
+ ...0_mqvs_refactor_support_prewhere_where.sql |  2 +
+ 14 files changed, 93 insertions(+), 48 deletions(-)
+
+diff --git a/.gitlab-ci-functional-test.yml b/.gitlab-ci-functional-test.yml
+index a6d9f1a98c..69a483fc2d 100644
+--- a/.gitlab-ci-functional-test.yml
++++ b/.gitlab-ci-functional-test.yml
+@@ -15,6 +15,7 @@ vector_search_test:
+     - docker/builder/tools/docker-info.sh
+   script:
+     - docker/builder/tools/vector-search-test.sh
++    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
+ ###################################### FUNCTIONAL TESTS ######################################
+diff --git a/.gitlab-ci-memory-leak-test.yml b/.gitlab-ci-memory-leak-test.yml
+index 636a04661b..89180bf3a1 100644
+--- a/.gitlab-ci-memory-leak-test.yml
++++ b/.gitlab-ci-memory-leak-test.yml
+@@ -123,31 +123,34 @@ vector-test-asan:
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+-# vector-test-tsan:
+-#   stage: test
+-#   needs: 
+-#    - job: build_with_sanitizer_tsanbinary
+-#      artifacts: true
+-#   parallel:
+-#     matrix:
+-#       - ARCH: amd64
+-#       # - ARCH: arm64
+-#   tags:
+-#     - ${ARCH}
+-#   artifacts:
+-#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectortsan"
+-#     paths:
+-#       - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+-#     when: always
+-#   before_script:
+-#     - docker/builder/tools/docker-info.sh
+-#   script:
+-#     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+-#     - docker/builder/tools/vector-search-test.sh
+-#     - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+-#   rules:
+-#     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-#     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++vector-test-tsan:
++  stage: memory-leak-test
++  needs: 
++   - job: build_with_sanitizer_tsanbinary
++     artifacts: true
++  parallel:
++    matrix:
++      - ARCH: amd64
++      # - ARCH: arm64
++  tags:
++    - ${ARCH}
++  artifacts:
++    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectortsan"
++    paths:
++      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
++    when: always
++  before_script:
++    - docker/builder/tools/docker-info.sh
++  script:
++    - replace_openmp=true
++    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
++    - docker/builder/tools/vector-search-test.sh &replace_openmp
++    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
++    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
++    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
++  rules:
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+ vector-test-msan:
+   stage: memory-leak-test
+   needs: 
+diff --git a/.gitlab-ci-performance-test.yml b/.gitlab-ci-performance-test.yml
+index 58a977c7a7..ece1df201f 100644
+--- a/.gitlab-ci-performance-test.yml
++++ b/.gitlab-ci-performance-test.yml
+@@ -20,7 +20,7 @@ performance_test0:
+     - docker/builder/tools/performance-test.sh CI_TEST ${CI_COMMIT_SHA} 0
+     - ls -al artifacts
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
+ performance_test1:
+   stage: performance-test
+@@ -43,7 +43,7 @@ performance_test1:
+     - docker/builder/tools/performance-test.sh CI_TEST ${CI_COMMIT_SHA} 1
+     - ls -al artifacts
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
+ performance_test2:
+   stage: performance-test
+@@ -66,7 +66,7 @@ performance_test2:
+     - docker/builder/tools/performance-test.sh CI_TEST ${CI_COMMIT_SHA} 2
+     - ls -al artifacts
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-performance"
+ ########## VECTOR-DB ###########
+ vector_db_test:
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 1753e94132..3d44c177d6 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -13,6 +13,7 @@ include:
+   - '/.gitlab-ci-performance-test.yml'
+ 
+ stages:
++  - check-pipeline
+   - build
+   - functional-test
+   - performance-test
+@@ -23,6 +24,20 @@ stages:
+   - deploy
+   - benchmark
+ 
++check_pipeline_already_running:
++  stage: check-pipeline
++  cache:
++    key: $CI_PIPELINE_SOURCE-$CI_COMMIT_SHA-$CI_TEST_VECTOR_DB
++    paths:
++      - .schedule_cache
++  rules:
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
++  script:
++    - if [[ -f .schedule_cache ]]; then
++          echo "already ran for this commit, nothing to do";
++          exit 1;
++      fi
++    - echo "done" > .schedule_cache
+ style_check:
+   stage: build
+   image: harbor.internal.moqi.ai/mqdb/style-check
+diff --git a/docker/builder/tools/vector-search-test.sh b/docker/builder/tools/vector-search-test.sh
+index 3160cc4a34..26e1ae400a 100755
+--- a/docker/builder/tools/vector-search-test.sh
++++ b/docker/builder/tools/vector-search-test.sh
+@@ -5,6 +5,11 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ PROJECT_PATH=$CUR_DIR/../../..
+ WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stateless
+ 
++THREAD_SANITIZER_TEST=${1:-false}
++if [ $THREAD_SANITIZER_TEST == "true" ]; then
++    sed -i 's?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.3?' docker/test/mqdb_run_stateless/Dockerfile
++fi
++
+ mkdir docker/test/mqdb_run_stateless/tests/queries
+ cp -rfv artifacts/clickhouse-*.deb docker/test/mqdb_run_stateless/packages
+ cp -rfv docker/test/mqdb_test_script/clickhouse-test docker/test/mqdb_run_stateless/clickhouse-test
+diff --git a/docker/test/mqdb_run_stateless/run.sh b/docker/test/mqdb_run_stateless/run.sh
+index 3deabd9df3..7eeb54ab33 100644
+--- a/docker/test/mqdb_run_stateless/run.sh
++++ b/docker/test/mqdb_run_stateless/run.sh
+@@ -38,6 +38,17 @@ function setup_zookeeper
+ }
+ setup_zookeeper
+ 
++function replace_opnemp
++{
++    if [ $OMP_LIB_PATH ]; then
++        cp $OMP_LIB_PATH/libomp.so /lib/llvm-13/lib/libomp.so.5
++    else
++        echo "won't run thread sanitizer for test, will skip"
++    fi
++}
++
++replace_opnemp
++
+ # For flaky check we also enable thread fuzzer
+ if [ "$NUM_TRIES" -gt "1" ]; then
+     export THREAD_FUZZER_CPU_TIME_PERIOD_US=1000
+@@ -122,7 +133,7 @@ function run_tests() {
+         01565_reconnect_after_client_error 01324_settings_documentation 01293_show_clusters \
+         01271_show_privileges 01158_zookeeper_log_long 01528_clickhouse_local_prepare_parts \
+         01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
+-        02047 01039 00993 02207 02117 02226 01606_git_import 2>&1 |
++        02047 01039 00993 02207 02117 02226 01606_git_import 00008_mqvs_empty_vector 2>&1 |
+         ts '%Y-%m-%d %H:%M:%S' |
+         tee -a test_output/test_result.txt
+     set -e
+diff --git a/docker/test/mqdb_test_stateless/Dockerfile b/docker/test/mqdb_test_stateless/Dockerfile
+index b0a2da5195..2d8416fd13 100644
+--- a/docker/test/mqdb_test_stateless/Dockerfile
++++ b/docker/test/mqdb_test_stateless/Dockerfile
+@@ -22,23 +22,19 @@ RUN wget "https://dl.min.io/server/minio/release/linux-${TARGETARCH:-amd64}/mini
+     && wget "https://dl.min.io/client/mc/release/linux-${TARGETARCH:-amd64}/mc" \
+     && chmod +x ./mc
+ 
+-# Download jdk
+-RUN wget --no-check-certificate --no-cookies --header "Cookie: oraclelicense=accept-securebackup-cookie" \
+-    "https://download.oracle.com/otn/java/jdk/8u351-b10/10e8cce67c7843478f41411b7003171c/jdk-8u351-linux-aarch64.tar.gz" \
+-    && mv ./jdk-8u351-linux-aarch64.tar.gz jdk-8u351-linux-arm64.tar.gz
+-RUN wget --no-check-certificate --no-cookies --header "Cookie: oraclelicense=accept-securebackup-cookie" \
+-    "https://download.oracle.com/otn/java/jdk/8u351-b10/10e8cce67c7843478f41411b7003171c/jdk-8u351-linux-x64.tar.gz" \
+-    && mv ./jdk-8u351-linux-x64.tar.gz jdk-8u351-linux-amd64.tar.gz
+-
+-RUN mkdir /usr/local/jdk
+-RUN mv jdk-8u351-linux-${TARGETARCH:-amd64}.tar.gz /usr/local/jdk
+-RUN cd /usr/local/jdk && tar -xzvf jdk-8u351-linux-${TARGETARCH:-amd64}.tar.gz
+-
+-ENV JAVA_HOME /usr/local/jdk/jdk1.8.0_351
+-ENV JRE_HOME /usr/local/jdk/jdk1.8.0_351/jre
+-ENV PATH $JAVA_HOME/bin:$PATH
+-
+-# Download zookeeper
++# build openmp for thread sanitizer
++# openmp: https://github.com/llvm-mirror/openmp.git
++# cmake: https://cmake.org/files/dev/cmake-3.22.20220106-g31b8466-linux-x86_64.tar.gz
++COPY openmp /openmp
++COPY cmake /cmake
++
++RUN ln -s /cmake/bin/cmake /usr/bin/cmake
++
++RUN cd /openmp && mkdir build ||: \ 
++    && cmake -DLIBOMP_TSAN_SUPPORT=1 /openmp \
++    && cmake --build . --target install
++
++ENV OMP_LIB_PATH=/usr/local/lib
+ 
+ ENV MINIO_ROOT_USER="clickhouse"
+ ENV MINIO_ROOT_PASSWORD="clickhouse"
+diff --git a/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql b/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
+index 0496afe21f..c07943141a 100644
+--- a/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
++++ b/tests/queries/2_vector_search/00016_mqvs_index_build_after_lightweight_delete.sql
+@@ -1,3 +1,5 @@
++-- Tags: no-parallel
++
+ DROP TABLE IF EXISTS test_vector;
+ CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
+ INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(2100);
+diff --git a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
+index 66258ec2ff..7eff31284d 100644
+--- a/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
++++ b/tests/queries/2_vector_search/00017_mqvs_lightweight_delete_with_decouple.sql
+@@ -1,3 +1,5 @@
++-- Tags: no-parallel
++
+ DROP TABLE IF EXISTS test_vector;
+ CREATE TABLE test_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, distable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+ INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
+diff --git a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+index 833f4d7ee4..7b7da30167 100644
+--- a/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
++++ b/tests/queries/2_vector_search/00018_mqvs_drop_index_mergetree.sql
+@@ -1,3 +1,5 @@
++-- Tags: no-parallel
++
+ DROP TABLE IF EXISTS test_drop_index;
+ CREATE TABLE test_drop_index(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1000;
+ INSERT INTO test_drop_index SELECT number, [number, number, number] FROM numbers(2100);
+diff --git a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
+index 33fd507de8..5fb86add2d 100644
+--- a/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
++++ b/tests/queries/2_vector_search/00019_mqvs_add_fail_status_in_vector_indices.sql
+@@ -1,3 +1,5 @@
++-- Tags: no-parallel
++
+ DROP TABLE IF EXISTS test_success_vector;
+ CREATE TABLE test_success_vector(id Float32, vector FixedArray(Float32, 3)) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=100;
+ INSERT INTO test_success_vector SELECT number, [number, number, number] FROM numbers(2100);
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+index 5107cec602..443cb43075 100644
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.reference
+@@ -1,5 +1,5 @@
+ test_drop_table	v1	HNSWSQ	v1 vector TYPE HNSWSQ	NoVectorIndexData
+ -- Empty result, no vector index v1
+ -- Create a new vector index v2 with different name and different type
+-test_drop_table	v2	HNSWPQ	v2 vector TYPE HNSWPQ	Built
++test_drop_table	v2	HNSWFLAT	v2 vector TYPE HNSWFLAT	Built
+ ok
+diff --git a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+index 7478635505..6c439386a0 100755
+--- a/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
++++ b/tests/queries/2_vector_search/00020_mqvs_drop_vector_index_and_drop_table.sh
+@@ -1,4 +1,5 @@
+ #!/usr/bin/env bash
++# Tags: no-parallel
+ 
+ max_response_time_drop_vector_index=1
+ max_response_time_drop_table=10
+@@ -6,7 +7,7 @@ max_response_time_drop_table=10
+ # create table & insert data
+ clickhouse-client -q "DROP TABLE IF EXISTS test_drop_table;"
+ clickhouse-client -q "CREATE TABLE test_drop_table(id UInt32, text String, vector FixedArray(Float32, 768)) Engine MergeTree ORDER BY id;"
+-clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(2000000);"
++clickhouse-client -q "INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);"
+ clickhouse-client -q "optimize table test_drop_table final;"
+ 
+ # when building vector index, drop this vector index
+@@ -25,6 +26,9 @@ status="NotBuilt"
+ while [[ $status != "Built" ]]
+ do
+         status=`clickhouse-client -q "select status from system.vector_indices where table = 'test_drop_table' and name = 'v2';"`
++        if [ $(clickhouse-client -q "select 1" 2>&1 | grep "Connection refused" | wc -l) == "1" ]; then
++            exit 1;
++        fi
+         sleep 1
+ done
+ clickhouse-client -q "select '-- Create a new vector index v2 with different name and different type';"
+diff --git a/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql b/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
+index cc3d7ac216..b2dc3c4993 100644
+--- a/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
++++ b/tests/queries/2_vector_search/00020_mqvs_refactor_support_prewhere_where.sql
+@@ -1,3 +1,5 @@
++-- Tags: no-parallel
++
+ drop table if exists test_vector;
+ create table test_vector
+ (
+-- 
+2.32.1 (Apple Git-133)
+

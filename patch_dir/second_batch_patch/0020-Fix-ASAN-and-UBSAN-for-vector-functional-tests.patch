@@ -1,0 +1,206 @@
+From 1fdc6668be5ba2b80bb42ab9c2385d1872371cd8 Mon Sep 17 00:00:00 2001
+From: Qin Liu <qliu@moqi.ai>
+Date: Fri, 3 Feb 2023 19:55:51 +0000
+Subject: [PATCH 20/85] Fix ASAN and UBSAN for vector functional tests
+
+---
+ .gitlab-ci-memory-leak-test.yml                      |  8 +++++---
+ contrib/faiss                                        |  2 +-
+ contrib/hnswlib                                      |  2 +-
+ docker/test/mqdb_run_stateless/run.sh                |  2 +-
+ scripts/setup_build.sh                               |  3 +++
+ .../MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp |  1 -
+ src/VectorIndex/CompositeIndexReader.cpp             |  3 +++
+ src/VectorIndex/IndexWriter.cpp                      |  3 ++-
+ src/VectorIndex/VectorSegmentExecutor.cpp            |  4 ++--
+ .../00008_mqvs_empty_vector.reference                | 12 ++++++------
+ .../2_vector_search/00008_mqvs_empty_vector.sh       |  4 ++--
+ 11 files changed, 26 insertions(+), 18 deletions(-)
+
+diff --git a/.gitlab-ci-memory-leak-test.yml b/.gitlab-ci-memory-leak-test.yml
+index 1afacab8b1..16309a28b6 100644
+--- a/.gitlab-ci-memory-leak-test.yml
++++ b/.gitlab-ci-memory-leak-test.yml
+@@ -128,7 +128,8 @@ vector-test-asan:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+ 
+-vector-test-tsan:
++# disable TSAN due to #89
++.vector-test-tsan:
+   stage: memory-leak-test
+   needs:
+     - job: build_with_sanitizer_tsanbinary
+@@ -149,7 +150,7 @@ vector-test-tsan:
+   script:
+     - replace_openmp=true
+     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+-    - docker/builder/tools/vector-search-test.sh &replace_openmp
++    - docker/builder/tools/vector-search-test.sh $replace_openmp
+     # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
+     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+@@ -157,7 +158,8 @@ vector-test-tsan:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+     - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
+ 
+-vector-test-msan:
++# disable MSAN due to #89
++.vector-test-msan:
+   stage: memory-leak-test
+   needs:
+     - job: build_with_sanitizer_msanbinary
+diff --git a/contrib/faiss b/contrib/faiss
+index 3f0f442c45..e36f4c1fd0 160000
+--- a/contrib/faiss
++++ b/contrib/faiss
+@@ -1 +1 @@
+-Subproject commit 3f0f442c45f34ef4cd28e15325234c3ec7fe3c63
++Subproject commit e36f4c1fd0b1f57f4721fc29d16df62ed5d31920
+diff --git a/contrib/hnswlib b/contrib/hnswlib
+index fdb835c454..7659d94583 160000
+--- a/contrib/hnswlib
++++ b/contrib/hnswlib
+@@ -1 +1 @@
+-Subproject commit fdb835c45492041c258d1485abb111ded0cf8867
++Subproject commit 7659d94583bf9df015a7de9d4e7377a800210f33
+diff --git a/docker/test/mqdb_run_stateless/run.sh b/docker/test/mqdb_run_stateless/run.sh
+index 7eeb54ab33..98674e8dfb 100644
+--- a/docker/test/mqdb_run_stateless/run.sh
++++ b/docker/test/mqdb_run_stateless/run.sh
+@@ -133,7 +133,7 @@ function run_tests() {
+         01565_reconnect_after_client_error 01324_settings_documentation 01293_show_clusters \
+         01271_show_privileges 01158_zookeeper_log_long 01528_clickhouse_local_prepare_parts \
+         01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
+-        02047 01039 00993 02207 02117 02226 01606_git_import 00008_mqvs_empty_vector 2>&1 |
++        02047 01039 00993 02207 02117 02226 01606_git_import 2>&1 |
+         ts '%Y-%m-%d %H:%M:%S' |
+         tee -a test_output/test_result.txt
+     set -e
+diff --git a/scripts/setup_build.sh b/scripts/setup_build.sh
+index d66b64e80c..101a3a1ea8 100644
+--- a/scripts/setup_build.sh
++++ b/scripts/setup_build.sh
+@@ -27,6 +27,9 @@ if [ $# -ge 2 ]; then
+     elif [ "$2" == "MSAN" ]; then
+         BUILD_FOLDER="${BUILD_FOLDER}-msan"
+         SANITIZE_ARGS="-DSANITIZE=memory"
++    elif [ "$2" == "UBSAN" ]; then
++        BUILD_FOLDER="${BUILD_FOLDER}-ubsan"
++        SANITIZE_ARGS="-DSANITIZE=undefined"
+     else
+         echo "Invalid sanitizer mode: $2"
+         exit 1
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index a826f2b5a8..19195f51f1 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -645,7 +645,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                     empty_ids.emplace_back(current_round_start_row + row);
+                 }
+             }
+-            result.clear();
+ 
+             LOG_DEBUG(
+                 log,
+diff --git a/src/VectorIndex/CompositeIndexReader.cpp b/src/VectorIndex/CompositeIndexReader.cpp
+index 957427eebe..a2c7d087f4 100644
+--- a/src/VectorIndex/CompositeIndexReader.cpp
++++ b/src/VectorIndex/CompositeIndexReader.cpp
+@@ -104,6 +104,9 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
+     size_t to_read = size * nitems;
+     size_t ret = 0;
+ 
++    if (to_read == 0)
++        return 0;
++
+     while (offset + to_read > static_cast<size_t>(current_loaded_size))
+     {
+         if (offset < static_cast<size_t>(current_loaded_size))
+diff --git a/src/VectorIndex/IndexWriter.cpp b/src/VectorIndex/IndexWriter.cpp
+index e6c2b8b455..e4e49daeff 100644
+--- a/src/VectorIndex/IndexWriter.cpp
++++ b/src/VectorIndex/IndexWriter.cpp
+@@ -1,4 +1,3 @@
+-
+ #include "IndexWriter.h"
+ namespace VectorIndex
+ {
+@@ -7,6 +6,8 @@ namespace VectorIndex
+ 
+ size_t BufferIndexWriter::operator()(const void * ptr, size_t size, size_t nitems)
+ {
++    if (ptr == nullptr || size == 0 || nitems == 0)
++        return 0;
+     size_t total_need = size * nitems + actual_size;
+     if (total_need > 0)
+     {
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index fe85dc9f28..869a722ee7 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -616,11 +616,11 @@ Status VectorSegmentExecutor::search(
+         cv.wait(lock, [] { return count.load() <= num_thread_for_vector; });
+         count.fetch_add(1);
+         added = true;
+-        LOG_DEBUG(log, "[search] index search, num threads: {}", omp_get_max_threads());
++        LOG_DEBUG(log, "[search] index search, num threads: {}", num_thread_for_vector);
+         /// a shared lock on a small number of concurrent threads, like 16. this is not hard limit so race is not a problem.
+         {
+             DB::OpenTelemetrySpanHolder span("VectorSegmentExecutor::search::vector_index_search");
+-            span.addAttribute("vec_search.num_threads", omp_get_max_threads());
++            span.addAttribute("vec_search.num_threads", num_thread_for_vector);
+             index->search(dataset, k, distances, labels, params, filter);
+         }
+ 
+diff --git a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+index 7ca3093bf6..dd3ad1d340 100644
+--- a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
++++ b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+@@ -1,20 +1,20 @@
+ 30	[30,30,30]	300
+-31	[31,31,31]	363
+ 9	[9,9,9]	363
++31	[31,31,31]	363
+ 8	[8,8,8]	432
+ 32	[32,32,32]	432
+-33	[33,33,33]	507
+ 7	[7,7,7]	507
+-34	[34,34,34]	588
++33	[33,33,33]	507
+ 6	[6,6,6]	588
++34	[34,34,34]	588
+ 5	[5,5,5]	675
+ 30	[30,30,30]	300
+-31	[31,31,31]	363
+ 9	[9,9,9]	363
++31	[31,31,31]	363
+ 8	[8,8,8]	432
+ 32	[32,32,32]	432
+-33	[33,33,33]	507
+ 7	[7,7,7]	507
+-34	[34,34,34]	588
++33	[33,33,33]	507
+ 6	[6,6,6]	588
++34	[34,34,34]	588
+ 5	[5,5,5]	675
+diff --git a/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh b/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
+index 7b9f2958d4..9d3c789017 100755
+--- a/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
++++ b/tests/queries/2_vector_search/00008_mqvs_empty_vector.sh
+@@ -5,10 +5,10 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ . "$CURDIR"/helpers/00000_prepare_data_with_empty_vectors.sh
+ 
+ # test empty vector with IVFFLAT
+-clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) FROM test_vector;"
++clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
+ 
+ # test empty vector with FLAT
+ clickhouse-client -q "ALTER TABLE test_vector DROP VECTOR INDEX v1;"
+ clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE FLAT;"
+ sleep 1
+-clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) FROM test_vector;"
++clickhouse-client -q "SELECT id, vector, distance('topK = 10')(vector, [20.0, 20.0, 20.0]) as dist FROM test_vector ORDER BY (dist, id);"
+-- 
+2.32.1 (Apple Git-133)
+
