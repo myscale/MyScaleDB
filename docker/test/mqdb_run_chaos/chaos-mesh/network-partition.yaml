@@ -1,0 +1,22 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-partition
+  namespace: "CHAOS_NAMESPACE"
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - "CHAOS_NAMESPACE"
+    labelSelectors:
+      'clickhouse.altinity.com/replica': '0'
+  direction: both
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - "CHAOS_NAMESPACE"
+      labelSelectors:
+        'clickhouse.altinity.com/replica': '1'
+  duration: '1m'

@@ -1,0 +1,13 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: all-kill
+  namespace: "CHAOS_NAMESPACE"
+spec:
+  action: pod-kill
+  mode: all
+  selector:
+    namespaces:
+      - "CHAOS_NAMESPACE"
+    labelSelectors:
+      'clickhouse.altinity.com/app': 'chop'
