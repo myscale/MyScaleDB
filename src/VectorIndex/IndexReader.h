@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 #include "faiss/impl/io.h"
 

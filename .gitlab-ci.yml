@@ -1,10 +1,10 @@
 image: harbor.internal.moqi.ai/mqdb/builder:2.8
 
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+# workflow:
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+#     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 include:
   - "/.gitlab-ci-build.yml"
