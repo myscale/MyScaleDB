@@ -1,0 +1,310 @@
+From ea15284456c96e6661966bafc8be004a6fa03c1f Mon Sep 17 00:00:00 2001
+From: Libao Yang <libaoy@moqi.ai>
+Date: Mon, 20 Feb 2023 09:38:13 +0000
+Subject: [PATCH 15/51] =?UTF-8?q?Resolve=20"batch=5Fdistance=20=E8=BF=94?=
+ =?UTF-8?q?=E5=9B=9E=E7=9A=84=E7=BB=93=E6=9E=9C=E6=95=B0=E9=87=8F=E5=A4=9A?=
+ =?UTF-8?q?=E4=BA=8E=E9=A2=84=E6=9C=9F"?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/Interpreters/TreeRewriter.cpp             | 127 ++++++++++--------
+ .../00002_mqvs_batch_distance.reference       |  53 ++++++--
+ .../00002_mqvs_batch_distance.sh              |  44 +++++-
+ 3 files changed, 152 insertions(+), 72 deletions(-)
+
+diff --git a/src/Interpreters/TreeRewriter.cpp b/src/Interpreters/TreeRewriter.cpp
+index 3f8b75d553..0bcb9e966a 100644
+--- a/src/Interpreters/TreeRewriter.cpp
++++ b/src/Interpreters/TreeRewriter.cpp
+@@ -856,93 +856,79 @@ void optimizeVectorScan(
+     if (vector_scan_funcs.size() == 1)
+     {
+         const auto * vector_scan_func_node = vector_scan_funcs[0];
+-        if (isDistance(vector_scan_func_node->getColumnName()))
++        String param_str = parseVectorScanParameters(vector_scan_func_node, context);
++        VectorIndex::Parameters vec_parameters;
++        if (!param_str.empty())
+         {
+-            String param_str = parseVectorScanParameters(vector_scan_func_node, context);
+-            VectorIndex::Parameters vec_parameters;
+-            if (!param_str.empty())
++            try
+             {
+-                try
+-                {
+-                    Poco::JSON::Parser json_parser;
+-                    auto object = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
+-                    vec_parameters = VectorIndex::convertPocoJsonToMap(object);
+-                }
+-                catch ([[maybe_unused]] const std::exception & e)
+-                {
+-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
+-                }
++                Poco::JSON::Parser json_parser;
++                auto object = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
++                vec_parameters = VectorIndex::convertPocoJsonToMap(object);
+             }
+-
+-            if (!select_query->orderBy())
++            catch ([[maybe_unused]] const std::exception & e)
+             {
+-                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
+-                auto order_by_elem = std::make_shared<ASTOrderByElement>();
+-                auto order_by_col = std::make_shared<ASTIdentifier>(vector_scan_func_node->getColumnName());
++                throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
++            }
++        }
+ 
+-                /// Basically copy-and-paste from ExpressionAnalyzer, dirty
+-                if (!vector_scan_func_node->arguments || vector_scan_func_node->arguments->children.size() != 2)
+-                {
+-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
+-                }
+-                const auto search_column_name = vector_scan_func_node->arguments->children[0]->getColumnName();
++        const auto vector_scan_func_node_cloumn_name = vector_scan_func_node->getColumnName();
++        std::shared_ptr<ASTFunction> tuple_function_a;
++        if (!select_query->orderBy())
++        {
++            /// Basically copy-and-paste from ExpressionAnalyzer, dirty
++            if (!vector_scan_func_node->arguments || vector_scan_func_node->arguments->children.size() != 2)
++            {
++                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
++            }
++            const auto search_column_name = vector_scan_func_node->arguments->children[0]->getColumnName();
+ 
+-                /// Empty is ok, l2 as default
+-                String metric_type = vec_parameters["metric_type"];
+-                for (const auto & vector_index_description : vector_indices_description)
++            /// Empty is ok, l2 as default
++            String metric_type = vec_parameters["metric_type"];
++            for (const auto & vector_index_description : vector_indices_description)
++            {
++                /// index metric_type has higher priority
++                if (vector_index_description.column == search_column_name)
+                 {
+-                    /// index metric_type has higher priority
+-                    if (vector_index_description.column == search_column_name)
+-                    {
+-                        const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_description.parameters);
+-                        if(index_parameter.contains("metric_type")){
+-                            metric_type = index_parameter.at("metric_type");
+-                            break;
+-                        }
++                    const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_description.parameters);
++                    if(index_parameter.contains("metric_type")){
++                        metric_type = index_parameter.at("metric_type");
++                        break;
+                     }
+                 }
+-                Poco::toUpperInPlace(metric_type);
++            }
++            Poco::toUpperInPlace(metric_type);
+ 
++            /// Stored in TreeRewriterResult, pass such info to ExpressionAnalyzer
++            vector_scan_metric_type = metric_type;
++            auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
++            if (isDistance(vector_scan_func_node_cloumn_name))
++            {
++                auto order_by_elem = std::make_shared<ASTOrderByElement>();
++                auto order_by_col = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
+                 order_by_elem->children.emplace_back(order_by_col);
+                 order_by_elem->direction = metric_type == "IP" ? -1 : 1;
+                 order_by_elem->nulls_direction = 1;
+ 
+                 order_by_exp_ast->children.emplace_back(order_by_elem);
+                 select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
+-
+-                /// Stored in TreeRewriterResult, pass such info to ExpressionAnalyzer
+-                vector_scan_metric_type = metric_type;
+             }
+-
+-            if (!select_query->limitBy() && !select_query->limitLength() && !select_query->limitOffset() && !select_query->limitByOffset()
+-                && !select_query->limitByLength())
++            else if (isBatchDistance(vector_scan_func_node_cloumn_name))
+             {
+-                if (vec_parameters.contains("topK"))
+-                {
+-                    auto limit_by_ast = std::make_shared<ASTLiteral>(VectorIndex::StoI(vec_parameters.at("topK")));
+-                    select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, limit_by_ast);
+-                }
+-            }
+-        }
+-        else if (isBatchDistance(vector_scan_funcs[0]->getColumnName()))
+-        {
+-            if (!select_query->orderBy())
+-            {
+-                auto order_by_exp_ast = std::make_shared<ASTExpressionList>();
+                 auto order_by_elem_a = std::make_shared<ASTOrderByElement>();
+-                auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
++                auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
+                 auto order_by_literal_a = std::make_shared<ASTLiteral>(1u);
+-                auto tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
++                tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
+                 order_by_elem_a->children.emplace_back(tuple_function_a);
+                 order_by_elem_a->direction = 1;
+                 order_by_elem_a->nulls_direction = 1;
+ 
+                 auto order_by_elem_b = std::make_shared<ASTOrderByElement>();
+-                auto order_by_col_b = std::make_shared<ASTIdentifier>(vector_scan_funcs[0]->getColumnName());
++                auto order_by_col_b = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
+                 auto order_by_literal_b = std::make_shared<ASTLiteral>(2u);
+                 auto tuple_function_b = makeASTFunction("tupleElement", order_by_col_b, order_by_literal_b);
+                 order_by_elem_b->children.emplace_back(tuple_function_b);
+-                order_by_elem_b->direction = 1;
++                order_by_elem_b->direction = metric_type == "IP" ? -1 : 1;
+                 order_by_elem_b->nulls_direction = 1;
+ 
+                 order_by_exp_ast->children.emplace_back(order_by_elem_a);
+@@ -950,6 +936,29 @@ void optimizeVectorScan(
+                 select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, order_by_exp_ast);
+             }
+         }
++
++        if (!select_query->limitBy() && !select_query->limitLength() && !select_query->limitOffset() && !select_query->limitByOffset()
++            && !select_query->limitByLength() && vec_parameters.contains("topK"))
++        {
++            auto limit_by_ast = std::make_shared<ASTLiteral>(VectorIndex::StoI(vec_parameters.at("topK")));
++            if (isDistance(vector_scan_func_node_cloumn_name))
++            {
++                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, limit_by_ast);
++            }
++            else if (isBatchDistance(vector_scan_func_node_cloumn_name))
++            {
++                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY_LENGTH, limit_by_ast);
++                auto limit_by_exp_ast = std::make_shared<ASTExpressionList>();
++                if(!tuple_function_a)
++                {
++                    auto order_by_col_a = std::make_shared<ASTIdentifier>(vector_scan_func_node_cloumn_name);
++                    auto order_by_literal_a = std::make_shared<ASTLiteral>(1u);
++                    tuple_function_a = makeASTFunction("tupleElement", order_by_col_a, order_by_literal_a);
++                }
++                limit_by_exp_ast->children.emplace_back(tuple_function_a);
++                select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY, limit_by_exp_ast);
++            }
++        }
+     }
+ }
+ }
+diff --git a/tests/queries/2_vector_search/00002_mqvs_batch_distance.reference b/tests/queries/2_vector_search/00002_mqvs_batch_distance.reference
+index 8f9a7a69aa..ca43b8ea64 100644
+--- a/tests/queries/2_vector_search/00002_mqvs_batch_distance.reference
++++ b/tests/queries/2_vector_search/00002_mqvs_batch_distance.reference
+@@ -1,3 +1,5 @@
++2
++-- batch_distance of metric_type=L2
+ 0	[0,0,0]	(0,0.030000001)
+ 1	[1,1,1]	(0,2.4299998)
+ 2	[2,2,2]	(0,10.83)
+@@ -18,13 +20,44 @@
+ 7	[7,7,7]	(1,138.72)
+ 8	[8,8,8]	(1,182.52002)
+ 9	[9,9,9]	(1,232.32)
+-0	[0,0,0]	(2,0.27)
+-1	[1,1,1]	(2,1.4699999)
+-2	[2,2,2]	(2,8.67)
+-3	[3,3,3]	(2,21.87)
+-4	[4,4,4]	(2,41.07)
+-5	[5,5,5]	(2,66.27)
+-6	[6,6,6]	(2,97.46999)
+-7	[7,7,7]	(2,134.66998)
+-8	[8,8,8]	(2,177.87)
+-9	[9,9,9]	(2,227.06998)
++50	[50,50,50]	(2,0.029999085)
++51	[51,51,51]	(2,2.4300082)
++49	[49,49,49]	(2,3.62999)
++52	[52,52,52]	(2,10.830017)
++48	[48,48,48]	(2,13.22998)
++53	[53,53,53]	(2,25.230026)
++47	[47,47,47]	(2,28.829971)
++54	[54,54,54]	(2,45.630035)
++46	[46,46,46]	(2,50.429962)
++55	[55,55,55]	(2,72.030045)
++-- batch_distance of metric_type=IP
++99	[99,99,99]	(0,29.7)
++98	[98,98,98]	(0,29.400002)
++97	[97,97,97]	(0,29.099998)
++96	[96,96,96]	(0,28.800001)
++95	[95,95,95]	(0,28.5)
++94	[94,94,94]	(0,28.2)
++93	[93,93,93]	(0,27.900002)
++92	[92,92,92]	(0,27.599998)
++91	[91,91,91]	(0,27.300001)
++90	[90,90,90]	(0,27)
++99	[99,99,99]	(1,59.4)
++98	[98,98,98]	(1,58.800003)
++97	[97,97,97]	(1,58.199997)
++96	[96,96,96]	(1,57.600002)
++95	[95,95,95]	(1,57)
++94	[94,94,94]	(1,56.4)
++93	[93,93,93]	(1,55.800003)
++92	[92,92,92]	(1,55.199997)
++91	[91,91,91]	(1,54.600002)
++90	[90,90,90]	(1,54)
++99	[99,99,99]	(2,14879.699)
++98	[98,98,98]	(2,14729.399)
++97	[97,97,97]	(2,14579.1)
++96	[96,96,96]	(2,14428.799)
++95	[95,95,95]	(2,14278.5)
++94	[94,94,94]	(2,14128.199)
++93	[93,93,93]	(2,13977.899)
++92	[92,92,92]	(2,13827.6)
++91	[91,91,91]	(2,13677.301)
++90	[90,90,90]	(2,13527)
+diff --git a/tests/queries/2_vector_search/00002_mqvs_batch_distance.sh b/tests/queries/2_vector_search/00002_mqvs_batch_distance.sh
+index 5b6aba20eb..b4388b09df 100755
+--- a/tests/queries/2_vector_search/00002_mqvs_batch_distance.sh
++++ b/tests/queries/2_vector_search/00002_mqvs_batch_distance.sh
+@@ -1,7 +1,45 @@
+ #!/usr/bin/env bash
+ # Tags: no-parallel
+ 
+-CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+-. "$CURDIR"/helpers/00000_prepare_index.sh
++clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
++clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id;"
++clickhouse-client -q "system stop merges test_vector;"
++
++clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(0,50);"
++clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(50,50);"
++clickhouse-client -q "select count(*) from system.parts where (table='test_vector');"
++
++# test metric_type=L2
++clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT('metric_type= L2');"
++status="NotBuilt"
++time=0
++while [[ $status != "Built" && $time != 10 ]]; do
++        status=$(clickhouse-client -q "select status from system.vector_indices where table = 'test_vector' and name = 'v1';")
++        sleep 1
++        ((++time))
++done
++if [ $time -eq 5 ]; then
++        echo "fail to build index"
++fi
++clickhouse-client -q "select '-- batch_distance of metric_type=L2';"
++clickhouse-client -q "SELECT id, vector, batch_distance('topK=10')(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) FROM test_vector;"
++
++clickhouse-client -q "ALTER TABLE test_vector DROP VECTOR INDEX v1;"
++
++# test metric_type=IP
++clickhouse-client -q "ALTER TABLE test_vector ADD VECTOR INDEX v2 vector TYPE HNSWFLAT('metric_type=IP');"
++status="NotBuilt"
++time=0
++while [[ $status != "Built" && $time != 10 ]]; do
++        status=$(clickhouse-client -q "select status from system.vector_indices where table = 'test_vector' and name = 'v2';")
++        sleep 1
++        ((++time))
++done
++if [ $time -eq 5 ]; then
++        echo "fail to build index"
++fi
++clickhouse-client -q "select '-- batch_distance of metric_type=IP';"
++clickhouse-client -q "SELECT id, vector, batch_distance('topK=10')(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) FROM test_vector;"
++
++clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
+ 
+-clickhouse-client -q "SELECT id, vector, batch_distance('topK=10')(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [0.3, 0.3, 0.3]]) FROM test_vector;"
+-- 
+2.32.1 (Apple Git-133)
+

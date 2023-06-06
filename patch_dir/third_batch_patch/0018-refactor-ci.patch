@@ -1,0 +1,1288 @@
+From 53b0d00f1b731611a8e6c2720e2da973c1454f99 Mon Sep 17 00:00:00 2001
+From: Yi Ma <yim@moqi.ai>
+Date: Fri, 3 Mar 2023 02:18:50 +0000
+Subject: [PATCH 18/51] refactor ci
+
+---
+ .gitlab-ci-build.yml                          | 19 ++---
+ .gitlab-ci-functional-test.yml                | 35 ++------
+ .gitlab-ci-performance-test.yml               |  6 +-
+ ...-test.yml => .gitlab-ci-sanitizer-test.yml | 52 ++++++------
+ .gitlab-ci.yml                                | 82 ++----------------
+ docker/builder/Dockerfile                     | 65 +++++++++++---
+ docker/builder/build.py                       |  2 +-
+ docker/builder/ccache.conf                    |  6 --
+ docker/builder/tools/docker-buildx.sh         |  2 +-
+ docker/builder/tools/image.sh                 |  6 +-
+ docker/builder/tools/proxy.sh                 |  6 +-
+ docker/builder/tools/saas-image.sh            |  2 +-
+ docker/builder/update-ccache-symlinks         | 84 +++++++++++++++++++
+ docker/mqdb-client/Dockerfile                 |  2 +-
+ docker/mqdb-runtime/Dockerfile                | 10 +--
+ docker/mqdb-runtime/build.sh                  |  2 +-
+ docker/mqdb-ssh-client/Dockerfile             |  2 +-
+ docker/mqdb-test-dist/Dockerfile              |  2 +-
+ docker/mqdb-test/Dockerfile                   |  2 +-
+ docker/mqdb/Dockerfile                        |  2 +-
+ docker/test/mqdb_test_base/Dockerfile         | 19 +++--
+ docker/test/mqdb_test_fuzzer/Dockerfile       | 30 +++----
+ .../mqdb_test_integration/runner/Dockerfile   | 26 +++---
+ docker/test/mqdb_test_performance/Dockerfile  | 48 +++++------
+ docker/test/mqdb_test_script/s3downloader     |  3 +-
+ docker/test/mqdb_test_smoke/Dockerfile        |  7 +-
+ docker/test/mqdb_test_stateless/Dockerfile    | 17 +---
+ docker/test/mqdb_test_stress/Dockerfile       | 28 +++----
+ tests/integration/test_cgroup_limit/test.py   |  2 +-
+ .../test_jemalloc_percpu_arena/test.py        |  2 +-
+ 30 files changed, 294 insertions(+), 277 deletions(-)
+ rename .gitlab-ci-memory-leak-test.yml => .gitlab-ci-sanitizer-test.yml (87%)
+ delete mode 100644 docker/builder/ccache.conf
+ create mode 100755 docker/builder/update-ccache-symlinks
+
+diff --git a/.gitlab-ci-build.yml b/.gitlab-ci-build.yml
+index 51163a30d4..fc36f8acbd 100644
+--- a/.gitlab-ci-build.yml
++++ b/.gitlab-ci-build.yml
+@@ -12,24 +12,20 @@ build_binary:
+     when: always
+     paths:
+       - artifacts/*.deb
+-      - build/programs/clickhouse
++      - artifacts/clickhouse
+       - artifacts/performance_pack_*
+       - build/CMakeFiles/CMakeOutput.log
+       - build/CMakeFiles/CMakeError.log
+   retry: 2
+   script:
+     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+-    - apt-get update -y && apt-get install rsync -y
+     - docker/builder/tools/submodule-update.sh
+     - docker/builder/build.py --output artifacts --arch linux-x86_64 --package
++    - mv build/programs/clickhouse artifacts/.
+     - docker/builder/tools/package_performance.sh all
+     - tar -zcf performance_pack_amd64.tar.gz performance_pack
+-    - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
+-    - docker/builder/tools/package_performance.sh all
+-    - tar -zcf performance_pack_arm64.tar.gz performance_pack
++    # - docker/builder/build.py --output artifacts --arch linux-aarch64 --package
+     - mv performance_pack_amd64.tar.gz artifacts/.
+-    - mv performance_pack_arm64.tar.gz artifacts/.
+-    - ls -al artifacts
+   rules:
+     - if: '$CI_TEST_VECTOR_DB != "true"'
+ 
+@@ -59,7 +55,7 @@ build_with_sanitizer_asanbinary:
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ build_with_sanitizer_tsanbinary:
+   stage: build
+@@ -87,7 +83,7 @@ build_with_sanitizer_tsanbinary:
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ build_with_sanitizer_ubsanbinary:
+   stage: build
+@@ -115,7 +111,7 @@ build_with_sanitizer_ubsanbinary:
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ build_with_sanitizer_msanbinary:
+   stage: build
+@@ -143,7 +139,7 @@ build_with_sanitizer_msanbinary:
+     - mv build/programs/clickhouse artifacts/.
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ build_for_integration_test:
+   stage: build
+@@ -159,7 +155,6 @@ build_for_integration_test:
+   retry: 2
+   script:
+     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+-    - apt-get update -y && apt-get install rsync -y
+     - docker/builder/tools/submodule-update.sh
+     - docker/builder/build.py --output artifacts --arch linux-x86_64
+   rules:
+diff --git a/.gitlab-ci-functional-test.yml b/.gitlab-ci-functional-test.yml
+index 9c07ab64be..9f499e6fd9 100644
+--- a/.gitlab-ci-functional-test.yml
++++ b/.gitlab-ci-functional-test.yml
+@@ -8,7 +8,7 @@ vector_search_test:
+   parallel:
+     matrix:
+       - ARCH: amd64
+-      - ARCH: arm64
++      # - ARCH: arm64
+   tags:
+     - ${ARCH}
+   before_script:
+@@ -26,7 +26,7 @@ smoke_test:
+   needs:
+     - job: build_binary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.2
+   parallel:
+     matrix:
+       - ARCH: x86_64
+@@ -60,7 +60,7 @@ stateless_test:
+   parallel:
+     matrix:
+       - ARCH: amd64
+-      - ARCH: arm64
++      # - ARCH: arm64
+   tags:
+     - ${ARCH}
+   before_script:
+@@ -85,7 +85,7 @@ stateful_test:
+   parallel:
+     matrix:
+       - ARCH: amd64
+-      - ARCH: arm64
++      # - ARCH: arm64
+   tags:
+     - ${ARCH}
+   before_script:
+@@ -94,29 +94,4 @@ stateful_test:
+     - docker/builder/tools/stateful-test.sh
+     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
+   rules:
+-    - if: '$CI_TEST_VECTOR_DB != "true"'
+-
+-####### AST FUZZER TESTS #########
+-fuzzer_test:
+-  stage: functional-test
+-  needs:
+-    - job: build_binary
+-      artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
+-  parallel:
+-    matrix:
+-      - ARCH: amd64
+-      # - ARCH: arm64
+-  tags:
+-    - ${ARCH}
+-  artifacts:
+-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzz"
+-    paths:
+-      - $CI_PROJECT_DIR/docker/test/mqdb_run_fuzzer/test_output
+-    when: always
+-  script:
+-    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
+-    - docker/builder/tools/fuzz-test.sh CI_TEST ${CI_COMMIT_SHA}
+-    - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+-  rules:
+-    - if: '$CI_TEST_VECTOR_DB != "true"'
++    - if: '$CI_TEST_VECTOR_DB != "true"'
+\ No newline at end of file
+diff --git a/.gitlab-ci-performance-test.yml b/.gitlab-ci-performance-test.yml
+index a8deb4765a..0bae8be152 100644
+--- a/.gitlab-ci-performance-test.yml
++++ b/.gitlab-ci-performance-test.yml
+@@ -4,7 +4,7 @@ performance_test0:
+   needs:
+     - job: build_binary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -28,7 +28,7 @@ performance_test1:
+   needs:
+     - job: build_binary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -52,7 +52,7 @@ performance_test2:
+   needs:
+     - job: build_binary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+diff --git a/.gitlab-ci-memory-leak-test.yml b/.gitlab-ci-sanitizer-test.yml
+similarity index 87%
+rename from .gitlab-ci-memory-leak-test.yml
+rename to .gitlab-ci-sanitizer-test.yml
+index 16309a28b6..9a612b5b6f 100644
+--- a/.gitlab-ci-memory-leak-test.yml
++++ b/.gitlab-ci-sanitizer-test.yml
+@@ -1,11 +1,11 @@
+ ########## STRESS TESTS ##########
+ # TODO build test image for arm64
+ stress_test_asan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -23,14 +23,14 @@ stress_test_asan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_stress
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ stress_test_tsan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_tsanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -48,14 +48,14 @@ stress_test_tsan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_stress
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ stress_test_ubsan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -73,14 +73,14 @@ stress_test_ubsan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_stress
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ stress_test_msan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_msanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -98,10 +98,10 @@ stress_test_msan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_stress
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ vector-test-asan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+@@ -126,11 +126,11 @@ vector-test-asan:
+     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ # disable TSAN due to #89
+ .vector-test-tsan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_tsanbinary
+       artifacts: true
+@@ -156,11 +156,11 @@ vector-test-asan:
+     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ # disable MSAN due to #89
+ .vector-test-msan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_msanbinary
+       artifacts: true
+@@ -185,10 +185,10 @@ vector-test-asan:
+     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ vector-test-ubsan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+@@ -213,14 +213,14 @@ vector-test-ubsan:
+     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ 
+ fuzzer_test-asan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_asanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -238,13 +238,13 @@ fuzzer_test-asan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+ fuzzer_test-ubsan:
+-  stage: memory-leak-test
++  stage: sanitizer-test
+   needs:
+     - job: build_with_sanitizer_ubsanbinary
+       artifacts: true
+-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzz:1.0
++  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.2
+   parallel:
+     matrix:
+       - ARCH: amd64
+@@ -262,4 +262,4 @@ fuzzer_test-ubsan:
+     - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+   rules:
+     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_VECTOR_DB != "true"' # Trigger pipline during scheduled tasks
+-    - if: $CI_MERGE_REQUEST_LABELS == "test-memory-leak"
++    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 517f7a7e3b..5bf1c7ceae 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -4,13 +4,13 @@ workflow:
+     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+ 
+-image: harbor.internal.moqi.ai/mqdb/builder:2.1
++image: harbor.internal.moqi.ai/mqdb/builder:2.6
+ 
+ include:
+   - "/.gitlab-ci-build.yml"
+   - "/.gitlab-ci-functional-test.yml"
+   - "/.gitlab-ci-integration-test.yml"
+-  - "/.gitlab-ci-memory-leak-test.yml"
++  - "/.gitlab-ci-sanitizer-test.yml"
+   - "/.gitlab-ci-performance-test.yml"
+ 
+ stages:
+@@ -19,7 +19,7 @@ stages:
+   - functional-test
+   - performance-test
+   - failover-test
+-  - memory-leak-test
++  - sanitizer-test
+   - package
+   - image
+   - deploy
+@@ -52,6 +52,7 @@ style_check:
+ 
+ build_package:
+   stage: package
++  when: manual
+   dependencies: []
+   variables:
+     KUBERNETES_CPU_REQUEST: 8
+@@ -71,14 +72,13 @@ build_package:
+ 
+ build_package_with_license:
+   stage: package
++  when: manual
+   dependencies: []
+   variables:
+     KUBERNETES_CPU_REQUEST: 8
+     KUBERNETES_CPU_LIMIT: 32
+     KUBERNETES_MEMORY_REQUEST: 16Gi
+     KUBERNETES_MEMORY_LIMIT: 32Gi
+-  rules:
+-    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+   artifacts:
+     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-license"
+     paths:
+@@ -92,6 +92,7 @@ build_package_with_license:
+ 
+ build_image:
+   stage: image
++  when: manual
+   dependencies: ["build_package"]
+   before_script:
+     - docker/builder/tools/docker-info.sh
+@@ -101,9 +102,8 @@ build_image:
+ 
+ build_saas_image:
+   stage: image
++  when: manual
+   dependencies: ["build_package"]
+-  # only:
+-  #   - mqdb-stable
+   before_script:
+     - docker/builder/tools/docker-info.sh
+     - docker/builder/tools/docker-buildx.sh
+@@ -122,71 +122,5 @@ upload_performance_file_to_s3:
+     - mkdir -pv ~/.mc
+     - cp -fv $mc_config ~/.mc/config.json
+   script:
+-    - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
++    # - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64_${CI_COMMIT_SHORT_SHA}.tar.gz
+     - mc cp artifacts/performance_pack_amd64.tar.gz cos/mqdb-release-1253802058/performance/performance_pack_amd64.tar.gz
+-# deploy_to_staging:
+-#   stage: deploy
+-#   dependencies: ["build_x86_64_package"]
+-#   rules:
+-#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+-#   variables:
+-#     deploy_to_host: 10.10.1.48
+-#   script:
+-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+-#     - scp artifacts/clickhouse-*.tgz root@$deploy_to_host:/moqi.ai/mqdb-deploy/packages/mqdb/x86_64/
+-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && git fetch --all && git reset --hard origin/master'
+-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy/environment && git fetch --all && git reset --hard origin/master'
+-#     - ssh root@$deploy_to_host 'cd /moqi.ai/mqdb-deploy && ./start.sh'
+-#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/init.yaml -l deploy'
+-#     - ssh root@$deploy_to_host 'docker exec mqdb-deploy ansible-playbook deployment/mqdb.yaml'
+-
+-# deploy_to_s3:
+-#   stage: deploy
+-#   image:
+-#     name: minio/mc
+-#     entrypoint: [""]
+-#   rules:
+-#     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+-#   before_script:
+-#     - mkdir -pv ~/.mc
+-#     - cp -fv $mc_config ~/.mc/config.json
+-#   script:
+-#     - mc cp artifacts/* cos/mqdb-release-1253802058/packages/mqdb/x86_64/$CI_COMMIT_SHORT_SHA/
+-
+-# benchmark_staging:
+-#   stage: benchmark
+-#   dependencies: []
+-#   only:
+-#     - schedules
+-#   variables:
+-#     deploy_to_host: 10.10.1.48
+-#   before_script:
+-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+-#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
+-#     - sleep 10
+-#   after_script:
+-#     - ssh root@$deploy_to_host 'supervisorctl restart mqdb'
+-#   script:
+-#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
+-#     - scp tests/vector_search/benchmark.py root@$deploy_to_host:~/benchmark
+-#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 benchmark.py"'
+-# generate_report:
+-#   stage: benchmark
+-#   dependencies: []
+-#   only:
+-#     - schedules
+-#   artifacts:
+-#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-report"
+-#     paths:
+-#       - ./*.png
+-#   variables:
+-#     deploy_to_host: 10.10.1.48
+-#   before_script:
+-#     - ssh-keyscan -H $deploy_to_host >> ~/.ssh/known_hosts
+-#     - ssh root@$deploy_to_host 'supervisorctl start mqdb > /dev/null 2>&1'
+-#     - sleep 10
+-#   script:
+-#     - ssh root@$deploy_to_host 'mkdir -p ~/benchmark'
+-#     - scp tests/vector_search/plot.py root@$deploy_to_host:~/benchmark
+-#     - ssh root@$deploy_to_host 'bash -c "source /opt/intel/oneapi/mkl/latest/env/vars.sh && cd ~/benchmark && python3 plot.py"'
+-#     - scp "root@10.10.1.48:~/benchmark/*.png" ./
+diff --git a/docker/builder/Dockerfile b/docker/builder/Dockerfile
+index 106480aa85..76704f1b28 100644
+--- a/docker/builder/Dockerfile
++++ b/docker/builder/Dockerfile
+@@ -1,5 +1,5 @@
+-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.1 . --push
+-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.1 bash
++# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.6 . --push
++# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.6 bash
+ 
+ FROM ubuntu:20.04
+ 
+@@ -10,6 +10,9 @@ ENV LLVM_VERSION=13
+ ENV CC=clang-${LLVM_VERSION}
+ ENV CXX=clang++-${LLVM_VERSION}
+ ENV INTEL_ONEAPI_VERSION=2021.4.0
++ENV CCACHE_VERSION=4.7.4
++ENV NFPM_VERSION=2.16.0
++ENV GO_VERSION=1.18.3
+ 
+ RUN apt update && apt install ca-certificates --yes --verbose-versions \
+     && sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list \
+@@ -18,7 +21,7 @@ RUN apt update && apt install ca-certificates --yes --verbose-versions \
+     && apt clean \
+     && rm -rfv /var/lib/apt/lists/
+ 
+-RUN apt update \
++RUN apt update && apt upgrade --yes --verbose-versions \
+     && apt install ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common --yes --verbose-versions \
+     && wget -q -O - https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
+     && echo "deb [trusted=yes] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker-ce.list \
+@@ -26,10 +29,10 @@ RUN apt update \
+     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
+     && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+     && wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
+-    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
++    && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list ; fi \
+     && apt update \
+-    && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping --yes --verbose-versions \
+-    && apt install git build-essential ccache cmake g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
++    && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
++    && apt install git build-essential libssl-dev cmake g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
+     && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu libblas-dev liblapack-dev --yes --verbose-versions \
+     && apt install \
+     llvm-${LLVM_VERSION} \
+@@ -55,7 +58,6 @@ RUN apt update \
+     && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then apt install intel-oneapi-mkl-${INTEL_ONEAPI_VERSION} intel-oneapi-mkl-devel-${INTEL_ONEAPI_VERSION} --yes --verbose-versions ; fi \
+     && ln -s /usr/bin/lld-${LLVM_VERSION} /usr/bin/ld.lld \
+     && ln -s /usr/bin/llvm-symbolizer-${LLVM_VERSION} /usr/bin/llvm-symbolizer \
+-    && update-ccache-symlinks \
+     && apt clean \
+     && rm -rfv /var/lib/apt/lists/*
+ 
+@@ -64,6 +66,42 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+ 
+ RUN mkdir -pv ${WORK_DIRECTORY}
+ 
++ENV CCACHE_DIR="${WORK_DIRECTORY}/.ccache"
++# ENV CCACHE_CONFIGPATH="${WORK_DIRECTORY}/.ccache/ccache.conf"
++RUN curl -Lo /tmp/ccache.tar.gz https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}.tar.gz \
++    && mkdir -p /tmp/ccache \
++    && tar xf /tmp/ccache.tar.gz -C /tmp/ccache --strip-components=1 \
++    && mkdir -p /tmp/ccache/build \
++    && cd /tmp/ccache/build \
++    && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_SYSCONFDIR=/etc .. \
++    && make \
++    && make install \
++    && mkdir -p ${CCACHE_DIR} \ 
++    && cd /tmp \
++    && rm -fr /tmp/ccache \
++    && rm -f /tmp/ccache.tar.gz
++
++ADD update-ccache-symlinks /usr/sbin/update-ccache-symlinks
++
++# Rust toolchain and libraries
++ENV RUSTUP_HOME=${WORK_DIRECTORY}/rustup
++ENV CARGO_HOME=${WORK_DIRECTORY}/cargo
++ENV PATH="${WORK_DIRECTORY}/cargo/env:${PATH}"
++ENV PATH="${WORK_DIRECTORY}/cargo/bin:${PATH}"
++ENV SCCACHE_DIR="${WORK_DIRECTORY}/.sccache"
++# ENV SCCACHE_CONF="${WORK_DIRECTORY}/.sccache/sccache.conf"
++RUN curl https://sh.rustup.rs -sSf | bash -s -- -y \
++    && chmod 777 -R ${WORK_DIRECTORY}/rustup  \
++    && chmod 777 -R ${WORK_DIRECTORY}/cargo  \
++    && rustup target add aarch64-unknown-linux-gnu \
++    && rustup target add x86_64-apple-darwin \
++    && rustup target add x86_64-unknown-freebsd \
++    && rustup target add aarch64-apple-darwin \
++    && rustup target add powerpc64le-unknown-linux-gnu \
++    && cargo install sccache \
++    && mkdir -p ${SCCACHE_DIR} \
++    && rm -fr ${CARGO_HOME}/registry
++
+ # libtapi is required to support .tbh format from recent MacOS SDKs
+ RUN git clone --depth 1 https://github.com/tpoechtrager/apple-libtapi.git \
+     && cd apple-libtapi \
+@@ -104,14 +142,12 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test --yes \
+     && apt clean \
+     && rm -rfv /var/lib/apt/lists/*
+ 
+-ARG NFPM_VERSION=2.16.0
+ RUN curl -Lo /tmp/nfpm.deb "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${TARGETARCH:-amd64}.deb" \
+     && dpkg -i /tmp/nfpm.deb \
+     && rm -fv /tmp/nfpm.deb
+ 
+ RUN curl -Lo /usr/bin/mc https://dl.min.io/client/mc/release/linux-${TARGETARCH:-amd64}/mc && chmod +x /usr/bin/mc
+ 
+-ARG GO_VERSION=1.18.3
+ RUN curl -Lo /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH:-amd64}.tar.gz" \
+     && tar -xzf /tmp/go.tgz -C /usr/local/ \
+     && rm -fv /tmp/go.tgz
+@@ -122,7 +158,16 @@ ENV GOCACHE=${WORK_DIRECTORY}/go/.cache
+ 
+ RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTORY}
+ 
+-ADD ccache.conf /etc/ccache.conf
++
++RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
++    && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
++    && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
++    && apt update \
++    && apt install mono-complete --yes \
++    && apt clean \
++    && rm -rfv /var/lib/apt/lists/*
++
++RUN pip install --upgrade clickhouse_driver
+ 
+ ADD ssh /root/.ssh
+ RUN chmod -R 600 /root/.ssh
+diff --git a/docker/builder/build.py b/docker/builder/build.py
+index 9b5389efe1..5dd4f42934 100755
+--- a/docker/builder/build.py
++++ b/docker/builder/build.py
+@@ -247,7 +247,6 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
+     target_os, target_arch = arch.split("-", maxsplit=1)
+ 
+     warp = [
+-        'PATH="/usr/lib/ccache:$PATH"',
+         'LD_LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LD_LIBRARY_PATH}'
+     ]
+ 
+@@ -546,4 +545,5 @@ if __name__ == "__main__":
+     cmake = prepare_build(compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
+ 
+     build(args.arch, args.build_jobs, cmake)
++    ccache_show_stats()
+     package(args.name, args.arch, args.package, args.with_sanitizer, args.build_type, args.output)
+diff --git a/docker/builder/ccache.conf b/docker/builder/ccache.conf
+deleted file mode 100644
+index 3d7b513d42..0000000000
+--- a/docker/builder/ccache.conf
++++ /dev/null
+@@ -1,6 +0,0 @@
+-max_size = 0
+-max_files = 0
+-compression_level = 5
+-hash_dir = true
+-compiler_check = content
+-cache_dir = /builder/.ccache
+diff --git a/docker/builder/tools/docker-buildx.sh b/docker/builder/tools/docker-buildx.sh
+index 7f8efe664b..fdb51426c6 100755
+--- a/docker/builder/tools/docker-buildx.sh
++++ b/docker/builder/tools/docker-buildx.sh
+@@ -2,5 +2,5 @@
+ set -e
+ 
+ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+-docker buildx create --use --name=qemu --driver-opt env.http_proxy='http://clash.internal.moqi.ai:7890' --driver-opt env.https_proxy='http://clash.internal.moqi.ai:7890' --driver-opt '"env.no_proxy='localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,mirror.ccs.tencentyun.com,.moqi.ai,.moqi.com.cn,mirrors.tuna.tsinghua.edu.cn'"'
++docker buildx create --use --name=qemu --driver-opt env.http_proxy='http://clash.internal.moqi.ai:7890' --driver-opt env.https_proxy='http://clash.internal.moqi.ai:7890' --driver-opt '"env.no_proxy='localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,mirror.ccs.tencentyun.com,git.moqi.ai,.internal.moqi.ai'"'
+ docker buildx inspect --bootstrap
+diff --git a/docker/builder/tools/image.sh b/docker/builder/tools/image.sh
+index 3a6ebe910c..65bfd193d1 100755
+--- a/docker/builder/tools/image.sh
++++ b/docker/builder/tools/image.sh
+@@ -15,11 +15,11 @@ HARBOR_NAMESPACE="mqdb"
+ 
+ echo $HARBOR_USER_PASSWORD | docker login $HARBOR_REGISTRY --username $HARBOR_USER_NAME --password-stdin
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
++docker buildx build --build-arg 'http_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'https_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,git.moqi.ai,.internal.moqi.ai' --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-client --push
++docker buildx build --build-arg 'http_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'https_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,git.moqi.ai,.internal.moqi.ai' --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-client --push
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-ssh-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-ssh-client --push
++docker buildx build --build-arg 'http_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'https_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,git.moqi.ai,.internal.moqi.ai' --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb-ssh-client:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb-ssh-client --push
+ 
+ rm -rfv docker/mqdb/clickhouse-*.tgz
+ rm -rfv docker/mqdb-client/clickhouse-*.tgz
+diff --git a/docker/builder/tools/proxy.sh b/docker/builder/tools/proxy.sh
+index 1db86c864a..82a4fe310c 100755
+--- a/docker/builder/tools/proxy.sh
++++ b/docker/builder/tools/proxy.sh
+@@ -1,11 +1,13 @@
+ function proxy() {
+-    export http_proxy="http://10.10.1.13:7890"
+-    export https_proxy="http://10.10.1.13:7890"
++    export http_proxy="http://clash.internal.moqi.ai:7890"
++    export https_proxy="http://clash.internal.moqi.ai:7890"
++    export no_proxy="localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+ }
+ 
+ function unproxy() {
+     unset http_proxy
+     unset https_proxy
++    unset no_proxy
+ }
+ 
+ proxy
+diff --git a/docker/builder/tools/saas-image.sh b/docker/builder/tools/saas-image.sh
+index 5b15f203b8..b5232b630f 100755
+--- a/docker/builder/tools/saas-image.sh
++++ b/docker/builder/tools/saas-image.sh
+@@ -10,6 +10,6 @@ DOCKER_HUB_USER_PASSWORD="dckr_pat_G5xUzsovxR4NrnaenDqZGtxM6CA"
+ 
+ echo $DOCKER_HUB_USER_PASSWORD | docker login --username $DOCKER_HUB_USER_NAME --password-stdin
+ 
+-docker buildx build --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $DOCKER_HUB_USER_NAME/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
++docker buildx build --build-arg 'http_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'https_proxy=http://clash.internal.moqi.ai:7890' --build-arg 'no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,git.moqi.ai,.internal.moqi.ai' --platform linux/amd64,linux/arm64 --build-arg version="${VERSION_STRING}" --rm=true -t $DOCKER_HUB_USER_NAME/mqdb:${VERSION_STRING}-${GIT_COMMIT} docker/mqdb --push
+ 
+ rm -rfv docker/mqdb/clickhouse-*.tgz
+diff --git a/docker/builder/update-ccache-symlinks b/docker/builder/update-ccache-symlinks
+new file mode 100755
+index 0000000000..d7177642ee
+--- /dev/null
++++ b/docker/builder/update-ccache-symlinks
+@@ -0,0 +1,84 @@
++#!/usr/bin/perl
++
++use strict;
++use warnings FATAL => "all";
++
++my $ccache_dir = "/usr/lib/ccache";
++my @gcc_dirs = (
++    "/usr/lib/gcc",
++    "/usr/lib/gcc-cross",
++    "/usr/lib/x86_64-linux-gnu/gcc",
++);
++my %old_symlinks; # Current compiler names in /usr/lib/ccache
++my %new_symlinks; # Compiler names that should be in /usr/lib/ccache
++my @standard_names = qw(cc c++);
++my $clang_names = qr/^(llvm-)?clang(\+\+)?(-[0-9.]+)?$/;
++my $verbose = 0;
++
++sub consider {
++    my ($name) = @_;
++    if (-x "/usr/bin/$name") {
++        $new_symlinks{$name} = 1;
++    }
++}
++
++sub consider_gcc {
++    my ($prefix, $suffix) = @_;
++    consider "${prefix}gcc${suffix}";
++    consider "${prefix}g++${suffix}";
++}
++
++# Find existing standard compiler names.
++foreach (@standard_names) {
++    consider $_;
++}
++
++# Find existing GCC variants.
++consider_gcc "", "";
++consider_gcc "c89-", "";
++consider_gcc "c99-", "";
++foreach my $gcc_dir (@gcc_dirs) {
++    foreach my $dir (<$gcc_dir/*>) {
++        (my $kind = $dir) =~ s|.*/||;
++        consider_gcc "$kind-", "";
++        foreach (<$dir/*>) {
++            if (! -l $_ and -d $_) {
++                s|.*/||;
++                consider_gcc "", "-$_";
++                consider_gcc "$kind-", "-$_";
++            }
++        }
++    }
++}
++
++# Find existing clang variants.
++foreach (</usr/bin/*clang*>) {
++    s|.*/||;
++    if (/$clang_names/) {
++        consider $_;
++    }
++}
++
++# Find existing symlinks.
++foreach (<$ccache_dir/*>) {
++    if (-l) {
++        s|.*/||;
++        $old_symlinks{$_} = 1;
++    }
++}
++
++# Remove obsolete symlinks.
++foreach (keys %old_symlinks) {
++    if (! exists $new_symlinks{$_}) {
++        print "Removing $ccache_dir/$_\n" if $verbose;
++        unlink "$ccache_dir/$_";
++    }
++}
++
++# Add missing symlinks.
++foreach (keys %new_symlinks) {
++    if (! exists $old_symlinks{$_}) {
++        print "Adding $ccache_dir/$_\n" if $verbose;
++        symlink "../../bin/ccache", "$ccache_dir/$_";
++    }
++}
+diff --git a/docker/mqdb-client/Dockerfile b/docker/mqdb-client/Dockerfile
+index eed1669b81..1a689b3f81 100644
+--- a/docker/mqdb-client/Dockerfile
++++ b/docker/mqdb-client/Dockerfile
+@@ -8,7 +8,7 @@ RUN mkdir -pv /builder/mqdb
+ ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
+ 
+ 
+-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1 as runtime
++FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
+ 
+ ARG TARGETARCH
+ ARG version=22.3.7.5
+diff --git a/docker/mqdb-runtime/Dockerfile b/docker/mqdb-runtime/Dockerfile
+index d8cd302424..a4f5e83711 100644
+--- a/docker/mqdb-runtime/Dockerfile
++++ b/docker/mqdb-runtime/Dockerfile
+@@ -1,4 +1,4 @@
+-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.1 . --push
++# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.2 . --push
+ FROM ubuntu:20.04
+ 
+ ARG TARGETARCH
+@@ -20,10 +20,10 @@ RUN apt update && apt install ca-certificates pip --yes --verbose-versions \
+     && apt clean \
+     && rm -rfv /var/lib/apt/lists/
+ 
+-RUN apt update \
++RUN apt update && apt upgrade --yes --verbose-versions \
+     && apt install bash ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common apt-utils --yes \
+     && apt install vim git curl expect perl pkg-config tzdata pip dirmngr locales jq tree dnsutils sysstat psmisc htop --yes \
+-    && apt install tmux net-tools tcpdump telnet iftop iotop nload python3 python3-lxml python3-requests python3-termcolor --yes \
++    && apt install tmux net-tools rsync tcpdump telnet iftop iotop nload python3 python3-lxml python3-requests python3-termcolor --yes \
+     && ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
+     && echo ${TZ} > /etc/timezone \
+     && dpkg-reconfigure --frontend noninteractive tzdata \
+@@ -33,7 +33,7 @@ RUN apt update \
+ RUN locale-gen en_US.UTF-8
+ 
+ RUN wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
+-    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list \
++    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list \
+     && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
+     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
+@@ -43,7 +43,5 @@ RUN wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW
+     && apt clean \
+     && rm -rf /var/lib/apt/lists/*
+ 
+-RUN if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo 'source /opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/env/vars.sh' >> /root/.bashrc ; fi
+-
+ 
+ 
+diff --git a/docker/mqdb-runtime/build.sh b/docker/mqdb-runtime/build.sh
+index c489fa381a..56f931124e 100755
+--- a/docker/mqdb-runtime/build.sh
++++ b/docker/mqdb-runtime/build.sh
+@@ -1,4 +1,4 @@
+ #!/usr/bin/env bash
+ set -e
+ 
+-docker build --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.1 .
++docker build --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.2 .
+diff --git a/docker/mqdb-ssh-client/Dockerfile b/docker/mqdb-ssh-client/Dockerfile
+index 9a92887d24..16c5c94dd3 100644
+--- a/docker/mqdb-ssh-client/Dockerfile
++++ b/docker/mqdb-ssh-client/Dockerfile
+@@ -10,7 +10,7 @@ ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
+ ADD https://mqdb-release.moqi.com.cn/clickhouse-backup-linux-${TARGETARCH:-amd64}.tar.gz /builder/clickhouse-backup/
+ RUN cd /builder/clickhouse-backup/ && tar -xf clickhouse-backup-linux-${TARGETARCH:-amd64}.tar.gz
+ 
+-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1 as runtime
++FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
+ 
+ ARG TARGETARCH
+ ARG version=22.3.7.5
+diff --git a/docker/mqdb-test-dist/Dockerfile b/docker/mqdb-test-dist/Dockerfile
+index 92a19116eb..92f52d1a03 100644
+--- a/docker/mqdb-test-dist/Dockerfile
++++ b/docker/mqdb-test-dist/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1
++FROM harbor.internal.moqi.ai/mqdb/runtime:1.2
+ 
+ ARG odbc_driver_url="https://github.com/ClickHouse/clickhouse-odbc/releases/download/v1.1.4.20200302/clickhouse-odbc-1.1.4-Linux.tar.gz"
+ 
+diff --git a/docker/mqdb-test/Dockerfile b/docker/mqdb-test/Dockerfile
+index 5ef28c20c0..3ecedff599 100644
+--- a/docker/mqdb-test/Dockerfile
++++ b/docker/mqdb-test/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1
++FROM harbor.internal.moqi.ai/mqdb/runtime:1.2
+ 
+ ADD clickhouse /usr/bin/
+ RUN ln -sv /usr/bin/clickhouse /usr/bin/clickhouse-server \
+diff --git a/docker/mqdb/Dockerfile b/docker/mqdb/Dockerfile
+index 10a28fb8ae..0800c906f6 100644
+--- a/docker/mqdb/Dockerfile
++++ b/docker/mqdb/Dockerfile
+@@ -8,7 +8,7 @@ RUN mkdir -pv /builder/mqdb
+ ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
+ 
+ 
+-FROM harbor.internal.moqi.ai/mqdb/runtime:1.1 as runtime
++FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
+ 
+ ARG TARGETARCH
+ ARG version=22.3.7.5
+diff --git a/docker/test/mqdb_test_base/Dockerfile b/docker/test/mqdb_test_base/Dockerfile
+index 4132face7c..6313432d7e 100644
+--- a/docker/test/mqdb_test_base/Dockerfile
++++ b/docker/test/mqdb_test_base/Dockerfile
+@@ -1,8 +1,10 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1 .
+-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1 . --push
+-FROM  harbor.internal.moqi.ai/mqdb/runtime:1.1
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2 .
++# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2 . --push
++FROM  harbor.internal.moqi.ai/mqdb/runtime:1.2
+ 
+ ENV TZ=Europe/Moscow
++ENV ZOOKEEPER_VERSION=3.4.9
++
+ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
+ 
+ 
+@@ -61,12 +63,11 @@ COPY process_functional_tests_result.py /
+ 
+ ARG TARGETARCH
+ 
+-# Download zookeeper
+-# wget http://archive.apache.org/dist/zookeeper/zookeeper-3.4.9/zookeeper-3.4.9.tar.gz 
+-COPY zookeeper-3.4.9.tar.gz /opt/zookeeper-3.4.9.tar.gz
+-RUN tar -xzvf /opt/zookeeper-3.4.9.tar.gz -C /opt/ \
+-    && mv /opt/zookeeper-3.4.9 /opt/zookeeper
+-RUN cp /opt/zookeeper/conf/zoo_sample.cfg /opt/zookeeper/conf/zoo.cfg
++RUN curl -Lo /opt/zookeeper-${ZOOKEEPER_VERSION}.tar.gz http://archive.apache.org/dist/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/zookeeper-${ZOOKEEPER_VERSION}.tar.gz \
++    && tar -xzvf /opt/zookeeper-${ZOOKEEPER_VERSION}.tar.gz -C /opt/ \
++    && mv /opt/zookeeper-${ZOOKEEPER_VERSION} /opt/zookeeper \
++    && cp /opt/zookeeper/conf/zoo_sample.cfg /opt/zookeeper/conf/zoo.cfg \
++    && rm -f /opt/zookeeper-${ZOOKEEPER_VERSION}.tar.gz
+ 
+ ENV ZOOKEEPER_BIN_PATH=/opt/zookeeper/bin
+ ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-${TARGETARCH:-amd64}
+diff --git a/docker/test/mqdb_test_fuzzer/Dockerfile b/docker/test/mqdb_test_fuzzer/Dockerfile
+index 0331a10086..5598fc60fa 100644
+--- a/docker/test/mqdb_test_fuzzer/Dockerfile
++++ b/docker/test/mqdb_test_fuzzer/Dockerfile
+@@ -1,23 +1,23 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.1 .
+-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.1 . --push
+-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.2 .
++# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.2 . --push
++FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+ 
+ ENV LANG=C.UTF-8
+ 
+ RUN apt-get update --allow-releaseinfo-change \
+     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+-            ca-certificates \
+-            libc6-dbg \
+-            p7zip-full \
+-            parallel \
+-            psmisc \
+-            python3 \
+-            python3-pip \
+-            rsync \
+-            tree \
+-            tzdata \
+-            vim \
+-            wget \
++    ca-certificates \
++    libc6-dbg \
++    p7zip-full \
++    parallel \
++    psmisc \
++    python3 \
++    python3-pip \
++    rsync \
++    tree \
++    tzdata \
++    vim \
++    wget \
+     && apt-get autoremove --yes \
+     && apt-get clean \
+     && rm -rf /var/lib/apt/lists/*
+diff --git a/docker/test/mqdb_test_integration/runner/Dockerfile b/docker/test/mqdb_test_integration/runner/Dockerfile
+index 95863447a6..9a90a35a8c 100644
+--- a/docker/test/mqdb_test_integration/runner/Dockerfile
++++ b/docker/test/mqdb_test_integration/runner/Dockerfile
+@@ -1,5 +1,5 @@
+ # docker build -t clickhouse/integration-tests-runner .
+-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1
++FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+ 
+ # ARG for quick switch to a given ubuntu mirror
+ ARG apt_archive="http://archive.ubuntu.com"
+@@ -33,10 +33,10 @@ RUN apt-get update --allow-releaseinfo-change \
+     krb5-user \
+     g++ \
+     && rm -rf \
+-        /var/lib/apt/lists/* \
+-        /var/cache/debconf \
+-        /tmp/*
+-    # && apt-get clean
++    /var/lib/apt/lists/* \
++    /var/cache/debconf \
++    /tmp/*
++# && apt-get clean
+ 
+ # ENV TZ=Etc/UTC
+ # RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+@@ -47,12 +47,12 @@ RUN add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_relea
+ 
+ RUN apt-get update \
+     && env DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+-        docker-ce \
++    docker-ce \
+     && rm -rf \
+-        /var/lib/apt/lists/* \
+-        /var/cache/debconf \
+-        /tmp/*
+-    # && apt-get clean
++    /var/lib/apt/lists/* \
++    /var/cache/debconf \
++    /tmp/*
++# && apt-get clean
+ 
+ RUN dockerd --version; docker --version
+ 
+@@ -94,10 +94,10 @@ COPY compose/ /compose/
+ COPY misc/ /misc/
+ 
+ RUN set -x \
+-  && addgroup --system dockremap \
++    && addgroup --system dockremap \
+     && adduser --system dockremap \
+-  && adduser dockremap dockremap \
+-  && echo 'dockremap:165536:65536' >> /etc/subuid \
++    && adduser dockremap dockremap \
++    && echo 'dockremap:165536:65536' >> /etc/subuid \
+     && echo 'dockremap:165536:65536' >> /etc/subgid
+ 
+ ENV DOCKER_CLIENT_TIMEOUT=300
+diff --git a/docker/test/mqdb_test_performance/Dockerfile b/docker/test/mqdb_test_performance/Dockerfile
+index 475e337caf..e800c7d790 100644
+--- a/docker/test/mqdb_test_performance/Dockerfile
++++ b/docker/test/mqdb_test_performance/Dockerfile
+@@ -1,30 +1,30 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.1 .
+-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.1 . --push
+-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 .
++# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 . --push
++FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+ 
+ RUN apt-get update --allow-releaseinfo-change \
+     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+-            bash \
+-            curl \
+-            dmidecode \
+-            g++ \
+-            git \
+-            gnuplot \
+-            imagemagick \
+-            libc6-dbg \
+-            numactl \
+-            p7zip-full \
+-            parallel \
+-            psmisc \
+-            python3 \
+-            python3-dev \
+-            python3-pip \
+-            python3-setuptools \
+-            rsync \
+-            tree \
+-            tzdata \
+-            vim \
+-            wget \
++    bash \
++    curl \
++    dmidecode \
++    g++ \
++    git \
++    gnuplot \
++    imagemagick \
++    libc6-dbg \
++    numactl \
++    p7zip-full \
++    parallel \
++    psmisc \
++    python3 \
++    python3-dev \
++    python3-pip \
++    python3-setuptools \
++    rsync \
++    tree \
++    tzdata \
++    vim \
++    wget \
+     && pip3 --no-cache-dir install 'clickhouse-driver==0.2.1' scipy \
+     && apt-get purge --yes python3-dev g++
+ 
+diff --git a/docker/test/mqdb_test_script/s3downloader b/docker/test/mqdb_test_script/s3downloader
+index 51c4e2ebff..9080089be2 100755
+--- a/docker/test/mqdb_test_script/s3downloader
++++ b/docker/test/mqdb_test_script/s3downloader
+@@ -11,6 +11,7 @@ import tempfile
+ 
+ 
+ DEFAULT_URL = 'https://mqdb-release.moqi.com.cn/datasets'
++PROXIES = { "http": "http://clash.internal.moqi.ai:7890", "https": "http://clash.internal.moqi.ai:7890", }
+ 
+ AVAILABLE_DATASETS = {
+     'hits': 'hits_v1.tar',
+@@ -30,7 +31,7 @@ def dowload_with_progress(url, path):
+     for i in range(RETRIES_COUNT):
+         try:
+             with open(path, 'wb') as f:
+-                response = requests.get(url, stream=True)
++                response = requests.get(url, stream=True, proxies=PROXIES)
+                 response.raise_for_status()
+                 total_length = response.headers.get('content-length')
+                 if total_length is None or int(total_length) == 0:
+diff --git a/docker/test/mqdb_test_smoke/Dockerfile b/docker/test/mqdb_test_smoke/Dockerfile
+index df97418656..e73d58889b 100644
+--- a/docker/test/mqdb_test_smoke/Dockerfile
++++ b/docker/test/mqdb_test_smoke/Dockerfile
+@@ -1,7 +1,6 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.1 .
+-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.1 . --push
+-ARG FROM_TAG=1.1
+-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:$FROM_TAG
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.2 .
++# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:1.2 . --push
++FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+ 
+ # COPY run.sh /run.sh
+ # COPY process_split_build_smoke_test_result.py /
+diff --git a/docker/test/mqdb_test_stateless/Dockerfile b/docker/test/mqdb_test_stateless/Dockerfile
+index 2d8416fd13..1f831bfadb 100644
+--- a/docker/test/mqdb_test_stateless/Dockerfile
++++ b/docker/test/mqdb_test_stateless/Dockerfile
+@@ -1,4 +1,4 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.1 .
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2 .
+ # docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2 . --push
+ FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+ 
+@@ -22,19 +22,8 @@ RUN wget "https://dl.min.io/server/minio/release/linux-${TARGETARCH:-amd64}/mini
+     && wget "https://dl.min.io/client/mc/release/linux-${TARGETARCH:-amd64}/mc" \
+     && chmod +x ./mc
+ 
+-# build openmp for thread sanitizer
+-# openmp: https://github.com/llvm-mirror/openmp.git
+-# cmake: https://cmake.org/files/dev/cmake-3.22.20220106-g31b8466-linux-x86_64.tar.gz
+-COPY openmp /openmp
+-COPY cmake /cmake
+-
+-RUN ln -s /cmake/bin/cmake /usr/bin/cmake
+-
+-RUN cd /openmp && mkdir build ||: \ 
+-    && cmake -DLIBOMP_TSAN_SUPPORT=1 /openmp \
+-    && cmake --build . --target install
+-
+-ENV OMP_LIB_PATH=/usr/local/lib
++RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
++    && pip install --upgrade cmake
+ 
+ ENV MINIO_ROOT_USER="clickhouse"
+ ENV MINIO_ROOT_PASSWORD="clickhouse"
+diff --git a/docker/test/mqdb_test_stress/Dockerfile b/docker/test/mqdb_test_stress/Dockerfile
+index 43730260df..75f6b3a32f 100644
+--- a/docker/test/mqdb_test_stress/Dockerfile
++++ b/docker/test/mqdb_test_stress/Dockerfile
+@@ -1,21 +1,21 @@
+-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1 .
+-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.1 . --push
++# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2 .
++# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.2 . --push
+ FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2
+ 
+ RUN apt-get update --allow-releaseinfo-change -y \
+     && env DEBIAN_FRONTEND=noninteractive \
+-        apt-get install --yes --no-install-recommends \
+-            bash \
+-            tzdata \
+-            parallel \
+-            expect \
+-            python3 \
+-            python3-lxml \
+-            python3-termcolor \
+-            python3-requests \
+-            curl \
+-            telnet \
+-            llvm-9
++    apt-get install --yes --no-install-recommends \
++    bash \
++    tzdata \
++    parallel \
++    expect \
++    python3 \
++    python3-lxml \
++    python3-termcolor \
++    python3-requests \
++    curl \
++    telnet \
++    llvm-9
+ 
+ ENV MINIO_ROOT_USER="clickhouse"
+ ENV MINIO_ROOT_PASSWORD="clickhouse"
+diff --git a/tests/integration/test_cgroup_limit/test.py b/tests/integration/test_cgroup_limit/test.py
+index 7ee6a878c3..3e113e175c 100644
+--- a/tests/integration/test_cgroup_limit/test.py
++++ b/tests/integration/test_cgroup_limit/test.py
+@@ -22,7 +22,7 @@ def run_command_in_container(cmd, *args):
+             "run",
+             "--rm",
+             *args,
+-            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1",
++            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2",
+             # "ubuntu:20.04",
+             "sh",
+             "-c",
+diff --git a/tests/integration/test_jemalloc_percpu_arena/test.py b/tests/integration/test_jemalloc_percpu_arena/test.py
+index 207c1d7bfd..061099404f 100755
+--- a/tests/integration/test_jemalloc_percpu_arena/test.py
++++ b/tests/integration/test_jemalloc_percpu_arena/test.py
+@@ -26,7 +26,7 @@ def run_command_in_container(cmd, *args):
+             "run",
+             "--rm",
+             *args,
+-            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.1",
++            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2",
+             # "ubuntu:20.04",
+             "sh",
+             "-c",
+-- 
+2.32.1 (Apple Git-133)
+

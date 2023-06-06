@@ -1,0 +1,27 @@
+From a6a8a9624cc964e40d75b4f516401521e408dccf Mon Sep 17 00:00:00 2001
+From: Shanfeng <shanfengp@moqi.ai>
+Date: Wed, 1 Mar 2023 10:13:36 +0800
+Subject: [PATCH 16/51] skip 01079_parallel_alter_detach_table_zookeeper
+ 01193_metadata_loading unstable test case
+
+---
+ docker/test/mqdb_run_stateless/run.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/docker/test/mqdb_run_stateless/run.sh b/docker/test/mqdb_run_stateless/run.sh
+index 8e7678554f..cc0a0100c8 100644
+--- a/docker/test/mqdb_run_stateless/run.sh
++++ b/docker/test/mqdb_run_stateless/run.sh
+@@ -134,7 +134,8 @@ function run_tests() {
+         01271_show_privileges 01158_zookeeper_log_long 01528_clickhouse_local_prepare_parts \
+         01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
+         02047 01039 00993 02207 02117 02226 01606_git_import \
+-        01154_move_partition_long 01076_parallel_alter_replicated_zookeeper 01172_transaction_counters 2>&1 |
++        01154_move_partition_long 01076_parallel_alter_replicated_zookeeper 01172_transaction_counters \
++        01079_parallel_alter_detach_table_zookeeper 01193_metadata_loading 2>&1 |
+         ts '%Y-%m-%d %H:%M:%S' |
+         tee -a test_output/test_result.txt
+     set -e
+-- 
+2.32.1 (Apple Git-133)
+

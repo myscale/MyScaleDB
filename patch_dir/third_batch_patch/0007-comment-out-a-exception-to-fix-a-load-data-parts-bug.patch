@@ -1,0 +1,33 @@
+From 430a9d884dd2675a202d7a9b8b7e15f6e746f97c Mon Sep 17 00:00:00 2001
+From: lvzheng <zhengl@moqi.ai>
+Date: Mon, 5 Dec 2022 17:20:43 +0800
+Subject: [PATCH 07/51] comment out a exception to fix a load data parts bug.
+ This bug is: when non-transaction delete/update sql modify data parts with
+ version infomation ,and server corrupt.
+
+---
+ src/Storages/MergeTree/MergeTreeData.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/Storages/MergeTree/MergeTreeData.cpp b/src/Storages/MergeTree/MergeTreeData.cpp
+index 5dd6f63f70..89b576a752 100644
+--- a/src/Storages/MergeTree/MergeTreeData.cpp
++++ b/src/Storages/MergeTree/MergeTreeData.cpp
+@@ -1346,9 +1346,11 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks)
+             /// It's possible that covering part was created without transaction,
+             /// but if covered part was created with transaction (i.e. creation_tid is not prehistoric),
+             /// then it must have removal tid in metadata file.
+-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Data part {} is Outdated and has creation TID {} and CSN {}, "
+-                            "but does not have removal tid. It's a bug or a result of manual intervention.",
+-                            part->name, part->version.creation_tid, creation_csn);
++//            throw Exception(ErrorCodes::LOGICAL_ERROR, "Data part {} is Outdated and has creation TID {} and CSN {}, "
++//                            "but does not have removal tid. It's a bug or a result of manual intervention.",
++//                            part->name, part->version.creation_tid, creation_csn);
++            /// After a non-transaction delete/update query modify data parts produced by a transaction, then server corrupt,
++            /// when server restart, it will come here. In fact, it doesn't affect anything, so comment out this exception.
+         }
+         modifyPartState(it, DataPartState::Outdated);
+         part->cancelBuild();
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,25 @@
+From 74c66430f794c273afec05ec347e91afb1ec8dae Mon Sep 17 00:00:00 2001
+From: Shanfeng <shanfengp@moqi.ai>
+Date: Wed, 1 Mar 2023 17:24:04 +0800
+Subject: [PATCH 19/51] Remove VERSION_GITHASH VERSION_DATE config option
+
+---
+ cmake/version.cmake | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/cmake/version.cmake b/cmake/version.cmake
+index 7f14b15310..acaa772ff2 100644
+--- a/cmake/version.cmake
++++ b/cmake/version.cmake
+@@ -15,8 +15,6 @@ set (VERSION_NAME "${PROJECT_NAME}")
+ set (VERSION_FULL "${VERSION_NAME} ${VERSION_STRING}")
+ set (VERSION_SO "${VERSION_STRING}")
+ set (VERSION_STRING_SHORT "${VERSION_MAJOR}.${VERSION_MINOR}")
+-set (VERSION_GITHASH "${VERSION_GITHASH}" CACHE STRING "")
+-set (VERSION_DATE "" CACHE STRING "")
+ 
+ math (EXPR VERSION_INTEGER "${VERSION_PATCH} + ${VERSION_MINOR}*1000 + ${VERSION_MAJOR}*1000000")
+ 
+-- 
+2.32.1 (Apple Git-133)
+

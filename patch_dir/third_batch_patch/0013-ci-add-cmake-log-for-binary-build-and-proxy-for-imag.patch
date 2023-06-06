@@ -1,0 +1,46 @@
+From ca675d2bcbf3f5b900053bfe35a65ebe37b1a398 Mon Sep 17 00:00:00 2001
+From: Yi Ma <yim@moqi.ai>
+Date: Fri, 17 Feb 2023 11:41:46 +0000
+Subject: [PATCH 13/51] ci: add cmake log for binary build and proxy for image
+ build
+
+---
+ .gitlab-ci-build.yml                  | 3 +++
+ docker/builder/tools/docker-buildx.sh | 6 +++---
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/.gitlab-ci-build.yml b/.gitlab-ci-build.yml
+index 4c6303a0bc..51163a30d4 100644
+--- a/.gitlab-ci-build.yml
++++ b/.gitlab-ci-build.yml
+@@ -9,10 +9,13 @@ build_binary:
+     KUBERNETES_MEMORY_LIMIT: 32Gi
+   artifacts:
+     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
++    when: always
+     paths:
+       - artifacts/*.deb
+       - build/programs/clickhouse
+       - artifacts/performance_pack_*
++      - build/CMakeFiles/CMakeOutput.log
++      - build/CMakeFiles/CMakeError.log
+   retry: 2
+   script:
+     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
+diff --git a/docker/builder/tools/docker-buildx.sh b/docker/builder/tools/docker-buildx.sh
+index 0cde82a554..7f8efe664b 100755
+--- a/docker/builder/tools/docker-buildx.sh
++++ b/docker/builder/tools/docker-buildx.sh
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env bash
+ set -e
+ 
+-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null 2>&1 || true
+-docker buildx create --use --name=qemu >/dev/null 2>&1 || true
+-docker buildx inspect --bootstrap >/dev/null 2>&1 || true
++docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
++docker buildx create --use --name=qemu --driver-opt env.http_proxy='http://clash.internal.moqi.ai:7890' --driver-opt env.https_proxy='http://clash.internal.moqi.ai:7890' --driver-opt '"env.no_proxy='localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,docker,mirror.ccs.tencentyun.com,.moqi.ai,.moqi.com.cn,mirrors.tuna.tsinghua.edu.cn'"'
++docker buildx inspect --bootstrap
+-- 
+2.32.1 (Apple Git-133)
+

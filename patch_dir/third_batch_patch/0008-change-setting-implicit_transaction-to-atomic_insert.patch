@@ -1,0 +1,79 @@
+From 87cf33df7c65ef8c4670b261edc8cdbf7acb20bd Mon Sep 17 00:00:00 2001
+From: lvzheng <zhengl@moqi.ai>
+Date: Fri, 9 Dec 2022 14:39:52 +0800
+Subject: [PATCH 08/51] change setting implicit_transaction to atomic_insert,
+ close implicit transaction.
+
+---
+ src/Core/Settings.h                        | 2 +-
+ src/Interpreters/executeQuery.cpp          | 8 ++++----
+ src/Storages/System/StorageSystemParts.cpp | 3 +++
+ 3 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/Core/Settings.h b/src/Core/Settings.h
+index a5019c39f9..b646d28e2f 100644
+--- a/src/Core/Settings.h
++++ b/src/Core/Settings.h
+@@ -1156,7 +1156,7 @@ class IColumn;
+     M(String, insert_deduplication_token, "", "If not empty, used for duplicate detection instead of data digest", 0)                    \
+     M(Bool, throw_on_unsupported_query_inside_transaction, true, "Throw exception if unsupported query is used inside transaction", 0)   \
+     M(TransactionsWaitCSNMode, wait_changes_become_visible_after_commit_mode, TransactionsWaitCSNMode::WAIT_UNKNOWN, "Wait for committed changes to become actually visible in the latest snapshot", 0) \
+-    M(Bool, implicit_transaction, false, "If enabled and not already inside a transaction, wraps the query inside a full transaction (begin + commit or rollback)", 0) \
++    M(Bool, atomic_insert, false, "If enabled and not already inside a transaction, wraps the insert query inside a full transaction (begin + commit or rollback)", 0) \
+     // End of COMMON_SETTINGS
+ // Please add settings related to formats into the FORMAT_FACTORY_SETTINGS and move obsolete settings to OBSOLETE_SETTINGS.
+ 
+diff --git a/src/Interpreters/executeQuery.cpp b/src/Interpreters/executeQuery.cpp
+index f7467a1bdf..5cf31f49ea 100644
+--- a/src/Interpreters/executeQuery.cpp
++++ b/src/Interpreters/executeQuery.cpp
+@@ -659,13 +659,13 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+ 
+             if (context->getCurrentTransaction() && settings.throw_on_unsupported_query_inside_transaction)
+                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts inside transactions are not supported");
+-            if (settings.implicit_transaction && settings.throw_on_unsupported_query_inside_transaction)
+-                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'implicit_transaction' are not supported");
++            if (settings.atomic_insert && settings.throw_on_unsupported_query_inside_transaction)
++                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'atomic_insert' are not supported");
+         }
+         else
+         {
+             /// We need to start the (implicit) transaction before getting the interpreter as this will get links to the latest snapshots
+-            if (!context->getCurrentTransaction() && settings.implicit_transaction && !ast->as<ASTTransactionControl>())
++            if (!context->getCurrentTransaction() && (insert_query && settings.atomic_insert))
+             {
+                 try
+                 {
+@@ -683,7 +683,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+                 }
+                 catch (Exception & e)
+                 {
+-                    e.addMessage("while starting a transaction with 'implicit_transaction'");
++                    e.addMessage("while starting a transaction with 'atomic_insert'");
+                     throw;
+                 }
+             }
+diff --git a/src/Storages/System/StorageSystemParts.cpp b/src/Storages/System/StorageSystemParts.cpp
+index 6674de06c0..a8edb8dd78 100644
+--- a/src/Storages/System/StorageSystemParts.cpp
++++ b/src/Storages/System/StorageSystemParts.cpp
+@@ -85,6 +85,7 @@ StorageSystemParts::StorageSystemParts(const StorageID & table_id_)
+ 
+         {"visible",                                     std::make_shared<DataTypeUInt8>()},
+         {"creation_tid",                                getTransactionIDDataType()},
++        {"removal_tid_lock",                            std::make_shared<DataTypeUInt64>()},
+         {"removal_tid",                                 getTransactionIDDataType()},
+         {"creation_csn",                                std::make_shared<DataTypeUInt64>()},
+         {"removal_csn",                                 std::make_shared<DataTypeUInt64>()},
+@@ -295,6 +296,8 @@ void StorageSystemParts::processNextStorage(
+ 
+         if (columns_mask[src_index++])
+             columns[res_index++]->insert(get_tid_as_field(part->version.creation_tid));
++        if (columns_mask[src_index++])
++            columns[res_index++]->insert(part->version.removal_tid_lock.load(std::memory_order_relaxed));
+         if (columns_mask[src_index++])
+             columns[res_index++]->insert(get_tid_as_field(part->version.getRemovalTID()));
+         if (columns_mask[src_index++])
+-- 
+2.32.1 (Apple Git-133)
+

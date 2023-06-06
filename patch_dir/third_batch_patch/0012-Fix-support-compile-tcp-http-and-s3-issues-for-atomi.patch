@@ -1,0 +1,344 @@
+From 14d8d08dbaf0e44c67f29c963e4367117e196442 Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Wed, 1 Feb 2023 15:52:13 +0800
+Subject: [PATCH 12/51] Fix/support compile, tcp, http and s3 issues for atomic
+ insert
+
+---
+ src/Interpreters/executeQuery.cpp             | 11 ++++++++-
+ .../Executors/CompletedPipelineExecutor.cpp   |  7 ++++++
+ .../Executors/CompletedPipelineExecutor.h     |  4 ++++
+ src/Processors/Executors/PipelineExecutor.h   |  3 +++
+ src/Server/HTTPHandler.cpp                    |  8 +++++++
+ src/Server/TCPHandler.cpp                     | 23 ++++++++++++++++++-
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp |  2 +-
+ src/Storages/StorageFile.h                    |  2 ++
+ src/Storages/StorageInput.h                   |  2 ++
+ src/Storages/StorageMergeTree.cpp             |  6 ++---
+ src/Storages/StorageS3.h                      |  2 ++
+ .../02405_mqvs_atomic_insert.reference        |  2 ++
+ .../0_stateless/02405_mqvs_atomic_insert.sh   | 17 ++++++++++++++
+ 13 files changed, 83 insertions(+), 6 deletions(-)
+ create mode 100644 tests/queries/0_stateless/02405_mqvs_atomic_insert.reference
+ create mode 100755 tests/queries/0_stateless/02405_mqvs_atomic_insert.sh
+
+diff --git a/src/Interpreters/executeQuery.cpp b/src/Interpreters/executeQuery.cpp
+index 5cf31f49ea..b4e24f34eb 100644
+--- a/src/Interpreters/executeQuery.cpp
++++ b/src/Interpreters/executeQuery.cpp
+@@ -435,6 +435,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+     if (internal || client_info.query_kind == ClientInfo::QueryKind::SECONDARY_QUERY)
+         max_query_size = 0;
+ 
++    /// Used for atomic insert via HTTP
++    ContextMutablePtr session_context = nullptr;
++
+     String query_database;
+     String query_table;
+     try
+@@ -675,7 +678,11 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+                     /// If there is no session (which is the default for the HTTP Handler), set up one just for this as it is necessary
+                     /// to control the transaction lifetime
+                     if (!context->hasSessionContext())
+-                        context->makeSessionContext();
++                    {
++                        session_context = Context::createCopy(context);
++                        session_context->makeSessionContext();
++                        context->setSessionContext(session_context);
++                    }
+ 
+                     auto tc = std::make_shared<InterpreterTransactionControlQuery>(ast, context);
+                     tc->executeBegin(context->getSessionContext());
+@@ -873,6 +880,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+             /// Also make possible for caller to log successful query finish and exception during execution.
+             auto finish_callback = [elem,
+                                     context,
++                                    session_context,
+                                     ast,
+                                     log_queries,
+                                     log_queries_min_type = settings.log_queries_min_type,
+@@ -982,6 +990,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+ 
+             auto exception_callback = [elem,
+                                        context,
++                                       session_context,
+                                        ast,
+                                        log_queries,
+                                        log_queries_min_type = settings.log_queries_min_type,
+diff --git a/src/Processors/Executors/CompletedPipelineExecutor.cpp b/src/Processors/Executors/CompletedPipelineExecutor.cpp
+index 8ec1916f4c..59e5ee0354 100644
+--- a/src/Processors/Executors/CompletedPipelineExecutor.cpp
++++ b/src/Processors/Executors/CompletedPipelineExecutor.cpp
+@@ -85,14 +85,21 @@ void CompletedPipelineExecutor::execute()
+                 break;
+ 
+             if (is_cancelled_callback())
++            {
+                 data->executor->cancel();
++                cancelled = true;
++            }
+         }
+ 
+         if (data->has_exception)
+             std::rethrow_exception(data->exception);
+     }
+     else
++    {
+         executor.execute(pipeline.getNumThreads());
++        if (executor.isCancelled())
++            cancelled = true;
++    }
+ }
+ 
+ CompletedPipelineExecutor::~CompletedPipelineExecutor()
+diff --git a/src/Processors/Executors/CompletedPipelineExecutor.h b/src/Processors/Executors/CompletedPipelineExecutor.h
+index e616cd6a2b..1a9c5a15c5 100644
+--- a/src/Processors/Executors/CompletedPipelineExecutor.h
++++ b/src/Processors/Executors/CompletedPipelineExecutor.h
+@@ -20,6 +20,9 @@ public:
+     /// If returns true, query would be cancelled.
+     void setCancelCallback(std::function<bool()> is_cancelled, size_t interactive_timeout_ms_);
+ 
++    /// Used for atomic insert to check if execution is cancelled.
++    bool isCancelled() const { return cancelled; }
++
+     void execute();
+     struct Data;
+ 
+@@ -28,6 +31,7 @@ private:
+     std::function<bool()> is_cancelled_callback;
+     size_t interactive_timeout_ms = 0;
+     std::unique_ptr<Data> data;
++    bool cancelled = false;
+ };
+ 
+ }
+diff --git a/src/Processors/Executors/PipelineExecutor.h b/src/Processors/Executors/PipelineExecutor.h
+index 0b1fe5dedf..251b7b659d 100644
+--- a/src/Processors/Executors/PipelineExecutor.h
++++ b/src/Processors/Executors/PipelineExecutor.h
+@@ -43,6 +43,9 @@ public:
+     /// Cancel execution. May be called from another thread.
+     void cancel();
+ 
++    /// Used for atomic insert to check if execution is cancelled.
++    bool isCancelled() const { return cancelled; }
++
+     /// Checks the query time limits (cancelled or timeout). Throws on cancellation or when time limit is reached and the query uses "break"
+     bool checkTimeLimit();
+     /// Same as checkTimeLimit but it never throws. It returns false on cancellation or time limit reached
+diff --git a/src/Server/HTTPHandler.cpp b/src/Server/HTTPHandler.cpp
+index 9218c75c39..ff30f79405 100644
+--- a/src/Server/HTTPHandler.cpp
++++ b/src/Server/HTTPHandler.cpp
+@@ -526,6 +526,14 @@ void HTTPHandler::processQuery(
+         session->makeSessionContext(session_id, session_timeout, session_check == "1");
+     }
+ 
++    /// Set session context for transaction in atomic insert
++    bool atomic_insert_enabled = params.getParsed<bool>("atomic_insert", false);
++    if (atomic_insert_enabled)
++    {
++        if (!session->sessionContext())
++            session->makeSessionContext();
++    }
++
+     // Parse the OpenTelemetry traceparent header.
+     ClientInfo client_info = session->getClientInfo();
+     if (request.has("traceparent"))
+diff --git a/src/Server/TCPHandler.cpp b/src/Server/TCPHandler.cpp
+index f4592a8b2c..7929bfbede 100644
+--- a/src/Server/TCPHandler.cpp
++++ b/src/Server/TCPHandler.cpp
+@@ -79,6 +79,7 @@ namespace ErrorCodes
+     extern const int UNEXPECTED_PACKET_FROM_CLIENT;
+     extern const int SUPPORT_IS_DISABLED;
+     extern const int UNKNOWN_PROTOCOL;
++    extern const int QUERY_WAS_CANCELLED;
+ }
+ 
+ TCPHandler::TCPHandler(IServer & server_, TCPServer & tcp_server_, const Poco::Net::StreamSocket & socket_, bool parse_proxy_protocol_, std::string server_display_name_)
+@@ -298,6 +299,10 @@ void TCPHandler::runImpl()
+                 {
+                     state.block_in.reset();
+                     state.maybe_compressed_in.reset();
++
++                    if (query_context->getSettingsRef().atomic_insert && (state.is_cancelled || state.is_connection_closed))
++                        throw Exception("Insert query has been canceled", ErrorCodes::QUERY_WAS_CANCELLED);
++
+                     return Block();
+                 }
+                 return state.block_for_input;
+@@ -339,6 +344,9 @@ void TCPHandler::runImpl()
+             {
+                 state.need_receive_data_for_insert = true;
+                 processInsertQuery();
++
++                if (query_context->getSettingsRef().atomic_insert && (state.is_cancelled || state.is_connection_closed))
++                    throw Exception("Insert query has been canceled", ErrorCodes::QUERY_WAS_CANCELLED);
+             }
+             else if (state.io.pipeline.pulling())
+             {
+@@ -368,6 +376,8 @@ void TCPHandler::runImpl()
+                 }
+                 executor.execute();
+ 
++                if (query_context->getSettingsRef().atomic_insert && executor.isCancelled())
++                    throw Exception("Insert query has been canceled", ErrorCodes::QUERY_WAS_CANCELLED);
+                 /// Send final progress
+                 ///
+                 /// NOTE: we cannot send Progress for regular INSERT (w/ VALUES)
+@@ -554,6 +564,7 @@ bool TCPHandler::readDataNext()
+             {
+                 LOG_INFO(log, "Client has dropped the connection, cancel the query.");
+                 state.is_connection_closed = true;
++                state.is_cancelled = true;
+                 break;
+             }
+ 
+@@ -564,7 +575,11 @@ bool TCPHandler::readDataNext()
+ 
+         /// Do we need to shut down?
+         if (server.isCancelled())
++        {
++            state.is_cancelled = true;
+             break;
++        }
++
+ 
+         /** Have we waited for data for too long?
+          *  If we periodically poll, the receive_timeout of the socket itself does not work.
+@@ -640,7 +655,10 @@ void TCPHandler::processInsertQuery()
+         while (readDataNext())
+             executor.push(std::move(state.block_for_insert));
+ 
+-        executor.finish();
++        if (query_context->getSettingsRef().atomic_insert && state.is_cancelled)
++            executor.cancel();
++        else
++            executor.finish();
+     };
+ 
+     if (num_threads > 1)
+@@ -1102,6 +1120,9 @@ bool TCPHandler::receivePacket()
+ 
+         case Protocol::Client::Cancel:
+         {
++            /// Mark cancel from client for atomic insert
++            state.is_cancelled = true;
++
+             /// For testing connection collector.
+             if (sleep_in_receive_cancel.totalMilliseconds())
+             {
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index ad5d4e133e..dee81bf889 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -1525,7 +1525,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+     buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
+ 
+     StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
+-    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr);
++    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr, storage.getContext());
+ 
+     MergeTreeReaderSettings reader_settings;
+ 
+diff --git a/src/Storages/StorageFile.h b/src/Storages/StorageFile.h
+index 86e75588e1..3119c88c4b 100644
+--- a/src/Storages/StorageFile.h
++++ b/src/Storages/StorageFile.h
+@@ -77,6 +77,8 @@ public:
+         const std::optional<FormatSettings> & format_settings,
+         ContextPtr context);
+ 
++    bool supportsTransactions() const override { return true; }
++
+ protected:
+     friend class StorageFileSource;
+     friend class StorageFileSink;
+diff --git a/src/Storages/StorageInput.h b/src/Storages/StorageInput.h
+index 4c44213a06..0ad2a45bb9 100644
+--- a/src/Storages/StorageInput.h
++++ b/src/Storages/StorageInput.h
+@@ -27,6 +27,8 @@ public:
+         size_t max_block_size,
+         unsigned num_streams) override;
+ 
++    bool supportsTransactions() const override { return true; }
++
+ private:
+     Pipe pipe;
+ 
+diff --git a/src/Storages/StorageMergeTree.cpp b/src/Storages/StorageMergeTree.cpp
+index 4350ccd1a5..f5c57aafc9 100644
+--- a/src/Storages/StorageMergeTree.cpp
++++ b/src/Storages/StorageMergeTree.cpp
+@@ -213,10 +213,10 @@ void StorageMergeTree::shutdown()
+         clearTemporaryIndexBuildDirectories();
+ 
+         /// Clear cached vector index
+-        clearCachedVectorIndex(getDataPartsVector());
++        clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
+ 
+         /// Clear primary key cache if exists.
+-        clearPrimaryKeyCache(getDataPartsVector());
++        clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
+     }
+     catch (...)
+     {
+@@ -506,7 +506,7 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
+         auto drop_vector_index = vector_index_commands[0];
+ 
+         /// Delete vector index files.
+-        for (const auto & part : getDataParts())
++        for (const auto & part : getDataPartsForInternalUsage())
+         {
+             // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+ 
+diff --git a/src/Storages/StorageS3.h b/src/Storages/StorageS3.h
+index 300b7becb9..e127bb54a5 100644
+--- a/src/Storages/StorageS3.h
++++ b/src/Storages/StorageS3.h
+@@ -175,6 +175,8 @@ public:
+         const std::optional<FormatSettings> & format_settings,
+         ContextPtr ctx);
+ 
++    bool supportsTransactions() const override { return true; }
++
+ private:
+     friend class StorageS3Cluster;
+     friend class TableFunctionS3Cluster;
+diff --git a/tests/queries/0_stateless/02405_mqvs_atomic_insert.reference b/tests/queries/0_stateless/02405_mqvs_atomic_insert.reference
+new file mode 100644
+index 0000000000..099493444e
+--- /dev/null
++++ b/tests/queries/0_stateless/02405_mqvs_atomic_insert.reference
+@@ -0,0 +1,2 @@
++OK
++0
+diff --git a/tests/queries/0_stateless/02405_mqvs_atomic_insert.sh b/tests/queries/0_stateless/02405_mqvs_atomic_insert.sh
+new file mode 100755
+index 0000000000..8379dbb93b
+--- /dev/null
++++ b/tests/queries/0_stateless/02405_mqvs_atomic_insert.sh
+@@ -0,0 +1,17 @@
++#!/usr/bin/env bash
++# Tags: no-parallel, no-fasttest
++
++CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
++# shellcheck source=../shell_config.sh
++. "$CUR_DIR"/../shell_config.sh
++
++${CLICKHOUSE_CLIENT} --query="SELECT number, if(number<699999, toString(number), 'a') FROM numbers(700000) FORMAT CSV" > "${CLICKHOUSE_TMP}"/data_for_atomic_insert.csv
++${CLICKHOUSE_CLIENT} --query="CREATE TABLE t_atomic(a int, b int) engine=MergeTree order by a"
++${CLICKHOUSE_CLIENT} --query="INSERT INTO t_atomic(a,b) FORMAT CSV settings atomic_insert=true" < "${CLICKHOUSE_TMP}"/data_for_atomic_insert.csv 2>&1 | grep -q "DB::Exception: Insert query has been canceled." && echo 'OK' || echo 'Fail' || :
++
++${CLICKHOUSE_CLIENT} --query="SELECT count() FROM t_atomic"
++
++${CLICKHOUSE_CLIENT} --query="DROP TABLE t_atomic"
++
++# delete all created elements
++rm -f "${CLICKHOUSE_TMP}"/data_for_atomic_insert.csv
+-- 
+2.32.1 (Apple Git-133)
+

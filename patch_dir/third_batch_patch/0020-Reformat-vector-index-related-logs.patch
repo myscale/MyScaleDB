@@ -1,0 +1,2499 @@
+From 48ffdecc5d6b9aab7a86f7970f0c463f7b9366b1 Mon Sep 17 00:00:00 2001
+From: Zhuo Qiu <jewelz.q.915@gmail.com>
+Date: Tue, 28 Feb 2023 17:32:59 +0800
+Subject: [PATCH 20/51] Reformat vector index related logs
+
+---
+ src/Storages/AlterCommands.cpp                |   4 +-
+ .../MergeTree/BackgroundJobsAssignee.cpp      |   4 +-
+ .../MergeTree/BackgroundJobsAssignee.h        |   2 +
+ src/Storages/MergeTree/IMergeTreeDataPart.cpp |  32 ++---
+ src/Storages/MergeTree/MergeTask.cpp          |   6 +-
+ .../MergeTreeBaseSelectProcessor.cpp          |  33 ++----
+ src/Storages/MergeTree/MergeTreeData.cpp      |   4 +-
+ ...MergeTreeSelectWithVectorScanProcessor.cpp |  43 +++----
+ .../MergeTreeVectorIndexBuilderUpdater.cpp    | 112 ++++++++----------
+ .../MergeTree/MergeTreeVectorScanManager.cpp  | 102 ++++++----------
+ .../MergeTree/MergeTreeVectorScanUtils.cpp    |   9 +-
+ .../MergeTree/MergeTreeWhereOptimizer.cpp     |   4 +-
+ src/Storages/MergeTree/VectorIndexEntry.h     |   5 +-
+ .../MergeTree/VectorIndexMergeTreeTask.cpp    |   8 +-
+ .../MergeTree/VectorIndexMergeTreeTask.h      |   2 +-
+ src/Storages/StorageMergeTree.cpp             |   2 +-
+ src/Storages/VectorIndexCommands.cpp          |   4 +-
+ src/VectorIndex/Autotuner.cpp                 |   2 +-
+ src/VectorIndex/BruteForceSearch.cpp          |   7 +-
+ src/VectorIndex/CacheManager.cpp              |   6 +-
+ src/VectorIndex/CompositeIndexReader.cpp      |  10 +-
+ src/VectorIndex/FlatIndex.cpp                 |   2 +-
+ src/VectorIndex/HNSWIndex.cpp                 |  12 +-
+ src/VectorIndex/HNSWIndex.h                   |   2 +
+ src/VectorIndex/HNSWPQ.cpp                    |   2 +-
+ src/VectorIndex/HNSWPQ.h                      |   2 +-
+ src/VectorIndex/HNSWSQ.cpp                    |   2 +-
+ src/VectorIndex/HNSWSQ.h                      |   2 +-
+ src/VectorIndex/IVFFlatIndex.cpp              |  20 ++--
+ src/VectorIndex/IVFFlatIndex.h                |   4 +-
+ src/VectorIndex/IVFSQIndex.cpp                |   2 +-
+ src/VectorIndex/IVFSQIndex.h                  |   2 +
+ src/VectorIndex/MergeUtils.h                  |   6 +-
+ src/VectorIndex/VectorIndexCommon.h           |   3 +-
+ src/VectorIndex/VectorSegmentExecutor.cpp     | 101 ++++++++--------
+ src/VectorIndex/VectorSegmentExecutor.h       |   4 +-
+ .../00008_mqvs_empty_vector.reference         |   4 +-
+ 37 files changed, 247 insertions(+), 324 deletions(-)
+
+diff --git a/src/Storages/AlterCommands.cpp b/src/Storages/AlterCommands.cpp
+index b35364e537..c368418804 100644
+--- a/src/Storages/AlterCommands.cpp
++++ b/src/Storages/AlterCommands.cpp
+@@ -418,7 +418,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
+         command.column_name = ast_vec_index_decl.column;
+ 
+         command.if_not_exists = command_ast->if_not_exists;
+-        LOG_DEBUG(log, "vector index name: {}", command.vec_index_name);
++        LOG_DEBUG(log, "Vector index name: {}", command.vec_index_name);
+ 
+         return command;
+     }
+@@ -1070,7 +1070,7 @@ std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(S
+     else if (type == DROP_VECTOR_INDEX) 
+     {
+         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+-        LOG_DEBUG(log, "drop_vector_index: index_name: {}", vec_index_name);
++        LOG_DEBUG(log, "Drop vector index name: {}", vec_index_name);
+         result.drop_command = true;
+         result.index_name = vec_index_name;
+ 
+diff --git a/src/Storages/MergeTree/BackgroundJobsAssignee.cpp b/src/Storages/MergeTree/BackgroundJobsAssignee.cpp
+index e083ae67f2..f976c6997e 100644
+--- a/src/Storages/MergeTree/BackgroundJobsAssignee.cpp
++++ b/src/Storages/MergeTree/BackgroundJobsAssignee.cpp
+@@ -84,7 +84,7 @@ void BackgroundJobsAssignee::scheduleCommonTask(ExecutableTaskPtr common_task, b
+ void BackgroundJobsAssignee::scheduleVectorIndexTask(ExecutableTaskPtr vector_index_task)
+ {
+     bool res = getContext()->getVectorIndexExecutor()->trySchedule(vector_index_task);
+-    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"vector try schedule response: {}", res);
++    LOG_DEBUG(log, "Vector try schedule response: {}", res);
+     res ? trigger() : postpone();
+ }
+ 
+@@ -92,7 +92,7 @@ void BackgroundJobsAssignee::scheduleVectorIndexTask(ExecutableTaskPtr vector_in
+ void BackgroundJobsAssignee::scheduleSlowModeVectorIndexTask(ExecutableTaskPtr vector_index_task)
+ {
+     bool res = getContext()->getSlowModeVectorIndexExecutor()->trySchedule(vector_index_task);
+-    LOG_DEBUG(&Poco::Logger::get("BackgroundJobsAssignee"),"slow mode vector try schedule response: {}", res);
++    LOG_DEBUG(log, "Slow mode vector try schedule response: {}", res);
+     res ? trigger() : postpone();
+ }
+ 
+diff --git a/src/Storages/MergeTree/BackgroundJobsAssignee.h b/src/Storages/MergeTree/BackgroundJobsAssignee.h
+index e64acdf10b..078faec189 100644
+--- a/src/Storages/MergeTree/BackgroundJobsAssignee.h
++++ b/src/Storages/MergeTree/BackgroundJobsAssignee.h
+@@ -52,6 +52,8 @@ private:
+     /// Mutex for thread safety
+     std::mutex holder_mutex;
+ 
++    Poco::Logger * log = &Poco::Logger::get("BackgroundJobsAssignee");
++
+ public:
+     /// In case of ReplicatedMergeTree the first assignee will be responsible for
+     /// polling the replication queue and schedule operations according to the LogEntry type
+diff --git a/src/Storages/MergeTree/IMergeTreeDataPart.cpp b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+index c7c1c2894d..5455e2571a 100644
+--- a/src/Storages/MergeTree/IMergeTreeDataPart.cpp
++++ b/src/Storages/MergeTree/IMergeTreeDataPart.cpp
+@@ -1203,7 +1203,7 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
+             // this index is in metadata and found in vector_index_ready
+             if (size != -1)
+             {
+-                LOG_TRACE(storage.log, "read from vector_index_ready:{},{}", index_name, size);
++                LOG_TRACE(storage.log, "Read from vector_index_ready:{},{}", index_name, size);
+                 VectorIndex::Parameters & single_params_from_record = para.find(index_name)->second;
+                 ///there are two cases, one, there are parameters, in which case we compare the one in metadata with the one on disk.
+                 if (!single_params_from_record.empty())
+@@ -1218,14 +1218,14 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
+                             VectorIndex::VectorIndexFactory::createIndexType(vec_index_desc.type),
+                             VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)))
+                     {
+-                        LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
++                        LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
+                         addVectorIndex(index_name);
+                     }
+                 }
+                 // second, there are no parameters, in which case we simple admit the correctness of index. this is legacy adaptation.
+                 else
+                 {
+-                    LOG_INFO(storage.log, "the index is built for part:{},{}", name, index_name);
++                    LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
+                     addVectorIndex(index_name);
+                 }
+             }
+@@ -1259,7 +1259,7 @@ void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
+         boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
+         if (tokens.size() != 4)
+         {
+-            LOG_INFO(storage.log, "merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
++            LOG_INFO(storage.log, "Merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
+             removeAllRowIdsMaps(true);
+             return;
+         }
+@@ -1541,7 +1541,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+ 
+     if (getMarksCount() == 0)
+     {
+-        LOG_WARNING(storage.log, "[readRowExistsColumn] skip empty part");
++        LOG_WARNING(storage.log, "Skip empty part");
+         return std::nullopt;
+     }
+ 
+@@ -1557,7 +1557,7 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+ 
+     if (!reader)
+     {
+-        LOG_ERROR(storage.log, "[readRowExistsColumn] create reader failed");
++        LOG_ERROR(storage.log, "Create reader failed");
+         return std::nullopt;
+     }
+ 
+@@ -1567,23 +1567,17 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+     size_t num_rows_read = 0;
+     const size_t num_rows_total = rows_count;
+ 
+-    LOG_DEBUG(storage.log, "[readRowExistsColumn] total_mark = {}", total_mark);
+-    LOG_DEBUG(storage.log, "[readRowExistsColumn] num_rows_total = {}", num_rows_total);
+-
+     bool continue_read = false;
+     while (num_rows_read < num_rows_total)
+     {
+         const size_t remaining_size = num_rows_total - num_rows_read;
+ 
+-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: num_rows_read = {}", num_rows_read);
+-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop: remaining_size = {}", remaining_size);
+-
+         Columns result;
+         result.resize(1);
+ 
+         size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+ 
+-        LOG_DEBUG(storage.log, "[readRowExistsColumn] in loop, count rows have be read = {}", num_rows);
++        LOG_DEBUG(storage.log, "Read {} rows", num_rows);
+ 
+         continue_read = true;
+         num_rows_read += num_rows;
+@@ -1624,14 +1618,14 @@ void IMergeTreeDataPart::onLightweightDelete() const
+     std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
+     if (!row_exists_column_opt.has_value())
+     {
+-        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column is empty in part {}", name);
++        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
+         return;
+     }
+ 
+     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
+     if (row_exists_col == nullptr)
+     {
+-        LOG_WARNING(storage.log, "[onLightweightDelete] row_exists column type is not UInt8 in part {}", name);
++        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
+         return;
+     }
+ 
+@@ -1646,7 +1640,7 @@ void IMergeTreeDataPart::onLightweightDelete() const
+ 
+     if (del_row_ids.empty())
+     {
+-        LOG_DEBUG(storage.log, "[onLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
++        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+         return;
+     }
+     /// currently only consider one vector index
+@@ -1673,14 +1667,14 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
+     std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
+     if (!row_exists_column_opt.has_value())
+     {
+-        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column is empty in part {}", name);
++        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
+         return;
+     }
+ 
+     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
+     if (row_exists_col == nullptr)
+     {
+-        LOG_WARNING(storage.log, "[onDecoupledLightweightDelete] row_exists column type is not UInt8 in part {}", name);
++        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
+         return;
+     }
+ 
+@@ -1696,7 +1690,7 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
+ 
+     if (new_del_ids.empty())
+     {
+-        LOG_DEBUG(storage.log, "[onDecoupledLightweightDelete] the value of row exists column is all 1, nothing to do in part {}", name);
++        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+         return;
+     }
+ 
+diff --git a/src/Storages/MergeTree/MergeTask.cpp b/src/Storages/MergeTree/MergeTask.cpp
+index 3ab9defafe..2e13d55498 100644
+--- a/src/Storages/MergeTree/MergeTask.cpp
++++ b/src/Storages/MergeTree/MergeTask.cpp
+@@ -474,7 +474,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
+     size_t rows_sources_count = ctx->rows_sources_write_buf->count();
+     /// get rows sources info from local file
+     auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
+-    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
++    LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
+     rows_sources_read_buf->seek(0, 0);
+     
+     /// read data into buffer
+@@ -525,7 +525,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
+         }
+     }
+     
+-    LOG_DEBUG(ctx->log, "[generateRowIdsMap]: after write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
++    LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
+ 
+     if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
+     {
+@@ -832,7 +832,7 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
+             auto& row_ids_map_tmp_file = global_ctx->row_ids_map_files[i]->path();
+             /// move and rename row ids map file to new dir
+             String row_ids_map_file_path = global_ctx->new_data_part->getFullPath() + "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+-            LOG_DEBUG(ctx->log, "row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
++            LOG_DEBUG(ctx->log, "Row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
+             std::filesystem::rename(row_ids_map_tmp_file, row_ids_map_file_path);
+             /// move and rename vector index files to new dir
+             VectorIndex::renameVectorIndexFiles(toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i]->getFullPath(), global_ctx->new_data_part->getFullPath());        
+diff --git a/src/Storages/MergeTree/MergeTreeBaseSelectProcessor.cpp b/src/Storages/MergeTree/MergeTreeBaseSelectProcessor.cpp
+index db703d4ff8..5aee605053 100644
+--- a/src/Storages/MergeTree/MergeTreeBaseSelectProcessor.cpp
++++ b/src/Storages/MergeTree/MergeTreeBaseSelectProcessor.cpp
+@@ -404,7 +404,6 @@ static bool isVectorSearchByPk(const std::vector<String> & a, const std::vector<
+ 
+ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::readFromPartImpl()
+ {
+-    Poco::Logger * log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
+     if (task->size_predictor)
+         task->size_predictor->startBlock();
+ 
+@@ -433,7 +432,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+     const size_t pk_col_size = pk_description.column_names.size();
+ 
+     const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
+-    LOG_DEBUG(log, "[readFromPartImpl] setting: enable_primary_key_cache = {}", enable_primary_key_cache);
++    LOG_DEBUG(log, "Setting enable_primary_key_cache = {}", enable_primary_key_cache);
+ 
+     if (enable_primary_key_cache && task->vector_scan_manager && !task->data_part->hasLightweightDelete())
+     {
+@@ -450,11 +449,11 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+ 
+     if (pk_cache_side)
+     {
+-        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side --- yes");
++        LOG_DEBUG(log, "Entry pk cache side --- yes");
+     }
+     else
+     {
+-        LOG_DEBUG(log, "[readFromPartImpl] entry pk cache side --- no");
++        LOG_DEBUG(log, "Entry pk cache side --- no");
+     }
+ 
+     const String cache_key = task->data_part->getFullRelativePath()+":"+task->data_part->name;
+@@ -465,7 +464,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+ 
+         if (cols_opt.has_value())
+         {
+-            LOG_DEBUG(log, "[readFromPartImpl] hit cache, and key is {}", cache_key);
++            LOG_DEBUG(log, "Hit cache, and key is {}", cache_key);
+ 
+             Columns cols = cols_opt.value();
+ 
+@@ -506,7 +505,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+                 std::make_move_iterator(temp_columns.end())
+                 );
+ 
+-            LOG_DEBUG(log, "[readFromPartImpl] fetch from cache size = {}", result_columns[0]->size());
++            LOG_DEBUG(log, "Fetch from cache size = {}", result_columns[0]->size());
+ 
+ 
+             if (task->vector_scan_manager->preComputed())
+@@ -520,9 +519,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+                     nullptr,
+                     nullptr);
+ 
+-                LOG_DEBUG(log, "[readFromPartImpl] result_columns's size = {}, result_row_num = {}",
+-                          result_columns[0]->size(), result_row_num);
+-
+                 if (result_row_num > 0)
+                 {
+                     task->mark_ranges.clear();
+@@ -533,7 +529,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+         }
+         else
+         {
+-            LOG_DEBUG(log, "[readFromPartImpl] not hit cache, and data part name is {}", cache_key);
++            LOG_DEBUG(log, "Miss cache, and data part name is {}", cache_key);
+         }
+     }
+ 
+@@ -620,7 +616,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+ 
+     auto read_end_time = std::chrono::system_clock::now();
+ 
+-    LOG_DEBUG(log, "[readFromPartImpl] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
++    LOG_DEBUG(log, "Read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
+ 
+     /// [MQDB] vector search
+     if (task->vector_scan_manager)
+@@ -663,7 +659,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+ 
+     if (!task->vector_scan_manager)
+     {
+-        LOG_DEBUG(log, "[readFromPartImpl] this task's vector_scan_manager is NIL");
++        LOG_DEBUG(log, "This task's vector_scan_manager is NIL");
+         BlockAndRowCount res = { sample_block.cloneWithColumns(ordered_columns), read_result.num_rows };
+         return res;
+     }
+@@ -716,8 +712,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeBaseSelectProcessor::rea
+ 
+ bool MergeTreeBaseSelectProcessor::readPrimaryKeyBin(Columns & out_columns)
+ {
+-    Poco::Logger * const log = &Poco::Logger::get("MergeTreeBaseSelectProcessor");
+-
+     const KeyDescription & primary_key = storage_snapshot->metadata->getPrimaryKey();
+     const size_t pk_columns_size = primary_key.column_names.size();
+ 
+@@ -735,12 +729,10 @@ bool MergeTreeBaseSelectProcessor::readPrimaryKeyBin(Columns & out_columns)
+ 
+     if (pk_columns_size == 0 || pk_columns_size != cols_size)
+     {
+-        LOG_ERROR(log, "[readPrimaryKeyBin]: pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
++        LOG_ERROR(log, "pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
+         return false;
+     }
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: pk_columns_size = {}", pk_columns_size);
+-
+     MutableColumns buffered_columns;
+     buffered_columns.resize(cols_size);
+     for (size_t i = 0; i < cols_size; ++i)
+@@ -758,7 +750,7 @@ bool MergeTreeBaseSelectProcessor::readPrimaryKeyBin(Columns & out_columns)
+ 
+     if (!reader)
+     {
+-        LOG_ERROR(log, "[readPrimaryKeyBin]: make reader failed");
++        LOG_ERROR(log, "Failed to get reader");
+         return false;
+     }
+ 
+@@ -773,9 +765,6 @@ bool MergeTreeBaseSelectProcessor::readPrimaryKeyBin(Columns & out_columns)
+     size_t num_rows_read = 0;
+     const size_t num_rows_total = task->data_part->rows_count;
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: total_mark = {}", total_mark);
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: num_rows_total = {}", num_rows_total);
+-
+     bool continue_read = false;
+ 
+     while (num_rows_read < num_rows_total)
+@@ -811,7 +800,7 @@ bool MergeTreeBaseSelectProcessor::readPrimaryKeyBin(Columns & out_columns)
+         buffered_column->protect();
+     }
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: finally, {} rows has been read", buffered_columns[0]->size());
++    LOG_DEBUG(log, "Finally, {} rows has been read", buffered_columns[0]->size());
+ 
+     out_columns.assign(
+         std::make_move_iterator(buffered_columns.begin()),
+diff --git a/src/Storages/MergeTree/MergeTreeData.cpp b/src/Storages/MergeTree/MergeTreeData.cpp
+index 5ff849bc97..84251b7f56 100644
+--- a/src/Storages/MergeTree/MergeTreeData.cpp
++++ b/src/Storages/MergeTree/MergeTreeData.cpp
+@@ -1613,7 +1613,7 @@ void MergeTreeData::clearTemporaryIndexBuildDirectories()
+             {
+                 if (disk->isDirectory(it->path()))
+                 {
+-                    LOG_INFO(log, "Removing temporary directory for vector index build {}", full_path);
++                    LOG_DEBUG(log, "Removing temporary directory for vector index build {}", full_path);
+                     disk->removeRecursive(it->path());
+                 }
+             }
+@@ -3228,7 +3228,7 @@ void MergeTreeData::forgetPartAndMoveToDetached(const MergeTreeData::DataPartPtr
+ 
+         for (const String & name : restored)
+         {
+-            LOG_INFO(log, "Activated part {}", name);
++            LOG_DEBUG(log, "Activated part {}", name);
+         }
+ 
+         if (error)
+diff --git a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+index 0094e66520..ea39e3fb75 100644
+--- a/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
++++ b/src/Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.cpp
+@@ -63,9 +63,6 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
+     initializeMergeTreeReadersForPart(data_part, task_columns, storage_snapshot->getMetadataForQuery(),
+         all_mark_ranges, {}, {});
+ */
+-
+-    LOG_DEBUG(log, "[initializeReadersWithVectorScan] task column: {}", task_columns.columns.toString());
+-
+     reader = data_part->getReader(task_columns.columns, storage_snapshot->getMetadataForQuery(),
+         all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), reader_settings,
+         {}, {});
+@@ -179,12 +176,10 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
+ 
+     if (pk_columns_size == 0 || pk_columns_size != cols_size)
+     {
+-        LOG_ERROR(log, "[readPrimaryKeyBin]: pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
++        LOG_ERROR(log, "pk_columns_size = {}, cols_size = {}", pk_columns_size, cols_size);
+         return false;
+     }
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: pk_columns_size = {}", pk_columns_size);
+-
+     MutableColumns buffered_columns;
+     buffered_columns.resize(cols_size);
+     for (size_t i = 0; i < cols_size; ++i)
+@@ -202,7 +197,7 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
+ 
+     if (!reader)
+     {
+-        LOG_ERROR(log, "[readPrimaryKeyBin]: make reader failed");
++        LOG_ERROR(log, "Failed to get reader");
+         return false;
+     }
+ 
+@@ -215,9 +210,6 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
+     size_t num_rows_read = 0;
+     const size_t num_rows_total = task->data_part->rows_count;
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: total_mark = {}", total_mark);
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: num_rows_total = {}", num_rows_total);
+-
+     bool continue_read = false;
+ 
+     while (num_rows_read < num_rows_total)
+@@ -253,7 +245,7 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
+         buffered_column->protect();
+     }
+ 
+-    LOG_DEBUG(log, "[readPrimaryKeyBin]: finally, {} rows has been read", buffered_columns[0]->size());
++    LOG_DEBUG(log, "Finally, {} rows has been read", buffered_columns[0]->size());
+ 
+     out_columns.assign(
+         std::make_move_iterator(buffered_columns.begin()),
+@@ -275,7 +267,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+         /// Initialize primary key cache
+         const auto & primary_key = storage_snapshot->metadata->getPrimaryKey();
+         const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
+-        LOG_DEBUG(log, "[initializeRangeReaders] reader setting: enable_primary_key_cache = {}", enable_primary_key_cache);
++        LOG_DEBUG(log, "Reader setting: enable_primary_key_cache = {}", enable_primary_key_cache);
+ 
+         /// consider cache if and only if
+         /// 1. this task is vector search and no prewhere info
+@@ -338,7 +330,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+ 
+     if (use_primary_key_cache)
+     {
+-        LOG_DEBUG(log, "[readFromPartWithVectorScan] use primary key cache");
++        LOG_DEBUG(log, "Use primary key cache");
+ 
+         const String cache_key = task->data_part->getFullRelativePath() + ":" + task->data_part->name;
+ 
+@@ -346,11 +338,11 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+ 
+         if (pk_cache_cols_opt.has_value())
+         {
+-            LOG_DEBUG(log, "[readFromPartWithVectorScan] hit primary key cache, and key is {}", cache_key);
++            LOG_DEBUG(log, "Hit primary key cache, and key is {}", cache_key);
+         }
+         else
+         {
+-            LOG_DEBUG(log, "[readFromPartWithVectorScan] miss primary key cache for part {}, will load", task->data_part->name);
++            LOG_DEBUG(log, "Miss primary key cache for part {}, will load", task->data_part->name);
+ 
+             /// load pk's bin to memory
+             Columns pk_columns;
+@@ -358,13 +350,13 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+ 
+             if (result)
+             {
+-                LOG_DEBUG(log, "[readFromPartWithVectorScan] load primary key column and will put into cache");
++                LOG_DEBUG(log, "Load primary key column and will put into cache");
+                 PrimaryKeyCacheManager::getMgr().setPartPkCache(cache_key, std::move(pk_columns));
+                 pk_cache_cols_opt = PrimaryKeyCacheManager::getMgr().getPartPkCache(cache_key);
+             }
+             else
+             {
+-                LOG_DEBUG(log, "[readFromPartWithVectorScan] failed to load primary key column for part {}, will back to normal read",  task->data_part->name);
++                LOG_DEBUG(log, "Failed to load primary key column for part {}, will back to normal read",  task->data_part->name);
+             }
+         }
+ 
+@@ -419,7 +411,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+                 std::make_move_iterator(result_pk_cols.end())
+                 );
+ 
+-            LOG_DEBUG(log, "[readFromPartWithVectorScan] fetch from primary key cache size = {}", result_columns[0]->size());
++            LOG_DEBUG(log, "Fetch from primary key cache size = {}", result_columns[0]->size());
+ 
+             /// Get _part_offset if exists.
+             if (mutable_part_offset_col)
+@@ -442,9 +434,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+                     nullptr,
+                     part_offset);
+ 
+-                LOG_DEBUG(log, "[readFromPartImpl] result_columns's size = {}, result_row_num = {}",
+-                          result_columns[0]->size(), result_row_num);
+-
+                 task->mark_ranges.clear();
+                 if (result_row_num > 0)
+                 {
+@@ -457,11 +446,11 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+         }
+     }
+ 
+-    LOG_DEBUG(log, "[readFromPartWithVectorScan] begin read, mark_ranges size = {}", task->mark_ranges.size());
++    LOG_DEBUG(log, "Begin read, mark_ranges size = {}", task->mark_ranges.size());
+     auto read_result = task->range_reader.read(rows_to_read, task->mark_ranges);
+     for (auto it = task->mark_ranges.begin(); it != task->mark_ranges.cend(); ++it)
+     {
+-        LOG_DEBUG(log, "[readFromPartWithVectorScan] mark_range begin = {}, end = {}", it->begin, it->end);
++        LOG_DEBUG(log, "Mark range begin = {}, end = {}", it->begin, it->end);
+     }
+ 
+     /// All rows were filtered. Repeat.
+@@ -478,8 +467,6 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+ 
+     UInt64 num_filtered_rows = read_result.numReadRows() - read_result.num_rows;
+ 
+-    LOG_DEBUG(log, "[readFromPartWithVectorScan] num_rows: {}, read_rows: {}", read_result.num_rows, read_result.numReadRows());
+-
+     progress({ read_result.numReadRows(), read_result.numBytesRead() });
+ 
+     auto read_ranges = read_result.readRanges();
+@@ -506,7 +493,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
+     {
+         auto & col_name = sample_block.getByPosition(ps).name;
+-        LOG_DEBUG(log, "[readFromPartWithVectorScan]: read column: {}", col_name);
++        LOG_DEBUG(log, "Read column: {}", col_name);
+         /// TODO: not add distance column to header_without_virtual_columns
+         if (isVectorScanFunc(col_name))
+         {
+@@ -527,7 +514,7 @@ MergeTreeBaseSelectProcessor::BlockAndRowCount MergeTreeSelectWithVectorScanProc
+ 
+     auto read_end_time = std::chrono::system_clock::now();
+ 
+-    LOG_DEBUG(log, "[readFromPartWithVectorScan] read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
++    LOG_DEBUG(log, "Read time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(read_end_time - read_start_time).count());
+ 
+     /// [MQDB] vector search
+     if (task->vector_scan_manager && task->vector_scan_manager->preComputed())
+@@ -641,7 +628,7 @@ try
+ 
+     for (const auto & range : mark_ranges_for_task)
+     {
+-        LOG_DEBUG(log, "[getNewTaskImpl] keep range: {} - {}", range.begin, range.end);
++        LOG_DEBUG(log, "Keep range: {} - {}", range.begin, range.end);
+     }
+     
+     if (mark_ranges_for_task.empty())
+diff --git a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+index ee2f30f835..d79150c125 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.cpp
+@@ -94,7 +94,7 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
+             /// Currently only one vector index is allowed.
+             const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+ 
+-            LOG_DEBUG(log, "cache: {} {}, metadata: {} {}", cache_item.first.vector_index_name, cache_item.first.column_name, vec_index_desc.name, vec_index_desc.column);
++            LOG_DEBUG(log, "Cache: {} {}, metadata: {} {}", cache_item.first.vector_index_name, cache_item.first.column_name, vec_index_desc.name, vec_index_desc.column);
+ 
+             /// Further check the part status, decouple part or VPart with single vector index
+             if (cache_item.first.vector_index_name == vec_index_desc.name && cache_item.first.column_name == vec_index_desc.column &&
+@@ -105,7 +105,7 @@ void MergeTreeVectorIndexBuilderUpdater::removeDroppedVectorIndices(const Storag
+                 VectorIndex::IndexType t = VectorIndex::VectorIndexFactory::createIndexType(params.find("type")->second);
+                 params.erase("type");
+ 
+-                LOG_DEBUG(log, "params: {}, desc params: {}", VectorIndex::ParametersToString(params),
++                LOG_DEBUG(log, "Params: {}, desc params: {}", VectorIndex::ParametersToString(params),
+                     VectorIndex::ParametersToString(VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters)));
+                 
+                 if (VectorIndex::VectorSegmentExecutor::compareVectorIndexParameters(
+@@ -215,7 +215,7 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
+                 auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
+                 if (part->info.contains(info))
+                 {
+-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] skip for future part {} due to origin part {}", part->name, part_name);
++                    LOG_DEBUG(log, "Skip for future part {} due to origin part {}", part->name, part_name);
+                     skip_build_index = true;
+                     break;
+                 }
+@@ -234,7 +234,7 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
+                     if (!isSlowModePart(part))
+                         continue;
+ 
+-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select slow mode part name: {}", part->name);
++                    LOG_DEBUG(log, "Select slow mode part name: {}", part->name);
+                     return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
+                 }
+                 else /// normal fast mode
+@@ -242,7 +242,7 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
+                     if (isSlowModePart(part))
+                         continue;
+ 
+-                    LOG_DEBUG(log, "[selectPartsToBuildVectorIndex] select part name: {}", part->name);
++                    LOG_DEBUG(log, "Select part name: {}", part->name);
+                     return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
+                 }
+             }
+@@ -257,20 +257,20 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+ {
+     if (part_name.empty())
+     {
+-        LOG_INFO(log, "no data");
++        LOG_INFO(log, "No data");
+         return BuildVectorIndexStatus::NO_DATA_PART;
+     }
+ 
+     if (metadata_snapshot->vec_indices.empty())
+     {
+-        LOG_INFO(log, "no vector index declared");
++        LOG_INFO(log, "No vector index declared");
+         return BuildVectorIndexStatus::SUCCESS;
+     }
+ 
+     Stopwatch watch;
+     /// build vector index part by part
+     /// we may consider building vector index in parallel in the future.
+-    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} start, slow_mode: {}", part_name, slow_mode);
++    LOG_INFO(log, "Start vector index build task for {}, slow_mode: {}", part_name, slow_mode);
+ 
+     /// One part is selected to build index.
+     {
+@@ -283,7 +283,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+ 
+         if (part->vector_index_build_cancelled)
+         {
+-            LOG_INFO(log, "[buildVectorIndex] part:{}, build index job has been cancelled", part->name);
++            LOG_INFO(log, "Part: {}, build index job has been cancelled", part->name);
+             return BuildVectorIndexStatus::BUILD_FAIL;
+         }
+ 
+@@ -310,7 +310,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+         {
+             if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
+             {
+-                LOG_INFO(log, "[buildVectorIndex] begin to build vector index of one part {}", part->name);
++                LOG_INFO(log, "Build vector index for one part {}", part->name);
+                 status = buildVectorIndexForOnePart(metadata_snapshot, part, tune, slow_mode);
+             }
+         }
+@@ -320,7 +320,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+             {
+                 status = BuildVectorIndexStatus::BUILD_FAIL;
+                 int temp_value = counter.increaseAndGet(part->getFullRelativePath());
+-                LOG_WARNING(log, "[buildVectorIndex] part = {}, has MEMORY_LIMIT_EXCEEDED for {} times", part->name, temp_value);
++                LOG_WARNING(log, "Vector index build task for part {} has MEMORY_LIMIT_EXCEEDED for {} times", part->name, temp_value);
+                 mem_limit_happened = true;
+             }
+             else
+@@ -346,7 +346,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+             if (part->containRowIdsMaps())
+             {
+                 auto lock = data.lockParts();
+-                LOG_INFO(log, "[buildVectorIndex] try to remove row ids maps files in {}", part->getFullPath());
++                LOG_DEBUG(log, "Remove row ids maps files in {}", part->getFullPath());
+                 /// currently only consider one vector index
+                 auto vec_index_desc = metadata_snapshot->vec_indices[0];
+                 auto old_segments = VectorIndex::getAllSegmentIds(part->getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+@@ -356,15 +356,15 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+                 }
+                 part->removeAllRowIdsMaps();
+             }
+-            LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask finished for part {}.", part->name);
++            LOG_INFO(log, "Vector index build task finished for part {}", part->name);
+         }
+     }
+ 
+     watch.stop();
+-    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
++    LOG_INFO(log, "Vector index build task for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
+ 
+ #ifdef build_fail_test
+-    LOG_INFO(log, "[buildVectorIndex] VectorIndexBuildTask increment VectorIndexBuildFailEvents.");
++    LOG_INFO(log, "Vector index build task increment VectorIndexBuildFailEvents.");
+     ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
+ #endif
+     // TODO: handle fail case
+@@ -374,18 +374,12 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(
+ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOnePart(
+     const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool tune, bool slow_mode)
+ {
+-    LOG_INFO(log, "[buildVectorIndex] part:{}, start checking for build index", part->name);
++    LOG_TRACE(log, "Start checking for build index for part {}", part->name);
+ 
+     bool enforce_fixed_array = data.getSettings()->enforce_fixed_vector_length_constraint;
+ 
+     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
+     {
+-        LOG_INFO(log, "[buildVectorIndex] vec_index_desc data column: {}", vec_index_desc.column);
+-        for (auto & param : VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters))
+-        {
+-            LOG_INFO(log, "[buildVectorIndex] vec_index_desc parameters: {},{}", param.first, param.second);
+-        }
+-        LOG_INFO(log, "[buildVectorIndex] vec_index_desc type: {}", vec_index_desc.type);
+         auto col_names = part->getColumns().getNames();
+         NamesAndTypesList cols;
+ 
+@@ -408,18 +402,16 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                         dim = metadata_snapshot->getConstraints().getArrayLengthByColumnName(col).first;
+                         if (dim == 0)
+                         {
+-                            LOG_ERROR(log, "[buildVectorIndex] wrong dimension: 0, please check length constraint on the column.");
++                            LOG_ERROR(log, "Wrong dimension: 0, please check length constraint on the column.");
+                             throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
+                         }
+-                        LOG_INFO(log, "[buildVectorIndex] dim: {}", dim);
+                     }
+                     ///only reading one column
+                     break;
+                 }
+                 else
+                 {
+-                    LOG_INFO(
+-                        log, "[buildVectorIndex] found column {} in part and vectorIndexDexcription, but not in metadata snapshot.", col);
++                    LOG_WARNING(log, "Found column {} in part and VectorIndexDescription, but not in metadata snapshot.", col);
+                     return BuildVectorIndexStatus::META_ERROR;
+                 }
+             }
+@@ -464,7 +456,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 else
+                 {
+                     disk->removeRecursive(vector_tmp_relative_path);
+-                    LOG_DEBUG(log, "[buildVectorIndex] remove incomplete temporary directory {}", vector_tmp_relative_path);
++                    LOG_DEBUG(log, "Remove incomplete temporary directory {}", vector_tmp_relative_path);
+                 }
+             }
+         }
+@@ -493,12 +485,12 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                     {
+                         if (from_part)
+                         {
+-                            LOG_INFO(log, "[buildVectorIndex] the index is built for part: {}", part->name);
++                            LOG_DEBUG(log, "Vector index is built for part: {}", part->name);
+                             part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                         }
+                         else /// Need to move built vector index files to the part.
+                         {
+-                            LOG_INFO(log, "[buildVectorIndex] the index is built for part: {} and stored in temporary directory {}", part->name, vector_tmp_full_path);
++                            LOG_DEBUG(log, "Vector index is built for part: {} and stored in temporary directory {}", part->name, vector_tmp_full_path);
+                             MergeTreeDataPartPtr future_part = nullptr;
+                             if (part->getState() == IMergeTreeDataPart::State::Active)
+                                 future_part = part;
+@@ -508,7 +500,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                                 future_part = data.getActiveContainingPart(part->name);
+                                 if (!future_part)
+                                 {
+-                                    LOG_WARNING(log, "[buildVectorIndex] failed to find future part for part {}, leave the temporary directory", part->name);
++                                    LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
+                                     return BuildVectorIndexStatus::SUCCESS;
+                                 }
+                             }
+@@ -520,7 +512,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                                 if (future_part->containRowIdsMaps())
+                                 {
+                                     auto lock = data.lockParts();
+-                                    VectorIndex::removeRowIdsMaps(future_part);
++                                    VectorIndex::removeRowIdsMaps(future_part, log);
+                                 }
+                             }
+                             /// else future part will pick up later at the next time when index built for it.
+@@ -550,7 +542,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+         size_t min_build_index_train_block_size = data.getContext()->getSettingsRef().min_build_index_train_block_size;
+         if (min_build_index_train_block_size < max_build_index_add_block_size)
+         {
+-            LOG_INFO(log, "[buildVectorIndex] min_build_index_train_block_size {} is smaller than max_build_index_add_block_size {}, will be updated",
++            LOG_DEBUG(log, "min_build_index_train_block_size {} is smaller than max_build_index_add_block_size {}, will be updated",
+                           min_build_index_train_block_size, max_build_index_add_block_size);
+             min_build_index_train_block_size = max_build_index_add_block_size;
+         }
+@@ -558,7 +550,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+         /// never divide a zero
+         size_t read_block_rows_num = max_build_index_add_block_size / 4 / std::max(1, dim);
+         size_t train_block_rows_num = min_build_index_train_block_size / 4 / std::max(1, dim);
+-        LOG_INFO(log, "[buildVectorIndex] set read_block_rows_num to {}, train_block_rows_num to {}", read_block_rows_num, train_block_rows_num);
++        LOG_DEBUG(log, "Set read_block_rows_num to {}, train_block_rows_num to {}", read_block_rows_num, train_block_rows_num);
+ 
+         bool continue_read = false;
+         bool training = true;
+@@ -616,11 +608,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 }
+             }
+ 
+-            LOG_DEBUG(log, "[buildVectorIndex] part:{}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
++            LOG_DEBUG(log, "Part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
+ 
+             if (num_rows == 0)
+             {
+-                LOG_WARNING(log, "[buildVectorIndex] part:{}, no data read for column {}", part->name, cols.back().name);
++                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
+                 part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                 break;
+             }
+@@ -629,7 +621,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
+             if (!array)
+             {
+-                throw Exception(ErrorCodes::LOGICAL_ERROR, "[buildVectorIndex] vector column type is not Array in part {}", part->name);
++                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector column type is not Array in part {}", part->name);
+             }
+ 
+             const IColumn & src_data = array->getData();
+@@ -637,7 +629,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+             if (!src_data_concrete)
+             {
+-                throw Exception(ErrorCodes::LOGICAL_ERROR, "[buildVectorIndex] vector column inner type in Array is not Float32 in part {}", part->name);
++                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector column inner type in Array is not Float32 in part {}", part->name);
+             }
+ 
+             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
+@@ -645,12 +637,12 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             {
+                 throw Exception(
+                     ErrorCodes::INCORRECT_DATA,
+-                    "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
++                    "Part: {}, vector column data length does not meet constraint",
+                     part->name);
+             }
+             if (src_vec.empty())
+             {
+-                LOG_WARNING(log, "[buildVectorIndex] part:{}, no data read for column {}", part->name, cols.back().name);
++                LOG_WARNING(log, "Part:{}, no data read for column {}", part->name, cols.back().name);
+                 part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
+                 return BuildVectorIndexStatus::SUCCESS;
+             }
+@@ -677,7 +669,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 if (enforce_fixed_array && vec_end_offset - vec_start_offset != dim)
+                     throw Exception(
+                         ErrorCodes::INCORRECT_DATA,
+-                        "[buildVectorIndex] part:{}, vector column data length does not meet constraint",
++                        "Part: {}, vector column data length does not meet constraint",
+                         part->name);
+                 if (vec_start_offset != vec_end_offset)
+                 {
+@@ -695,7 +687,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+ 
+             LOG_DEBUG(
+                 log,
+-                "[buildVectorIndex] part:{}, raw_data size: {}, empty_ids size: {}",
++                "Part:{}, raw_data size: {}, empty_ids size: {}",
+                 part->name,
+                 vector_raw_data.size(),
+                 empty_ids.size());
+@@ -724,9 +716,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             /// only run in the first read round
+             if (training)
+             {
+-                LOG_INFO(
++                LOG_DEBUG(
+                     log,
+-                    "[buildVectorIndex] index train: part_name: {}, num_rows_train: {}, vector index name: {}, path: {}",
++                    "Train vector index: part_name: {}, num_rows_train: {}, vector index name: {}, path: {}",
+                     part->name,
+                     num_rows_train,
+                     vec_index_desc.name,
+@@ -735,7 +727,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 /// Create temp directory before serialize.
+                 if (disk->exists(vector_tmp_relative_path))
+                 {
+-                    LOG_DEBUG(log, "[buildVectorIndex] the temporary directory to store vector index files already exists, will be removed {}", vector_tmp_relative_path);
++                    LOG_DEBUG(log, "The temporary directory to store vector index files already exists, will be removed {}", vector_tmp_relative_path);
+                     disk->removeRecursive(vector_tmp_relative_path);
+                 }
+ 
+@@ -752,30 +744,30 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+ 
+                 if (!build_status.fine())
+                 {
+-                    LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
++                    LOG_ERROR(log, "Failed to build vector index for part {}", part->name);
+                     disk->removeRecursive(vector_tmp_relative_path);
+                     throw Exception(build_status.getCode(), build_status.getMessage());
+                 }
+                 training = false;
+             }
+ 
+-            LOG_INFO(log, "[buildVectorIndex] index add vectors: read vector num: {}", vec_data->getVectorNum());
++            LOG_DEBUG(log, "Add vectors to index: read vector num: {}", vec_data->getVectorNum());
+             vec_index_builder->addVectors(vec_data);
+ 
+             if (!empty_ids.empty())
+                 vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
+ 
+-            LOG_INFO(log, "[buildVectorIndex] index after read vectors: read vector num: {}", vec_data->getVectorNum());
++            LOG_DEBUG(log, "After adding vectors: read vector num: {}", vec_data->getVectorNum());
+         }
+ 
+         if (num_rows_read == 0 && part->rows_count == 0)
+         {
+-            LOG_WARNING(log, "[buildVectorIndex] part {} is empty", part->name);
++            LOG_WARNING(log, "Part {} is empty", part->name);
+             continue;
+         }
+         else if (num_rows_read < part->rows_count)
+         {
+-            LOG_ERROR(log, "[buildVectorIndex] failed to build vector index for part {}", part->name);
++            LOG_ERROR(log, "Failed to build vector index for part {}", part->name);
+             disk->removeRecursive(vector_tmp_relative_path);
+             return BuildVectorIndexStatus::BUILD_FAIL;
+         }
+@@ -790,9 +782,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+             vec_index_builder->tune(vec_data, empty_ids, current_round_start_row);
+ 
+             /// remove empty vectors
+-            LOG_INFO(log, "[buildVectorIndex] index serialize");
++            LOG_DEBUG(log, "Serialize vector index");
+             VectorIndex::Status seri_status = vec_index_builder->serialize();
+-            LOG_INFO(log, "[buildVectorIndex] after serialize status: {}", seri_status.getCode());
++            LOG_DEBUG(log, "Serialization status: {}", seri_status.getCode());
+             if (!seri_status.fine())
+             {
+                 /// Remove temporay directory
+@@ -814,7 +806,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 future_part = data.getActiveContainingPart(part->name);
+                 if (!future_part)
+                 {
+-                    LOG_WARNING(log, "[buildVectorIndex] failed to find future part for part {}, leave the temporary directory", part->name);
++                    LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
+                     return BuildVectorIndexStatus::SUCCESS;
+                 }
+             }
+@@ -842,20 +834,20 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
+                 if (future_part->hasLightweightDelete())
+                     vec_index_builder->reloadDeleteBitMap();
+ 
+-                LOG_INFO(log, "[buildVectorIndex] index cache: status: {}", seri_status.getCode());
++                LOG_DEBUG(log, "Cache index: status: {}", seri_status.getCode());
+                 vec_index_builder->cache();
+-                LOG_INFO(log, "[buildVectorIndex] index after cache: status: {}", seri_status.getCode());
++                LOG_DEBUG(log, "After cache: status: {}", seri_status.getCode());
+ 
+                 if (future_part->containRowIdsMaps())
+                 {
+                     auto lock = data.lockParts();
+-                    VectorIndex::removeRowIdsMaps(future_part);
++                    VectorIndex::removeRowIdsMaps(future_part, log);
+                 }
+             }
+         }
+     }
+ 
+-    LOG_INFO(log, "[buildVectorIndex] index build complete");
++    LOG_DEBUG(log, "Vector index build complete");
+ 
+     return BuildVectorIndexStatus::SUCCESS;
+ }
+@@ -915,7 +907,7 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const
+     if (!dest_part)
+         return false;
+ 
+-    LOG_DEBUG(log, "[buildVectorIndex] current active part {} is selected to store vector index", dest_part->name, dest_part->getState());
++    LOG_DEBUG(log, "Current active part {} is selected to store vector index", dest_part->name, dest_part->getState());
+ 
+     auto disk = dest_part->volume->getDisk();
+     String dest_relative_path = dest_part->getFullRelativePath();
+@@ -934,7 +926,7 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const
+ 
+     if (!found_vector_file)
+     {
+-        LOG_DEBUG(log, "[buildVectorIndex] failed to find any vector index files in directory {}, will remove it", vector_tmp_relative_path);
++        LOG_DEBUG(log, "Failed to find any vector index files in directory {}, will remove it", vector_tmp_relative_path);
+         disk->removeRecursive(vector_tmp_relative_path);
+ 
+         return false;
+@@ -945,12 +937,12 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const
+ 
+     disk->removeRecursive(vector_tmp_relative_path);
+ 
+-    LOG_INFO(log, "[buildVectorIndex] move vector index files to part {}", dest_part->name);
++    LOG_DEBUG(log, "Move vector index files to part {}", dest_part->name);
+ 
+     /// Apply lightweight delete bitmap to index's bitmap
+     if (dest_part->hasLightweightDelete())
+     {
+-        LOG_DEBUG(log, "[buildVectorIndex] apply lightweight delete to vector index in part {}", dest_part->name);
++        LOG_DEBUG(log, "Apply lightweight delete to vector index in part {}", dest_part->name);
+         dest_part->onLightweightDelete();
+     }
+ 
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+index 3f273575d3..2654f95c2f 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+@@ -47,14 +47,10 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
+     auto & query_column = desc.query_column;
+     int dim = desc.search_column_dim;
+ 
+-    /// LOG_DEBUG(log, "[vectorScanImpl] column: {}", query_column->dumpStructure());
+-    LOG_DEBUG(log, "[generateVectorDataset] before create holder");
+-
+     if (!query_column)
+         throw Exception("Wrong query column type", ErrorCodes::LOGICAL_ERROR); 
+ 
+     ColumnPtr holder = query_column->convertToFullColumnIfConst();
+-    LOG_DEBUG(log, "[generateVectorDataset] after create holder");
+     const ColumnArray * query_col = checkAndGetColumn<ColumnArray>(holder.get());
+ 
+     if (is_batch)
+@@ -108,7 +104,7 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
+             vec_parameters.erase("topK");
+         }
+ 
+-        LOG_DEBUG(log, "[batchVectorScan] set k to {}, dim to {}", k, dim);
++        LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
+         return std::make_shared<VectorIndex::VectorDataset>(
+             query_vector_num, static_cast<int32_t>(dim), const_cast<float *>(query_new_data.data()));
+     }
+@@ -161,7 +157,6 @@ void MergeTreeVectorScanManager::executeAfterRead(
+     bool has_prewhere,
+     const ColumnUInt8 * filter)
+ {
+-    LOG_DEBUG(log, "executeAfterRead");
+     if (vector_scan_info->is_batch)
+     {
+         if (has_prewhere)
+@@ -223,9 +218,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+     UInt64 dim = desc.search_column_dim;
+     VectorIndex::Parameters vec_parameters = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
+ 
+-    LOG_DEBUG(log, "[vectorScan] data_path = {}", data_path);
+-    LOG_DEBUG(log, "[vectorScan] data_part name = {}", data_part->name);
+-
+     int k = 50;
+     if (vec_parameters.contains("topK"))
+     {
+@@ -234,7 +226,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+     }
+ 
+     String metrics_str = data_part->storage.getSettings()->vector_search_metric_type;
+-    LOG_DEBUG(log, "[vectorscan] metric: {}", metrics_str);
+ 
+     std::vector<VectorIndex::SegmentId> segment_ids;
+     for (auto & v_index : vector_indices)
+@@ -246,7 +237,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                 metrics_str = v_index.parameters->getValue<String>("metric_type");
+             }
+             
+-            LOG_DEBUG(log, "[vectorscan] metric: {}", metrics_str);
+             if (data_part->containVectorIndex(v_index.name, v_index.column))
+             {
+                 find_index = true;
+@@ -257,14 +247,14 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                 if (data_part->containRowIdsMaps())
+                 {
+                     segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
+-                    LOG_DEBUG(log, "[vectorScan] index found for decouple part, use old parts' index first when both exist in metadata.");
++                    LOG_DEBUG(log, "Index found for decouple part, use old parts' index first when both exist in metadata.");
+                 }
+                 else
+                 {
+                     VectorIndex::SegmentId segment_id(data_path, data_part->name, data_part->name, index.name, index.column, 0);
+                     segment_ids.emplace_back(std::move(segment_id));
+ 
+-                    LOG_DEBUG(log, "[vectorScan] index found, because current data part contains it");
++                    LOG_DEBUG(log, "Index found, because current data part contains it");
+                 }
+ 
+                 break;
+@@ -276,9 +266,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                 {
+                     find_index = true;
+                     index = v_index;
+-                    LOG_DEBUG(log, "[vectorScan] index found, because index segment_ids is not empty");
++                    LOG_DEBUG(log, "Index found, because index segment_ids is not empty");
+                     String cache_key = segment_ids[0].getCacheKey().toString();
+-                    LOG_DEBUG(log, "[vectorScan] the cache key = {}", cache_key);
++                    LOG_DEBUG(log, "Cache key = {}", cache_key);
+                     break;
+                 }
+             }
+@@ -289,7 +279,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+ 
+     if (find_index)
+     {
+-        LOG_DEBUG(log, "[vectorScan] find index, segment_ids size: {}", segment_ids.size());
++        LOG_DEBUG(log, "Find index, segment_ids size: {}", segment_ids.size());
+         DB::OpenTelemetrySpanHolder span("MergeTreeVectorScanManager::vectorScan::find_index");
+         span.addAttribute("vectorScan.segment_ids", segment_ids.size());
+ 
+@@ -319,7 +309,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                 }
+                 ++offset;
+             }
+-            LOG_DEBUG(log, "[vectorScan] filter size: {}, read_range size: {}", filter_data_size, read_ranges.size());
++            LOG_DEBUG(log, "Filter size: {}, read_range size: {}", filter_data_size, read_ranges.size());
+             span.addAttribute("vectorScan.filter_sizes", filter_data_size);
+             span.addAttribute("vectorScan.read_ranges", read_ranges.size());
+         }
+@@ -340,20 +330,20 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+ 
+         for (VectorIndex::SegmentId & segment_id : segment_ids)
+         {
+-            LOG_DEBUG(log, "[vectorScan] create vector segment executor for : {}", segment_id.getFullPath());
++            LOG_DEBUG(log, "Create vector segment executor for : {}", segment_id.getFullPath());
+             VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+                 VectorIndex::VectorIndexFactory::createIndexType(index.type),
+                 segment_id,
+                 vec_parameters,
+                 dim);
+             VectorIndex::Status status = vec_executor->load();
+-            LOG_DEBUG(log, "[vectorScan] vector number in index: {}", vec_executor->getRawDataSize());
+-            LOG_DEBUG(log, "[vectorScan] load vector index: {}", status.getCode());
++            LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
++            LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+ 
+             if (!status.fine())
+             {
+                 /// case of merged vector indices had been removed, we need to use new vector index files
+-                LOG_ERROR(log, "[vectorScan] fail to load vector index: {}", segment_id.getFullPath());
++                LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
+                 retry = true;
+                 brute_force = true;
+                 break;
+@@ -373,19 +363,19 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+ 
+             if (segment_ids.size() == 1)
+             {
+-                LOG_DEBUG(log, "[vectorScan] create vector segment executor for : {}", segment_ids[0].getFullPath());
++                LOG_DEBUG(log, "Create vector segment executor for : {}", segment_ids[0].getFullPath());
+                 VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+                     VectorIndex::VectorIndexFactory::createIndexType(index.type),
+                     segment_ids[0],
+                     vec_parameters,
+                     dim);
+                 VectorIndex::Status status = vec_executor->load();
+-                LOG_DEBUG(log, "[vectorScan] vector number in index: {}", vec_executor->getRawDataSize());
+-                LOG_DEBUG(log, "[vectorScan] load vector index: {}", status.getCode());
++                LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
++                LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+ 
+                 if (!status.fine())
+                 {
+-                    LOG_ERROR(log, "[vectorScan] fail to load vector index: {}", segment_ids[0].getFullPath());
++                    LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
+                 }
+                 else
+                 {
+@@ -429,11 +419,10 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                 continue;
+             }
+ 
+-            LOG_DEBUG(log, "[vectorScan] start search: vector num: {}", vec_data->getVectorNum());
++            LOG_DEBUG(log, "Start search: vector num: {}", vec_data->getVectorNum());
+ 
+             std::vector<float> per_distance(k * vec_data->getVectorNum(), 0.0);
+             std::vector<int64_t> per_id(k * vec_data->getVectorNum(), -1);
+-            LOG_DEBUG(log, "[vectorScan] per_id size: {}, per_distance size: {}", per_id.size(), per_distance.size());
+             float * distance_data = per_distance.data();
+             int64_t * id_data = per_id.data();
+ 
+@@ -444,7 +433,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+             }
+             else if (search_status.getCode() != 0)
+             {
+-                LOG_WARNING(log, "[batchVectorScan] fail to search with vector index. code {}", search_status.getCode());
++                LOG_WARNING(log, "Fail to search with vector index. code {}", search_status.getCode());
+                 /// TODO: default vector search without vector index
+                 throw Exception(
+                     "fail to search with vector index. code: " + std::to_string(search_status.getCode())
+@@ -452,8 +441,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+                     ErrorCodes::LOGICAL_ERROR);
+             }
+ 
+-            LOG_DEBUG(log, "[vectorScan] after search");
+-
+             if (is_batch)
+             {
+                 OpenTelemetrySpanHolder span("MergeTreeVectorScanManager::vectorScan()::find_index::segment_batch_generate_results");
+@@ -502,8 +489,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
+         tmp_vector_scan_result->computed = true;
+         tmp_vector_scan_result->result_columns[0] = std::move(label_column);
+ 
+-        LOG_DEBUG(log, "[vectorScan] after generate results");
+-
+         return tmp_vector_scan_result;
+     }
+     else
+@@ -702,23 +687,14 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+ 
+     if (!label_column)
+     {
+-        LOG_DEBUG(log, "[mergeVectorScanResult] label colum is null");
+-    }
+-
+-    const size_t vector_scan_result_size = label_column->size();
+-    LOG_DEBUG(log, "[mergeVectorScanResult] label colum size: {}, distance column size: {}", label_column->size(), distance_column->size());
+-    const ColumnUInt32::Container & label_column_ctr = label_column->getData();
+-    const ColumnFloat32::Container & distance_column_ctr = distance_column->getData();
+-    for (size_t i = 0; i < 5 && i < vector_scan_result_size; ++i)
+-    {
+-        LOG_DEBUG(log, "[mergeVectorScanResult] label[{}] = {}, distance[{}] = {}", i, label_column_ctr[i], i, distance_column_ctr[i]);
++        LOG_DEBUG(log, "Label colum is null");
+     }
+ 
+     auto final_distance_column = DataTypeFloat32().createColumn();
+ 
+     /// create new column vector to save final results
+     MutableColumns final_result;
+-    LOG_DEBUG(log, "[mergeVectorScanResult] create final result");
++    LOG_DEBUG(log, "Create final result");
+     for (auto & col : pre_result)
+     {
+         final_result.emplace_back(col->cloneEmpty());
+@@ -726,7 +702,6 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+ 
+     if (filter)
+     {
+-        LOG_DEBUG(log, "[mergeVectorScanResult] filter data size: {}, read_ranges size: {}", filter->getData().size(), read_ranges.size());
+         auto & filter_data = filter->getData();
+         size_t current_column_pos = 0;
+         int range_index = 0;
+@@ -766,7 +741,7 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+     }
+     else
+     {
+-        LOG_DEBUG(log, "[mergeVectorScanResult] no filter statement");
++        LOG_DEBUG(log, "No filter statement");
+         if (part_offset == nullptr)
+         {
+             size_t start_pos = 0;
+@@ -788,7 +763,6 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+                             Field field;
+                             pre_result[i]->get(index_of_arr, field);
+                             final_result[i]->insert(field);
+-                            LOG_DEBUG(log, "[mergeVectorScanResult] label: {}, distance: {}, field: {}", label_value, distance_column->getFloat32(ind), field);
+                         }
+ 
+                         final_distance_column->insert(distance_column->getFloat32(ind));
+@@ -799,7 +773,7 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+         }
+         else
+         {
+-            LOG_DEBUG(log, "[mergeVectorScanResult] get part offset");
++            LOG_DEBUG(log, "Get part offset");
+             for (auto & read_range : read_ranges)
+             {
+                 const size_t start_pos = read_range.start_row;
+@@ -824,7 +798,6 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+                                     Field field;
+                                     pre_result[i]->get(j, field);
+                                     final_result[i]->insert(field);
+-                                    LOG_DEBUG(log, "[mergeVectorScanResult] label: {}, distance: {}, field: {}", label_value, distance_column->getFloat32(ind), field);
+                                 }
+ 
+                                 final_distance_column->insert(distance_column->getFloat32(ind));
+@@ -845,8 +818,6 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+     read_rows = final_distance_column->size();
+ 
+     pre_result.emplace_back(std::move(final_distance_column));
+-
+-    LOG_DEBUG(log, "[mergeVectorScanResult] distance column size: {}, merge result size: {}", label_column->size(), read_rows);
+ }
+ 
+ 
+@@ -922,7 +893,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+ 
+     size_t default_read_num = std::max(index_granularity.getMarkRows(current_mark), max_search_block_size_bytes / 4 / dim);
+ 
+-    LOG_DEBUG(log, "default_read_num: {}, mark row: {}", default_read_num, index_granularity.getMarkRows(current_mark));
+     bool continue_read = false;
+ 
+     std::vector<float> final_distance;
+@@ -961,14 +931,14 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+             size_t num_rows = reader->readRows(single_range.start_mark, 0, false, single_range.row_num, result);
+             if (num_rows == 0)
+             {
+-                LOG_WARNING(log, "[vectorScanWithoutIndex] part: {}, no data read for column {}", part->name, cols.back().name);
++                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
+                 break;
+             }
+             else if (num_rows != single_range.row_num)
+             {
+                 LOG_WARNING(
+                     log,
+-                    "[vectorScanWithoutIndex] part: {}, read row num doesn't match range row_num: {} - {}",
++                    "Part: {}, read row num doesn't match range row_num: {} - {}",
+                     part->name,
+                     num_rows,
+                     single_range.row_num);
+@@ -1035,11 +1005,11 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+ 
+             if (vector_raw_data.empty())
+             {
+-                LOG_DEBUG(log, "range:{} - {} has data but all data are empty array", single_range.start_mark, single_range.end_mark);
++                LOG_DEBUG(log, "Range: {} - {} has data but all data are empty array", single_range.start_mark, single_range.end_mark);
+                 continue;
+             }
+ 
+-            LOG_DEBUG(log, "part:{}, raw_data size: {}", part->name, vector_raw_data.size());
++            LOG_DEBUG(log, "Part: {}, raw_data size: {}", part->name, vector_raw_data.size());
+ 
+             auto base_data = std::make_shared<VectorIndex::VectorDataset>(
+                 static_cast<int32_t>(actual_id_in_range.size()), static_cast<int32_t>(dim), const_cast<float *>(vector_raw_data.data()));
+@@ -1048,13 +1018,13 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+ 
+             LOG_DEBUG(
+                 log,
+-                "part_name: {}, num_rows: {}, vector index name: {}, path: {}",
++                "Part: {}, num_rows: {}, vector index name: {}, path: {}",
+                 part->name,
+                 num_rows,
+                 "brute force",
+                 part->getFullPath());
+         }
+-        LOG_DEBUG(log, "part:{}, num_rows_read: {}, filter read:{}", part->name, num_rows_read, filter_parsed);
++        LOG_DEBUG(log, "Part: {}, num_rows_read: {}, filter read:{}", part->name, num_rows_read, filter_parsed);
+     }
+     else
+     {
+@@ -1077,11 +1047,11 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+                 }
+             }
+ 
+-            LOG_DEBUG(log, "[vectorScanWithoutIndex] part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
++            LOG_DEBUG(log, "Part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
+ 
+             if (num_rows == 0)
+             {
+-                LOG_WARNING(log, "[vectorScanWithoutIndex] part: {}, no data read for column {}", part->name, cols.back().name);
++                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
+                 break;
+             }
+ 
+@@ -1121,23 +1091,23 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+                 }
+             }
+ 
+-            LOG_DEBUG(log, "part: {}, raw_data size: {}", part->name, vector_raw_data.size());
++            LOG_DEBUG(log, "Part: {}, raw_data size: {}", part->name, vector_raw_data.size());
+ 
+             int deleted_row_num = 0;
+             if (part->storage.hasLightweightDeletedMask())
+             {
+-                LOG_DEBUG(log, "[vectorScanWithoutIndex] try to get row exists col, result size: {}", result.size());
++                LOG_DEBUG(log, "Try to get row exists col, result size: {}", result.size());
+                 const auto& row_exists_col = result[1];
+                 if (row_exists_col)
+                 {
+                     const ColumnUInt8 * col = checkAndGetColumn<ColumnUInt8>(row_exists_col.get());
+                     const auto & col_data = col->getData();
+-                    LOG_DEBUG(log, "[vectorScanWithoutIndex] col data size: {}", col_data.size());
++                    LOG_DEBUG(log, "Col data size: {}", col_data.size());
+                     for (int i = 0; i < col_data.size(); i++)
+                     {
+                         if (!col_data[i])
+                         {
+-                            LOG_DEBUG(log, "[vectorScanWithoutIndex] unset: {}", num_rows_read + i);
++                            LOG_DEBUG(log, "Unset: {}", num_rows_read + i);
+                             ++deleted_row_num;
+                             row_exists->unset(num_rows_read + i);
+                         }
+@@ -1156,7 +1126,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+ 
+             LOG_DEBUG(
+                 log,
+-                "part_name: {}, num_rows: {}, vector index name: {}, path: {}",
++                "Part: {}, num_rows: {}, vector index name: {}, path: {}",
+                 part->name,
+                 num_rows,
+                 "brute force",
+@@ -1164,7 +1134,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+         }
+     }
+ 
+-    LOG_DEBUG(log, "part_name: {}, total num rows read: {}", part->name, num_rows_read);
++    LOG_DEBUG(log, "Part: {}, total num rows read: {}", part->name, num_rows_read);
+ 
+     /// batch search case
+     if (is_batch)
+@@ -1191,7 +1161,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
+         {
+             if (final_id[label] > -1 && row_exists->test(final_id[label]))
+             {
+-                LOG_DEBUG(log, "[vectorScan] label: {}, distance: {}", final_id[label], final_distance[label]);
++                LOG_DEBUG(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);
+                 label_column->insert(final_id[label]);
+                 distance_column->insert(final_distance[label]);
+             }
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp b/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
+index eb3081c420..9384b2a1dc 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanUtils.cpp
+@@ -61,14 +61,15 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
+     /// distance, data_part_name, label
+     std::vector<std::tuple<float, String, uint32_t>> all_result;
+     std::unordered_map<String, RangesInDataPart> part_map;
+-    LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] parts_with_ranges size: {}", parts_with_ranges.size());
++    Poco::Logger const * log = &Poco::Logger::get("MergeTreeVectorScanUtils");
++    LOG_DEBUG(log, "parts_with_ranges size: {}", parts_with_ranges.size());
+ 
+     for (auto & part_with_ranges : parts_with_ranges)
+     {
+         VectorScanResultPtr result = part_with_ranges.vector_scan_manager->getVectorScanResult();
+         if (!result)
+         {
+-            LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] result is empty");
++            LOG_DEBUG(log, "Result is empty");
+             continue;
+         }
+         const ColumnUInt32 * label_column = checkAndGetColumn<ColumnUInt32>(result->result_columns[0].get());
+@@ -90,8 +91,6 @@ void mergeDataPartsResult(RangesInDataParts & parts_with_ranges, int top_k, cons
+ 
+     pdqsort(all_result.begin(), all_result.end(), comparator);
+ 
+-    LOG_DEBUG(&Poco::Logger::get("MergeTreeVectorScanUtils"), "[mergeDataPartsResult] after sort");
+-
+     for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), all_result.size()); ++i)
+     {
+         RangesInDataPart & p = part_map[get<1>(all_result[i])];
+@@ -146,7 +145,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
+             {
+                 LOG_TRACE(
+                     &Poco::Logger::get("MergeTreeVectorScanUtils"),
+-                    "[need_this_range] keep range: {}-{} in part: {}",
++                    "Keep range: {}-{} in part: {}",
+                     begin,
+                     end,
+                     part->name);
+diff --git a/src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp b/src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp
+index e2062eefeb..c33dece69e 100644
+--- a/src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp
++++ b/src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp
+@@ -212,7 +212,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const ASTPtr & node,
+         bool require_distance_func = false;
+         for (const auto & col : queried_columns)
+         {
+-            LOG_DEBUG(log, "[MergeTreeWhereOptimizer] queried column: {}", col);
++            LOG_DEBUG(log, "Queried column: {}", col);
+             if (isVectorScanFunc(col))
+             {
+                 require_distance_func = true;
+@@ -220,7 +220,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const ASTPtr & node,
+             }
+         }
+ 
+-        LOG_DEBUG(log, "[MergeTreeWhereOptimizer] containVectorScanFunc(cond.node): {}", containVectorScanFunc());
++        LOG_DEBUG(log, "containVectorScanFunc(cond.node): {}", containVectorScanFunc());
+ 
+         cond.viable =
+             /// Condition depend on some column. Constant expressions are not moved.
+diff --git a/src/Storages/MergeTree/VectorIndexEntry.h b/src/Storages/MergeTree/VectorIndexEntry.h
+index de8443eba2..41430ad96f 100644
+--- a/src/Storages/MergeTree/VectorIndexEntry.h
++++ b/src/Storages/MergeTree/VectorIndexEntry.h
+@@ -14,6 +14,7 @@ struct VectorIndexEntry
+     String vector_index_name;
+     MergeTreeData & data;
+     bool is_replicated;
++    Poco::Logger * log = &Poco::Logger::get("vectorIndexEntry");
+ 
+     VectorIndexEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, const bool is_replicated_)
+      : part_name(std::move(part_name_))
+@@ -21,7 +22,7 @@ struct VectorIndexEntry
+      , data(data_)
+      , is_replicated(is_replicated_)
+     {
+-        LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[constructor] currently_vector_indexing_parts add: {}", part_name);
++        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", part_name);
+         /// insert for replicated merge tree to avoid creating log entry multiple times for the same part.
+         std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
+         data.currently_vector_indexing_parts.insert(part_name);
+@@ -32,7 +33,7 @@ struct VectorIndexEntry
+         /// VectorIndexEntry will be distroyed for replicated merge tree after create log entry.
+         if (!is_replicated)
+         {
+-            LOG_DEBUG(&Poco::Logger::get("vectorIndexEntry"), "[deconstructor] currently_vector_indexing_parts remove: {}", part_name);
++            LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", part_name);
+ 
+             std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
+             data.currently_vector_indexing_parts.erase(part_name);
+diff --git a/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp b/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
+index 2a9c52642c..751802cff3 100644
+--- a/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
++++ b/src/Storages/MergeTree/VectorIndexMergeTreeTask.cpp
+@@ -21,7 +21,7 @@ bool VectorIndexMergeTreeTask::executeStep()
+ {
+     if (vector_index_entry != nullptr)
+     {
+-        LOG_DEBUG(log, "execute vector index build for : {} slow_mode: {}", vector_index_entry->part_name, slow_mode);
++        LOG_DEBUG(log, "Execute vector index build for : {} slow_mode: {}", vector_index_entry->part_name, slow_mode);
+         try
+         {
+             builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, false, slow_mode);
+@@ -30,7 +30,7 @@ bool VectorIndexMergeTreeTask::executeStep()
+         catch (...)
+         {
+             String exception_message = getCurrentExceptionMessage(false);
+-            LOG_ERROR(log, "something went wrong during index building: {}", exception_message);
++            LOG_ERROR(log, "Something went wrong during index building: {}", exception_message);
+             storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, false, exception_message);
+ 
+             auto part = storage.getActiveContainingPart(vector_index_entry->part_name);
+@@ -49,14 +49,14 @@ UInt64 VectorIndexMergeTreeTask::getPriority()
+ void VectorIndexMergeTreeTask::onCompleted()
+ {
+     if (vector_index_entry)
+-        LOG_DEBUG(log, "on complete: {}", vector_index_entry->part_name);
++        LOG_DEBUG(log, "On complete: {}", vector_index_entry->part_name);
+ 
+     task_result_callback(true);
+ }
+ 
+ VectorIndexMergeTreeTask::~VectorIndexMergeTreeTask()
+ {
+-    LOG_TRACE(log, "destroy vector index job with vector index entry: {}", vector_index_entry->part_name);
++    LOG_TRACE(log, "Destroy vector index job with vector index entry: {}", vector_index_entry->part_name);
+ }
+ 
+ }
+diff --git a/src/Storages/MergeTree/VectorIndexMergeTreeTask.h b/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
+index eef9f6ff6f..4503b90ee7 100644
+--- a/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
++++ b/src/Storages/MergeTree/VectorIndexMergeTreeTask.h
+@@ -37,7 +37,7 @@ public:
+         , slow_mode(slow_mode_)
+         , log(&Poco::Logger::get("VectorIndexMergeTreeTask"))
+     {
+-        LOG_INFO(log, "create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
++        LOG_INFO(log, "Create VectorIndexMergeTreeTask, slow mode: {}", slow_mode);
+     }
+ 
+     bool executeStep() override;
+diff --git a/src/Storages/StorageMergeTree.cpp b/src/Storages/StorageMergeTree.cpp
+index f44af68481..a8702bb9b9 100644
+--- a/src/Storages/StorageMergeTree.cpp
++++ b/src/Storages/StorageMergeTree.cpp
+@@ -252,7 +252,7 @@ void StorageMergeTree::read(
+     if (auto plan = reader.read(
+         column_names, storage_snapshot, query_info, local_context, max_block_size, num_streams, processed_stage, nullptr, enable_parallel_reading))
+         query_plan = std::move(*plan);
+-    LOG_DEBUG(log, "[StorageMergeTree::read] after QueryPlan MergeTree read");
++    LOG_DEBUG(log, "After QueryPlan MergeTree read");
+ 
+ }
+ 
+diff --git a/src/Storages/VectorIndexCommands.cpp b/src/Storages/VectorIndexCommands.cpp
+index 06c802f8f0..e72c5978bc 100644
+--- a/src/Storages/VectorIndexCommands.cpp
++++ b/src/Storages/VectorIndexCommands.cpp
+@@ -37,7 +37,7 @@ std::optional<VectorIndexCommand> VectorIndexCommand::parse(ASTAlterCommand * co
+         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
+         res.column_name = getIdentifierName(command->column);
+         res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
+-        LOG_DEBUG(log, "add vector index: name: {}, index_type: {}", res.index_name, res.index_type);
++        LOG_DEBUG(log, "Aadd vector index: name: {}, index_type: {}", res.index_name, res.index_type);
+         return res;
+     }
+     else if (command->type == ASTAlterCommand::DROP_VECTOR_INDEX)
+@@ -47,7 +47,7 @@ std::optional<VectorIndexCommand> VectorIndexCommand::parse(ASTAlterCommand * co
+         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
+         res.column_name = getIdentifierName(command->column);
+         res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
+-        LOG_DEBUG(log, "drop vector index: name: {}, index_type: {}", res.index_name, res.index_type);
++        LOG_DEBUG(log, "Drop vector index: name: {}, index_type: {}", res.index_name, res.index_type);
+         return res;
+     }
+     else
+diff --git a/src/VectorIndex/Autotuner.cpp b/src/VectorIndex/Autotuner.cpp
+index 6a0b2a05eb..d2f6f1c8c3 100644
+--- a/src/VectorIndex/Autotuner.cpp
++++ b/src/VectorIndex/Autotuner.cpp
+@@ -15,7 +15,7 @@ void Autotuner::start()
+ void Autotuner::run()
+ {
+     go = true;
+-    LOG_INFO(log, "starting index autotuner");
++    LOG_INFO(log, "Start index autotuner");
+     while (true)
+     {
+         if (quit)
+diff --git a/src/VectorIndex/BruteForceSearch.cpp b/src/VectorIndex/BruteForceSearch.cpp
+index d570a2e8f9..ae9a64494e 100644
+--- a/src/VectorIndex/BruteForceSearch.cpp
++++ b/src/VectorIndex/BruteForceSearch.cpp
+@@ -7,21 +7,22 @@ namespace VectorIndex
+ Status tryBruteForceSearch(
+     const float * x, const float * y, size_t d, size_t k, size_t nx, size_t ny, int64_t * result_id, float * distance, const Metrics & m)
+ {
++    Poco::Logger * log = &Poco::Logger::get("bruteforce");
+     if (m == IP)
+     {
+-        LOG_DEBUG(&Poco::Logger::get("bruteforce"), "metric is IP");
++        LOG_DEBUG(log, "Metric is IP");
+         faiss::float_minheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
+         faiss::knn_inner_product(x, y, d, nx, ny, &res, nullptr);
+     }
+     else if (m == L2)
+     {
+-        LOG_DEBUG(&Poco::Logger::get("bruteforce"), "metric is L2");
++        LOG_DEBUG(log, "Metric is L2");
+         faiss::float_maxheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
+         faiss::knn_L2sqr(x, y, d, nx, ny, &res, nullptr);
+     }
+     else if (m == Cosine)
+     {
+-        LOG_DEBUG(&Poco::Logger::get("bruteforce"), "metric is Cosine");
++        LOG_DEBUG(log, "Metric is Cosine");
+         faiss::float_maxheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
+         faiss::knn_cosine(x, y, d, nx, ny, &res, nullptr);
+     }
+diff --git a/src/VectorIndex/CacheManager.cpp b/src/VectorIndex/CacheManager.cpp
+index 43577a5705..5f0f1e8eb3 100644
+--- a/src/VectorIndex/CacheManager.cpp
++++ b/src/VectorIndex/CacheManager.cpp
+@@ -51,7 +51,7 @@ void CacheManager::put(const CacheKey& cache_key, IndexWithMetaPtr index)
+     {
+         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
+     }
+-    LOG_INFO(log, "VectorIndexCache put cache_key={}", cache_key.toString());
++    LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
+ 
+     IndexAndMutexPtr iam_ptr = std::make_shared<IndexAndMutex>(index, nullptr);
+ 
+@@ -65,7 +65,7 @@ size_t CacheManager::countItem() const
+ 
+ void CacheManager::forceExpire(const CacheKey& cache_key)
+ {
+-    LOG_INFO(log, "VectorIndexCache forceExpire cache_key={}", cache_key.toString());
++    LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
+     return cache_->remove(cache_key);
+ }
+ 
+@@ -75,7 +75,7 @@ void CacheManager::startLoading(const CacheKey& cache_key)
+     {
+         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "startLoading: cache not allocated");
+     }
+-    LOG_INFO(log, "VectorIndexCache startLoading cache_key={}", cache_key.toString());
++    LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
+     std::shared_ptr<std::mutex> new_mutex = std::make_shared<std::mutex>();
+ 
+     std::shared_ptr<IndexAndMutex> im_ptr = std::make_shared<IndexAndMutex>(nullptr, new_mutex);
+diff --git a/src/VectorIndex/CompositeIndexReader.cpp b/src/VectorIndex/CompositeIndexReader.cpp
+index a2c7d087f4..87d39912f5 100644
+--- a/src/VectorIndex/CompositeIndexReader.cpp
++++ b/src/VectorIndex/CompositeIndexReader.cpp
+@@ -64,20 +64,20 @@ void CompositeIndexReader::read_part()
+     reader.seekg(sizeof(int64_t));
+     int64_t binary_length;
+     reader.read(&binary_length, sizeof(binary_length));
+-    LOG_INFO(log, "[readPart] compressed data size: {}", binary_length);
++    LOG_DEBUG(log, "Compressed data size: {}", binary_length);
+ 
+     /// third 8 bytes are meta recording uncompressed binary size of index
+     reader.seekg(sizeof(int64_t) * 2);
+     int64_t binary_length_original;
+     reader.read(&binary_length_original, sizeof(binary_length_original));
+     buffer.resize(binary_length_original + COMPRESSION_ADDITIONAL_BYTES_AT_END_OF_BUFFER);
+-    LOG_INFO(log, "[readPart] uncompressed data size: {}", binary_length_original);
++    LOG_DEBUG(log, "Uncompressed data size: {}", binary_length_original);
+ 
+     /// fourth 8 bytes records total vectors stored, this is repeated many times. Could be d, or not.
+     reader.seekg(sizeof(int64_t) * 3);
+     int64_t total_vec_bin;
+     reader.read(&total_vec_bin, sizeof(total_vec_bin));
+-    LOG_INFO(log, "[readPart] total vectors: {}", total_vec_bin);
++    LOG_DEBUG(log, "Total vectors: {}", total_vec_bin);
+ 
+     /// finally we have the compressed binaries
+     reader.seekg(sizeof(int64_t) * 4);
+@@ -90,7 +90,7 @@ void CompositeIndexReader::read_part()
+ 
+     current_buffer_start = current_loaded_size;
+     current_loaded_size += binary_length_original;
+-    LOG_INFO(log, "[readPart] current_buffer_start: {}, current_loaded_size: {}", current_buffer_start, current_loaded_size);
++    LOG_DEBUG(log, "current_buffer_start: {}, current_loaded_size: {}", current_buffer_start, current_loaded_size);
+ 
+     if (final_mark && current_loaded_size != original_binary_size)
+     {
+@@ -112,7 +112,6 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
+         if (offset < static_cast<size_t>(current_loaded_size))
+         {
+             size_t len = current_loaded_size - offset;
+-            LOG_DEBUG(log, "offset: {}, len: {}, to_read: {}", offset, len, to_read);
+             memcpy(ptr, &buffer[offset - current_buffer_start], len);
+             offset += len;
+             ret += len;
+@@ -126,7 +125,6 @@ size_t CompositeIndexReader::operator()(void * ptr, size_t size, size_t nitems)
+ 
+     if (offset + to_read <= static_cast<size_t>(current_loaded_size))
+     {
+-        LOG_DEBUG(log, "offset: {}, to_read: {}", offset, to_read);
+         memcpy(ptr, &buffer[offset - current_buffer_start], to_read);
+         offset += to_read;
+         ret += to_read;
+diff --git a/src/VectorIndex/FlatIndex.cpp b/src/VectorIndex/FlatIndex.cpp
+index 7c6752557a..4feae15e7f 100644
+--- a/src/VectorIndex/FlatIndex.cpp
++++ b/src/VectorIndex/FlatIndex.cpp
+@@ -51,7 +51,7 @@ void FlatIndex::search(
+     int32_t num_query = dataset->getVectorNum();
+     float * query_datas = dataset->getData();
+ 
+-    LOG_DEBUG(log, "[search] raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
++    LOG_DEBUG(log, "Raw data size: {}", reinterpret_cast<faiss::IndexFlatFilter *>(index.get())->xb.size());
+ 
+     reinterpret_cast<faiss::IndexFlatFilter *>(index.get())
+         ->search(num_query, query_datas, topK, distances, result_id, inner_bit_map.get());
+diff --git a/src/VectorIndex/HNSWIndex.cpp b/src/VectorIndex/HNSWIndex.cpp
+index 71b5cd42ce..2ce744445e 100644
+--- a/src/VectorIndex/HNSWIndex.cpp
++++ b/src/VectorIndex/HNSWIndex.cpp
+@@ -38,7 +38,6 @@ void HNSWIndex::train(const VectorDatasetPtr dataset, int64_t total)
+ 
+ void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
+ {
+-    Poco::Logger * log = &Poco::Logger::get("HNSW");
+     if (index != nullptr)
+     {
+         int total_vectors = dataset->getVectorNum();
+@@ -62,11 +61,9 @@ void HNSWIndex::addWithoutId(const VectorDatasetPtr dataset)
+ void HNSWIndex::search(
+     const VectorDatasetPtr dataset, int32_t topK, float * distances, int64_t * result_id, Parameters & params, GeneralBitMapPtr filter)
+ {
+-    Poco::Logger * log = &Poco::Logger::get("HNSW");
+-
+     if (index == nullptr)
+     {
+-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not intialized");
++        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "search: index not initialized");
+     }
+     int total_vectors = dataset->getVectorNum();
+     float * __restrict data_grid = dataset->getData();
+@@ -74,7 +71,7 @@ void HNSWIndex::search(
+     hnswlib::bitMapPtr inner_bit_map = std::shared_ptr<hnswlib::bitMap>();
+     inner_bit_map.reset(reinterpret_cast<hnswlib::bitMap *>(convertInnerBitMap(filter)));
+     //TODO add omp resource control
+-    LOG_DEBUG(log, "searching in HNSW, current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
++    LOG_DEBUG(log, "Current element count:{}, max:{}", index->cur_element_count, index->max_elements_);
+     int ef_s = 50;
+     if (params.contains("ef_s"))
+     {
+@@ -217,27 +214,22 @@ bool HNSWIndex::compare(const VectorIndex & other)
+     const HNSWIndex * other_p = dynamic_cast<const HNSWIndex *>(&other);
+     if (other_p == nullptr)
+     {
+-        LOG_INFO(&Poco::Logger::get("HNSW"), "nullptr");
+         return false;
+     }
+     if (other_p->ef_c != ef_c)
+     {
+-        LOG_INFO(&Poco::Logger::get("HNSW"), "ef_c");
+         return false;
+     }
+     if (other_p->me != me)
+     {
+-        LOG_INFO(&Poco::Logger::get("HNSW"), "me");
+         return false;
+     }
+     if (other_p->neighbor != neighbor)
+     {
+-        LOG_INFO(&Poco::Logger::get("HNSW"), "neighbor");
+         return false;
+     }
+     if (other_p->dimension != dimension)
+     {
+-        LOG_INFO(&Poco::Logger::get("HNSW"), "dimension");
+         return false;
+     }
+     return true;
+diff --git a/src/VectorIndex/HNSWIndex.h b/src/VectorIndex/HNSWIndex.h
+index cbc0c0128d..a7311c03e0 100644
+--- a/src/VectorIndex/HNSWIndex.h
++++ b/src/VectorIndex/HNSWIndex.h
+@@ -68,6 +68,8 @@ private:
+     int neighbor = 16;
+     int ef_c = 100;
+ 
++    Poco::Logger * log = &Poco::Logger::get("HNSW");
++
+     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
+     BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
+ };
+diff --git a/src/VectorIndex/HNSWPQ.cpp b/src/VectorIndex/HNSWPQ.cpp
+index 066674dd2e..3ec54fe3bd 100644
+--- a/src/VectorIndex/HNSWPQ.cpp
++++ b/src/VectorIndex/HNSWPQ.cpp
+@@ -134,7 +134,7 @@ void * HNSWpq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
+     return new_map;
+ }
+ 
+-BinaryPtr HNSWpq::convertStructToBinary(uint8_t * index_data, size_t written_size)
++BinaryPtr HNSWpq::convertStructToBinary(uint8_t * index_data, uint64_t written_size)
+ {
+     BinaryPtr serial_index = std::make_shared<Binary>();
+     serial_index->data = index_data;
+diff --git a/src/VectorIndex/HNSWPQ.h b/src/VectorIndex/HNSWPQ.h
+index 8e8fe93e2f..839fdc07e1 100644
+--- a/src/VectorIndex/HNSWPQ.h
++++ b/src/VectorIndex/HNSWPQ.h
+@@ -74,6 +74,6 @@ private:
+     int pq_m = 8;
+     int bit_size = 8;
+     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
+-    BinaryPtr convertStructToBinary(uint8_t * index_data, size_t written_size) override;
++    BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
+ };
+ }
+diff --git a/src/VectorIndex/HNSWSQ.cpp b/src/VectorIndex/HNSWSQ.cpp
+index 73d7c8dfe1..e672637c6c 100644
+--- a/src/VectorIndex/HNSWSQ.cpp
++++ b/src/VectorIndex/HNSWSQ.cpp
+@@ -141,7 +141,7 @@ void * HNSWsq::convertInnerBitMap(GeneralBitMapPtr outerBitMap)
+     return new_map;
+ }
+ 
+-BinaryPtr HNSWsq::convertStructToBinary(uint8_t * index_data, size_t written_size)
++BinaryPtr HNSWsq::convertStructToBinary(uint8_t * index_data, uint64_t written_size)
+ {
+     BinaryPtr serial_index = std::make_shared<Binary>();
+     serial_index->data = index_data;
+diff --git a/src/VectorIndex/HNSWSQ.h b/src/VectorIndex/HNSWSQ.h
+index eb92ff648d..5df28f36b4 100644
+--- a/src/VectorIndex/HNSWSQ.h
++++ b/src/VectorIndex/HNSWSQ.h
+@@ -66,7 +66,7 @@ private:
+     faiss::ScalarQuantizer::QuantizerType quantizer = faiss::ScalarQuantizer::QT_8bit;
+ 
+     void * convertInnerBitMap(GeneralBitMapPtr sharedPtr) override;
+-    BinaryPtr convertStructToBinary(uint8_t * index_data, size_t written_size) override;
++    BinaryPtr convertStructToBinary(uint8_t * index_data, uint64_t written_size) override;
+     faiss::ScalarQuantizer::QuantizerType parse_SQ_string(String bits);
+ };
+ }
+diff --git a/src/VectorIndex/IVFFlatIndex.cpp b/src/VectorIndex/IVFFlatIndex.cpp
+index 56a6ee2e5f..5564c7987a 100644
+--- a/src/VectorIndex/IVFFlatIndex.cpp
++++ b/src/VectorIndex/IVFFlatIndex.cpp
+@@ -39,7 +39,7 @@ void IVFFlatIndex::train(const VectorDatasetPtr dataset, int64_t total)
+     faiss::IndexFlat * coarse_quantizer = new faiss::IndexFlat(dimension, metrictype);
+     int nlist = ncentroids > dataset->getVectorNum() / min_centroid_size ? dataset->getVectorNum() / min_centroid_size : ncentroids;
+     nlist = std::max(1, nlist);
+-    LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "[build] nlist: {}", nlist);
++    LOG_DEBUG(log, "Train index: nlist: {}", nlist);
+     index = std::make_shared<faiss::IndexIVFFlatFilter>(coarse_quantizer, dimension, nlist, metrictype);
+     faiss::IndexIVFFlatFilter * ivfflat = reinterpret_cast<faiss::IndexIVFFlatFilter *>(index.get());
+     ivfflat->own_fields = true;
+@@ -51,7 +51,7 @@ void IVFFlatIndex::train(const VectorDatasetPtr dataset, int64_t total)
+     }
+     else
+     {
+-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "[build] profiler is false, vector num: {}", dataset->getVectorNum());
++        LOG_DEBUG(log, "Profiler is false, vector num: {}", dataset->getVectorNum());
+         ivfflat->train(dataset->getVectorNum(), dataset->getData());
+     }
+ }
+@@ -115,7 +115,7 @@ void IVFFlatIndex::search(
+         }
+         if (!index_real->tuned)
+         {
+-            LOG_WARNING(&Poco::Logger::get("IVFFlatIndex"), "the index is too small to be tuned, not using accuracy bounding.");
++            LOG_WARNING(log, "The index is too small to be tuned, not using accuracy bounding.");
+             nprobe = INT32_MAX; ///since the datapart is too small, we might just search its entirety.
+         }
+     } 
+@@ -157,8 +157,8 @@ void IVFFlatIndex::search(
+         }
+         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
+         LOG_DEBUG(
+-            &Poco::Logger::get("IVFFlatIndex"),
+-            "[search] nprobe: {}, parallel mode: {}, num_t: {}",
++            log,
++            "Index search: nprobe: {}, parallel mode: {}, num_t: {}",
+             nprobe,
+             ivf_params.parallel_mode,
+             num_thread_for_vector);
+@@ -170,8 +170,8 @@ void IVFFlatIndex::search(
+         ivf_params.acc = acc;
+         omp_set_num_threads(std::max(1, (num_thread_for_vector / current_running_task)));
+         LOG_DEBUG(
+-            &Poco::Logger::get("IVFFlatIndex"),
+-            "[search] acc requirement: {}, parallel mode: {}, num_t: {}",
++            log,
++            "Index search: acc requirement: {}, parallel mode: {}, num_t: {}",
+             acc,
+             ivf_params.parallel_mode,
+             num_thread_for_vector);
+@@ -265,7 +265,7 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
+         memcpy(query.data(), base->getData(), sizeof(float) * default_query_size * default_topk);
+         std::vector<float> gt_dis(default_topk * default_query_size);
+         std::vector<int64_t> gt(default_topk * default_query_size);
+-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "get gt for {} queries", default_query_size);
++        LOG_DEBUG(log, "Get gt for {} queries", default_query_size);
+         faiss::bitMapPtr bits = std::make_shared<faiss::bitMap>(base->getVectorNum());
+         memset(bits->bitmap, 255, (base->getVectorNum() / 8) + 1);
+         faiss::IVFSearchParameters param;
+@@ -279,14 +279,14 @@ void IVFFlatIndex::tune(VectorDatasetPtr base, int topK)
+         index_real->search(default_query_size, query.data(), default_topk, gt_dis.data(), gt.data(), &param, bits.get());
+ 
+         faiss::Error_sys profiled_index(index_real, default_query_size, default_topk);
+-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "training profiler");
++        LOG_DEBUG(log, "Training profiler");
+         profiled_index.set_gt(gt_dis.data(), gt.data());
+         profiled_index.sys_train(default_query_size, query.data(), std_m, multiplier);
+         if(me==Metrics::Cosine){
+             index_real->metric_type = faiss::METRIC_Cosine;
+             index_real->quantizer->metric_type = faiss::METRIC_Cosine;
+         }
+-        LOG_INFO(&Poco::Logger::get("IVFFlatIndex"), "profiler train completed");
++        LOG_DEBUG(log, "Profiler train completed");
+     }
+     else
+     {
+diff --git a/src/VectorIndex/IVFFlatIndex.h b/src/VectorIndex/IVFFlatIndex.h
+index ae1fbf6902..ba117dbca0 100644
+--- a/src/VectorIndex/IVFFlatIndex.h
++++ b/src/VectorIndex/IVFFlatIndex.h
+@@ -25,7 +25,8 @@ namespace VectorIndex
+ class IVFFlatIndex : public FaissIndex
+ {
+ public:
+-    IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters) : FaissIndex(it_, im_, me_, dimension_)
++    IVFFlatIndex(IndexType it_, IndexMode im_, Metrics me_, int dimension_, Parameters parameters)
++        : FaissIndex(it_, im_, me_, dimension_), log(&Poco::Logger::get("IVFFlat"))
+     {
+         getMyParameters(parameters);
+     }
+@@ -52,5 +53,6 @@ private:
+     float std_m = 6.0;
+     float multiplier = 1.3;
+     bool profiler = false;
++    Poco::Logger * log;
+ };
+ }
+diff --git a/src/VectorIndex/IVFSQIndex.cpp b/src/VectorIndex/IVFSQIndex.cpp
+index 4853d2ccb4..a579274284 100644
+--- a/src/VectorIndex/IVFSQIndex.cpp
++++ b/src/VectorIndex/IVFSQIndex.cpp
+@@ -37,7 +37,7 @@ void IVFSQIndex::train(VectorDatasetPtr dataset, int64_t total)
+     nlist = std::max(1, nlist);
+     index = std::make_shared<faiss::IndexIVFSQFilter>(coarse_quantizer, dimension, nlist, quantizer, metrictype);
+     reinterpret_cast<faiss::IndexIVFSQFilter *>(index.get())->own_fields = true;
+-    LOG_DEBUG(&Poco::Logger::get("IVFSQIndex"), "vector num: {}, raw data size: {}, dim: {}",
++    LOG_DEBUG(log, "Vector num: {}, raw data size: {}, dim: {}",
+         dataset->getVectorNum(), dataset->getRawVector().size(), dimension);
+     index->train(dataset->getVectorNum(), dataset->getData());
+ }
+diff --git a/src/VectorIndex/IVFSQIndex.h b/src/VectorIndex/IVFSQIndex.h
+index c761b8d41d..601e72236e 100644
+--- a/src/VectorIndex/IVFSQIndex.h
++++ b/src/VectorIndex/IVFSQIndex.h
+@@ -49,5 +49,7 @@ private:
+ 
+     int ncentroids = 1024;
+     faiss::ScalarQuantizer::QuantizerType quantizer = faiss::ScalarQuantizer::QT_8bit;
++
++    Poco::Logger * log = &Poco::Logger::get("IVFSQ");
+ };
+ }
+diff --git a/src/VectorIndex/MergeUtils.h b/src/VectorIndex/MergeUtils.h
+index 4da7901614..ab6d0b0772 100644
+--- a/src/VectorIndex/MergeUtils.h
++++ b/src/VectorIndex/MergeUtils.h
+@@ -46,7 +46,7 @@ static std::vector<SegmentId> getAllSegmentIds(const String & data_path, const D
+ 
+         for (const auto & old_part : old_parts)
+         {
+-            LOG_DEBUG(log, "segments: merged-{}-{}", old_part.id, old_part.name);
++            LOG_DEBUG(log, "Segments: merged-{}-{}", old_part.id, old_part.name);
+ 
+             SegmentId segment_id(data_path, data_part->name, old_part.name, index_name, index_column, old_part.id);
+             segment_ids.emplace_back(std::move(segment_id));
+@@ -73,12 +73,12 @@ static bool containRowIdsMaps(const String & data_path)
+ }
+ 
+ /// Remove old parts' vector index from cache manager and data part.
+-static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part)
++static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part, const Poco::Logger * log)
+ {
+     if (!data_part || !data_part->isStoredOnDisk() || !data_part->containRowIdsMaps())
+         return;
+ 
+-    LOG_INFO(&Poco::Logger::get("removeRowIdsMaps"), "try to remove row ids maps files in {}", data_part->getFullPath());
++    LOG_DEBUG(log, "Try to remove row ids maps files in {}", data_part->getFullPath());
+     /// currently only consider one vector index
+     auto metadata_snapshot = data_part->storage.getInMemoryMetadataPtr();
+     auto vec_index_desc = metadata_snapshot->vec_indices[0];
+diff --git a/src/VectorIndex/VectorIndexCommon.h b/src/VectorIndex/VectorIndexCommon.h
+index d9d42b41c4..c933a474f9 100644
+--- a/src/VectorIndex/VectorIndexCommon.h
++++ b/src/VectorIndex/VectorIndexCommon.h
+@@ -223,8 +223,7 @@ static inline GeneralBitMapPtr mergeBitMap(GeneralBitMapPtr left, GeneralBitMapP
+             ++bit_size;
+         }
+     }
+-    Poco::Logger * log = &Poco::Logger::get("mergeBitMap");
+-    LOG_DEBUG(log, "[mergeBitMap] bit size: {}, vector_count: {}", bit_size, vector_count);
++    LOG_DEBUG(&Poco::Logger::get("mergeBitMap"), "mergeBitMap: bit size: {}, vector_count: {}", bit_size, vector_count);
+     after_merge->bitmap = bits;
+     after_merge->size = vector_count;
+     return after_merge;
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 869a722ee7..5093008a37 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -39,6 +39,8 @@ std::condition_variable_any cv;
+ int num_thread_for_vector;
+ std::atomic_int count;
+ 
++auto VectorSegmentExecutor::log = &Poco::Logger::get("VectorSegmentExecutor");
++
+ String cutMutVer(const String & part_name)
+ {
+     std::vector<String> tokens;
+@@ -75,7 +77,7 @@ static String dumpBitmap(GeneralBitMapPtr bit_map_ptr)
+ 
+ /// TODO segment_id needs to be dynamic in the future
+ VectorSegmentExecutor::VectorSegmentExecutor(IndexType type_, const SegmentId & segment_id_, Parameters des_, size_t dimension_)
+-    : dimension(dimension_), type(type_), segment_id(segment_id_), log(&Poco::Logger::get("VectorSegmentExecutor")), des(des_)
++    : dimension(dimension_), type(type_), segment_id(segment_id_), des(des_)
+ {
+     std::call_once(once, [&] {
+         int num_threads = omp_get_max_threads();
+@@ -86,7 +88,7 @@ VectorSegmentExecutor::VectorSegmentExecutor(IndexType type_, const SegmentId &
+         num_thread_for_vector = num_threads;
+         omp_set_num_threads(num_thread_for_vector);
+         count.store(0);
+-        LOG_INFO(log, "set omp_num_threads to {}", num_threads);
++        LOG_DEBUG(log, "Set omp_num_threads to {}", num_threads);
+     });
+ }
+ 
+@@ -96,7 +98,6 @@ VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_)
+     , mode(IndexMode::CPU)
+     , me(Metrics::L2)
+     , segment_id(segment_id_)
+-    , log(&Poco::Logger::get("VectorSegmentExecutor"))
+ {
+ }
+ 
+@@ -107,7 +108,7 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
+     {
+         if (!index)
+         {
+-            LOG_INFO(log, "Index type actually created {}", VectorIndexFactory::typeToString(type));
++            LOG_DEBUG(log, "Index type actually created {}", VectorIndexFactory::typeToString(type));
+             if (para_copy.contains("metric_type"))
+             {
+                 me = VectorIndexFactory::createIndexMetrics(para_copy.at("metric_type"));
+@@ -132,7 +133,7 @@ Status VectorSegmentExecutor::buildIndex(VectorDatasetPtr data_set, int64_t tota
+                     int num_procs = omp_get_num_procs();
+                     /// only use half cores
+                     omp_set_num_threads(std::max(1, num_procs / 4));
+-                    LOG_INFO(log, "build index in slow mode, set num threads to {} with omp_get_num_procs {}", std::max(1, num_procs / 4), num_procs);
++                    LOG_DEBUG(log, "Build index in slow mode, set num threads to {} with omp_get_num_procs {}", std::max(1, num_procs / 4), num_procs);
+                 }
+             }
+ 
+@@ -166,7 +167,7 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
+     }
+     catch(const DB::Exception & e)
+     {
+-        LOG_DEBUG(log, "[updateCacheValueWithRowIdsMaps]: Failed to load inverted row ids map entries, error: {}", e.what());
++        LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
+         return;
+     }
+ 
+@@ -203,9 +204,9 @@ Status VectorSegmentExecutor::cache()
+     IndexWithMetaPtr cache_item = std::make_shared<IndexWithMeta>(index, total_vec, op_points, delete_bitmap, des,
+         row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
+ 
+-    LOG_INFO(log, "cache key: {}", segment_id.getCacheKey().toString());
++    LOG_DEBUG(log, "Cache key: {}", segment_id.getCacheKey().toString());
+     mgr->put(segment_id.getCacheKey(), cache_item);
+-    LOG_INFO(log, "num of item after cache {}", mgr->countItem());
++    LOG_DEBUG(log, "Num of item after cache {}", mgr->countItem());
+     return Status();
+ }
+ 
+@@ -228,14 +229,14 @@ Status VectorSegmentExecutor::serialize()
+         {
+             /// Even though we set the max bytes to serialize for serialization,
+             /// it could exceed this amount by accident,then we need to handle the exceeded part.
+-            LOG_INFO(log, "expected segment_size: {}", optimal_segment_size);
++            LOG_DEBUG(log, "expected segment_size: {}", optimal_segment_size);
+             index_binary = index->serialize(optimal_segment_size, last_part);
+             if (index_binary->size <= 0)
+             {
+                 break;
+             }
+             binary_total_size += index_binary->size;
+-            LOG_INFO(log, "binary_total_size: {}", binary_total_size);
++            LOG_DEBUG(log, "binary_total_size: {}", binary_total_size);
+             int64_t actual_all = index_binary->size;
+             int64_t written = 0;
+             while (actual_all > 0)
+@@ -259,7 +260,7 @@ Status VectorSegmentExecutor::serialize()
+     }
+     catch (const std::exception & e)
+     {
+-        LOG_ERROR(log, "serialze: failed due to {}", e.what());
++        LOG_ERROR(log, "Failed to serialize due to {}", e.what());
+         return Status(1, e.what());
+     }
+ }
+@@ -279,12 +280,12 @@ Status VectorSegmentExecutor::startWrite()
+     {
+         if (!ready_flag_writer.open(ready_file_path, true))
+         {
+-            LOG_ERROR(log, "fail to open {}", ready_file_path);
++            LOG_ERROR(log, "Fail to open {}", ready_file_path);
+             return Status(5, "not able to open ready flag for write!");
+         }
+     }
+     String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
+-    LOG_INFO(log, "{}, length{}", all_string_together, all_string_together.length());
++    LOG_DEBUG(log, "{}, length: {}", all_string_together, all_string_together.length());
+     ready_flag_writer.seekp(0, seekdir::end);
+     ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
+     ready_flag_writer.close();
+@@ -295,9 +296,9 @@ Status VectorSegmentExecutor::writePart(bool final, int segment_count, uint8_t *
+ {
+     std::string part_id = segment_id.getFullPath() + "_" + ItoS(segment_count) + VECTOR_INDEX_FILE_SUFFIX;
+     BinaryPtr index_binary_compressed = std::make_shared<Binary>();
+-    LOG_INFO(log, "Size of binary before compress: {}", index_segment_size);
++    LOG_DEBUG(log, "Size of binary before compress: {}", index_segment_size);
+     compressWithCheckSum(cmb, index_segment_offset, index_segment_size, index_binary_compressed);
+-    LOG_INFO(log, "Size of binary after compress: {}", index_binary_compressed->size);
++    LOG_DEBUG(log, "Size of binary after compress: {}", index_binary_compressed->size);
+     DiskIOWriter writer;
+     if (!writer.open(part_id, false))
+     {
+@@ -332,9 +333,6 @@ Status VectorSegmentExecutor::finishWrite(int64_t binary_total_size)
+     String paras;
+     for (auto & s : des)
+     {
+-        LOG_INFO(log, "{}", s.first);
+-        LOG_INFO(log, "{}", s.second);
+-        LOG_INFO(log, "{}", paras);
+         paras = paras + s.first + ",";
+         paras = paras + s.second + ",";
+     }
+@@ -345,12 +343,12 @@ Status VectorSegmentExecutor::finishWrite(int64_t binary_total_size)
+     {
+         if (!ready_flag_writer.open(ready_file_path, true))
+         {
+-            LOG_ERROR(log, "fail to open {}", ready_file_path);
++            LOG_ERROR(log, "Fail to open {}", ready_file_path);
+             return Status(5, "not able to open ready flag for write!");
+         }
+     }
+     String all_string_together = index_type + ";" + paras + ";" + index_name + ":" + binary_total_size_str + nextline;
+-    LOG_INFO(log, "{}, length {}", all_string_together, all_string_together.length());
++    LOG_DEBUG(log, "{}, length: {}", all_string_together, all_string_together.length());
+     ready_flag_writer.seekp(0, seekdir::end);
+     ready_flag_writer.write((void *)all_string_together.c_str(), all_string_together.length());
+     ready_flag_writer.close();
+@@ -375,7 +373,7 @@ void VectorSegmentExecutor::handleMergedMaps()
+         {
+             uint8_t * row_source_pos = reinterpret_cast<uint8_t *>(inverted_row_sources_map_buf->position());
+             uint8_t * row_sources_end = reinterpret_cast<uint8_t *>(inverted_row_sources_map_buf->buffer().end());
+-            LOG_DEBUG(log, "[generateRowIdsMap]: read from rows_sources_file: size {}", row_sources_end - row_source_pos);
++            LOG_DEBUG(log, "Read from rows_sources_file: size {}", row_sources_end - row_source_pos);
+ 
+             while (row_source_pos < row_sources_end)
+             {
+@@ -386,7 +384,7 @@ void VectorSegmentExecutor::handleMergedMaps()
+             inverted_row_sources_map_buf->position() = reinterpret_cast<char *>(row_source_pos);
+         }
+ 
+-        LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} inverted row sources map entries", inverted_row_sources_map->size());
++        LOG_DEBUG(log, "Loaded {} inverted row sources map entries", inverted_row_sources_map->size());
+ 
+         UInt64 row_id;
+ 
+@@ -397,7 +395,7 @@ void VectorSegmentExecutor::handleMergedMaps()
+             row_ids_map->push_back(row_id);
+         }
+ 
+-        LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} row ids map entries", row_ids_map->size());
++        LOG_DEBUG(log, "Loaded {} row ids map entries", row_ids_map->size());
+ 
+         while (!inverted_row_ids_map_buf->eof())
+         {
+@@ -411,7 +409,7 @@ void VectorSegmentExecutor::handleMergedMaps()
+         throw;
+     }
+ 
+-    LOG_DEBUG(log, "[VectorSegmentExecutor]: loaded {} inverted row ids map entries", inverted_row_ids_map->size());
++    LOG_DEBUG(log, "Loaded {} inverted row ids map entries", inverted_row_ids_map->size());
+ }
+ 
+ Status VectorSegmentExecutor::load()
+@@ -421,17 +419,17 @@ Status VectorSegmentExecutor::load()
+     CacheKey cache_key = segment_id.getCacheKey();
+     const String cache_key_str = cache_key.toString();
+ 
+-    LOG_DEBUG(log, "[load] segment_id.getPathSuffix() = {}", segment_id.getPathSuffix());
+-    LOG_DEBUG(log, "[load] segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
+-    LOG_DEBUG(log, "[load] cache_key_str = {}", cache_key_str);
++    LOG_DEBUG(log, "segment_id.getPathSuffix() = {}", segment_id.getPathSuffix());
++    LOG_DEBUG(log, "segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
++    LOG_DEBUG(log, "cache_key_str = {}", cache_key_str);
+ 
+     IndexWithMetaPtr new_index = mgr->get(cache_key);
+     if (new_index == nullptr)
+     {
+-        LOG_DEBUG(log, "[load] miss cache, cache_key_str = {}", cache_key_str);
++        LOG_DEBUG(log, "Miss cache, cache_key_str = {}", cache_key_str);
+         /// We don't want many execution engine reading disk and preserving multiple copies of index, so we use a unique lock to
+         /// ensure that only one execution engine may read from disk at any time.
+-        LOG_DEBUG(log, "[load] num of item before cache {}", mgr->countItem());
++        LOG_DEBUG(log, "Num of item before cache {}", mgr->countItem());
+         mgr->startLoading(cache_key);
+         std::shared_ptr<std::mutex> this_segment_mutex = mgr->getMutex(cache_key);
+         if (this_segment_mutex != nullptr)
+@@ -465,7 +463,7 @@ Status VectorSegmentExecutor::load()
+                 = readVectorIndexReadyFile(reader, ready_file_path, index_names, params);
+             if (original_binary_sizes.find(index_name) == original_binary_sizes.end())
+             {
+-                LOG_DEBUG(log, "[load] unable to parse the original index size {}", ready_file_path);
++                LOG_DEBUG(log, "Unable to parse the original index size {}", ready_file_path);
+                 return Status(5, "unable to parse the original index size " + ready_file_path);
+             }
+             int64_t original_binary_size = original_binary_sizes.find(index_name)->second;
+@@ -477,7 +475,7 @@ Status VectorSegmentExecutor::load()
+ 
+             if (!readBitMap())
+             {
+-                LOG_ERROR(log, "failed to read vector index bitmap: {}", segment_id.getFullPath());
++                LOG_ERROR(log, "Failed to read vector index bitmap: {}", segment_id.getFullPath());
+                 return Status(5, "corrupted data: " + segment_id.getFullPath());
+             }
+ 
+@@ -487,7 +485,7 @@ Status VectorSegmentExecutor::load()
+             }
+             Parameters place_holder;
+             index = VectorIndexFactory::createIndex(type, mode, me, dimension, place_holder);
+-            LOG_INFO(log, "[load] start loading index: total_vec: {}", total_vec);
++            LOG_DEBUG(log, "Start loading index: total_vec: {}", total_vec);
+             CompositeIndexReader index_reader(segment_id, original_binary_size);
+             try
+             {
+@@ -501,7 +499,7 @@ Status VectorSegmentExecutor::load()
+             index->setTrained();
+             des.erase("type");
+             index->parseParameter(des);
+-            LOG_INFO(log, "[load] finish loading index");
++            LOG_DEBUG(log, "Finish loading index");
+             if (auto_tune && getOps().getCode() != 0)
+             {
+                 LOG_WARNING(log, "Index not autotuned");
+@@ -514,7 +512,7 @@ Status VectorSegmentExecutor::load()
+             }
+             catch(const DB::Exception & e)
+             {
+-                LOG_DEBUG(log, "[load]: Failed to load inverted row ids map entries, error: {}", e.what());
++                LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
+                 return Status(e.code(), e.message());
+             }
+ 
+@@ -527,7 +525,7 @@ Status VectorSegmentExecutor::load()
+     }
+     else
+     {
+-        LOG_DEBUG(log, "[load] hit cache, cache_key_str = {}", cache_key_str);
++        LOG_DEBUG(log, "Hit cache, cache_key_str = {}", cache_key_str);
+         index = new_index->index;
+         total_vec = new_index->total_vec;
+         op_points = new_index->op_points;
+@@ -551,14 +549,13 @@ Status VectorSegmentExecutor::load()
+             LOG_WARNING(log, "Index not autotuned");
+         }
+ 
+-        LOG_DEBUG(log, "[load] after load");
+         return Status();
+     }
+ }
+ 
+ Status VectorSegmentExecutor::addVectors(VectorDatasetPtr dataset)
+ {
+-    LOG_TRACE(log, "adding {} vectors", dataset->getVectorNum());
++    LOG_TRACE(log, "Adding {} vectors", dataset->getVectorNum());
+     index->addWithoutId(dataset);
+     total_vec += dataset->getVectorNum();
+     index->setTrained();
+@@ -605,7 +602,7 @@ Status VectorSegmentExecutor::search(
+             }
+             if (!satisfied)
+             {
+-                LOG_WARNING(log, "index can't satisfy the required accuracy, switching to brute force search.");
++                LOG_WARNING(log, "Index can't satisfy the required accuracy, switching to brute force search.");
+                 return Status(200);
+             }
+         }
+@@ -616,7 +613,7 @@ Status VectorSegmentExecutor::search(
+         cv.wait(lock, [] { return count.load() <= num_thread_for_vector; });
+         count.fetch_add(1);
+         added = true;
+-        LOG_DEBUG(log, "[search] index search, num threads: {}", num_thread_for_vector);
++        LOG_DEBUG(log, "Index search, num threads: {}", num_thread_for_vector);
+         /// a shared lock on a small number of concurrent threads, like 16. this is not hard limit so race is not a problem.
+         {
+             DB::OpenTelemetrySpanHolder span("VectorSegmentExecutor::search::vector_index_search");
+@@ -625,7 +622,6 @@ Status VectorSegmentExecutor::search(
+         }
+ 
+         transferToNewRowIds(labels, k * dataset->getVectorNum());
+-        LOG_DEBUG(log, "[search] after transfer row ids");
+     }
+     catch (const IndexException & e)
+     {
+@@ -638,14 +634,13 @@ Status VectorSegmentExecutor::search(
+     if (added)
+         count.fetch_sub(1);
+     cv.notify_one();
+-    LOG_DEBUG(log, "[search] before return status");
+     return Status();
+ }
+ 
+ Status VectorSegmentExecutor::searchWithoutIndex(
+     VectorDatasetPtr query_data, VectorDatasetPtr base_data, int32_t k, float *& distances, int64_t *& labels, const Metrics& metrics)
+ {
+-    LOG_DEBUG(&Poco::Logger::get("VectorSegmentExecutor"), "[searchWithoutIndex] query_data {}", query_data->printVectors());
++    LOG_DEBUG(log, "Search without index: query_data {}", query_data->printVectors());
+     omp_set_num_threads(1);
+     return tryBruteForceSearch(
+         query_data->getData(),
+@@ -667,9 +662,9 @@ IndexType VectorSegmentExecutor::indexType()
+ Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
+ {
+     CacheManager * mgr = CacheManager::getInstance();
+-    LOG_INFO(&Poco::Logger::get("VectorSegmentExecutor"), "[removeFromCache] num of cache items before forceExpire {} ", mgr->countItem());
++    LOG_DEBUG(log, "Num of cache items before forceExpire {} ", mgr->countItem());
+     mgr->forceExpire(cache_key);
+-    LOG_INFO(&Poco::Logger::get("VectorSegmentExecutor"), "[removeFromCache] num of cache items after forceExpire {} ", mgr->countItem());
++    LOG_DEBUG(log, "Num of cache items after forceExpire {} ", mgr->countItem());
+     return Status();
+ }
+ 
+@@ -720,7 +715,7 @@ Status VectorSegmentExecutor::tune(VectorDatasetPtr base, std::vector<int64_t> &
+         int dimension = base->getDimension();
+         if (default_query_size < 2000)
+         {
+-            LOG_WARNING(log, "Not enough data points to train this datapart.");
++            LOG_WARNING(log, "Not enough data points to train this data part.");
+             return Status();
+         }
+         std::vector<float> remove_empty;
+@@ -804,7 +799,7 @@ Status VectorSegmentExecutor::cancelBuild()
+ 
+ Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
+ {
+-    LOG_INFO(log, "need to remove {} ids", n);
++    LOG_DEBUG(log, "Need to remove {} ids", n);
+     int64_t removed = 0;
+     for (int64_t i = 0; i < n; i++)
+     {
+@@ -814,7 +809,7 @@ Status VectorSegmentExecutor::removeByIds(int64_t n, int64_t * ids)
+             delete_bitmap->unset(ids[i]);
+         }
+     }
+-    LOG_INFO(log, "removed {} ids", removed);
++    LOG_DEBUG(log, "Removed {} ids", removed);
+     if (removed == n)
+     {
+         return Status();
+@@ -860,7 +855,7 @@ bool VectorSegmentExecutor::readBitMap()
+     bit_map_reader.read(&bit_map_size, sizeof(int64_t));
+     if (bit_map_size != (total_vec >> 3) + 1)
+     {
+-        LOG_ERROR(log, "bitmap file {} is corrupted: bit_map_size {}, total_vec {}", read_file_path, bit_map_size, total_vec);
++        LOG_ERROR(log, "Bitmap file {} is corrupted: bit_map_size {}, total_vec {}", read_file_path, bit_map_size, total_vec);
+         throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "vector index bitmap on disk is corrupted");
+     }
+ 
+@@ -949,13 +944,13 @@ void VectorSegmentExecutor::readTotalVec()
+     String path = segment_id.getFullPath() + "_" + ItoS(0) + VECTOR_INDEX_FILE_SUFFIX;
+     if (!reader.open(path))
+     {
+-        LOG_ERROR(log, "failed to open {}", path);
++        LOG_ERROR(log, "Failed to open {}", path);
+         throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "failed to open " + path);
+     }
+ 
+     reader.seekg(sizeof(int64_t) * 3);
+     reader.read(&total_vec, sizeof(total_vec));
+-    LOG_DEBUG(log, "[readTotalVec] total vectors read: {}", total_vec);
++    LOG_DEBUG(log, "Total vectors read: {}", total_vec);
+ }
+ 
+ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_ids)
+@@ -966,7 +961,7 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64>& deleted_row_
+     /// Read the delete bitmap
+     if (!readBitMap())
+     {
+-        LOG_WARNING(log, "[updateBitMap] skip to update unreadable vector bitmap file for part {}", segment_id.current_part_name);
++        LOG_WARNING(log, "Skip to update unreadable vector bitmap file for part {}", segment_id.current_part_name);
+         return;
+     }
+ 
+@@ -1008,7 +1003,7 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
+     {
+         LOG_WARNING(
+             log,
+-            "[updateMergedBitMap] skip to update unreadable vector bitmap file: owner part {}, current part {}",
++            "Skip to update unreadable vector bitmap file: owner part {}, current part {}",
+             segment_id.owner_part_name,
+             segment_id.current_part_name);
+         return;
+@@ -1021,7 +1016,7 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64>& delete
+     }
+     catch(const DB::Exception & e)
+     {
+-        LOG_DEBUG(log, "[updateMergedBitMap] Skip to update vector bitmap due to failure when read inverted row ids map entries, error: {}", e.what());
++        LOG_DEBUG(log, "Skip to update vector bitmap due to failure when read inverted row ids map entries, error: {}", e.what());
+         return;
+     }
+ 
+diff --git a/src/VectorIndex/VectorSegmentExecutor.h b/src/VectorIndex/VectorSegmentExecutor.h
+index cc5db6541d..e899b6c82e 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.h
++++ b/src/VectorIndex/VectorSegmentExecutor.h
+@@ -210,8 +210,6 @@ private:
+             return;
+         }
+ 
+-        LOG_DEBUG(log, "[transferToNewRowIds] size: {}", size);
+-
+         for (int i = 0; i < size; i++)
+         {
+             if (labels[i] != -1)
+@@ -229,7 +227,7 @@ private:
+     uint8_t cmb = static_cast<uint8_t>(DB::CompressionMethodByte::LZ4);
+     VectorIndexPtr index = nullptr; // index related to this VectorSegmentExecutor
+     SegmentId segment_id; // this index's related segment_id and file write position.
+-    Poco::Logger * log;
++    static Poco::Logger * log;
+     UInt64 total_vec = 0;
+     OPsPtr op_points = nullptr; // operating points precomputed as an <accuracy, parameter> map, ordered by acc.
+     GeneralBitMapPtr delete_bitmap = nullptr; // manage deletion from database
+diff --git a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+index 091bb2feb8..d619e1d15b 100644
+--- a/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
++++ b/tests/queries/2_vector_search/00008_mqvs_empty_vector.reference
+@@ -18,5 +18,5 @@
+ 6	[6,6,6]	588
+ 34	[34,34,34]	588
+ 5	[5,5,5]	675
+-test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 [buildVectorIndex] part:all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
+-test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 [buildVectorIndex] part:all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
++test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Part: all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
++test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Part: all_1_3_1, vector column data length does not meet constraint. (INCORRECT_DATA) (version 22.3.7.5)
+-- 
+2.32.1 (Apple Git-133)
+

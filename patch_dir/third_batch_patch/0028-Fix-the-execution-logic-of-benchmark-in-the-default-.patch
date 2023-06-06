@@ -1,0 +1,35 @@
+From 4639c338fdef55070676114798009ca4f6a13cc5 Mon Sep 17 00:00:00 2001
+From: shanfengp <shanfengp@moqi.ai>
+Date: Sat, 25 Mar 2023 08:10:37 +0800
+Subject: [PATCH 28/51] Fix the execution logic of benchmark in the default
+ branch
+
+---
+ .gitlab-ci.yml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 854d70fb80..f18933ed2c 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -32,7 +32,7 @@ check_pipeline_already_running:
+     paths:
+       - .schedule_cache
+   rules:
+-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
++    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_TEST_VECTOR_DB != "true"'
+   script:
+     - if [[ -f .schedule_cache ]]; then
+       echo "already ran for this commit, nothing to do";
+@@ -123,7 +123,7 @@ upload_performance_file_to_s3:
+     name: minio/mc
+     entrypoint: [""]
+   rules:
+-    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
++    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_TEST_VECTOR_DB != "true"
+   before_script:
+     - mkdir -pv ~/.mc
+     - cp -fv $mc_config ~/.mc/config.json
+-- 
+2.32.1 (Apple Git-133)
+
