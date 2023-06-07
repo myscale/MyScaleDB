@@ -870,8 +870,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         cols.emplace_back(LightweightDeleteDescription::FILTER_COLUMN);
     }
 
-    Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(part->rows_count, true);
-
     VectorScanResultPtr tmp_vector_scan_result = std::make_shared<VectorScanResult>();
     tmp_vector_scan_result->result_columns.resize(is_batch ? 3 : 2);
 
@@ -898,16 +896,13 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         {});
 
     size_t current_mark = 0;
-    size_t total_mask = part->getMarksCount();
     size_t total_rows_to_read = part->rows_count;
     const auto & index_granularity = part->index_granularity;
 
-    /// compute how many rows to read in one round
-    size_t max_search_block_size_bytes = part->storage.getContext()->getSettingsRef().preferred_block_size_bytes;
-
     size_t num_rows_read = 0;
 
-    size_t default_read_num = std::max(index_granularity.getMarkRows(current_mark), max_search_block_size_bytes / 4 / dim);
+    ///size_t default_read_num = std::max(index_granularity.getMarkRows(current_mark), max_search_block_size_bytes / 4 / dim);
+    size_t default_read_num = index_granularity.getMarkRows(current_mark);
 
     bool continue_read = false;
 
@@ -944,6 +939,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             Columns result;
             result.resize(cols.size());
             size_t num_rows = reader->readRows(single_range.start_mark, 0, false, single_range.row_num, result);
+            Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(num_rows, true);
+
             if (num_rows == 0)
             {
                 LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
@@ -1049,22 +1046,13 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     {
         while (num_rows_read < total_rows_to_read)
         {
-            size_t remaining_size = total_rows_to_read - num_rows_read;
-            size_t max_read_row = std::min(remaining_size, default_read_num);
+            size_t max_read_row = std::min((total_rows_to_read - num_rows_read), default_read_num);
             Columns result;
             result.resize(cols.size());
             size_t num_rows = reader->readRows(current_mark, 0, continue_read, max_read_row, result);
+            current_mark ++;
 
             continue_read = true;
-
-            for (size_t mask = 0; mask < total_mask - 1; ++mask)
-            {
-                if (index_granularity.getMarkStartingRow(mask) >= num_rows_read
-                    && index_granularity.getMarkStartingRow(mask + 1) < num_rows_read)
-                {
-                    current_mark = mask;
-                }
-            }
 
             LOG_DEBUG(log, "Part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
 
@@ -1080,7 +1068,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             const ColumnArray::Offsets & offsets = array->getOffsets();
             const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
-            // size_t size = offsets.size();
+
             if (src_vec.empty())
             {
                 num_rows_read += num_rows;
@@ -1105,6 +1093,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             LOG_DEBUG(log, "Part: {}, raw_data size: {}", part->name, vector_raw_data.size());
 
             int deleted_row_num = 0;
+            Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(offsets.size(), true);
+
             if (part->storage.hasLightweightDeletedMask())
             {
                 LOG_DEBUG(log, "Try to get row exists col, result size: {}", result.size());
@@ -1165,7 +1155,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         for (size_t label = 0; label < k * nq; ++label)
         {
             UInt32 vector_id = label / k;
-            if (final_id[label] > -1 && row_exists->is_member(final_id[label]))
+            if (final_id[label] > -1)
             {
                 label_column->insert(final_id[label]);
                 vector_id_column->insert(vector_id);
@@ -1181,7 +1171,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     {
         for (size_t label = 0; label < k * nq; ++label)
         {
-            if (final_id[label] > -1 && row_exists->is_member(final_id[label]))
+            if (final_id[label] > -1)
             {
                 LOG_DEBUG(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);
                 label_column->insert(final_id[label]);

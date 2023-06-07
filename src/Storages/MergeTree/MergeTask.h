@@ -14,6 +14,8 @@
 #include <Compression/CompressedReadBufferFromFile.h>
 #include <Common/filesystemHelpers.h>
 
+#include <VectorIndex/SegmentId.h>
+
 #include <memory>
 #include <list>
 
