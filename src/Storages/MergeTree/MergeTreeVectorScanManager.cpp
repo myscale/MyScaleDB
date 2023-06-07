@@ -789,38 +789,49 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
         else
         {
             LOG_DEBUG(log, "Get part offset");
-            for (auto & read_range : read_ranges)
+
+            /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
+            /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
+            const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
+
+            /// start_pos and end_pos is used as start and end index of part_offset
+            size_t start_pos = 0;
+            size_t end_pos = part_offset->size() - 1;
+
+            for (size_t ind = 0; ind < label_column->size(); ++ind)
             {
-                const size_t start_pos = read_range.start_row;
-                const size_t end_pos = read_range.start_row + read_range.row_num;
-                for (size_t ind = 0; ind < label_column->size(); ++ind)
+                const UInt64 label_value = label_column->getUInt(ind);
+
+                /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
+                size_t low = start_pos;
+                size_t high = end_pos;
+                size_t mid;
+
+                /// label_value (row id) = part_offset.
+                /// We can use binary search to quickly locate part_offset for current label.
+                while (low <= high)
                 {
-                    const UInt64 label_value = label_column->getUInt(ind);
-                    if (label_value >= start_pos && label_value < end_pos)
+                    mid = low + (high - low) / 2;
+
+                    if (label_value == offset_raw_value[mid])
                     {
-                        const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
-
-                        /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
-                        /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
-                        /// TODO: the value in part_offset is sorted, use binary search?
-                        for (size_t j = 0; j < part_offset->size(); ++j)
+                        /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
+                        for (size_t i = 0; i < final_result.size(); ++i)
                         {
-                            if (offset_raw_value[j] == label_value)
-                            {
-                                /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
-                                for (size_t i = 0; i < final_result.size(); ++i)
-                                {
-                                    Field field;
-                                    pre_result[i]->get(j, field);
-                                    final_result[i]->insert(field);
-                                }
-
-                                final_distance_column->insert(distance_column->getFloat32(ind));
-
-                                break;
-                            }
+                            Field field;
+                            pre_result[i]->get(mid, field);
+                            final_result[i]->insert(field);
                         }
+
+                        final_distance_column->insert(distance_column->getFloat32(ind));
+
+                        /// break from binary search loop
+                        break;
                     }
+                    else if (label_value > offset_raw_value[mid])
+                        low = mid + 1;
+                    else
+                        high = mid - 1;
                 }
             }
         }
