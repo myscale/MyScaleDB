@@ -1418,9 +1418,8 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                     }
                 }
             }
-
-            /// Get metric_type in index definition
-            String metric_type;
+            /// The default value is vector_search_metric_type in MergeTree, but we cannot get it here.
+            String metric_type = "L2";
             for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
             {
                 if (vector_index_desc.column == vec_col_name)
@@ -1428,6 +1427,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                     const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
                     if(index_parameter.contains("metric_type"))
                     {
+                        /// Get metric_type in index definition
                         metric_type = index_parameter.at("metric_type");
                         break;
                     }
@@ -1438,10 +1438,10 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             if (metric_type == "IP")
             {
                 if (direction == 1)
-                    throw Exception(ErrorCodes::SYNTAX_ERROR, "ORDER BY on distance function column should be DESC when metric type is IP");
+                    throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance DESC' when the metric type is IP");
             }
             else if (direction == -1)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "ORDER BY on distance function column should be ASC when metric type is not IP");
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance ASC' when the metric type is {}", metric_type);
         }
     }
     /// Interpreter select on the right joined table where vector column exists, insert distance func column name.

@@ -545,7 +545,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         VectorIndex::PartReader part_reader(
             builds_blocker, part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), dim, enforce_fixed_array);
         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
-        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string("L2")));
+        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
         VectorIndex::VectorSegmentExecutorPtr vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
             segment_id,
             index_type,
