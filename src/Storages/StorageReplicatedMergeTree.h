@@ -472,6 +472,15 @@ private:
 
     std::atomic<bool> initialization_done{false};
 
+    /// A task that update cached vector index info to zookeeper.
+    BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
+
+    /// Whether vector indices were initially loaded on table start-up
+    volatile bool vidx_init_loaded = false;
+
+    /// It is acquired when writing vector index info to zookeeper
+    std::mutex vidx_info_mutex;
+
     /// True if replica was created for existing table with fixed granularity
     bool other_replicas_fixed_granularity = false;
 
@@ -894,6 +903,15 @@ private:
         const String & vector_index_name,
         int32_t log_version,
         bool slow_mode = false);
+
+    /// Get cached vector index info from zookeeper and load into cache.
+    void loadVectorIndexFromZookeeper();
+
+    /// Update cached vector index info to zookeeper periodically.
+    void updateVectorIndexInfoZookeeper();
+
+    /// Write vector index info to zookeeper.
+    void writeVectorIndexInfoToZookeeper(bool force = false);
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

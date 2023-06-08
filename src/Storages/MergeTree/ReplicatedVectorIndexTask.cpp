@@ -28,6 +28,9 @@ bool ReplicatedVectorIndexTask::executeStep()
 
             std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
+
+            /// write latest cached vector index info to zookeeper
+            storage.vidx_info_updating_task->schedule();
         }
         catch (...)
         {

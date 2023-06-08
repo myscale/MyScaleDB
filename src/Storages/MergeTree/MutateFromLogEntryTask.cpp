@@ -259,6 +259,8 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
             new_part->onDecoupledLightWeightDelete();
     }
 
+    storage.vidx_info_updating_task->schedule();
+
     return true;
 }
 

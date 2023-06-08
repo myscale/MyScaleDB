@@ -24,6 +24,7 @@
 #include <Common/CurrentMetrics.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Core/QueryProcessingStage.h>
+#include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeEnum.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -8431,6 +8432,132 @@ void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool 
         vector_index_status.latest_failed_part_info = part_info;
         vector_index_status.latest_fail_reason = exception_message;
     }
+}
+
+void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)
+{
+    auto metadata = getInMemoryMetadata();
+
+    std::unordered_map<String, VectorIndexDescription> v_index_map;
+    for (const auto & v_index : metadata.getVectorIndices())
+    {
+        v_index_map.try_emplace(v_index.name, v_index);
+    }
+
+    std::unordered_set<String> valid_vidx;
+    std::unordered_set<String> invalid_vidx;
+    std::vector<VectorIndex::CacheKey> loaded_keys;
+
+    Search::IndexType index_type;
+    Search::Metric metric;
+    Search::Parameters index_params;
+    size_t dim;
+
+    String metric_str = getSettings()->vector_search_metric_type;
+    size_t min_bytes_to_build_vector_index = getSettings()->min_bytes_to_build_vector_index;
+    bool default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
+
+    for (const auto & data_part : getDataPartsVectorForInternalUsage())
+    {
+        String part_name = data_part->info.getPartNameWithoutMutation();
+
+        if (!vector_indices.contains(part_name))
+            continue;
+
+        for (const auto & vidx_name : vector_indices[part_name])
+        {
+            if (invalid_vidx.contains(vidx_name) || !v_index_map.contains(vidx_name))
+                continue;
+
+            auto v_index = v_index_map[vidx_name];
+            dim = metadata.getConstraints().getArrayLengthByColumnName(v_index.column).first;
+
+            if (!valid_vidx.contains(vidx_name))
+            {
+                /// check vector index metadata
+                auto col_and_type = metadata.getColumns().getAllPhysical().tryGetByName(v_index.column);
+                if (!col_and_type)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Vector index column {} not found in metadata", v_index.column);
+                    continue;
+                }
+
+                const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
+                if (!array_type)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Vector index column {} type is not array", v_index.column);
+                    continue;
+                }
+
+                if (dim == 0)
+                {
+                    invalid_vidx.insert(vidx_name);
+                    LOG_ERROR(log, "Wrong dimension: 0 for column {}, please check length constraint on the column.", v_index.column);
+                    continue;
+                }
+
+                valid_vidx.insert(vidx_name);
+            }
+
+            if (isShutdown())
+                abortLoadVectorIndex(loaded_keys);
+
+            index_type = VectorIndex::getIndexType(v_index.type);
+
+            if (v_index.parameters && v_index.parameters->has("metric_type"))
+            {
+                metric_str = v_index.parameters->getValue<String>("metric_type");
+            }
+            metric = VectorIndex::getMetric(metric_str);
+
+            index_params = VectorIndex::convertPocoJsonToMap(v_index.parameters);
+            index_params.erase("metric_type");
+
+            /// load vector index into cache
+            for (const auto & segment_id : VectorIndex::getAllSegmentIds(data_part->getDataPartStorage().getFullPath(), data_part, v_index.name, v_index.column))
+            {
+                auto vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+                    segment_id,
+                    index_type,
+                    metric,
+                    dim,
+                    data_part->rows_count,
+                    index_params,
+                    min_bytes_to_build_vector_index,
+                    default_mstg_disk_mode);
+
+                LOG_INFO(log, "Start loading vector index {} in {}", v_index.name, data_part->name);
+                VectorIndex::Status status = vec_executor->load();
+
+                if (status.fine())
+                {
+                    LOG_DEBUG(log, "Loaded vector index {} in {}", v_index.name, data_part->name);
+                    loaded_keys.emplace_back(segment_id.getCacheKey());
+                }
+                else
+                {
+                    LOG_ERROR(
+                        log,
+                        "Failed to load vector index {} in part {}: [{}] {}",
+                        v_index.name,
+                        data_part->name,
+                        status.getCode(),
+                        status.getMessage());
+                }
+            }
+        }
+    }
+
+    if (isShutdown())
+        abortLoadVectorIndex(loaded_keys);
+}
+
+void MergeTreeData::abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys)
+{
+    for (const auto & key : loaded_keys)
+        VectorIndex::VectorSegmentExecutor::removeFromCache(key);
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

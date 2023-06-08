@@ -1104,6 +1104,12 @@ public:
 
     virtual bool isShutdown() const { return false; }
 
+    /// Load vector indices to memory, map key is part_name, value are vector indices in this part to load
+    void loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices);
+
+    /// Remove loaded vector indices from memory
+    static void abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys);
+
 protected:
     friend class IMergeTreeDataPart;
     friend class MergeTreeDataMergerMutator;

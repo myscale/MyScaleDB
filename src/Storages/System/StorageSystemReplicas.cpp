@@ -61,6 +61,7 @@ StorageSystemReplicas::StorageSystemReplicas(const StorageID & table_id_)
         { "active_replicas",                      std::make_shared<DataTypeUInt8>()    },
         { "last_queue_update_exception",          std::make_shared<DataTypeString>()   },
         { "zookeeper_exception",                  std::make_shared<DataTypeString>()   },
+        { "is_data_synced",                       std::make_shared<DataTypeUInt8>()    },
         { "replica_is_active",                    std::make_shared<DataTypeMap>(std::make_shared<DataTypeString>(), std::make_shared<DataTypeUInt8>()) }
     }));
     setInMemoryMetadata(storage_metadata);
@@ -214,6 +215,7 @@ Pipe StorageSystemReplicas::read(
         res_columns[col_num++]->insert(status.active_replicas);
         res_columns[col_num++]->insert(status.last_queue_update_exception);
         res_columns[col_num++]->insert(status.zookeeper_exception);
+        res_columns[col_num++]->insert(status.is_data_synced);
 
         Map replica_is_active_values;
         for (const auto & [name, is_active] : status.replica_is_active)
