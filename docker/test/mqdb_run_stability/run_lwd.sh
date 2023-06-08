@@ -2,6 +2,7 @@
 set -e
 HOST=${1:-127.0.0.1}
 TIMEOUT=${2:-259200} # 3d
+INDEX_TYPE=${3:-"MSTG"}
 
 # source /etc/profile
 arch="$(dpkg --print-architecture)"
@@ -11,6 +12,8 @@ fi
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
+WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stability
+rm -rf $WORKPATH/test_output/* ||:
 
 
 docker rm -f lwd-test >/dev/null 2>&1 || true
@@ -19,5 +22,6 @@ docker build --rm=true -t run-lwd-test $PROJECT_PATH/docker/test/mqdb_run_stabil
 
 docker run -itd \
     --user root --cap-add=SYS_PTRACE \
-    -e HOST=${HOST} -e TIMEOUT=${TIMEOUT}\
+    -e HOST=${HOST} -e TIMEOUT=${TIMEOUT} -e INDEX_TYPE=${INDEX_TYPE} \
+    --volume=$WORKPATH/test_output:/home/minimum_test/lwd_feature_test/results \
     --name lwd-test run-lwd-test

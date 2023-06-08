@@ -37,9 +37,20 @@ spec:
 
   configuration:
     settings:
-      logger/level: error
+      allow_experimental_transactions: 42
+      logger/level: information
       logger/size: 2000M
       logger/count: 100
+      vector_index_cache_path: /var/lib/clickhouse/vector_index_cache
+      mark_cache_size: 209715200
+      uncompressed_cache_size: 314572800
+      merge_tree/number_of_free_entries_in_pool_to_execute_mutation: 2
+      merge_tree/number_of_free_entries_in_pool_to_lower_max_size_of_merge: 2
+      merge_tree/max_parts_to_merge_at_once: 100
+      merge_tree/merge_max_block_size: 256
+      merge_tree/default_mstg_disk_mode: 0
+      merge_tree/max_bytes_to_merge_at_max_space_in_pool: 5368709120
+      merge_tree/simple_merge_selector_base: 1.2
       max_concurrent_queries: 10000
       merge_tree/min_rows_to_build_vector_index: 0
       query_log/database: system
@@ -47,6 +58,11 @@ spec:
       query_log/partition_by: toYYYYMMDD(event_date)
       query_log/ttl: event_date + INTERVAL 3 DAY DELETE
       query_log/flush_interval_milliseconds: 7500
+      query_thread_log/database: system
+      query_thread_log/table: query_log
+      query_thread_log/partition_by: toYYYYMMDD(event_date)
+      query_thread_log/ttl: event_date + INTERVAL 3 DAY DELETE
+      query_thread_log/flush_interval_milliseconds: 7500
     users:
       default/networks/ip:
         - "127.0.0.1"
@@ -54,21 +70,38 @@ spec:
         - "0.0.0.0/0"
     profiles:
       default/allow_experimental_lightweight_delete: true
+      default/background_pool_size: 4
+      default/background_merges_mutations_concurrency_ratio: 2
+      default/max_memory_usage: 8000000000
+      default/min_insert_block_size_bytes: 33554432
+      default/atomic_insert: false
+#      default/min_insert_block_size_rows: 1048576
       default/mutations_sync: 1
       default/log_query_threads: 0
-      default/log_queries_cut_to_length: 1000
+      default/log_queries_cut_to_length: 100
+#      default/log_queries_min_type: QUERY_FINISH
     clusters:
       - name: "testing"
         layout:
           shardsCount: 1
           replicasCount: 1
+    files:
+      z_log_disable.xml: |-
+        <?xml version="1.0"?>
+        <clickhouse>
+            <asynchronous_metric_log remove="1"/>
+            <session_log remove="1"/>
+            <text_log remove="1" />
+            <trace_log remove="1"/>
+            <query_views_log remove="1" />
+            <query_thread_log remove="1" />
+        </clickhouse>
+
   templates:
     serviceTemplates:
       - name: service-template
         metadata:
           annotations:
-            # service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-ezx6t8lt
-            # service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-q5eu0w59
             service.kubernetes.io/qcloud-loadbalancer-internal-subnetid: subnet-itzzzhyz
         spec:
           type: LoadBalancer
@@ -109,10 +142,22 @@ spec:
     podTemplates:
       - name: pod-template
         spec:
+          nodeSelector:
+            node.kubernetes.io/localpath-volume: "true"
+          tolerations:
+            - key: node.kubernetes.io/localpath-volume
+              value: "true"
+              effect: NoExecute
           containers:
             - name: clickhouse
+              # image: harbor.internal.moqi.ai/mqdb/mqdb:22.3.7.5-7759467b
               image: harbor.internal.moqi.ai/mqdb/mqdb:IMAGE_VERSION
-              # image: harbor.internal.moqi.ai/mqdb/mqdb:22.3.7.5-dc6971d6e
+              securityContext:
+                privileged: true
+              command:
+                - bash
+                - -c
+                - ulimit -l unlimited && /entrypoint.sh
               ports:
                 - containerPort: 9000
                   name: tcp
@@ -128,17 +173,19 @@ spec:
                   protocol: TCP
               resources:
                 requests:
-                  cpu: 4
-                  memory: 8Gi
+                  cpu: 2
+                  memory: 4Gi
                 limits:
-                  cpu: 4
-                  memory: 8Gi
+                  cpu: 2
+                  memory: 4Gi
+              volumeMounts:
+                - mountPath: /var/lib/clickhouse/vector_index_cache
+                  name: local-volume-claim-template
           volumes:
             - name: ssh
               configMap:
                 name: ssh
                 defaultMode: 0600
-
     volumeClaimTemplates:
       - name: data-volume-claim-template
         spec:
@@ -153,4 +200,13 @@ spec:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 20Gi
+              storage: 200Gi
+      - name: local-volume-claim-template
+        reclaimPolicy: Delete
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 100Gi
+          storageClassName: localpath
