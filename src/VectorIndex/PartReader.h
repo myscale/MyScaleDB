@@ -6,10 +6,7 @@
 #include <Common/logger_useful.h>
 #include <Common/Exception.h>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #include <SearchIndex/VectorIndex.h>
-#pragma GCC diagnostic pop
 
 namespace DB::ErrorCodes
 {

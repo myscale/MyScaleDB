@@ -29,42 +29,8 @@
 #include <VectorIndex/VectorIndexCommon.h>
 
 #include <Common/logger_useful.h>
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wextra-semi-stmt"
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#pragma GCC diagnostic ignored "-Wc++20-compat"
-#pragma GCC diagnostic ignored "-Walloca"
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic ignored "-Wgcc-compat"
-#pragma GCC diagnostic ignored "-Wcovered-switch-default"
-#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
-#pragma GCC diagnostic ignored "-Wextra-semi"
-#pragma GCC diagnostic ignored "-Wfinal-dtor-non-final-class"
-#pragma GCC diagnostic ignored "-Wundef"
-#pragma GCC diagnostic ignored "-Wsuggest-override"
-#pragma GCC diagnostic ignored "-Wshadow-field-in-constructor"
-#pragma GCC diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
-#pragma GCC diagnostic ignored "-Wmismatched-tags"
-#pragma GCC diagnostic ignored "-Wundefined-reinterpret-cast"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wshadow-uncaptured-local"
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#pragma GCC diagnostic ignored "-Wunused-private-field"
-#pragma GCC diagnostic ignored "-Wshadow-field"
-#pragma GCC diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
-#pragma GCC diagnostic ignored "-Wshadow"
-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
-#pragma GCC diagnostic ignored "-Wrange-loop-bind-reference"
-#pragma GCC diagnostic ignored "-Wenum-compare-switch"
-#pragma GCC diagnostic ignored "-Wnewline-eof"
-#pragma GCC diagnostic ignored "-Wreorder-ctor"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <SearchIndex/Common/Utils.h>
 #include <SearchIndex/IndexDataFileIO.h>
-#pragma GCC diagnostic pop
 
 namespace DB::ErrorCodes
 {

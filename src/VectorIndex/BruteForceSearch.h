@@ -1,13 +1,6 @@
 #pragma once
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdocumentation"
-#pragma GCC diagnostic ignored "-Wunused-function"
 #include <faiss/utils/distances.h>
-#pragma GCC diagnostic pop
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <SearchIndex/VectorIndex.h>
-#pragma GCC diagnostic pop
 #include <VectorIndex/Status.h>
 
 namespace VectorIndex
