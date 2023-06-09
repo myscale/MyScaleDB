@@ -4572,7 +4572,7 @@ void StorageReplicatedMergeTree::shutdown()
         return;
 
     /// Save cached vector index info before shutdown
-    if (vidx_init_loaded)
+    if (vidx_init_loaded.load())
         writeVectorIndexInfoToZookeeper();
 
     session_expired_callback_handler.reset();
@@ -6132,7 +6132,7 @@ void StorageReplicatedMergeTree::getStatus(ReplicatedTableStatus & res, bool wit
     res.can_become_leader = storage_settings_ptr->replicated_can_become_leader;
     res.is_readonly = is_readonly;
     res.is_session_expired = !zookeeper || zookeeper->expired();
-    res.is_data_synced = vidx_init_loaded;
+    res.is_data_synced = vidx_init_loaded.load();
 
     res.queue = queue.getStatus();
     res.absolute_delay = getAbsoluteDelay(); /// NOTE: may be slightly inconsistent with queue status.
@@ -9463,7 +9463,7 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
 
 void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
 {
-    if (!vidx_init_loaded)
+    if (!vidx_init_loaded.load())
     {
         bool synced = false;
         Stopwatch watch;
@@ -9496,7 +9496,7 @@ void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
 
         LOG_INFO(log, "Loading vector indices from zookeeper done in {} seconds", watch.elapsedSeconds());
 
-        vidx_init_loaded = true;
+        vidx_init_loaded.store(true);
     }
 
     writeVectorIndexInfoToZookeeper();

@@ -269,7 +269,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
     {
         MergeTreeRangeReader* prev_reader = nullptr;
         bool last_reader = false;
-        /// size_t pre_readers_shift = 0;
 
         /// Initialize primary key cache
         const auto & primary_key = storage_snapshot->metadata->getPrimaryKey();
@@ -312,7 +311,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
             task->pre_range_readers.push_back(
                 MergeTreeRangeReader(pre_reader_for_step[0].get(), prev_reader, &lightweight_delete_filter_step, last_reader, non_const_virtual_column_names));
             prev_reader = &task->pre_range_readers.back();
-            /// pre_readers_shift++;
         }
 
         task->range_reader = MergeTreeRangeReader(reader.get(), prev_reader, nullptr, true, non_const_virtual_column_names);

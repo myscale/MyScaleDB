@@ -157,14 +157,10 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
 
     std::vector<MarkRange> ranges_stack = {{0, marks_count}};
 
-    /// size_t steps = 0;
-
     while (!ranges_stack.empty())
     {
         MarkRange range = ranges_stack.back();
         ranges_stack.pop_back();
-
-        /// steps++;
 
         if (!need_this_range(range))
             continue;

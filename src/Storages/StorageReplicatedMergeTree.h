@@ -476,7 +476,7 @@ private:
     BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
 
     /// Whether vector indices were initially loaded on table start-up
-    volatile bool vidx_init_loaded = false;
+    std::atomic<bool> vidx_init_loaded{false};
 
     /// It is acquired when writing vector index info to zookeeper
     std::mutex vidx_info_mutex;
