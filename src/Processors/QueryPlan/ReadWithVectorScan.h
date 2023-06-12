@@ -2,6 +2,7 @@
 #include <Processors/QueryPlan/ISourceStep.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
+#include <Processors/QueryPlan/ReadFromMergeTree.h>
 
 namespace DB
 {
@@ -29,7 +30,7 @@ public:
 
     void initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &) override;
 
-    Pipe createReadProcessorsAmongParts(MergeTreeData::DataPartsVector & parts,
+    Pipe createReadProcessorsAmongParts(RangesInDataParts parts_with_range,
     const Names & column_names);
 
 private:
@@ -60,11 +61,18 @@ private:
     std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read;
 
     Poco::Logger * log;
+    UInt64 selected_parts = 0;
+    UInt64 selected_rows = 0;
+    UInt64 selected_marks = 0;
 
     Pipe readFromParts(
-        const MergeTreeData::DataPartsVector & parts,
+        const RangesInDataParts & parts,
         Names required_columns,
         bool use_uncompressed_cache);
+
+    MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(MergeTreeData::DataPartsVector parts) const;
+    ReadFromMergeTree::AnalysisResult getAnalysisResult() const;
+    MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr;
 };
 
 }

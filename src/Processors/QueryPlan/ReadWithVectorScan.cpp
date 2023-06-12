@@ -4,9 +4,17 @@
 #include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/Sources/NullSource.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
+#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h>
 #include <Storages/MergeTree/MergeTreeSource.h>
+
+namespace ProfileEvents
+{
+    extern const Event SelectedParts;
+    extern const Event SelectedRanges;
+    extern const Event SelectedMarks;
+}
 
 namespace DB
 {
@@ -78,11 +86,65 @@ ReadWithVectorScan::ReadWithVectorScan(
         read_task_callback = context->getMergeTreeReadTaskCallback();
 }
 
+MergeTreeDataSelectAnalysisResultPtr ReadWithVectorScan::selectRangesToRead(MergeTreeData::DataPartsVector parts) const
+{
+    return ReadFromMergeTree::selectRangesToRead(
+        std::move(parts),
+        storage_snapshot->metadata,
+        storage_snapshot->getMetadataForQuery(),
+        query_info,
+        context,
+        requested_num_streams,
+        max_block_numbers_to_read,
+        data,
+        real_column_names,
+        sample_factor_column_queried,
+        log);
+}
+
+ReadFromMergeTree::AnalysisResult ReadWithVectorScan::getAnalysisResult() const
+{
+    auto result_ptr = analyzed_result_ptr ? analyzed_result_ptr : selectRangesToRead(prepared_parts);
+    if (std::holds_alternative<std::exception_ptr>(result_ptr->result))
+        std::rethrow_exception(std::get<std::exception_ptr>(result_ptr->result));
+
+    return std::get<ReadFromMergeTree::AnalysisResult>(result_ptr->result);
+}
+
 void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
 {
+    /// Referenced from ReadFromMergeTree::initializePipeline(). Add logic for mark range optimization based on where conditions.
+    auto result = getAnalysisResult();
+    LOG_DEBUG(
+        log,
+        "Selected {}/{} parts by partition key, {} parts by primary key, {}/{} marks by primary key, {} marks to read from {} ranges",
+        result.parts_before_pk,
+        result.total_parts,
+        result.selected_parts,
+        result.selected_marks_pk,
+        result.total_marks_pk,
+        result.selected_marks,
+        result.selected_ranges);
+
+    ProfileEvents::increment(ProfileEvents::SelectedParts, result.selected_parts);
+    ProfileEvents::increment(ProfileEvents::SelectedRanges, result.selected_ranges);
+    ProfileEvents::increment(ProfileEvents::SelectedMarks, result.selected_marks);
+
+    auto query_id_holder = MergeTreeDataSelectExecutor::checkLimits(data, result, context);
+
+    if (result.parts_with_ranges.empty())
+    {
+        pipeline.init(Pipe(std::make_shared<NullSource>(getOutputStream().header)));
+        return;
+    }
+
+    selected_marks = result.selected_marks;
+    selected_rows = result.selected_rows;
+    selected_parts = result.selected_parts;
+
     Pipe pipe;
 
-    Names column_names_to_read = real_column_names;
+    Names column_names_to_read = std::move(result.column_names_to_read);
 
     /// If there are only virtual columns in the query, should be wrong, just return.
     if (column_names_to_read.empty())
@@ -92,8 +154,9 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         return;
     }
 
+    /// Reference spreadMarkRangesAmongStreams()
     pipe = createReadProcessorsAmongParts(
-        prepared_parts,
+        std::move(result.parts_with_ranges),
         column_names_to_read);
 
     if (pipe.empty())
@@ -108,17 +171,21 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         processors.emplace_back(processor);
     }
 
+    // Attach QueryIdHolder if needed
+    if (query_id_holder)
+        pipe.addQueryIdHolder(std::move(query_id_holder));
+
     pipeline.init(std::move(pipe));
 }
 
 
-/// needs to handle:
+/// Reference from ReadFromMergeTree::spreadMarkRangesAmongStreams()
 /// 
 Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
-    MergeTreeData::DataPartsVector & parts,
+    RangesInDataParts parts_with_range,
     const Names & column_names)
 {
-    if (parts.size() == 0)
+    if (parts_with_range.size() == 0)
         return {};
 
     const auto & settings = context->getSettingsRef();
@@ -129,18 +196,18 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
     if (num_streams > 1)
     {
         /// Reduce the number of num_streams if the data is small.
-        if (parts.size() < num_streams)
-            num_streams = parts.size();
+        if (parts_with_range.size() < num_streams)
+            num_streams = parts_with_range.size();
     }
 
-    const size_t min_parts_per_stream = (parts.size() - 1) / num_streams + 1;
-    for (size_t i = 0; i < num_streams && !parts.empty(); ++i)
+    const size_t min_parts_per_stream = (parts_with_range.size() - 1) / num_streams + 1;
+    for (size_t i = 0; i < num_streams && !parts_with_range.empty(); ++i)
     {
-        MergeTreeData::DataPartsVector new_parts;
-        for (size_t need_parts = min_parts_per_stream; need_parts > 0 && !parts.empty(); need_parts--)
+        RangesInDataParts new_parts;
+        for (size_t need_parts = min_parts_per_stream; need_parts > 0 && !parts_with_range.empty(); need_parts--)
         {
-            new_parts.push_back(parts.back());
-            parts.pop_back();
+            new_parts.push_back(parts_with_range.back());
+            parts_with_range.pop_back();
         }
 
         res.emplace_back(readFromParts(std::move(new_parts), column_names, settings.use_uncompressed_cache));
@@ -152,7 +219,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
 }
 
 Pipe ReadWithVectorScan::readFromParts(
-    const MergeTreeData::DataPartsVector & parts,
+    const RangesInDataParts & parts,
     Names required_columns,
     bool use_uncompressed_cache)
 {
@@ -188,19 +255,15 @@ Pipe ReadWithVectorScan::readFromParts(
             };
         }
 
-        MarkRanges ranges;
-        if (part->index_granularity.getMarksCount())
-            ranges.emplace_back(0, part->index_granularity.getMarksCount());
-
         auto algorithm = std::make_unique<MergeTreeSelectWithVectorScanProcessor>(
             data,
             storage_snapshot,
-            part,
+            part.data_part,
             max_block_size,
             preferred_block_size_bytes,
             preferred_max_column_in_block_size_bytes,
             required_columns,
-            ranges,
+            part.ranges,
             use_uncompressed_cache,
             prewhere_info,
             actions_settings,
