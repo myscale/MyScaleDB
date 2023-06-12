@@ -52,7 +52,7 @@ MergeTreeWhereOptimizer::MergeTreeWhereOptimizer(
     }
 }
 
-void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context) const
+void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, const ContextPtr & context)
 {
     auto & select = select_query_info.query->as<ASTSelectQuery &>();
     if (!select.where() || select.prewhere())

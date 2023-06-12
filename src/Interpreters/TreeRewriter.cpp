@@ -904,7 +904,7 @@ std::vector<const ASTFunction *> getVectorScanFunctions(ASTPtr & query, const AS
 
     /// Addtional check for distance functions
     if (data.vector_scan_funcs.size() > 1)
-        throw Exception("Not support multiple distance funcs in one query now.", ErrorCodes::SYNTAX_ERROR);
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support multiple distance funcs in one query now.");
 
     /// vector scan function is found, check exists in order by / where clauses.
     if (data.vector_scan_funcs.size() == 1)
@@ -912,14 +912,14 @@ std::vector<const ASTFunction *> getVectorScanFunctions(ASTPtr & query, const AS
         if (!select_query.orderBy())
         {
             /// TODO: Will be removed when distance functions are implemented
-            throw Exception("Not support distance function without ORDER BY clause", ErrorCodes::SYNTAX_ERROR);
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without ORDER BY clause");
         }
 
         bool is_batch = isBatchDistance(data.vector_scan_funcs[0]->getColumnName());
         if (!is_batch && !select_query.limitLength())
-            throw Exception("Not support distance function without LIMIT N clause", ErrorCodes::SYNTAX_ERROR);
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
         else if (is_batch && !select_query.limitByLength())
-            throw Exception("Not support batch distance function without LIMIT N BY clause", ErrorCodes::SYNTAX_ERROR);
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch distance function without LIMIT N BY clause");
 
         if (select_query.orderBy())
         {
@@ -927,7 +927,7 @@ std::vector<const ASTFunction *> getVectorScanFunctions(ASTPtr & query, const AS
             GetVectorScanVisitor(order_by_data).visit(select_query.orderBy());
 
             if (order_by_data.vector_scan_funcs.size() != 1)
-                throw Exception("Not support without distance function inside ORDER BY clause", ErrorCodes::SYNTAX_ERROR);
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without distance function inside ORDER BY clause");
         }
     }
 
@@ -1282,7 +1282,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
 
         /// TODO: Will be removed when distance functions are implemented
         if (limit_length == 0)
-            throw Exception("Not support distance function without LIMIT N clause", ErrorCodes::SYNTAX_ERROR);
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
 
         /// Check if vector column in vector scan func exists in left table or right joined table
         /// Insert distance func columns into source columns here
@@ -1341,7 +1341,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
 
             auto order_by = select_query->orderBy();
             if (!order_by)
-                throw Exception("Not support distance function without ORDER BY clause", ErrorCodes::SYNTAX_ERROR);
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without ORDER BY clause");
 
             /// Find the direction for distance func
             for (const auto & child : order_by->children)
@@ -1393,10 +1393,10 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             if (metric_type == "IP")
             {
                 if (direction == 1)
-                    throw Exception("ORDER BY on distance function column should be DESC when metric type is IP", ErrorCodes::SYNTAX_ERROR);
+                    throw Exception(ErrorCodes::SYNTAX_ERROR, "ORDER BY on distance function column should be DESC when metric type is IP");
             }
             else if (direction == -1)
-                throw Exception("ORDER BY on distance function column should be ASC when metric type is not IP", ErrorCodes::SYNTAX_ERROR);
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "ORDER BY on distance function column should be ASC when metric type is not IP");
         }
     }
     /// Interpreter select on the right joined table where vector column exists, insert distance func column name.

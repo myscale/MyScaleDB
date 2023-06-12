@@ -41,7 +41,7 @@ public:
         const std::optional<NameSet> & supported_columns_,
         Poco::Logger * log_);
 
-    void optimize(SelectQueryInfo & select_query_info, const ContextPtr & context) const;
+    void optimize(SelectQueryInfo & select_query_info, const ContextPtr & context);
 
     struct FilterActionsOptimizeResult
     {
