@@ -1,0 +1,39 @@
+From 736e444f09a63d0c7f3cc51f9ae400681e79cb0e Mon Sep 17 00:00:00 2001
+From: Linpeng Tang <linpengt@moqi.ai>
+Date: Tue, 16 May 2023 04:00:39 +0000
+Subject: [PATCH 18/49] change executeQuery log level to debug to accelerate
+ alpha=1 search
+
+---
+ src/Interpreters/executeQuery.cpp                           | 2 +-
+ tests/queries/0_stateless/00965_logs_level_bugfix.reference | 1 -
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/Interpreters/executeQuery.cpp b/src/Interpreters/executeQuery.cpp
+index b0a9afe72a..83cfe0de3e 100644
+--- a/src/Interpreters/executeQuery.cpp
++++ b/src/Interpreters/executeQuery.cpp
+@@ -998,7 +998,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
+ 
+                 if (elem.read_rows != 0)
+                 {
+-                    LOG_INFO(&Poco::Logger::get("executeQuery"), "Read {} rows, {} in {} sec., {} rows/sec., {}/sec.",
++                    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Read {} rows, {} in {} sec., {} rows/sec., {}/sec.",
+                         elem.read_rows, ReadableSize(elem.read_bytes), elapsed_seconds,
+                         static_cast<size_t>(elem.read_rows / elapsed_seconds),
+                         ReadableSize(elem.read_bytes / elapsed_seconds));
+diff --git a/tests/queries/0_stateless/00965_logs_level_bugfix.reference b/tests/queries/0_stateless/00965_logs_level_bugfix.reference
+index 52396b3fe7..affd41b780 100644
+--- a/tests/queries/0_stateless/00965_logs_level_bugfix.reference
++++ b/tests/queries/0_stateless/00965_logs_level_bugfix.reference
+@@ -2,7 +2,6 @@
+ .
+ <Debug>
+ .
+-<Information>
+ .
+ <Error>
+ -
+-- 
+2.32.1 (Apple Git-133)
+

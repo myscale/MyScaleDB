@@ -1,0 +1,291 @@
+From 09ccce19993c70dd599631afe9d963e451d1e209 Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Tue, 9 May 2023 07:07:11 +0000
+Subject: [PATCH 09/49] Fix SQL + Vector failed test cases
+
+---
+ src/Interpreters/ExpressionAnalyzer.cpp       | 34 ++------------
+ src/Interpreters/InterpreterSelectQuery.cpp   |  7 +++
+ src/Interpreters/TreeOptimizer.cpp            |  7 +++
+ src/Interpreters/TreeRewriter.cpp             | 41 +++++++++++++++++
+ ...00028_mqvs_sql_vector_improvment.reference | 19 ++++++++
+ .../00028_mqvs_sql_vector_improvment.sql      | 45 +++++++++++++++++++
+ 6 files changed, 123 insertions(+), 30 deletions(-)
+ create mode 100644 tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.reference
+ create mode 100644 tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.sql
+
+diff --git a/src/Interpreters/ExpressionAnalyzer.cpp b/src/Interpreters/ExpressionAnalyzer.cpp
+index 84a4a737d1..8d3fe399b3 100644
+--- a/src/Interpreters/ExpressionAnalyzer.cpp
++++ b/src/Interpreters/ExpressionAnalyzer.cpp
+@@ -15,7 +15,6 @@
+ #include <Parsers/DumpASTNode.h>
+ 
+ #include <DataTypes/DataTypeNullable.h>
+-#include <DataTypes/DataTypeArray.h>
+ #include <Columns/IColumn.h>
+ 
+ #include <Interpreters/ArrayJoinAction.h>
+@@ -33,8 +32,6 @@
+ 
+ #include <Processors/QueryPlan/ExpressionStep.h>
+ 
+-#include <Functions/FunctionHelpers.h>
+-
+ #include <AggregateFunctions/AggregateFunctionFactory.h>
+ #include <AggregateFunctions/parseAggregateFunctionParameters.h>
+ 
+@@ -643,34 +640,11 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
+                     "wrong argument number in distance function");
+         }
+ 
+-        vector_scan_desc.search_column_name = arguments[0]->getColumnName();
+-
+-        std::optional<NameAndTypePair> search_column_type = std::nullopt;
+-        if (syntax->vector_from_right_table)
+-        {
+-            search_column_type = analyzedJoin().columnsFromJoinedTable().tryGetByName(vector_scan_desc.search_column_name);
+-        }
+-        else if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
+-        {
+-            /// Cannot use sourceColumns() as vector column is not needed
+-            search_column_type = syntax->storage_snapshot->metadata->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
+-        }
+-
+-        if (search_column_type)
+-        {
+-            LOG_DEBUG(log, "search column type name: {}", (*search_column_type).type->getName());
+-        }
++        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
++        if (auto * identifier = arguments[0]->as<ASTIdentifier>())
++            vector_scan_desc.search_column_name = identifier->shortName();
+         else
+-        {
+-            LOG_DEBUG(log, "search column name: {}, type not exist", vector_scan_desc.search_column_name);
+-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong search column name '{}'", vector_scan_desc.search_column_name);
+-        }
+-
+-        const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
+-
+-        if (!array_type)
+-            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+-                "Search column {} should be Array type", vector_scan_desc.search_column_name);
++            vector_scan_desc.search_column_name = arguments[0]->getColumnName();
+ 
+         /// Not initialize dim here
+ 
+diff --git a/src/Interpreters/InterpreterSelectQuery.cpp b/src/Interpreters/InterpreterSelectQuery.cpp
+index df3c201409..7e2939fb44 100644
+--- a/src/Interpreters/InterpreterSelectQuery.cpp
++++ b/src/Interpreters/InterpreterSelectQuery.cpp
+@@ -1924,10 +1924,17 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
+         if (!subquery)
+             throw Exception("Subquery expected", ErrorCodes::LOGICAL_ERROR);
+ 
++        /// If there is vector scan in the outer query and main table is subquery, save the vector scan description to subquery.
++        if (query_analyzer->hasVectorScan())
++            context->setVecScanDescription(query_analyzer->vectorScanDescs().front());
++
+         interpreter_subquery = std::make_unique<InterpreterSelectWithUnionQuery>(
+             subquery, getSubqueryContext(context),
+             options.copy().subquery().noModify(), required_columns);
+ 
++        if (query_analyzer->hasVectorScan())
++            context->resetVecScanDescription();
++
+         if (query_analyzer->hasAggregation())
+             interpreter_subquery->ignoreWithTotals();
+ 
+diff --git a/src/Interpreters/TreeOptimizer.cpp b/src/Interpreters/TreeOptimizer.cpp
+index 23938beffc..5e77c68ae3 100644
+--- a/src/Interpreters/TreeOptimizer.cpp
++++ b/src/Interpreters/TreeOptimizer.cpp
+@@ -110,6 +110,13 @@ void optimizeGroupBy(ASTSelectQuery * select_query, ContextPtr context)
+     {
+         if (const auto * function = group_exprs[i]->as<ASTFunction>())
+         {
++            /// Skip vector scan function
++            if (isVectorScanFunc(function->name))
++            {
++                ++i;
++                continue;
++            }
++
+             /// assert function is injective
+             if (possibly_injective_function_names.count(function->name))
+             {
+diff --git a/src/Interpreters/TreeRewriter.cpp b/src/Interpreters/TreeRewriter.cpp
+index 9c8f4a5b7e..351073bda3 100644
+--- a/src/Interpreters/TreeRewriter.cpp
++++ b/src/Interpreters/TreeRewriter.cpp
+@@ -47,6 +47,9 @@
+ #include <DataTypes/DataTypesNumber.h>
+ #include <DataTypes/DataTypeTuple.h>
+ 
++#include <DataTypes/DataTypeArray.h>
++#include <Functions/FunctionHelpers.h>
++
+ #include <IO/WriteHelpers.h>
+ #include <Storages/IStorage.h>
+ #include <Storages/MergeTree/MergeTreeData.h>
+@@ -1225,6 +1228,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+         if (limit_length == 0)
+             throw Exception("Not support distance function without LIMIT N clause", ErrorCodes::SYNTAX_ERROR);
+ 
++        /// There is no vector scan function, hence the checks like input paramters are put here.
+         /// Check if vector column in vector scan func exists in left table or right joined table
+         /// Insert distance func columns into source columns here
+         const ASTFunction * node = vector_scan_funcs[0];
+@@ -1237,12 +1241,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+         String distance_col_name = node->getColumnName();
+         StorageMetadataPtr metadata_snapshot = nullptr;
+ 
++        std::optional<NameAndTypePair> search_column_type = std::nullopt;
++
+         if (storage_snapshot && storage_snapshot->metadata->getColumns().has(vec_col_name))
+         {
+             /// distance func column name should add to left table's source_columns
+             /// Will be added inside collectUsedColumns() after erase unrequired columns.
+             /// addDistanceFuncColName(distance_col_name, source_columns);
+             metadata_snapshot = storage_snapshot->metadata;
++
++            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vec_col_name);
+         }
+         else if (tables_with_columns.size() > 1)
+         {
+@@ -1250,11 +1258,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+             const auto & right_table = tables_with_columns[1];
+             String table_name = right_table.table.getQualifiedNamePrefix(false);
+ 
++            /// Handle cases where left table and right table both have the same vector column.
++            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
++                vec_col_name = identifier->shortName();
++
+             if (!right_table.hasColumn(vec_col_name))
+             {
+                 throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
+             }
+ 
++            search_column_type = right_table.columns.tryGetByName(vec_col_name);
+             vector_from_right_table = true;
+ 
+             /// distance func column name should add to right joined table's source columns
+@@ -1269,11 +1282,39 @@ void TreeRewriterResult::collectForVectorScanFunctions(
+             const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
+             metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
+         }
++        else if (tables_with_columns.size() == 1)
++        {
++            /// Left table is subquery
++            const auto & left_table = tables_with_columns[0];
++            String table_name = left_table.table.getQualifiedNamePrefix(false);
++
++            if (!left_table.hasColumn(vec_col_name))
++            {
++                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
++            }
++
++            /// Unable get metadata for left table, because the table name and UUID are empty.
++            search_column_type = left_table.columns.tryGetByName(vec_col_name);
++        }
+         else
+         {
+             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", vec_col_name);
+         }
+ 
++        /// Check vector column data type
++        if (search_column_type)
++        {
++            const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
++
++            if (!array_type)
++                throw Exception(ErrorCodes::BAD_ARGUMENTS,
++                    "Search column {} should be Array type", vec_col_name);
++        }
++        else
++        {
++            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", vec_col_name);
++        }
++
+         /// When metric_type = IP in definition of vector index, order by must be DESC.
+         if (metadata_snapshot)
+         {
+diff --git a/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.reference b/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.reference
+new file mode 100644
+index 0000000000..f77f28e238
+--- /dev/null
++++ b/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.reference
+@@ -0,0 +1,19 @@
++0
++vector column name exists in both two joined tables
++1	0
++2	3
++3	12
++4	27
++5	48
++distance function column exists in GROUP BY clause
++1	0	1
++2	3	1
++3	12	1
++4	27	1
++5	48	1
++distance function exists when main table is subquery
++11	300
++12	363
++13	432
++14	507
++15	588
+diff --git a/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.sql b/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.sql
+new file mode 100644
+index 0000000000..26bbd47f17
+--- /dev/null
++++ b/tests/queries/2_vector_search/00028_mqvs_sql_vector_improvment.sql
+@@ -0,0 +1,45 @@
++
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_vector_sql_improvment;
++CREATE TABLE test_vector_sql_improvment
++(
++    id    UInt32,
++    vector  Array(Float32),
++    CONSTRAINT check_length CHECK length(vector) = 3
++)
++engine = MergeTree ORDER BY id;
++
++DROP TABLE IF EXISTS test_vector_bak;
++CREATE TABLE test_vector_bak
++(
++    id    UInt32,
++    vector  Array(Float32)
++)
++engine = MergeTree ORDER BY id;
++
++ALTER TABLE test_vector_sql_improvment ADD VECTOR INDEX v2 vector TYPE HNSWFLAT;
++
++INSERT INTO test_vector_sql_improvment SELECT number, [number, number, number] from numbers(1, 100);
++INSERT INTO test_vector_bak SELECT number, [number, number, number] from numbers(1, 100);
++
++SELECT sleep(1);
++
++SELECT 'vector column name exists in both two joined tables';
++SELECT t1.id, distance(t2.vector, [1.0,1.0,1.0]) as dist
++FROM test_vector_bak as t1
++JOIN test_vector_sql_improvment as t2 ON t1.id = t2.id
++ORDER BY dist LIMIT 5;
++
++SELECT 'distance function column exists in GROUP BY clause';
++SELECT id, distance(vector, [1.0,1.0,1.0]) as dist, count(*)
++FROM test_vector_sql_improvment
++GROUP BY id,dist
++ORDER BY dist LIMIT 5;
++
++SELECT 'distance function exists when main table is subquery';
++SELECT id, distance(vector, [1.0,1.0,1.0]) as dist
++FROM (
++    SELECT id, vector FROM test_vector_sql_improvment WHERE id > 10)
++GROUP BY id,dist
++ORDER BY dist LIMIT 5;
+-- 
+2.32.1 (Apple Git-133)
+

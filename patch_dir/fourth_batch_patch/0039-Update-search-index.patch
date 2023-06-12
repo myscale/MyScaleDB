@@ -1,0 +1,20 @@
+From 3d3bbc25032113535a323ab63b55d229bdc06e1b Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 5 Jun 2023 13:13:31 +0800
+Subject: [PATCH 39/49] Update search-index
+
+close #156 and the stability bug
+---
+ contrib/search-index | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index 05b1f7b749..eb7636340f 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit 05b1f7b749217a66b772852c9e82501a2f324488
++Subproject commit eb7636340fc6b30ce0da5fd016ad6a22c220897d
+-- 
+2.32.1 (Apple Git-133)
+

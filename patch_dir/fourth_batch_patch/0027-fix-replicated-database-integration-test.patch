@@ -1,0 +1,292 @@
+From 28d8a1fda2418f1b5597f948cf244d72c42afd7d Mon Sep 17 00:00:00 2001
+From: Xu Jing <xuj@moqi.ai>
+Date: Wed, 17 May 2023 12:53:00 +0800
+Subject: [PATCH 27/49] fix replicated database integration test
+
+---
+ .../test_replicated_database/test.py          | 194 ++++++++++--------
+ 1 file changed, 110 insertions(+), 84 deletions(-)
+
+diff --git a/tests/integration/test_replicated_database/test.py b/tests/integration/test_replicated_database/test.py
+index 108191b306..e8d6923ce2 100644
+--- a/tests/integration/test_replicated_database/test.py
++++ b/tests/integration/test_replicated_database/test.py
+@@ -62,7 +62,6 @@ all_nodes = [
+     competing_node,
+     snapshotting_node,
+     snapshot_recovering_node,
+-    default_replicated_node,
+ ]
+ 
+ uuid_regex = re.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+@@ -84,6 +83,64 @@ def started_cluster():
+     finally:
+         cluster.shutdown()
+ 
++def create_some_tables(db):
++    settings = {"distributed_ddl_task_timeout": 0}
++    main_node.query(f"CREATE TABLE {db}.t1 (n int) ENGINE=Memory", settings=settings)
++    dummy_node.query(
++        f"CREATE TABLE {db}.t2 (s String) ENGINE=Memory", settings=settings
++    )
++    main_node.query(
++        f"CREATE TABLE {db}.mt1 (n int) ENGINE=MergeTree order by n",
++        settings=settings,
++    )
++    dummy_node.query(
++        f"CREATE TABLE {db}.mt2 (n int) ENGINE=MergeTree order by n",
++        settings=settings,
++    )
++    main_node.query(
++        f"CREATE TABLE {db}.rmt1 (n int) ENGINE=ReplicatedMergeTree order by n",
++        settings=settings,
++    )
++    dummy_node.query(
++        f"CREATE TABLE {db}.rmt2 (n int) ENGINE=ReplicatedMergeTree order by n",
++        settings=settings,
++    )
++    main_node.query(
++        f"CREATE TABLE {db}.rmt3 (n int) ENGINE=ReplicatedMergeTree order by n",
++        settings=settings,
++    )
++    dummy_node.query(
++        f"CREATE TABLE {db}.rmt5 (n int) ENGINE=ReplicatedMergeTree order by n",
++        settings=settings,
++    )
++    main_node.query(
++        f"CREATE MATERIALIZED VIEW {db}.mv1 (n int) ENGINE=ReplicatedMergeTree order by n AS SELECT n FROM recover.rmt1",
++        settings=settings,
++    )
++    dummy_node.query(
++        f"CREATE MATERIALIZED VIEW {db}.mv2 (n int) ENGINE=ReplicatedMergeTree order by n  AS SELECT n FROM recover.rmt2",
++        settings=settings,
++    )
++    main_node.query(
++        f"CREATE DICTIONARY {db}.d1 (n int DEFAULT 0, m int DEFAULT 1) PRIMARY KEY n "
++        "SOURCE(CLICKHOUSE(HOST 'localhost' PORT 9000 USER 'default' TABLE 'rmt1' PASSWORD '' DB 'recover')) "
++        "LIFETIME(MIN 1 MAX 10) LAYOUT(FLAT())"
++    )
++    dummy_node.query(
++        f"CREATE DICTIONARY {db}.d2 (n int DEFAULT 0, m int DEFAULT 1) PRIMARY KEY n "
++        "SOURCE(CLICKHOUSE(HOST 'localhost' PORT 9000 USER 'default' TABLE 'rmt2' PASSWORD '' DB 'recover')) "
++        "LIFETIME(MIN 1 MAX 10) LAYOUT(FLAT())"
++    )
++
++
++# These tables are used to check that DatabaseReplicated correctly renames all the tables in case when it restores from the lost state
++def create_table_for_exchanges(db):
++    settings = {"distributed_ddl_task_timeout": 0}
++    for table in ["a1", "a2", "a3", "a4", "a5", "a6"]:
++        main_node.query(
++            f"CREATE TABLE {db}.{table} (s String) ENGINE=ReplicatedMergeTree order by s",
++            settings=settings,
++        )
+ 
+ def test_create_replicated_table(started_cluster):
+     main_node.query(
+@@ -612,59 +669,21 @@ def test_recover_staled_replica(started_cluster):
+     )
+ 
+     settings = {"distributed_ddl_task_timeout": 0}
+-    main_node.query("CREATE TABLE recover.t1 (n int) ENGINE=Memory", settings=settings)
+-    dummy_node.query(
+-        "CREATE TABLE recover.t2 (s String) ENGINE=Memory", settings=settings
+-    )
+-    main_node.query(
+-        "CREATE TABLE recover.mt1 (n int) ENGINE=MergeTree order by n",
+-        settings=settings,
+-    )
+-    dummy_node.query(
+-        "CREATE TABLE recover.mt2 (n int) ENGINE=MergeTree order by n",
+-        settings=settings,
+-    )
+-    main_node.query(
+-        "CREATE TABLE recover.rmt1 (n int) ENGINE=ReplicatedMergeTree order by n",
+-        settings=settings,
+-    )
+-    dummy_node.query(
+-        "CREATE TABLE recover.rmt2 (n int) ENGINE=ReplicatedMergeTree order by n",
+-        settings=settings,
+-    )
+-    main_node.query(
+-        "CREATE TABLE recover.rmt3 (n int) ENGINE=ReplicatedMergeTree order by n",
+-        settings=settings,
+-    )
+-    dummy_node.query(
+-        "CREATE TABLE recover.rmt5 (n int) ENGINE=ReplicatedMergeTree order by n",
+-        settings=settings,
+-    )
+-    main_node.query(
+-        "CREATE MATERIALIZED VIEW recover.mv1 (n int) ENGINE=ReplicatedMergeTree order by n AS SELECT n FROM recover.rmt1",
+-        settings=settings,
+-    )
+-    dummy_node.query(
+-        "CREATE MATERIALIZED VIEW recover.mv2 (n int) ENGINE=ReplicatedMergeTree order by n  AS SELECT n FROM recover.rmt2",
+-        settings=settings,
+-    )
+-    main_node.query(
+-        "CREATE DICTIONARY recover.d1 (n int DEFAULT 0, m int DEFAULT 1) PRIMARY KEY n "
+-        "SOURCE(CLICKHOUSE(HOST 'localhost' PORT 9000 USER 'default' TABLE 'rmt1' PASSWORD '' DB 'recover')) "
+-        "LIFETIME(MIN 1 MAX 10) LAYOUT(FLAT())"
+-    )
+-    dummy_node.query(
+-        "CREATE DICTIONARY recover.d2 (n int DEFAULT 0, m int DEFAULT 1) PRIMARY KEY n "
+-        "SOURCE(CLICKHOUSE(HOST 'localhost' PORT 9000 USER 'default' TABLE 'rmt2' PASSWORD '' DB 'recover')) "
+-        "LIFETIME(MIN 1 MAX 10) LAYOUT(FLAT())"
+-    )
++    create_some_tables("recover")
++    create_table_for_exchanges("recover")
+ 
+     for table in ["t1", "t2", "mt1", "mt2", "rmt1", "rmt2", "rmt3", "rmt5"]:
+-        main_node.query("INSERT INTO recover.{} VALUES (42)".format(table))
++        main_node.query(f"INSERT INTO recover.{table} VALUES (42)")
+     for table in ["t1", "t2", "mt1", "mt2"]:
+-        dummy_node.query("INSERT INTO recover.{} VALUES (42)".format(table))
++        dummy_node.query(f"INSERT INTO recover.{table} VALUES (42)")
++
++    for i, table in enumerate(["a1", "a2", "a3", "a4", "a5", "a6"]):
++        main_node.query(f"INSERT INTO recover.{table} VALUES ('{str(i + 1) * 10}')")
++
+     for table in ["rmt1", "rmt2", "rmt3", "rmt5"]:
+-        main_node.query("SYSTEM SYNC REPLICA recover.{}".format(table))
++        main_node.query(f"SYSTEM SYNC REPLICA recover.{table}")
++    for table in ["a1", "a2", "a3", "a4", "a5", "a6"]:
++        main_node.query(f"SYSTEM SYNC REPLICA recover.{table}")
+ 
+     with PartitionManager() as pm:
+         pm.drop_instance_zk_connections(dummy_node)
+@@ -692,25 +711,21 @@ def test_recover_staled_replica(started_cluster):
+         )
+ 
+         inner_table = (
+-            ".inner_id."
+-            + dummy_node.query_with_retry(
+-                "SELECT uuid FROM system.tables WHERE database='recover' AND name='mv1'"
+-            ).strip()
++                ".inner_id."
++                + dummy_node.query_with_retry(
++            "SELECT uuid FROM system.tables WHERE database='recover' AND name='mv1'"
++        ).strip()
+         )
+         main_node.query_with_retry(
+-            "ALTER TABLE recover.`{}` MODIFY COLUMN n int DEFAULT 42".format(
+-                inner_table
+-            ),
++            f"ALTER TABLE recover.`{inner_table}` MODIFY COLUMN n int DEFAULT 42",
+             settings=settings,
+         )
+         main_node.query_with_retry(
+-            "ALTER TABLE recover.mv1 MODIFY QUERY SELECT m FROM recover.rmt1".format(
+-                inner_table
+-            ),
++            "ALTER TABLE recover.mv1 MODIFY QUERY SELECT m FROM recover.rmt1",
+             settings=settings,
+         )
+         main_node.query_with_retry(
+-            "RENAME TABLE recover.mv2 TO recover.mv3".format(inner_table),
++            "RENAME TABLE recover.mv2 TO recover.mv3",
+             settings=settings,
+         )
+ 
+@@ -726,11 +741,18 @@ def test_recover_staled_replica(started_cluster):
+             "CREATE TABLE recover.tmp AS recover.m1", settings=settings
+         )
+ 
++        main_node.query("EXCHANGE TABLES recover.a1 AND recover.a2", settings=settings)
++        main_node.query("EXCHANGE TABLES recover.a3 AND recover.a4", settings=settings)
++        main_node.query("EXCHANGE TABLES recover.a5 AND recover.a4", settings=settings)
++        main_node.query("EXCHANGE TABLES recover.a6 AND recover.a3", settings=settings)
++        main_node.query("RENAME TABLE recover.a6 TO recover.a7", settings=settings)
++        main_node.query("RENAME TABLE recover.a1 TO recover.a8", settings=settings)
++
+     assert (
+-        main_node.query(
+-            "SELECT name FROM system.tables WHERE database='recover' AND name NOT LIKE '.inner_id.%' ORDER BY name"
+-        )
+-        == "d1\nd2\nm1\nmt1\nmt2\nmv1\nmv3\nrmt1\nrmt2\nrmt4\nt2\ntmp\n"
++            main_node.query(
++                "SELECT name FROM system.tables WHERE database='recover' AND name NOT LIKE '.inner_id.%' ORDER BY name"
++            )
++            == "a2\na3\na4\na5\na7\na8\nd1\nd2\nm1\nmt1\nmt2\nmv1\nmv3\nrmt1\nrmt2\nrmt4\nt2\ntmp\n"
+     )
+     query = (
+         "SELECT name, uuid, create_table_query FROM system.tables WHERE database='recover' AND name NOT LIKE '.inner_id.%' "
+@@ -739,18 +761,24 @@ def test_recover_staled_replica(started_cluster):
+     expected = main_node.query(query)
+     assert_eq_with_retry(dummy_node, query, expected)
+     assert (
+-        main_node.query(
+-            "SELECT count() FROM system.tables WHERE database='recover' AND name LIKE '.inner_id.%'"
+-        )
+-        == "2\n"
++            main_node.query(
++                "SELECT count() FROM system.tables WHERE database='recover' AND name LIKE '.inner_id.%'"
++            )
++            == "2\n"
+     )
+     assert (
+-        dummy_node.query(
+-            "SELECT count() FROM system.tables WHERE database='recover' AND name LIKE '.inner_id.%'"
+-        )
+-        == "2\n"
++            dummy_node.query(
++                "SELECT count() FROM system.tables WHERE database='recover' AND name LIKE '.inner_id.%'"
++            )
++            == "2\n"
+     )
+ 
++    # Check that Database Replicated renamed all the tables correctly
++    for i, table in enumerate(["a2", "a8", "a5", "a7", "a4", "a3"]):
++        assert (
++                dummy_node.query(f"SELECT * FROM recover.{table}") == f"{str(i + 1) * 10}\n"
++        )
++
+     for table in [
+         "m1",
+         "t2",
+@@ -778,18 +806,16 @@ def test_recover_staled_replica(started_cluster):
+     )
+     test_recover_staled_replica_run += 1
+     table = dummy_node.query(
+-        "SHOW TABLES FROM recover_broken_tables LIKE 'mt1_29_%' LIMIT 1"
++        "SHOW TABLES FROM recover_broken_tables LIKE 'mt1_41_%' LIMIT 1"
+     ).strip()
+     assert (
+-        dummy_node.query("SELECT (*,).1 FROM recover_broken_tables.{}".format(table))
+-        == "42\n"
++            dummy_node.query(f"SELECT (*,).1 FROM recover_broken_tables.{table}") == "42\n"
+     )
+     table = dummy_node.query(
+-        "SHOW TABLES FROM recover_broken_tables LIKE 'rmt5_29_%' LIMIT 1"
++        "SHOW TABLES FROM recover_broken_tables LIKE 'rmt5_41_%' LIMIT 1"
+     ).strip()
+     assert (
+-        dummy_node.query("SELECT (*,).1 FROM recover_broken_tables.{}".format(table))
+-        == "42\n"
++            dummy_node.query(f"SELECT (*,).1 FROM recover_broken_tables.{table}") == "42\n"
+     )
+ 
+     expected = "Cleaned 6 outdated objects: dropped 1 dictionaries and 3 tables, moved 2 tables"
+@@ -845,13 +871,13 @@ def test_server_uuid(started_cluster):
+ 
+ 
+ def test_default_replicated_engine(started_cluster):
+-    assert default_replicated_node.query("SHOW CREATE DATABASE default") == "CREATE DATABASE default\nENGINE = Replicated('/clickhouse/test/databases/default', '{shard}', '{replica}')"
++    assert default_replicated_node.query("SHOW CREATE DATABASE default") == "CREATE DATABASE default\\nENGINE = Replicated(\\'/clickhouse/test/databases/default\\', \\'{shard}\\', \\'{replica}\\')\n"
+     default_replicated_node.query("DROP DATABASE IF EXISTS testdb")
+     default_replicated_node.query("CREATE DATABASE testdb")
+-    assert default_replicated_node.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\nENGINE = Replicated('/clickhouse/test/databases/testdb', '{shard}', '{replica}')"
++    assert default_replicated_node.query("SHOW CREATE DATABASE testdb") == "CREATE DATABASE testdb\\nENGINE = Replicated(\\'/clickhouse/test/databases/testdb\\', \\'{shard}\\', \\'{replica}\\')\n"
+     
+-    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree")
++    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n")
+     assert "MergeTree" in default_replicated_node.query("SHOW CREATE TABLE test")
+-    default_replicated_node.query("DROP TABLE test")
+-    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree", settings={"database_replicated_always_convert_table_to_replicated": 1})
++    default_replicated_node.query("DROP TABLE IF EXISTS test")
++    default_replicated_node.query("CREATE TABLE test (n int) ENGINE=MergeTree order by n", settings={"database_replicated_always_convert_table_to_replicated": 1})
+     assert "ReplicatedMergeTree" in default_replicated_node.query("SHOW CREATE TABLE test")
+\ No newline at end of file
+-- 
+2.32.1 (Apple Git-133)
+

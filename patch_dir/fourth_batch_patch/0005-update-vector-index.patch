@@ -1,0 +1,50 @@
+From bb0662a4f03749c4766200f90ee6d1325e8563f5 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Fri, 28 Apr 2023 19:58:42 +0800
+Subject: [PATCH 05/49] update vector index
+
+---
+ contrib/search-index                      | 2 +-
+ src/VectorIndex/VectorSegmentExecutor.cpp | 5 ++---
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/contrib/search-index b/contrib/search-index
+index f6169681df..284fa4ee88 160000
+--- a/contrib/search-index
++++ b/contrib/search-index
+@@ -1 +1 @@
+-Subproject commit f6169681df197a3ad57f9ea21d7bfd54f58b0f0f
++Subproject commit 284fa4ee88f9005a3512dc45c8f44f8f89f2ed1b
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index 2663b239bd..bb2685a58c 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -560,7 +560,7 @@ Status VectorSegmentExecutor::search(
+ 
+     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
+ 
+-    SearchThreadLimiter limiter(log, max_threads);
++    // SearchThreadLimiter limiter(log, max_threads);
+ 
+     // Merge filter and delete_bitmap
+     if (!delete_bitmap->all())
+@@ -597,7 +597,6 @@ void VectorSegmentExecutor::performSearch(
+     // Perform the actual search
+     {
+         DB::OpenTelemetrySpanHolder span2("VectorSegmentExecutor::search::vector_index_search");
+-        span2.addAttribute("vec_search.max_threads", max_threads);
+         auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
+         index->search(query_dataset, k, distances, labels, parameters, false, filter.get());
+     }
+@@ -843,7 +842,7 @@ std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
+ 
+     std::lock_guard<std::mutex> lock(mutex);
+     if (io_manager == nullptr)
+-        io_manager = std::make_shared<Search::DiskIOManager>(4, 64);
++        io_manager = std::make_shared<Search::DiskIOManager>(max_threads, 64);
+     return io_manager;
+ }
+ 
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,141 @@
+From 37b6e1c124dc1a3be471e51add4e70530a40ffe9 Mon Sep 17 00:00:00 2001
+From: Jianmei Zhang <jianmeiz@moqi.ai>
+Date: Wed, 7 Jun 2023 05:40:45 +0000
+Subject: [PATCH 42/49] Optimize logic for no where with LWD cases in
+ mergeVectorScanResult
+
+---
+ .../MergeTree/MergeTreeVectorScanManager.cpp  | 61 +++++++++++--------
+ ..._lightweight_delete_small_ranges.reference | 12 ++++
+ ...2_mqvs_lightweight_delete_small_ranges.sql | 21 +++++++
+ 3 files changed, 69 insertions(+), 25 deletions(-)
+ create mode 100644 tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.reference
+ create mode 100644 tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.sql
+
+diff --git a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+index 398b8e7485..a2a0d96f72 100644
+--- a/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
++++ b/src/Storages/MergeTree/MergeTreeVectorScanManager.cpp
+@@ -770,38 +770,49 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
+         else
+         {
+             LOG_DEBUG(log, "Get part offset");
+-            for (auto & read_range : read_ranges)
++
++            /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
++            /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
++            const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
++
++            /// start_pos and end_pos is used as start and end index of part_offset
++            size_t start_pos = 0;
++            size_t end_pos = part_offset->size() - 1;
++
++            for (size_t ind = 0; ind < label_column->size(); ++ind)
+             {
+-                const size_t start_pos = read_range.start_row;
+-                const size_t end_pos = read_range.start_row + read_range.row_num;
+-                for (size_t ind = 0; ind < label_column->size(); ++ind)
++                const UInt64 label_value = label_column->getUInt(ind);
++
++                /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
++                size_t low = start_pos;
++                size_t high = end_pos;
++                size_t mid;
++
++                /// label_value (row id) = part_offset.
++                /// We can use binary search to quickly locate part_offset for current label.
++                while (low <= high)
+                 {
+-                    const UInt64 label_value = label_column->getUInt(ind);
+-                    if (label_value >= start_pos && label_value < end_pos)
+-                    {
+-                        const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
++                    mid = low + (high - low) / 2;
+ 
+-                        /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
+-                        /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
+-                        /// TODO: the value in part_offset is sorted, use binary search?
+-                        for (size_t j = 0; j < part_offset->size(); ++j)
++                    if (label_value == offset_raw_value[mid])
++                    {
++                        /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
++                        for (size_t i = 0; i < final_result.size(); ++i)
+                         {
+-                            if (offset_raw_value[j] == label_value)
+-                            {
+-                                /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
+-                                for (size_t i = 0; i < final_result.size(); ++i)
+-                                {
+-                                    Field field;
+-                                    pre_result[i]->get(j, field);
+-                                    final_result[i]->insert(field);
+-                                }
++                            Field field;
++                            pre_result[i]->get(mid, field);
++                            final_result[i]->insert(field);
++                        }
+ 
+-                                final_distance_column->insert(distance_column->getFloat32(ind));
++                        final_distance_column->insert(distance_column->getFloat32(ind));
+ 
+-                                break;
+-                            }
+-                        }
++                        /// break from binary search loop
++                        break;
+                     }
++                    else if (label_value > offset_raw_value[mid])
++                        low = mid + 1;
++                    else
++                        high = mid - 1;
+                 }
+             }
+         }
+diff --git a/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.reference b/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.reference
+new file mode 100644
+index 0000000000..1370505c8b
+--- /dev/null
++++ b/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.reference
+@@ -0,0 +1,12 @@
++0
++0
++1	[1,1,1]	0
++0	[0,0,0]	3
++4	[4,4,4]	27
++5	[5,5,5]	48
++6	[6,6,6]	75
++7	[7,7,7]	108
++9	[9,9,9]	192
++10	[10,10,10]	243
++11	[11,11,11]	300
++12	[12,12,12]	363
+diff --git a/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.sql b/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.sql
+new file mode 100644
+index 0000000000..64a4cd9360
+--- /dev/null
++++ b/tests/queries/2_vector_search/00032_mqvs_lightweight_delete_small_ranges.sql
+@@ -0,0 +1,21 @@
++-- Tags: no-parallel
++
++DROP TABLE IF EXISTS test_vector;
++CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3)
++engine MergeTree primary key id SETTINGS index_granularity=3, min_rows_to_build_vector_index=10;
++
++INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
++ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
++
++SELECT sleep(2);
++
++set allow_experimental_lightweight_delete=1;
++set mutations_sync=1;
++
++delete from test_vector where id = 2 or id = 3 or id = 8;
++
++SELECT sleep(2);
++
++SELECT id, vector, distance(vector, [1.0, 1.0, 1.0]) as d FROM test_vector order by d limit 10;
++
++drop table test_vector;
+-- 
+2.32.1 (Apple Git-133)
+

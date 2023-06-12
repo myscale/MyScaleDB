@@ -1,0 +1,170 @@
+From f6985a34345858faa91827359b37a8e9c136a71d Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Fri, 12 May 2023 19:33:29 +0800
+Subject: [PATCH 14/49] expose new APIs for two-stage search
+
+---
+ src/VectorIndex/VectorSegmentExecutor.cpp | 56 ++++++++++++-----------
+ src/VectorIndex/VectorSegmentExecutor.h   | 27 ++++++-----
+ 2 files changed, 42 insertions(+), 41 deletions(-)
+
+diff --git a/src/VectorIndex/VectorSegmentExecutor.cpp b/src/VectorIndex/VectorSegmentExecutor.cpp
+index f608c0614d..f9e78926a3 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.cpp
++++ b/src/VectorIndex/VectorSegmentExecutor.cpp
+@@ -600,10 +600,11 @@ Status VectorSegmentExecutor::load()
+ }
+ 
+ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
+-    VectorDatasetPtr dataset,
++    VectorDatasetPtr queries,
+     int32_t k,
+     const Search::DenseBitmapPtr & filter,
+-    Search::Parameters & parameters)
++    Search::Parameters & parameters,
++    bool first_stage_only)
+ {
+     DB::OpenTelemetrySpanHolder span("VectorSegmentExecutor::search()");
+ 
+@@ -618,7 +619,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
+     }
+ 
+     // Check if the dimensions of the searched index and input match
+-    if (dataset->getDimension() != static_cast<int64_t>(dimension))
++    if (queries->getDimension() != static_cast<int64_t>(dimension))
+     {
+         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "The dimension of searched index and input doesn't match.");
+     }
+@@ -632,12 +633,27 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
+     if (!delete_bitmap->all())
+         merged_filter = Search::mergeDenseBitmap(filter, delete_bitmap);
+ 
+-    // Perform the search and handle the results
++    if (fallback_to_flat)
++        parameters.clear();
++
+     try
+     {
+-        if (fallback_to_flat)
+-            parameters.clear();
+-        return performSearch(dataset, k, merged_filter, parameters);
++        std::shared_ptr<Search::SearchResult> ret;
++        // Perform the actual search
++        {
++            DB::OpenTelemetrySpanHolder span_search("VectorSegmentExecutor::performSearch()::search");
++            auto search_queries
++                = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
++            ret = index->search(search_queries, k, parameters, first_stage_only, merged_filter.get());
++        }
++
++        // Transfer the results to newRowIds
++        if (!first_stage_only)
++        {
++            DB::OpenTelemetrySpanHolder span_transfer_id("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
++            transferToNewRowIds(ret);
++        }
++        return ret;
+     }
+     catch (const SearchIndexException & e)
+     {
+@@ -650,30 +666,16 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
+     }
+ }
+ 
+-std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::performSearch(
+-    VectorDatasetPtr dataset,
+-    int32_t k,
+-    const Search::DenseBitmapPtr & filter,
+-    Search::Parameters & parameters)
+-{
+-    std::shared_ptr<Search::SearchResult> ret;
+-    // Perform the actual search
+-    {
+-        DB::OpenTelemetrySpanHolder span("VectorSegmentExecutor::performSearch()::search");
+-        auto query_dataset = std::make_shared<Search::DataSet<float>>(dataset->getData(), dataset->getVectorNum(), dataset->getDimension());
+-        ret = index->search(query_dataset, k, parameters, false, filter.get());
+-    }
+ 
+-    // Transfer the results to newRowIds
+-    {
+-        DB::OpenTelemetrySpanHolder span("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
+-        auto labels = ret->getResultIndices();
+-        transferToNewRowIds(labels, k * dataset->getVectorNum());
+-    }
++std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::computeTopDistanceSubset(
++    VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k)
++{
++    auto search_queries = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
++    auto ret = index->computeTopDistanceSubset(search_queries, first_stage_result, top_k);
++    transferToNewRowIds(ret);
+     return ret;
+ }
+ 
+-
+ Status VectorSegmentExecutor::searchWithoutIndex(
+     VectorDatasetPtr query_data,
+     VectorDatasetPtr base_data,
+diff --git a/src/VectorIndex/VectorSegmentExecutor.h b/src/VectorIndex/VectorSegmentExecutor.h
+index 5032af901d..e14dceedd0 100644
+--- a/src/VectorIndex/VectorSegmentExecutor.h
++++ b/src/VectorIndex/VectorSegmentExecutor.h
+@@ -139,10 +139,14 @@ public:
+ 
+     /// A method that wraps VectorIndex::search() and does some check and post-process.
+     std::shared_ptr<Search::SearchResult> search(
+-        VectorDatasetPtr dataset,
++        VectorDatasetPtr queries,
+         int32_t k,
+         const Search::DenseBitmapPtr & filter,
+-        Search::Parameters & parameters);
++        Search::Parameters & parameters,
++        bool first_stage_only = false);
++
++    std::shared_ptr<Search::SearchResult>
++    computeTopDistanceSubset(VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k);
+ 
+     void buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size);
+ 
+@@ -205,6 +209,8 @@ public:
+     /// Update merged old part's delete bitmap after lightweight delete on disk and cache if exists.
+     void updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids);
+ 
++    bool supportTwoStageSearch() const { return index->supportTwoStageSearch(); }
++
+ private:
+     void init();
+ 
+@@ -214,25 +220,18 @@ private:
+ 
+     void handleMergedMaps();
+ 
+-    std::shared_ptr<Search::SearchResult> performSearch(
+-        VectorDatasetPtr dataset,
+-        int32_t k,
+-        const Search::DenseBitmapPtr & filter,
+-        Search::Parameters & parameters);
+-
+-    void transferToNewRowIds(int64_t *& labels, int size)
++    void transferToNewRowIds(std::shared_ptr<Search::SearchResult> & result)
+     {
+         if (row_ids_map->empty())
+         {
+             return;
+         }
+ 
+-        for (int i = 0; i < size; i++)
++        for (size_t k = 0; k < result->numQueries(); k++)
+         {
+-            if (labels[i] != -1)
+-            {
+-                labels[i] = (*row_ids_map)[labels[i]];
+-            }
++            for (auto & label : result->getResultIndices(k))
++                if (label != -1)
++                    label = (*row_ids_map)[label];
+         }
+     }
+ 
+-- 
+2.32.1 (Apple Git-133)
+

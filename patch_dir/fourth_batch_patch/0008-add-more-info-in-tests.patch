@@ -1,0 +1,96 @@
+From a6716065f0096567656a5dae857ce66057b78487 Mon Sep 17 00:00:00 2001
+From: Qin Liu <lqgy2001@gmail.com>
+Date: Mon, 8 May 2023 00:10:19 +0800
+Subject: [PATCH 08/49] add more info in tests
+
+---
+ ...cated_lightweight_delete_with_decouple.reference |  8 ++++++++
+ ..._replicated_lightweight_delete_with_decouple.sql | 13 +++++++++----
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
+index 53febe7ab5..8bf934161f 100644
+--- a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
++++ b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.reference
+@@ -1,5 +1,8 @@
+ 0
+ 0
++0
++test_replicated_vector	v1	HNSWFLAT	3	Built
++test_replicated_vector2	v1	HNSWFLAT	3	Built
+ --- Original topK result
+ 0	[0,0,0]	0.030000001
+ 1	[1,1,1]	2.4299998
+@@ -12,6 +15,8 @@
+ 8	[8,8,8]	187.23
+ 9	[9,9,9]	237.62997
+ --- Lightweight delete on parts with vector index
++test_replicated_vector	v1	HNSWFLAT	3	Built
++test_replicated_vector2	v1	HNSWFLAT	3	Built
+ 0	[0,0,0]	0.030000001
+ 1	[1,1,1]	2.4299998
+ 3	[3,3,3]	25.230003
+@@ -34,6 +39,8 @@
+ 16	[16,16,16]	758.42993
+ --- Decoupled part when source parts contain lightweight delete
+ 0
++test_replicated_vector	v1	HNSWFLAT	1	InProgress
++test_replicated_vector2	v1	HNSWFLAT	1	InProgress
+ 0	[0,0,0]	0.030000001
+ 1	[1,1,1]	2.4299998
+ 3	[3,3,3]	25.230003
+@@ -56,6 +63,7 @@
+ 16	[16,16,16]	758.42993
+ --- Lightweight delete on decoupled part
+ test_replicated_vector	v1	HNSWFLAT	1	InProgress
++test_replicated_vector2	v1	HNSWFLAT	1	InProgress
+ 0	[0,0,0]	0.030000001
+ 1	[1,1,1]	2.4299998
+ 4	[4,4,4]	45.630005
+diff --git a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
+index 33e96eb131..857988fd7c 100644
+--- a/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
++++ b/tests/queries/2_vector_search/00017_mqvs_replicated_lightweight_delete_with_decouple.sql
+@@ -13,22 +13,27 @@ INSERT INTO test_replicated_vector SELECT number + 100, [number + 100, number +
+ INSERT INTO test_replicated_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
+ 
+ SELECT sleep(3);
++SELECT sleep(3);
++select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
++
+ SELECT '--- Original topK result';
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
+ 
++SELECT '--- Lightweight delete on parts with vector index';
+ set allow_experimental_lightweight_delete=1;
+ set mutations_sync=2;
+-
+-SELECT '--- Lightweight delete on parts with vector index';
+ delete from test_replicated_vector where id = 2;
+ delete from test_replicated_vector where id = 10;
+ 
++select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
++
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
+ 
+ SELECT '--- Decoupled part when source parts contain lightweight delete';
+ optimize table test_replicated_vector final;
+-SELECT sleep(2);
++SELECT sleep(3);
++select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+ 
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 prewhere id > 5 order by d limit 10;
+@@ -37,7 +42,7 @@ SELECT '--- Lightweight delete on decoupled part';
+ delete from test_replicated_vector where id = 3;
+ delete from test_replicated_vector where id = 15;
+ 
+-select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_replicated_vector';
++select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+ 
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
+ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
+-- 
+2.32.1 (Apple Git-133)
+

@@ -1,0 +1,573 @@
+From 084661674e46d0b8f9ad6f42204bf4f57047aa88 Mon Sep 17 00:00:00 2001
+From: Alexander Tokmakov <tavplubix@clickhouse.com>
+Date: Thu, 29 Dec 2022 17:34:11 +0300
+Subject: [PATCH 28/49] Implement SYSTEM DROP DATABASE REPLICA (#42807)
+
+---
+ src/Common/ZooKeeper/ZooKeeper.cpp            | 31 +++++--
+ src/Common/ZooKeeper/ZooKeeper.h              |  8 +-
+ src/Databases/DatabaseReplicated.cpp          | 37 +++++++-
+ src/Databases/DatabaseReplicated.h            |  4 +
+ src/Databases/DatabaseReplicatedWorker.cpp    | 11 +++
+ src/Databases/DatabaseReplicatedWorker.h      |  7 ++
+ src/Interpreters/InterpreterCreateQuery.cpp   |  6 +-
+ src/Interpreters/InterpreterSystemQuery.cpp   | 74 ++++++++++++++++
+ src/Interpreters/InterpreterSystemQuery.h     |  1 +
+ src/Parsers/ASTSystemQuery.cpp                |  2 +-
+ src/Parsers/ASTSystemQuery.h                  |  1 +
+ src/Parsers/ParserSystemQuery.cpp             | 87 +++++++++++--------
+ .../02447_drop_database_replica.reference     | 10 +++
+ .../02447_drop_database_replica.sh            | 38 ++++++++
+ 14 files changed, 262 insertions(+), 55 deletions(-)
+ create mode 100644 tests/queries/0_stateless/02447_drop_database_replica.reference
+ create mode 100755 tests/queries/0_stateless/02447_drop_database_replica.sh
+
+diff --git a/src/Common/ZooKeeper/ZooKeeper.cpp b/src/Common/ZooKeeper/ZooKeeper.cpp
+index 96abf3b543..a62561aa09 100644
+--- a/src/Common/ZooKeeper/ZooKeeper.cpp
++++ b/src/Common/ZooKeeper/ZooKeeper.cpp
+@@ -877,19 +877,34 @@ bool ZooKeeper::waitForDisappear(const std::string & path, const WaitCondition &
+     return false;
+ }
+ 
+-void ZooKeeper::waitForEphemeralToDisappearIfAny(const std::string & path)
++void ZooKeeper::handleEphemeralNodeExistence(const std::string & path, const std::string & fast_delete_if_equal_value)
+ {
+     zkutil::EventPtr eph_node_disappeared = std::make_shared<Poco::Event>();
+     String content;
+-    if (!tryGet(path, content, nullptr, eph_node_disappeared))
++    Coordination::Stat stat;
++    if (!tryGet(path, content, &stat, eph_node_disappeared))
+         return;
+ 
+-    int32_t timeout_ms = 3 * session_timeout_ms;
+-    if (!eph_node_disappeared->tryWait(timeout_ms))
+-        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR,
+-                            "Ephemeral node {} still exists after {}s, probably it's owned by someone else. "
+-                            "Either session_timeout_ms in client's config is different from server's config or it's a bug. "
+-                            "Node data: '{}'", path, timeout_ms / 1000, content);
++    if (content == fast_delete_if_equal_value)
++    {
++        auto code = tryRemove(path, stat.version);
++        if (code != Coordination::Error::ZOK && code != Coordination::Error::ZNONODE)
++            throw Coordination::Exception(code, path);
++    }
++    else
++    {
++        LOG_WARNING(log, "Ephemeral node ('{}') already exists but it isn't owned by us. Will wait until it disappears", path);
++        int32_t timeout_ms = 3 * session_timeout_ms;
++        if (!eph_node_disappeared->tryWait(timeout_ms))
++            throw DB::Exception(
++                DB::ErrorCodes::LOGICAL_ERROR,
++                "Ephemeral node {} still exists after {}s, probably it's owned by someone else. "
++                "Either session_timeout_ms in client's config is different from server's config or it's a bug. "
++                "Node data: '{}'",
++                path,
++                timeout_ms / 1000,
++                content);
++    }
+ }
+ 
+ ZooKeeperPtr ZooKeeper::startNewSession() const
+diff --git a/src/Common/ZooKeeper/ZooKeeper.h b/src/Common/ZooKeeper/ZooKeeper.h
+index a49e83d949..a35f92fd10 100644
+--- a/src/Common/ZooKeeper/ZooKeeper.h
++++ b/src/Common/ZooKeeper/ZooKeeper.h
+@@ -250,9 +250,11 @@ public:
+     /// The function returns true if waited and false if waiting was interrupted by condition.
+     bool waitForDisappear(const std::string & path, const WaitCondition & condition = {});
+ 
+-    /// Wait for the ephemeral node created in previous session to disappear.
+-    /// Throws LOGICAL_ERROR if node still exists after 2x session_timeout.
+-    void waitForEphemeralToDisappearIfAny(const std::string & path);
++    /// Checks if a the ephemeral node exists. These nodes are removed automatically by ZK when the session ends
++    /// If the node exists and its value is equal to fast_delete_if_equal_value it will remove it
++    /// If the node exists and its value is different, it will wait for it to disappear. It will throw a LOGICAL_ERROR if the node doesn't
++    /// disappear automatically after 3x session_timeout.
++    void handleEphemeralNodeExistence(const std::string & path, const std::string & fast_delete_if_equal_value);
+ 
+     /// Async interface (a small subset of operations is implemented).
+     ///
+diff --git a/src/Databases/DatabaseReplicated.cpp b/src/Databases/DatabaseReplicated.cpp
+index 8d782bd2dd..e4f4e91372 100644
+--- a/src/Databases/DatabaseReplicated.cpp
++++ b/src/Databases/DatabaseReplicated.cpp
+@@ -506,9 +506,6 @@ void DatabaseReplicated::recoverLostReplica(const ZooKeeperPtr & current_zookeep
+     else
+         LOG_WARNING(log, "Will recover replica with staled log pointer {} from log pointer {}", our_log_ptr, max_log_ptr);
+ 
+-    if (new_replica && !empty())
+-        throw Exception(ErrorCodes::LOGICAL_ERROR, "It's new replica, but database is not empty");
+-
+     auto table_name_to_metadata = tryGetConsistentMetadataSnapshot(current_zookeeper, max_log_ptr);
+ 
+     /// For ReplicatedMergeTree tables we can compare only UUIDs to ensure that it's the same table.
+@@ -773,6 +770,38 @@ ASTPtr DatabaseReplicated::parseQueryFromMetadataInZooKeeper(const String & node
+     return ast;
+ }
+ 
++void DatabaseReplicated::dropReplica(
++    DatabaseReplicated * database, const String & database_zookeeper_path, const String & full_replica_name)
++{
++    assert(!database || database_zookeeper_path == database->zookeeper_path);
++
++    if (full_replica_name.find('/') != std::string::npos)
++        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid replica name: {}", full_replica_name);
++
++    auto zookeeper = Context::getGlobalContextInstance()->getZooKeeper();
++
++    String database_replica_path = fs::path(database_zookeeper_path) / "replicas" / full_replica_name;
++    if (!zookeeper->exists(database_replica_path))
++        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Replica {} does not exist (database path: {})",
++                        full_replica_name, database_zookeeper_path);
++
++    if (zookeeper->exists(database_replica_path + "/active"))
++        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Replica {} is active, cannot drop it (database path: {})",
++                        full_replica_name, database_zookeeper_path);
++
++    zookeeper->set(database_replica_path, DROPPED_MARK, -1);
++    /// Notify other replicas that cluster configuration was changed (if we can)
++    if (database)
++        database->createEmptyLogEntry(zookeeper);
++
++    zookeeper->tryRemoveRecursive(database_replica_path);
++    if (zookeeper->tryRemove(database_zookeeper_path + "/replicas") == Coordination::Error::ZOK)
++    {
++        /// It was the last replica, remove all metadata
++        zookeeper->tryRemoveRecursive(database_zookeeper_path);
++    }
++}
++
+ void DatabaseReplicated::drop(ContextPtr context_)
+ {
+     auto current_zookeeper = getZooKeeper();
+@@ -807,7 +836,7 @@ void DatabaseReplicated::shutdown()
+ void DatabaseReplicated::dropTable(ContextPtr local_context, const String & table_name, bool no_delay)
+ {
+     auto txn = local_context->getZooKeeperMetadataTransaction();
+-    assert(!ddl_worker->isCurrentlyActive() || txn || startsWith(table_name, ".inner_id."));
++    assert(!ddl_worker || !ddl_worker->isCurrentlyActive() || txn || startsWith(table_name, ".inner_id."));
+     if (txn && txn->isInitialQuery())
+     {
+         String metadata_zk_path = zookeeper_path + "/metadata/" + escapeForFileName(table_name);
+diff --git a/src/Databases/DatabaseReplicated.h b/src/Databases/DatabaseReplicated.h
+index fcb8a2c4d3..7451aa384a 100644
+--- a/src/Databases/DatabaseReplicated.h
++++ b/src/Databases/DatabaseReplicated.h
+@@ -55,6 +55,8 @@ public:
+     String getFullReplicaName() const;
+     static std::pair<String, String> parseFullReplicaName(const String & name);
+ 
++    const String & getZooKeeperPath() const { return zookeeper_path; }
++
+     /// Returns cluster consisting of database replicas
+     ClusterPtr getCluster() const;
+ 
+@@ -68,6 +70,8 @@ public:
+ 
+     void shutdown() override;
+ 
++    static void dropReplica(DatabaseReplicated * database, const String & database_zookeeper_path, const String & full_replica_name);
++
+     friend struct DatabaseReplicatedTask;
+     friend class DatabaseReplicatedDDLWorker;
+ private:
+diff --git a/src/Databases/DatabaseReplicatedWorker.cpp b/src/Databases/DatabaseReplicatedWorker.cpp
+index 365a5d0281..99d0c2aa90 100644
+--- a/src/Databases/DatabaseReplicatedWorker.cpp
++++ b/src/Databases/DatabaseReplicatedWorker.cpp
+@@ -2,6 +2,7 @@
+ #include <Databases/DatabaseReplicated.h>
+ #include <Interpreters/DDLTask.h>
+ #include <Common/ZooKeeper/KeeperException.h>
++#include <Core/ServerUUID.h>
+ #include <filesystem>
+ 
+ namespace fs = std::filesystem;
+@@ -61,6 +62,16 @@ void DatabaseReplicatedDDLWorker::initializeReplication()
+     /// Invariant: replica is lost if it's log_ptr value is less then max_log_ptr - logs_to_keep.
+ 
+     auto zookeeper = getAndSetZooKeeper();
++
++    /// Create "active" node (remove previous one if necessary)
++    String active_path = fs::path(database->replica_path) / "active";
++    String active_id = toString(ServerUUID::get());
++    zookeeper->handleEphemeralNodeExistence(active_path, active_id);
++    zookeeper->create(active_path, active_id, zkutil::CreateMode::Ephemeral);
++    active_node_holder.reset();
++    active_node_holder_zookeeper = zookeeper;
++    active_node_holder = zkutil::EphemeralNodeHolder::existing(active_path, *active_node_holder_zookeeper);
++
+     String log_ptr_str = zookeeper->get(database->replica_path + "/log_ptr");
+     UInt32 our_log_ptr = parse<UInt32>(log_ptr_str);
+     UInt32 max_log_ptr = parse<UInt32>(zookeeper->get(database->zookeeper_path + "/max_log_ptr"));
+diff --git a/src/Databases/DatabaseReplicatedWorker.h b/src/Databases/DatabaseReplicatedWorker.h
+index 6b957e567f..c076ce8d14 100644
+--- a/src/Databases/DatabaseReplicatedWorker.h
++++ b/src/Databases/DatabaseReplicatedWorker.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ #include <Interpreters/DDLWorker.h>
++#include <Common/ZooKeeper/ZooKeeper.h>
+ 
+ namespace DB
+ {
+@@ -44,6 +45,12 @@ private:
+     std::condition_variable wait_current_task_change;
+     String current_task;
+     std::atomic<UInt32> logs_to_keep = std::numeric_limits<UInt32>::max();
++
++
++    /// EphemeralNodeHolder has reference to ZooKeeper, it may become dangling
++    ZooKeeperPtr active_node_holder_zookeeper;
++    /// It will remove "active" node when database is detached
++    zkutil::EphemeralNodeHolderPtr active_node_holder;
+ };
+ 
+ }
+diff --git a/src/Interpreters/InterpreterCreateQuery.cpp b/src/Interpreters/InterpreterCreateQuery.cpp
+index 191682f6fd..f158b08d14 100644
+--- a/src/Interpreters/InterpreterCreateQuery.cpp
++++ b/src/Interpreters/InterpreterCreateQuery.cpp
+@@ -256,7 +256,7 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
+ 
+     if ((create.storage->engine->name == "MaterializeMySQL" || create.storage->engine->name == "MaterializedMySQL")
+         && !getContext()->getSettingsRef().allow_experimental_database_materialized_mysql
+-        && !internal)
++        && !internal && !create.attach)
+     {
+         throw Exception("MaterializedMySQL is an experimental database engine. "
+                         "Enable allow_experimental_database_materialized_mysql to use it.", ErrorCodes::UNKNOWN_DATABASE_ENGINE);
+@@ -264,7 +264,7 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
+ 
+     if (create.storage->engine->name == "Replicated"
+         && !getContext()->getSettingsRef().allow_experimental_database_replicated
+-        && !internal)
++        && !internal && !create.attach)
+     {
+         throw Exception("Replicated is an experimental database engine. "
+                         "Enable allow_experimental_database_replicated to use it.", ErrorCodes::UNKNOWN_DATABASE_ENGINE);
+@@ -272,7 +272,7 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
+ 
+     if (create.storage->engine->name == "MaterializedPostgreSQL"
+         && !getContext()->getSettingsRef().allow_experimental_database_materialized_postgresql
+-        && !internal)
++        && !internal && !create.attach)
+     {
+         throw Exception("MaterializedPostgreSQL is an experimental database engine. "
+                         "Enable allow_experimental_database_materialized_postgresql to use it.", ErrorCodes::UNKNOWN_DATABASE_ENGINE);
+diff --git a/src/Interpreters/InterpreterSystemQuery.cpp b/src/Interpreters/InterpreterSystemQuery.cpp
+index 703b813ca7..015dad3232 100644
+--- a/src/Interpreters/InterpreterSystemQuery.cpp
++++ b/src/Interpreters/InterpreterSystemQuery.cpp
+@@ -35,6 +35,7 @@
+ #include <Access/ContextAccess.h>
+ #include <Access/Common/AllowedClientHosts.h>
+ #include <Databases/IDatabase.h>
++#include <Databases/DatabaseReplicated.h>
+ #include <Disks/DiskRestartProxy.h>
+ #include <Storages/StorageDistributed.h>
+ #include <Storages/StorageReplicatedMergeTree.h>
+@@ -413,6 +414,9 @@ BlockIO InterpreterSystemQuery::execute()
+         case Type::DROP_REPLICA:
+             dropReplica(query);
+             break;
++        case Type::DROP_DATABASE_REPLICA:
++            dropDatabaseReplica(query);
++            break;
+         case Type::SYNC_REPLICA:
+             syncReplica(query);
+             break;
+@@ -696,6 +700,75 @@ bool InterpreterSystemQuery::dropReplicaImpl(ASTSystemQuery & query, const Stora
+     return true;
+ }
+ 
++void InterpreterSystemQuery::dropDatabaseReplica(ASTSystemQuery & query)
++{
++    if (query.replica.empty())
++        throw Exception("Replica name is empty", ErrorCodes::BAD_ARGUMENTS);
++
++    auto check_not_local_replica = [](const DatabaseReplicated * replicated, const ASTSystemQuery & query)
++    {
++        if (!query.replica_zk_path.empty() && fs::path(replicated->getZooKeeperPath()) != fs::path(query.replica_zk_path))
++            return;
++        if (replicated->getFullReplicaName() != query.replica)
++            return;
++
++        throw Exception(ErrorCodes::TABLE_WAS_NOT_DROPPED, "There is a local database {}, which has the same path in ZooKeeper "
++                        "and the same replica name. Please check the path in query. "
++                        "If you want to drop replica of this database, use `DROP DATABASE`", replicated->getDatabaseName());
++    };
++
++    if (query.database)
++    {
++        getContext()->checkAccess(AccessType::SYSTEM_DROP_REPLICA, query.getDatabase());
++        DatabasePtr database = DatabaseCatalog::instance().getDatabase(query.getDatabase());
++        if (auto * replicated = dynamic_cast<DatabaseReplicated *>(database.get()))
++        {
++            check_not_local_replica(replicated, query);
++            DatabaseReplicated::dropReplica(replicated, replicated->getZooKeeperPath(), query.replica);
++        }
++        else
++            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Database {} is not Replicated, cannot drop replica", query.getDatabase());
++        LOG_TRACE(log, "Dropped replica {} of Replicated database {}", query.replica, backQuoteIfNeed(database->getDatabaseName()));
++    }
++    else if (query.is_drop_whole_replica)
++    {
++        auto databases = DatabaseCatalog::instance().getDatabases();
++        auto access = getContext()->getAccess();
++        bool access_is_granted_globally = access->isGranted(AccessType::SYSTEM_DROP_REPLICA);
++
++        for (auto & elem : databases)
++        {
++            DatabasePtr & database = elem.second;
++            auto * replicated = dynamic_cast<DatabaseReplicated *>(database.get());
++            if (!replicated)
++                continue;
++            if (!access_is_granted_globally && !access->isGranted(AccessType::SYSTEM_DROP_REPLICA, elem.first))
++            {
++                LOG_INFO(log, "Access {} denied, skipping database {}", "SYSTEM DROP REPLICA", elem.first);
++                continue;
++            }
++
++            check_not_local_replica(replicated, query);
++            DatabaseReplicated::dropReplica(replicated, replicated->getZooKeeperPath(), query.replica);
++            LOG_TRACE(log, "Dropped replica {} of Replicated database {}", query.replica, backQuoteIfNeed(database->getDatabaseName()));
++        }
++    }
++    else if (!query.replica_zk_path.empty())
++    {
++        getContext()->checkAccess(AccessType::SYSTEM_DROP_REPLICA);
++
++        /// This check is actually redundant, but it may prevent from some user mistakes
++        for (auto & elem : DatabaseCatalog::instance().getDatabases())
++            if (auto * replicated = dynamic_cast<DatabaseReplicated *>(elem.second.get()))
++                check_not_local_replica(replicated, query);
++
++        DatabaseReplicated::dropReplica(nullptr, query.replica_zk_path, query.replica);
++        LOG_INFO(log, "Dropped replica {} of Replicated database with path {}", query.replica, query.replica_zk_path);
++    }
++    else
++        throw Exception("Invalid query", ErrorCodes::LOGICAL_ERROR);
++}
++
+ void InterpreterSystemQuery::syncReplica(ASTSystemQuery &)
+ {
+     getContext()->checkAccess(AccessType::SYSTEM_SYNC_REPLICA, table_id);
+@@ -868,6 +941,7 @@ AccessRightsElements InterpreterSystemQuery::getRequiredAccessForDDLOnCluster()
+             break;
+         }
+         case Type::DROP_REPLICA:
++        case Type::DROP_DATABASE_REPLICA:
+         {
+             required_access.emplace_back(AccessType::SYSTEM_DROP_REPLICA, query.getDatabase(), query.getTable());
+             break;
+diff --git a/src/Interpreters/InterpreterSystemQuery.h b/src/Interpreters/InterpreterSystemQuery.h
+index a9ce5e95d0..8f186c5d02 100644
+--- a/src/Interpreters/InterpreterSystemQuery.h
++++ b/src/Interpreters/InterpreterSystemQuery.h
+@@ -57,6 +57,7 @@ private:
+ 
+     void dropReplica(ASTSystemQuery & query);
+     bool dropReplicaImpl(ASTSystemQuery & query, const StoragePtr & table);
++    void dropDatabaseReplica(ASTSystemQuery & query);
+     void flushDistributed(ASTSystemQuery & query);
+     void restartDisk(String & name);
+ 
+diff --git a/src/Parsers/ASTSystemQuery.cpp b/src/Parsers/ASTSystemQuery.cpp
+index a4b0a69faa..ee6d2eec54 100644
+--- a/src/Parsers/ASTSystemQuery.cpp
++++ b/src/Parsers/ASTSystemQuery.cpp
+@@ -181,7 +181,7 @@ void ASTSystemQuery::formatImpl(const FormatSettings & settings, FormatState &,
+         else if (!disk.empty())
+             print_identifier(disk);
+     }
+-    else if (type == Type::DROP_REPLICA)
++    else if (type == Type::DROP_REPLICA || type == Type::DROP_DATABASE_REPLICA)
+     {
+         print_drop_replica();
+     }
+diff --git a/src/Parsers/ASTSystemQuery.h b/src/Parsers/ASTSystemQuery.h
+index 37b0ad9250..e9b580e5b3 100644
+--- a/src/Parsers/ASTSystemQuery.h
++++ b/src/Parsers/ASTSystemQuery.h
+@@ -34,6 +34,7 @@ public:
+         RESTART_REPLICA,
+         RESTORE_REPLICA,
+         DROP_REPLICA,
++        DROP_DATABASE_REPLICA,
+         SYNC_REPLICA,
+         SYNC_TRANSACTION_LOG,
+         RELOAD_DICTIONARY,
+diff --git a/src/Parsers/ParserSystemQuery.cpp b/src/Parsers/ParserSystemQuery.cpp
+index 61e96b9c1d..1aadae08be 100644
+--- a/src/Parsers/ParserSystemQuery.cpp
++++ b/src/Parsers/ParserSystemQuery.cpp
+@@ -150,6 +150,49 @@ static bool parseQueryWithOnCluster(std::shared_ptr<ASTSystemQuery> & res, IPars
+     return true;
+ }
+ 
++static bool parseDropReplica(std::shared_ptr<ASTSystemQuery> & res, IParser::Pos & pos, Expected & expected, bool database)
++{
++    if (!parseQueryWithOnCluster(res, pos, expected))
++        return false;
++
++    ASTPtr ast;
++    if (!ParserStringLiteral{}.parse(pos, ast, expected))
++        return false;
++    res->replica = ast->as<ASTLiteral &>().value.safeGet<String>();
++    if (ParserKeyword{"FROM"}.ignore(pos, expected))
++    {
++        // way 1. parse replica database
++        // way 2. parse replica table
++        // way 3. parse replica zkpath
++        if (ParserKeyword{"DATABASE"}.ignore(pos, expected))
++        {
++            ParserIdentifier database_parser;
++            if (!database_parser.parse(pos, res->database, expected))
++                return false;
++        }
++        else if (!database && ParserKeyword{"TABLE"}.ignore(pos, expected))
++        {
++            parseDatabaseAndTableAsAST(pos, expected, res->database, res->table);
++        }
++        else if (ParserKeyword{"ZKPATH"}.ignore(pos, expected))
++        {
++            ASTPtr path_ast;
++            if (!ParserStringLiteral{}.parse(pos, path_ast, expected))
++                return false;
++            String zk_path = path_ast->as<ASTLiteral &>().value.safeGet<String>();
++            if (!zk_path.empty() && zk_path[zk_path.size() - 1] == '/')
++                zk_path.pop_back();
++            res->replica_zk_path = zk_path;
++        }
++        else
++            return false;
++    }
++    else
++        res->is_drop_whole_replica = true;
++
++    return true;
++}
++
+ bool ParserSystemQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected & expected)
+ {
+     if (!ParserKeyword{"SYSTEM"}.ignore(pos, expected))
+@@ -194,45 +237,17 @@ bool ParserSystemQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected &
+                 return false;
+             break;
+         }
++
+         case Type::DROP_REPLICA:
+         {
+-            parseQueryWithOnCluster(res, pos, expected);
+-
+-            ASTPtr ast;
+-            if (!ParserStringLiteral{}.parse(pos, ast, expected))
++            if (!parseDropReplica(res, pos, expected, /* database */ false))
++                return false;
++            break;
++        }
++        case Type::DROP_DATABASE_REPLICA:
++        {
++            if (!parseDropReplica(res, pos, expected, /* database */ true))
+                 return false;
+-            res->replica = ast->as<ASTLiteral &>().value.safeGet<String>();
+-            if (ParserKeyword{"FROM"}.ignore(pos, expected))
+-            {
+-                // way 1. parse replica database
+-                // way 2. parse replica tables
+-                // way 3. parse replica zkpath
+-                if (ParserKeyword{"DATABASE"}.ignore(pos, expected))
+-                {
+-                    ParserIdentifier database_parser;
+-                    if (!database_parser.parse(pos, res->database, expected))
+-                        return false;
+-                }
+-                else if (ParserKeyword{"TABLE"}.ignore(pos, expected))
+-                {
+-                    parseDatabaseAndTableAsAST(pos, expected, res->database, res->table);
+-                }
+-                else if (ParserKeyword{"ZKPATH"}.ignore(pos, expected))
+-                {
+-                    ASTPtr path_ast;
+-                    if (!ParserStringLiteral{}.parse(pos, path_ast, expected))
+-                        return false;
+-                    String zk_path = path_ast->as<ASTLiteral &>().value.safeGet<String>();
+-                    if (!zk_path.empty() && zk_path[zk_path.size() - 1] == '/')
+-                        zk_path.pop_back();
+-                    res->replica_zk_path = zk_path;
+-                }
+-                else
+-                    return false;
+-            }
+-            else
+-                res->is_drop_whole_replica = true;
+-
+             break;
+         }
+ 
+diff --git a/tests/queries/0_stateless/02447_drop_database_replica.reference b/tests/queries/0_stateless/02447_drop_database_replica.reference
+new file mode 100644
+index 0000000000..2444905619
+--- /dev/null
++++ b/tests/queries/0_stateless/02447_drop_database_replica.reference
+@@ -0,0 +1,10 @@
++t
++1
++2
++2
++2
++2
++2
++rdb_default	1	1
++rdb_default	1	2
++2
+diff --git a/tests/queries/0_stateless/02447_drop_database_replica.sh b/tests/queries/0_stateless/02447_drop_database_replica.sh
+new file mode 100755
+index 0000000000..e1d1042f61
+--- /dev/null
++++ b/tests/queries/0_stateless/02447_drop_database_replica.sh
+@@ -0,0 +1,38 @@
++#!/usr/bin/env bash
++
++CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
++# shellcheck source=../shell_config.sh
++. "$CURDIR"/../shell_config.sh
++
++db="rdb_$CLICKHOUSE_DATABASE"
++
++$CLICKHOUSE_CLIENT -q "system flush logs"
++$CLICKHOUSE_CLIENT --allow_experimental_database_replicated=1 -q "create database $db engine=Replicated('/test/$CLICKHOUSE_DATABASE/rdb', 's1', 'r1')"
++$CLICKHOUSE_CLIENT --distributed_ddl_output_mode=none -q "create table $db.t as system.query_log"   # Suppress style check: current_database=$CLICKHOUSE_DATABASE
++$CLICKHOUSE_CLIENT -q "show tables from $db"
++
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from table t" 2>&1| grep -Fac "SYNTAX_ERROR"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from database $db" 2>&1| grep -Fac "There is a local database"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from zkpath '/test/$CLICKHOUSE_DATABASE/rdb'" 2>&1| grep -Fac "There is a local database"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from zkpath '/test/$CLICKHOUSE_DATABASE/rdb/'" 2>&1| grep -Fac "There is a local database"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's2|r1' from zkpath '/test/$CLICKHOUSE_DATABASE/rdb'" 2>&1| grep -Fac "does not exist"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's2/r1' from zkpath '/test/$CLICKHOUSE_DATABASE/rdb'" 2>&1| grep -Fac "Invalid replica name"
++
++db2="${db}_2"
++$CLICKHOUSE_CLIENT --allow_experimental_database_replicated=1 -q "create database $db2 engine=Replicated('/test/$CLICKHOUSE_DATABASE/rdb', 's1', 'r2')"
++$CLICKHOUSE_CLIENT -q "select cluster, shard_num, replica_num from system.clusters where cluster='$db' order by shard_num, replica_num"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from database $db2" 2>&1| grep -Fac "is active, cannot drop it"
++
++$CLICKHOUSE_CLIENT -q "detach database $db2"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r2' from database $db"
++$CLICKHOUSE_CLIENT -q "attach database $db2" 2>/dev/null
++
++$CLICKHOUSE_CLIENT -q "detach database $db"
++$CLICKHOUSE_CLIENT -q "system drop database replica 's1|r1' from zkpath '/test/$CLICKHOUSE_DATABASE/rdb/'"
++db3="${db}_3"
++$CLICKHOUSE_CLIENT --allow_experimental_database_replicated=1 -q "create database $db3 engine=Replicated('/test/$CLICKHOUSE_DATABASE/rdb', 's1', 'r1')"
++
++$CLICKHOUSE_CLIENT -q "drop database $db2"
++$CLICKHOUSE_CLIENT -q "drop database $db3"
++$CLICKHOUSE_CLIENT -q "attach database $db"
++$CLICKHOUSE_CLIENT -q "drop database $db"
+\ No newline at end of file
+-- 
+2.32.1 (Apple Git-133)
+
