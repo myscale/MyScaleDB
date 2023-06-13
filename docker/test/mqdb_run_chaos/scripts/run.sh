@@ -58,7 +58,6 @@ function check_job_status()
         generate_urls $start_time $end_time
         echo "grafana url: $GRAFANA_URL"
         echo "job log url: $JOB_LOKI_URL"
-        kubectl delete ns $current_namespace
         exit 1
       elif [ "$state" == "Completed" ]
       then
