@@ -4,12 +4,13 @@
 #include <Common/DateLUT.h>
 #include <Core/NamesAndTypes.h>
 #include <Core/NamesAndAliases.h>
-#include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <IO/ReadBufferFromMemory.h>
 #include <IO/ReadHelpers.h>
 
 namespace DB
 {
+
+class IMergeTreeDataPart;
 
 struct VectorIndexEventLogElement
 {
@@ -36,8 +37,8 @@ struct VectorIndexEventLogElement
     };
     String database_name;
     String table_name;
-    String part_name;
-    String partition_id;
+    mutable String part_name;
+    mutable String partition_id;
 
     Type event_type = DEFAULT;
     time_t event_time = 0;
@@ -50,13 +51,15 @@ struct VectorIndexEventLogElement
 
     static NamesAndTypesList getNamesAndTypes();
     static NamesAndAliases getNamesAndAliases() { return {}; }
-    void appendToBlock(MutableColumns & columns) const; 
+    void appendToBlock(MutableColumns & columns) const;
+    static const char * getCustomColumnList() { return nullptr; }
 };
 
 class VectorIndexEventLog : public SystemLog<VectorIndexEventLogElement>
 {
     using SystemLog<VectorIndexEventLogElement>::SystemLog;
     using VectorIndexEventLogPtr = std::shared_ptr<VectorIndexEventLog>;
+    using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
 
 public:
     static void addEventLog(
@@ -79,7 +82,7 @@ public:
     
     static void addEventLog(
         ContextPtr current_context,
-        const DB::MergeTreeDataPartPtr & data_part,
+        const MergeTreeDataPartPtr & data_part,
         VectorIndexEventLogElement::Type event_type,
         const ExecutionStatus & execution_status = {});
 

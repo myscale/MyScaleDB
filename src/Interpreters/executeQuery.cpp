@@ -266,8 +266,8 @@ static void onExceptionBeforeStart(
         vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
     vec_elem.part_name = "";
     vec_elem.partition_id = "";
-    vec_elem.event_time = current_time_us / 1000000;
-    vec_elem.event_time_microseconds = current_time_us;
+    vec_elem.event_time = timeInSeconds(query_end_time);
+    vec_elem.event_time_microseconds = timeInMicroseconds(query_end_time);
     if (const auto * query_with_table_output = dynamic_cast<const ASTQueryWithTableAndOutput *>(ast.get()))
     {
         vec_elem.table_name = query_with_table_output->getTable();
@@ -859,8 +859,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             
             vec_elem.part_name = "";
             vec_elem.partition_id = "";
-            vec_elem.event_time = timeInSeconds(current_time);
-            vec_elem.event_time_microseconds = timeInMicroseconds(current_time);
+            vec_elem.event_time = timeInSeconds(query_start_time);
+            vec_elem.event_time_microseconds = timeInMicroseconds(query_start_time);
             vec_elem.event_type = VectorIndexEventLogElement::DEFAULT;
             if (query_database == "")
                 vec_elem.database_name = context->getCurrentDatabase();

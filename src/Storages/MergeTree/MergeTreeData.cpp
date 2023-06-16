@@ -2477,7 +2477,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
     const auto settings = getSettings();
 
-    auto remove_single_thread = [this, &parts_to_remove, part_names_succeed]()
+    auto remove_single_thread = [this, &parts_to_remove, part_names_succeed, vec_event_log, vec_elem]()
     {
         LOG_DEBUG(
             log, "Removing {} parts from filesystem (serially): Parts: [{}]", parts_to_remove.size(), fmt::join(parts_to_remove, ", "));
@@ -2597,7 +2597,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
         sum_of_ranges += parts_in_range.size();
 
         pool.scheduleOrThrowOnError(
-            [this, range, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup(), batch = std::move(parts_in_range)]
+            [this, range, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup(), batch = std::move(parts_in_range), vec_event_log, vec_elem]
         {
             SCOPE_EXIT_SAFE(
                 if (thread_group)

@@ -35,6 +35,7 @@
 #include <DataTypes/DataTypeAggregateFunction.h>
 #include <Interpreters/MergeTreeTransaction.h>
 #include <Interpreters/TransactionLog.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/CacheManager.h>
 #include <VectorIndex/DiskIOReader.h>

@@ -14,7 +14,6 @@
 #include <Processors/Executors/PullingPipelineExecutor.h>
 
 #include <Common/CurrentThread.h>
-#include <Common/
 
 namespace DB
 {
@@ -96,7 +95,7 @@ void VectorIndexEventLog::addEventLog(
     const auto time_now = std::chrono::system_clock::now();
 
     elem.event_time = timeInSeconds(time_now);
-    elem.event_time_microseconds = timeInNanoseconds(time_now);
+    elem.event_time_microseconds = timeInMicroseconds(time_now);
 
     elem.error_code = static_cast<UInt16>(execution_status.code);
     elem.exception = execution_status.message;
@@ -131,7 +130,7 @@ void VectorIndexEventLog::addEventLog(
 
 void VectorIndexEventLog::addEventLog(
     ContextPtr current_context,
-    const DB::MergeTreeDataPartPtr & data_part,
+    const MergeTreeDataPartPtr & data_part,
     VectorIndexEventLogElement::Type event_type,
     const ExecutionStatus & execution_status)
 {

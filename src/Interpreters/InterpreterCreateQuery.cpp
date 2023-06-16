@@ -201,25 +201,6 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         if (!create.attach && fs::exists(metadata_path))
             throw Exception(ErrorCodes::DATABASE_ALREADY_EXISTS, "Metadata directory {} already exists", metadata_path.string());
     }
-
-    if (create.storage->engine->name == "Replicated" && !create.attach)
-    {
-        if (!create.storage->engine->arguments) {
-            create.storage->engine->arguments = std::make_shared<ASTExpressionList>();
-        }
-
-        /// Fill in default parameters
-        String default_zk_path_prefix = getContext()->getSettingsRef().database_replicated_default_zk_path_prefix.value;
-        if (create.storage->engine->arguments->children.size() == 0 && default_zk_path_prefix.size() > 0)
-            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>(default_zk_path_prefix + database_name));
-
-        if (create.storage->engine->arguments->children.size() == 1)
-            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{shard}"));
-
-        if (create.storage->engine->arguments->children.size() == 2)
-            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{replica}"));
-    }
-
     else if (create.storage->engine->name == "MaterializeMySQL"
         || create.storage->engine->name == "MaterializedMySQL")
     {
@@ -259,6 +240,24 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         /// Ignore UUID if it's ON CLUSTER query
         create.uuid = UUIDHelpers::Nil;
         metadata_path = metadata_path / "metadata" / database_name_escaped;
+    }
+
+    if (create.storage->engine->name == "Replicated" && !create.attach)
+    {
+        if (!create.storage->engine->arguments) {
+            create.storage->engine->arguments = std::make_shared<ASTExpressionList>();
+        }
+
+        /// Fill in default parameters
+        String default_zk_path_prefix = getContext()->getSettingsRef().database_replicated_default_zk_path_prefix.value;
+        if (create.storage->engine->arguments->children.size() == 0 && default_zk_path_prefix.size() > 0)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>(default_zk_path_prefix + database_name));
+
+        if (create.storage->engine->arguments->children.size() == 1)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{shard}"));
+
+        if (create.storage->engine->arguments->children.size() == 2)
+            create.storage->engine->arguments->children.push_back(std::make_shared<ASTLiteral>("{replica}"));
     }
 
     if ((create.storage->engine->name == "MaterializeMySQL" || create.storage->engine->name == "MaterializedMySQL")
