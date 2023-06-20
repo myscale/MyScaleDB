@@ -23,8 +23,13 @@ chmod a+x /usr/bin/clickhouse-test
 
 # install test configs
 /usr/share/clickhouse-test/config/install.sh
+
+azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --debug /azurite_log &
+./setup_minio.sh stateful
+
 rm -rf /etc/clickhouse-server/config.d/listen.xml
 echo '<clickhouse><listen_host>0.0.0.0</listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/listen.xml
+echo '<clickhouse><interserver_listen_host>0.0.0.0</interserver_listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/interserver_listen_host.xml
 
 function start() {
     if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
@@ -123,19 +128,30 @@ function run_tests() {
 export -f run_tests
 timeout "$MAX_RUN_TIME" bash -c run_tests || :
 
+echo "Files in current directory"
+ls -la ./
+echo "Files in root directory"
+ls -la /
+
 python3 ./process_functional_tests_result.py || echo -e "failure\tCannot parse results" >/test_output/check_status.tsv
 
-grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server.log || :
-pigz </var/log/clickhouse-server/clickhouse-server.log >/test_output/clickhouse-server.log.gz || :
+sudo clickhouse stop ||:
+
+rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server.log ||:
+
+zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server.log > /test_output/clickhouse-server.log.zst ||:
 mv /var/log/clickhouse-server/stderr.log /test_output/ || :
 if [[ -n "$WITH_COVERAGE" ]] && [[ "$WITH_COVERAGE" -eq 1 ]]; then
-    tar -chf /test_output/clickhouse_coverage.tar.gz /profraw || :
+    tar --zstd -c -h -f /test_output/clickhouse_coverage.tar.zst /profraw ||:
 fi
 if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server1.log || :
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server2.log || :
-    pigz </var/log/clickhouse-server/clickhouse-server1.log >/test_output/clickhouse-server1.log.gz || :
-    pigz </var/log/clickhouse-server/clickhouse-server2.log >/test_output/clickhouse-server2.log.gz || :
-    mv /var/log/clickhouse-server/stderr1.log /test_output/ || :
-    mv /var/log/clickhouse-server/stderr2.log /test_output/ || :
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server1.log ||:
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server2.log ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server1.log > /test_output/clickhouse-server1.log.zst ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server2.log > /test_output/clickhouse-server2.log.zst ||:
+    # FIXME: remove once only github actions will be left
+    rm /var/log/clickhouse-server/clickhouse-server1.log
+    rm /var/log/clickhouse-server/clickhouse-server2.log
+    mv /var/log/clickhouse-server/stderr1.log /test_output/ ||:
+    mv /var/log/clickhouse-server/stderr2.log /test_output/ ||:
 fi

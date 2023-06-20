@@ -99,7 +99,7 @@ build_package_with_license:
     - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
-    # - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
 
 build_image:
   stage: image

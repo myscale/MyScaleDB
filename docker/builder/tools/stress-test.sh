@@ -14,6 +14,8 @@ function clean
     rm -rf $WORKPATH/packages/* ||:;
     rm -rf $WORKPATH/test_output/* ||:;
     rm -rf $WORKPATH/workspace ||:;
+    rm -rf rm -rf /etc/clickhouse-server/* ||:
+    rm -rf rm -rf /var/lib/clickhouse/* ||:
     tree -L 2 $WORKPATH
 }
 
@@ -34,11 +36,12 @@ clean
 # In ci test, all CK installation packages are from 
 # ${PROJECT_PATH}/artifacts path. we can copy the file that we want
 cp -rfv ${PROJECT_PATH}/artifacts/clickhouse-*.deb $WORKPATH/packages/.;
-cp -rf $PROJECT_PATH/docker/test/mqdb_test_script/clickhouse-test $WORKPATH/
+cp -rfv ${PROJECT_PATH}/tests/clickhouse-test $WORKPATH/tests/
 cp -rf $PROJECT_PATH/tests/config $WORKPATH/tests/
 cp -rf $PROJECT_PATH/tests/queries $WORKPATH/tests/
 rm -rf $WORKPATH/tests/queries/2_vector_search $WORKPATH/tests/queries/3_ai_core_support ||:
 cp -rf $PROJECT_PATH/tests/performance $WORKPATH/tests/
+cp -rf $PROJECT_PATH/tests/ci $WORKPATH/tests/
 # cp -rf $PROJECT_PATH/tests/clickhouse-test $WORKPATH/tests/
 echo "***Test environment initialization completed***"
 tree -L 2 $WORKPATH

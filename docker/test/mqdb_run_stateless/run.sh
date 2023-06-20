@@ -25,7 +25,14 @@ chmod a+x /usr/bin/clickhouse-test
 /usr/share/clickhouse-test/config/install.sh
 rm -rf /etc/clickhouse-server/config.d/listen.xml
 echo '<clickhouse><listen_host>0.0.0.0</listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/listen.xml
+echo '<clickhouse><interserver_listen_host>0.0.0.0</interserver_listen_host></clickhouse>' >>/etc/clickhouse-server/config.d/interserver_listen_host.xml
 # cp -r clickhouse-test /usr/bin/clickhouse-test
+
+if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
+    echo "Azure is disabled"
+else
+    azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --debug /azurite_log &
+fi
 
 ./setup_minio.sh stateless
 ./setup_hdfs_minicluster.sh
@@ -127,18 +134,48 @@ export -f run_tests
 
 timeout "$MAX_RUN_TIME" bash -c run_tests || :
 
+echo "Files in current directory"
+ls -la ./
+echo "Files in root directory"
+ls -la /
+
 python3 process_functional_tests_result.py || echo -e "failure\tCannot parse results" >/test_output/check_status.tsv
 
 clickhouse-client -q "system flush logs" || :
 
-grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server.log || :
-pigz </var/log/clickhouse-server/clickhouse-server.log >/test_output/clickhouse-server.log.gz &
-clickhouse-client -q "select * from system.query_log format TSVWithNamesAndTypes" | pigz >/test_output/query-log.tsv.gz &
-clickhouse-client -q "select * from system.query_thread_log format TSVWithNamesAndTypes" | pigz >/test_output/query-thread-log.tsv.gz &
+# Stop server so we can safely read data with clickhouse-local.
+# Why do we read data with clickhouse-local?
+# Because it's the simplest way to read it when server has crashed.
+sudo clickhouse stop ||:
+if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
+    sudo clickhouse stop --pid-path /var/run/clickhouse-server1 ||:
+    sudo clickhouse stop --pid-path /var/run/clickhouse-server2 ||:
+fi
+
+rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server.log ||:
+rg -A50 -Fa "============" /var/log/clickhouse-server/stderr.log ||:
+zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server.log > /test_output/clickhouse-server.log.zst &
+
+# Compress tables.
+#
+# NOTE:
+# - that due to tests with s3 storage we cannot use /var/lib/clickhouse/data
+#   directly
+# - even though ci auto-compress some files (but not *.tsv) it does this only
+#   for files >64MB, we want this files to be compressed explicitly
+for table in query_log zookeeper_log trace_log transactions_info_log
+do
+    clickhouse-local --path /var/lib/clickhouse/ --only-system-tables -q "select * from system.$table format TSVWithNamesAndTypes" | zstd --threads=0 > /test_output/$table.tsv.zst ||:
+    if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
+        clickhouse-local --path /var/lib/clickhouse1/ --only-system-tables -q "select * from system.$table format TSVWithNamesAndTypes" | zstd --threads=0 > /test_output/$table.1.tsv.zst ||:
+        clickhouse-local --path /var/lib/clickhouse2/ --only-system-tables -q "select * from system.$table format TSVWithNamesAndTypes" | zstd --threads=0 > /test_output/$table.2.tsv.zst ||:
+    fi
+done
 
 # Also export trace log in flamegraph-friendly format.
-for trace_type in CPU Memory Real; do
-    clickhouse-client -q "
+for trace_type in CPU Memory Real
+do
+    clickhouse-local --path /var/lib/clickhouse/ --only-system-tables -q "
             select
                 arrayStringConcat((arrayMap(x -> concat(splitByChar('/', addressToLine(x))[-1], '#', demangle(addressToSymbol(x)) ), trace)), ';') AS stack,
                 count(*) AS samples
@@ -147,36 +184,29 @@ for trace_type in CPU Memory Real; do
             group by trace
             order by samples desc
             settings allow_introspection_functions = 1
-            format TabSeparated" |
-        pigz >"/test_output/trace-log-$trace_type-flamegraph.tsv.gz" &
+            format TabSeparated" \
+        | zstd --threads=0 > "/test_output/trace-log-$trace_type-flamegraph.tsv.zst" ||:
 done
 
-wait || :
-
-mv /var/log/clickhouse-server/stderr.log /test_output/ || :
+# Compressed (FIXME: remove once only github actions will be left)
+rm /var/log/clickhouse-server/clickhouse-server.log
+mv /var/log/clickhouse-server/stderr.log /test_output/ ||:
 if [[ -n "$WITH_COVERAGE" ]] && [[ "$WITH_COVERAGE" -eq 1 ]]; then
-    tar -chf /test_output/clickhouse_coverage.tar.gz /profraw || :
+    tar --zstd -chf /test_output/clickhouse_coverage.tar.zst /profraw ||:
 fi
 
-tar -chf /test_output/coordination.tar /var/lib/clickhouse/coordination || :
-
-# Replace the engine with Ordinary to avoid extra symlinks stuff in artifacts.
-# (so that clickhouse-local --path can read it w/o extra care).
-sed -i -e "s/ATTACH DATABASE _ UUID '[^']*'/ATTACH DATABASE system/" -e "s/Atomic/Ordinary/" /var/lib/clickhouse/metadata/system.sql
-for table in text_log query_log zookeeper_log trace_log; do
-    sed -i "s/ATTACH TABLE _ UUID '[^']*'/ATTACH TABLE $table/" /var/lib/clickhouse/metadata/system/${table}.sql
-    tar -chf /test_output/${table}_dump.tar /var/lib/clickhouse/metadata/system.sql /var/lib/clickhouse/metadata/system/${table}.sql /var/lib/clickhouse/data/system/${table} || :
-done
+tar -chf /test_output/coordination.tar /var/lib/clickhouse/coordination ||:
 
 if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]; then
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server1.log || :
-    grep -Fa "Fatal" /var/log/clickhouse-server/clickhouse-server2.log || :
-    pigz </var/log/clickhouse-server/clickhouse-server1.log >/test_output/clickhouse-server1.log.gz || :
-    pigz </var/log/clickhouse-server/clickhouse-server2.log >/test_output/clickhouse-server2.log.gz || :
-    mv /var/log/clickhouse-server/stderr1.log /test_output/ || :
-    mv /var/log/clickhouse-server/stderr2.log /test_output/ || :
-    tar -chf /test_output/zookeeper_log_dump1.tar /var/lib/clickhouse1/data/system/zookeeper_log || :
-    tar -chf /test_output/zookeeper_log_dump2.tar /var/lib/clickhouse2/data/system/zookeeper_log || :
-    tar -chf /test_output/coordination1.tar /var/lib/clickhouse1/coordination || :
-    tar -chf /test_output/coordination2.tar /var/lib/clickhouse2/coordination || :
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server1.log ||:
+    rg -Fa "<Fatal>" /var/log/clickhouse-server/clickhouse-server2.log ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server1.log > /test_output/clickhouse-server1.log.zst ||:
+    zstd --threads=0 < /var/log/clickhouse-server/clickhouse-server2.log > /test_output/clickhouse-server2.log.zst ||:
+    # FIXME: remove once only github actions will be left
+    rm /var/log/clickhouse-server/clickhouse-server1.log
+    rm /var/log/clickhouse-server/clickhouse-server2.log
+    mv /var/log/clickhouse-server/stderr1.log /test_output/ ||:
+    mv /var/log/clickhouse-server/stderr2.log /test_output/ ||:
+    tar -chf /test_output/coordination1.tar /var/lib/clickhouse1/coordination ||:
+    tar -chf /test_output/coordination2.tar /var/lib/clickhouse2/coordination ||:
 fi
