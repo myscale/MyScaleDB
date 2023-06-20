@@ -39,7 +39,7 @@ unsigned getCGroupV2LimitedCPUCores(unsigned default_cpu_count)
     infile >> cgroup_quota >> cgroup_period;
     if (cgroup_quota > -1 && cgroup_period > 0)
     {
-        quota_count = ceil(static_cast<float>(cgroup_quota) / static_cast<float>(cgroup_period));
+        quota_count = static_cast<unsigned>(ceil(static_cast<float>(cgroup_quota) / static_cast<float>(cgroup_period)));
     }
 
     return std::min(default_cpu_count, quota_count);

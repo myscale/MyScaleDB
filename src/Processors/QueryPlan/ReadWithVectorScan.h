@@ -1,5 +1,4 @@
 #pragma once
-#include <Processors/QueryPlan/ISourceStep.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
@@ -7,7 +6,7 @@
 namespace DB
 {
 
-class ReadWithVectorScan final : public ISourceStep
+class ReadWithVectorScan final : public SourceStepWithFilter
 {
 public:
     ReadWithVectorScan(

@@ -50,7 +50,7 @@ ReadWithVectorScan::ReadWithVectorScan(
     std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
     Poco::Logger * log_,
     bool enable_parallel_reading)
-    : ISourceStep(DataStream{.header = IMergeTreeSelectAlgorithm::transformHeader(
+    : SourceStepWithFilter(DataStream{.header = IMergeTreeSelectAlgorithm::transformHeader(
         storage_snapshot_->getSampleBlockForColumns(real_column_names_),
         getPrewhereInfo(query_info_),
         data_.getPartitionValueType(),
@@ -90,6 +90,8 @@ MergeTreeDataSelectAnalysisResultPtr ReadWithVectorScan::selectRangesToRead(Merg
 {
     return ReadFromMergeTree::selectRangesToRead(
         std::move(parts),
+        prewhere_info,
+        filter_nodes,
         storage_snapshot->metadata,
         storage_snapshot->getMetadataForQuery(),
         query_info,
@@ -171,11 +173,11 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         processors.emplace_back(processor);
     }
 
+    pipeline.init(std::move(pipe));
+
     // Attach QueryIdHolder if needed
     if (query_id_holder)
-        pipe.addQueryIdHolder(std::move(query_id_holder));
-
-    pipeline.init(std::move(pipe));
+        pipeline.setQueryIdHolder(std::move(query_id_holder));
 }
 
 
