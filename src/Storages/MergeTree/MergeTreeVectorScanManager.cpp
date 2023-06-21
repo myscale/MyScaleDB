@@ -707,6 +707,10 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
         LOG_DEBUG(log, "Label colum is null");
     }
 
+    /// Initialize was_result_processed
+    if (tmp_result->was_result_processed.size() == 0)
+        tmp_result->was_result_processed.assign(label_column->size(), false);
+
     auto final_distance_column = DataTypeFloat32().createColumn();
 
     /// create new column vector to save final results
@@ -736,6 +740,10 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
                 /// for each vector search result, try to find if there is one with label equals to row id.
                 for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
+                    /// Skip if this label has already processed
+                    if (tmp_result->was_result_processed[ind])
+                        continue;
+
                     if (label_column->getUInt(ind) == start_pos + offset)
                     {
                         /// LOG_DEBUG(log, "merge result: ind: {}, current_column_pos: {}, filter_id: {}", ind, current_column_pos, i + start_offset);
@@ -747,6 +755,8 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
                             final_result[col]->insert(field);
                         }
                         final_distance_column->insert(distance_column->getFloat32(ind));
+
+                        tmp_result->was_result_processed[ind] = true;
                     }
                 }
                 ++current_column_pos;
@@ -769,6 +779,9 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
                 end_pos = read_range.start_row + read_range.row_num;
                 for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
+                    if (tmp_result->was_result_processed[ind])
+                        continue;
+
                     const UInt64 label_value = label_column->getUInt(ind);
                     if (label_value >= start_pos && label_value < end_pos)
                     {
@@ -781,57 +794,74 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
                         }
 
                         final_distance_column->insert(distance_column->getFloat32(ind));
+
+                        tmp_result->was_result_processed[ind] = true;
                     }
                 }
                 prev_row_num += read_range.row_num;
             }
         }
-        else
+        else if (part_offset->size() > 0)
         {
             LOG_DEBUG(log, "Get part offset");
 
             /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
             /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
             const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
+            size_t part_offset_size = part_offset->size();
 
-            /// start_pos and end_pos is used as start and end index of part_offset
             size_t start_pos = 0;
-            size_t end_pos = part_offset->size() - 1;
+            size_t end_pos = 0;
 
-            for (size_t ind = 0; ind < label_column->size(); ++ind)
+            for (auto & read_range : read_ranges)
             {
-                const UInt64 label_value = label_column->getUInt(ind);
+                start_pos = read_range.start_row;
+                end_pos = read_range.start_row + read_range.row_num;
 
-                /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
-                size_t low = start_pos;
-                size_t high = end_pos;
-                size_t mid;
-
-                /// label_value (row id) = part_offset.
-                /// We can use binary search to quickly locate part_offset for current label.
-                while (low <= high)
+                for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
-                    mid = low + (high - low) / 2;
+                    if (tmp_result->was_result_processed[ind])
+                        continue;
 
-                    if (label_value == offset_raw_value[mid])
+                    const UInt64 label_value = label_column->getUInt(ind);
+
+                    /// Check if label_value inside this read range
+                    if (label_value < start_pos || (label_value >= end_pos))
+                        continue;
+
+                    /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
+                    int low = 0;
+                    int high = part_offset_size - 1;
+                    int mid;
+
+                    /// label_value (row id) = part_offset.
+                    /// We can use binary search to quickly locate part_offset for current label.
+                    while (low <= high)
                     {
-                        /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
-                        for (size_t i = 0; i < final_result.size(); ++i)
+                        mid = low + (high - low) / 2;
+
+                        if (label_value == offset_raw_value[mid])
                         {
-                            Field field;
-                            pre_result[i]->get(mid, field);
-                            final_result[i]->insert(field);
+                            /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
+                            for (size_t i = 0; i < final_result.size(); ++i)
+                            {
+                                Field field;
+                                pre_result[i]->get(mid, field);
+                                final_result[i]->insert(field);
+                            }
+
+                            final_distance_column->insert(distance_column->getFloat32(ind));
+
+                            tmp_result->was_result_processed[ind] = true;
+
+                            /// break from binary search loop
+                            break;
                         }
-
-                        final_distance_column->insert(distance_column->getFloat32(ind));
-
-                        /// break from binary search loop
-                        break;
+                        else if (label_value > offset_raw_value[mid])
+                            low = mid + 1;
+                        else
+                            high = mid - 1;
                     }
-                    else if (label_value > offset_raw_value[mid])
-                        low = mid + 1;
-                    else
-                        high = mid - 1;
                 }
             }
         }

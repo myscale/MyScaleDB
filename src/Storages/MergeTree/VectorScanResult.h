@@ -14,6 +14,7 @@ struct VectorScanResult
     int top_k;
     int query_vector_num;
     MutableColumns result_columns;
+    std::vector<bool> was_result_processed;  /// Mark if the result was processed or not.
     UInt64 vector_scan_duration_ms;
     UInt64 read_duration_ms;
 

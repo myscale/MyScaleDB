@@ -422,11 +422,14 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
             /// Get _part_offset if exists.
             if (mutable_part_offset_col)
             {
-                part_offset = typeid_cast<const ColumnUInt64 *>(mutable_part_offset_col.get());
-
                 /// _part_offset column exists in original select columns
                 if (!need_remove_part_offset)
+                {
                     result_columns.emplace_back(std::move(mutable_part_offset_col));
+                    part_offset = typeid_cast<const ColumnUInt64 *>(result_columns.back().get());
+                }
+                else
+                    part_offset = typeid_cast<const ColumnUInt64 *>(mutable_part_offset_col.get());
             }
 
             if (task->vector_scan_manager && task->vector_scan_manager->preComputed())
@@ -512,14 +515,13 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
             continue;
         }
 
-        ColumnPtr column_ptr = read_result.columns[ps];
+        ordered_columns.emplace_back(std::move(read_result.columns[ps]));
 
         /// Copy _part_offset column
         if (col_name == "_part_offset")
         {
-            part_offset = typeid_cast<const ColumnUInt64 *>(column_ptr.get());
+            part_offset = typeid_cast<const ColumnUInt64 *>(ordered_columns.back().get());
         }
-        ordered_columns.emplace_back(std::move(read_result.columns[ps]));
     }
 
     auto read_end_time = std::chrono::system_clock::now();
