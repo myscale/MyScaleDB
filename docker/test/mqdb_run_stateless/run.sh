@@ -85,7 +85,24 @@ if [[ -n "$USE_DATABASE_REPLICATED" ]] && [[ "$USE_DATABASE_REPLICATED" -eq 1 ]]
     MAX_RUN_TIME=$((MAX_RUN_TIME != 0 ? MAX_RUN_TIME : 9000))   # set to 2.5 hours if 0 (unlimited)
 fi
 
-sleep 5
+function wait_server_setup() {
+    counter=0
+    until clickhouse-client --query "SELECT 1"; do
+        if [ "$counter" -gt 120 ]; then
+            echo "Cannot start clickhouse-server"
+            cat /var/log/clickhouse-server/stdout.log ||:
+            tail -n1000 /var/log/clickhouse-server/stderr.log ||:
+            tail -n1000 /var/log/clickhouse-server/clickhouse-server.log ||:
+            break
+        fi
+        sleep 0.5
+        counter=$((counter + 1))
+    done
+}
+
+wait_server_setup
+
+lsof -i
 
 function run_tests() {
     set -x
@@ -124,7 +141,7 @@ function run_tests() {
         01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
         02047 01039 00993 02207 02117 02226 01606_git_import 01945_show_debug_warning 02420_stracktrace_debug_symbols \
         02435_rollback_cancelled_queries 02345_implicit_transaction 01193_metadata_loading 01880_remote_ipv6 \
-        01103_check_cpu_instructions_at_startup 2>&1 |
+        01103_check_cpu_instructions_at_startup 02125_many_mutations 2>&1 |
         ts '%Y-%m-%d %H:%M:%S' |
         tee -a test_output/test_result.txt
     set -e

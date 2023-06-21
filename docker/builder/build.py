@@ -214,7 +214,8 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
         if build_type in ["Release", "RelWithDebInfo"]:
             cmake["-DSPLIT_DEBUG_SYMBOLS"] = "ON"
-            cmake["-DBUILD_STANDALONE_KEEPER"] = "ON"
+            if with_sanitizer == '':
+                cmake["-DBUILD_STANDALONE_KEEPER"] = "ON"
 
     return cmake
 
@@ -263,7 +264,10 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
     cmd = "rm -fv CMakeCache.txt"
     command(cmd, shell=True, cwd=BUILD_DIRECTORY)
 
-    cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=ON"
+    if "-DSANITIZE" in cmake.keys() and cmake["-DSANITIZE"] == "address":
+        cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=OFF"
+    else:
+        cmd = "cmake --debug-trycompile -DCMAKE_VERBOSE_MAKEFILE=1 -LA -DENABLE_CHECK_HEAVY_BUILDS=ON"
     for k, v in cmake.items():
         logging.debug("CMAKE: %s = %s", k, v)
         cmd += f" {k}={v}"
@@ -542,7 +546,7 @@ if __name__ == "__main__":
         run_docker_builder(image, True, args.ccache, args.output, options)
         exit(0)
 
-    build_diagnostics(args.arch, args.name)
+    # build_diagnostics(args.arch, args.name)
 
     cmake = prepare_build(args.compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
 

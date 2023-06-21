@@ -1,12 +1,13 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.6 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.6 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.9 bash
 
 FROM ubuntu:20.04
 
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=13
+ENV LLVM_VERSION=15
 ENV CC=clang-${LLVM_VERSION}
 ENV CXX=clang++-${LLVM_VERSION}
 ENV INTEL_ONEAPI_VERSION=2021.4.0
@@ -32,7 +33,7 @@ RUN apt update && apt upgrade --yes --verbose-versions \
     && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list ; fi \
     && apt update \
     && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
-    && apt install git build-essential libssl-dev cmake g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
+    && apt install git build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
     && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu libblas-dev liblapack-dev --yes --verbose-versions \
     && apt install \
     llvm-${LLVM_VERSION} \

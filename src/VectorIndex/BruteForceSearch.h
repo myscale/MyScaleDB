@@ -1,5 +1,8 @@
 #pragma once
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdocumentation"
 #include <faiss/utils/distances.h>
+#pragma GCC diagnostic pop
 #include <SearchIndex/VectorIndex.h>
 #include <VectorIndex/Status.h>
 

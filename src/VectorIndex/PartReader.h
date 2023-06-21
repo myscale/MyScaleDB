@@ -28,7 +28,7 @@ public:
         DB::MarkCache * mark_cache_,
         size_t dimension_,
         bool enforce_fixed_array);
-    ~PartReader() { }
+    ~PartReader() override { }
 
     std::shared_ptr<DataChunk> sampleData(size_t n) override;
 

@@ -14,6 +14,7 @@ set -x
 PROJECT_PATH=${1:-/workspace/ClickHouse}
 SHA_TO_TEST=${2:-run_for_test}
 WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stress
+mkdir /test_output
 
 rm -rf /usr/share/clickhouse-test
 ls $WORKPATH/tests
@@ -217,7 +218,7 @@ sudo chgrp clickhouse /etc/clickhouse-server/config.d/s3_storage_policy_by_defau
 
 start
 
-stress --hung-check --drop-databases --output-folder test_output --skip-func-tests "$SKIP_TESTS_OPTION" --global-time-limit 1200 \
+stress --hung-check --drop-databases --output-folder /test_output --skip-func-tests "$SKIP_TESTS_OPTION" --global-time-limit 1200 \
     && echo -e "Test script exit code$OK" >> /test_output/test_results.tsv \
     || echo -e "Test script failed$FAIL script exit code: $?" >> /test_output/test_results.tsv
 

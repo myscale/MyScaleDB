@@ -21,6 +21,8 @@
 #include <VectorIndex/VectorSegmentExecutor.h>
 
 #include <memory>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
 
 /// #define profile
 
@@ -1361,3 +1363,5 @@ void MergeTreeVectorScanManager::searchWrapper(
     final_id = std::move(intermediate_ids);
 }
 }
+
+#pragma GCC diagnostic pop

@@ -393,7 +393,7 @@ if __name__ == "__main__":
         --volume={src_dir}/Server/grpc_protos:/ClickHouse/src/Server/grpc_protos \
         {dockerd_internal_volume} \
         -e DOCKER_CLIENT_TIMEOUT=300 -e COMPOSE_HTTP_TIMEOUT=600 \
-        -e XTABLES_LOCKFILE=/run/host/xtables.lock \
+        -e XTABLES_LOCKFILE=/run/host/xtables.lock -e PYTHONUNBUFFERED=1 \
         -e PYTEST_OPTS='{parallel} {opts} {tests_list} -vvv' {img} {command}".format(
             net=net,
             bin=args.binary,

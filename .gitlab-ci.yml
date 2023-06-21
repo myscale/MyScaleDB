@@ -1,4 +1,4 @@
-image: harbor.internal.moqi.ai/mqdb/builder:2.8
+image: harbor.internal.moqi.ai/mqdb/builder:2.9.1
 
 # workflow:
 #   rules:
@@ -95,7 +95,7 @@ build_package:
     - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --profile release --arch linux-x86_64 --package --compiler "clang-15"
-    # - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15
+    - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - when: manual

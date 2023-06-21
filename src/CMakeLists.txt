@@ -538,8 +538,8 @@ if (TARGET ch_contrib::datasketches)
 endif ()
 
 target_link_libraries (clickhouse_common_io PRIVATE ch_contrib::lz4)
-dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/rapidjson/include")
-dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/lz4/lib")
+# dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/rapidjson/include")
+# dbms_target_include_directories(PUBLIC "${ClickHouse_SOURCE_DIR}/contrib/lz4/lib")
 
 if (TARGET ch_contrib::qpl)
 dbms_target_link_libraries(PUBLIC ch_contrib::qpl)
