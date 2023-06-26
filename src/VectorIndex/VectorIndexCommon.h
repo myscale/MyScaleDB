@@ -2,11 +2,14 @@
 #include <cmath>
 #include <iostream>
 #include <string>
-#include <lz4.h>
+#include <lib/lz4.h>
 #include <Poco/JSON/JSON.h>
 #include <Poco/JSON/Object.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-builtins"
 #include <Compression/CompressedReadBuffer.h>
+#pragma GCC diagnostic pop
 #include <Compression/CompressedWriteBuffer.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Common/Exception.h>

@@ -6,7 +6,10 @@
 #include <vector>
 #include <Core/Field.h>
 #include <Interpreters/ExpressionActions.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-builtins"
 #include <Parsers/IAST_fwd.h>
+#pragma GCC diagnostic pop
 #include <Storages/ColumnsDescription.h>
 #include <Poco/JSON/JSON.h>
 #include <Poco/JSON/Object.h>

@@ -17,7 +17,7 @@
 #    pragma clang diagnostic ignored "-Wimplicit-fallthrough"
 #    pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
 #endif
-#include "../../contrib/xxHash/xxhash.h"
+#include <xxhash.h>
 
 #if USE_BLAKE3
 #    include <blake3.h>
