@@ -94,8 +94,8 @@ build_package:
   script:
     - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --profile release --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --profile release --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package --compiler "clang-15"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - when: manual
@@ -118,12 +118,12 @@ build_package_with_license:
   script:
     - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
 
 build_image:
   stage: image
-  dependencies: ["build_package","check_pipeline_already_running"]
+  dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
@@ -140,7 +140,7 @@ build_image:
 build_saas_image:
   stage: image
   when: manual
-  dependencies: ["build_package","check_pipeline_already_running"]
+  dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
@@ -149,7 +149,7 @@ build_saas_image:
 
 upload_performance_file_to_s3:
   stage: deploy
-  dependencies: ["build_binary","check_pipeline_already_running"]
+  dependencies: ["build_binary", "check_pipeline_already_running"]
   image:
     name: minio/mc
     entrypoint: [""]
@@ -170,7 +170,7 @@ flag_pipeline_status:
   image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
   # rules:
   #   - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"'
-    # - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'
+  # - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'
   script:
     - if [ ! -n "$REDIS_HOST" ]; then echo "redis host unknown, Run the pipeline by default."; exit 0; fi
     - KEY_TIMEOUT=${EXPIRE_TIME:-604800}
