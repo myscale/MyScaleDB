@@ -1156,9 +1156,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                     {
                         if (!col_data[i])
                         {
-                            LOG_DEBUG(log, "Unset: {}", num_rows_read + i);
+                            LOG_DEBUG(log, "Unset: {}", i);
                             ++deleted_row_num;
-                            row_exists->unset(num_rows_read + i);
+                            row_exists->unset(i);
                         }
                     }
                 }
@@ -1302,11 +1302,7 @@ void MergeTreeVectorScanManager::searchWrapper(
             while (curr_pos < k && tmp_curr_pos < k + delete_id_num)
             {
                 auto & tmp_id = tmp_per_id[i * (k + delete_id_num) + tmp_curr_pos];
-                if (tmp_id < 0)
-                {
-                    LOG_ERROR(log, "tmp_id: {}, num_rows_read: {}", tmp_id, num_rows_read);
-                }
-                else if (tmp_id >= 0 && row_exists->is_member(tmp_id + num_rows_read))
+                if (tmp_id >= 0 && row_exists->is_member(tmp_id))
                 {
                     per_id[i * k + curr_pos] = tmp_per_id[i * (k + delete_id_num) + tmp_curr_pos];
                     per_distance[i * k + curr_pos] = tmp_per_distance[i * (k + delete_id_num) + tmp_curr_pos];
