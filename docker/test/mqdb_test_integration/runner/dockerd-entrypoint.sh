@@ -2,9 +2,9 @@
 set -e
 
 mkdir -p /etc/docker/
+# "ipv6": true,
+# "fixed-cidr-v6": "fd00::/8",
 echo '{
-    "ipv6": true,
-    "fixed-cidr-v6": "fd00::/8",
     "ip-forward": true,
     "log-level": "debug",
     "storage-driver": "overlay2",
@@ -19,7 +19,7 @@ trap '' INT
 # Binding to an IP address without --tlsverify is deprecated. Startup is intentionally being slowed
 # unless --tls=false or --tlsverify=false is set
 dockerd --host=unix:///var/run/docker.sock --tls=false \
-        --host=tcp://0.0.0.0:2375 \
+        --host=tcp://0.0.0.0:2376 \
         --default-address-pool base=172.17.0.0/12,size=24 \
         --http-proxy=http://clash.internal.moqi.ai:7890 \
         --https-proxy=http://clash.internal.moqi.ai:7890 \

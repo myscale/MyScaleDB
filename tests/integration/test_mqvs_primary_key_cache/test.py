@@ -28,10 +28,10 @@ def test_primary_key_cache_enabled(started_cluster):
 
     time.sleep(2)
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Miss primary key cache")
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Hit primary key cache")
 
     instance.query("DROP TABLE IF EXISTS test_pk_cache")
@@ -49,7 +49,7 @@ def test_primary_key_cache_disabled(started_cluster):
 
     time.sleep(2)
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache_disable")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache_disable ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("enable_primary_key_cache = false")
 
     instance.query("DROP TABLE IF EXISTS test_pk_cache_disable")

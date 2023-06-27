@@ -28,10 +28,10 @@ def primary_key_cache_test(data_type):
 
     time.sleep(2)
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Miss primary key cache")
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Hit primary key cache")
 
 
@@ -112,8 +112,8 @@ def test_primary_key_cache_enum(started_cluster):
 
     time.sleep(2)
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Miss primary key cache")
 
-    instance.query("SELECT id, distance('topK=5')(vector, [0.1, 0.1, 0.1]) FROM test_pk_cache")
+    instance.query("SELECT id, distance(vector, [0.1, 0.1, 0.1]) as dist FROM test_pk_cache ORDER BY dist LIMIT 5")
     assert instance.contains_in_log("Hit primary key cache")

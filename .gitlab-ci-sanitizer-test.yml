@@ -203,9 +203,7 @@ vector-test-asan:
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
-    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
-    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
-    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+    - docker/builder/tools/check_job_states.sh mqdb_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -236,9 +234,7 @@ vector-test-ubsan:
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
-    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
-    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
-    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+    - docker/builder/tools/check_job_states.sh mqdb_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"

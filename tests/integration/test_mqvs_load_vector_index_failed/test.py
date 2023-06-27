@@ -37,6 +37,6 @@ def test_load_vector_index_failed(started_cluster):
         user="root",
     )
 
-    instance.query("SELECT id, vector, distance('topK = 10')(vector, [300.0, 300, 300]) AS dist FROM test_load_vector_index_failed;")
+    instance.query("SELECT id, vector, distance(vector, [300.0, 300, 300]) AS dist FROM test_load_vector_index_failed ORDER BY dist LIMIT 10;")
 
     assert instance.contains_in_log("Load vector index: 5")
