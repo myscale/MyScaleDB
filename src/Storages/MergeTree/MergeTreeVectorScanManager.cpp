@@ -32,6 +32,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int QUERY_WAS_CANCELLED;
+    extern const int ILLEGAL_COLUMN;
 }
 
 template <typename FloatType>
@@ -1006,6 +1007,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             const IColumn & src_data = array->getData();
             const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
             const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+            if (!src_data_concrete)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
             const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
             // size_t size = offsets.size();
             if (src_vec.empty())
@@ -1110,6 +1113,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             const IColumn & src_data = array->getData();
             const ColumnArray::Offsets & offsets = array->getOffsets();
             const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+            if (!src_data_concrete)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
             const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
 
             if (src_vec.empty())
