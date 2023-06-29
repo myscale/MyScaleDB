@@ -4,7 +4,7 @@ from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 instance = cluster.add_instance("instance", stay_alive=True)
-path_to_index_ready_file = "/var/lib/clickhouse/data/default/test_load_vector_index_failed/all_1_1_0/vector_index_ready.vidx"
+path_to_index_ready_file = "/var/lib/clickhouse/data/default/test_load_vector_index_failed/all_1_1_0/vector_index_ready.vidx2"
 
 
 @pytest.fixture(scope="module")
@@ -39,4 +39,4 @@ def test_load_vector_index_failed(started_cluster):
 
     instance.query("SELECT id, vector, distance(vector, [300.0, 300, 300]) AS dist FROM test_load_vector_index_failed ORDER BY dist LIMIT 10;")
 
-    assert instance.contains_in_log("Load vector index: 5")
+    assert instance.contains_in_log("Load vector index: 107")

@@ -196,6 +196,23 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
+    
+    if with_sanitizer == 'memory':
+        cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
+        cmake["-DENABLE_CLICKHOUSE_SERVER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_CLIENT"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_FORMAT"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_LOCAL"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_COMPRESSOR"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_COPIER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_EXTRACT_FROM_CONFIG"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_ODBC_BRIDGE"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_LIBRARY_BRIDGE"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_OBFUSCATOR"] = "ON"
+        cmake["-DENABLE_CLICKHOUSE_INSTALL"] = "ON"
     # else:
     #     cmake["-DSANITIZE"] = "''"
 
@@ -398,9 +415,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compiler",
         choices=(
-            "clang-13",
-            "clang-14",
             "clang-15",
+            "clang-16",
         ),
         default="clang-15",
     )

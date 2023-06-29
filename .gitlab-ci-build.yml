@@ -131,6 +131,7 @@ build_with_sanitizer_msanbinary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  # image: harbor.internal.moqi.ai/mqdb/builder:2.9.4
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKMsan"
     paths:
@@ -141,6 +142,7 @@ build_with_sanitizer_msanbinary:
     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
+    # - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory --compiler "clang-16"
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks

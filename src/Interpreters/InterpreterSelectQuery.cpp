@@ -1864,7 +1864,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                 /// We must do projection after DISTINCT because projection may remove some columns.
                 executeProjection(query_plan, expressions.final_projection);
             }
-            LOG_DEBUG(log, "[executeImpl] after execute projection, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
+            // LOG_DEBUG(log, "[executeImpl] after execute projection, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
             /// Extremes are calculated before LIMIT, but after LIMIT BY. This is Ok.
             executeExtremes(query_plan);

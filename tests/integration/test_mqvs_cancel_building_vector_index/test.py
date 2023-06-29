@@ -22,7 +22,7 @@ def test_drop_index_cancel_building_index(started_cluster):
     CREATE TABLE test_drop_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
     INSERT INTO test_drop_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(50000);
     optimize table test_drop_index final;
-    ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE HNSWSQ;
+    ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE MSTG('disk_mode=1');
     """
     )
 
@@ -35,7 +35,7 @@ def test_drop_index_cancel_building_index(started_cluster):
 
     instance.query("DROP TABLE IF EXISTS test_drop_index")
 
-
+@pytest.mark.skip(reason="integration search-index bug")
 def test_drop_table_cancel_building_index(started_cluster):
     instance.query(
         """

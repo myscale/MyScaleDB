@@ -233,7 +233,13 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
 
         for (size_t i = 0; i < cols_size; ++i)
         {
-            buffered_columns[i]->insertRangeFrom(*result[i], 0, result[i]->size());
+            if (result[i]->isSparse())
+            {
+                auto res = result[i]->convertToFullColumnIfSparse();
+                buffered_columns[i]->insertRangeFrom(*res, 0, result[i]->size());
+            }
+            else
+                buffered_columns[i]->insertRangeFrom(*result[i], 0, result[i]->size());
         }
 
         /// calculate next mark

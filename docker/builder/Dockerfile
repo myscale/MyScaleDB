@@ -1,5 +1,5 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9 . --push
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9.4 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9.4 . --push
 # docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.9 bash
 
 FROM ubuntu:20.04
@@ -7,7 +7,7 @@ FROM ubuntu:20.04
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=15
+ENV LLVM_VERSION=16
 ENV CC=clang-${LLVM_VERSION}
 ENV CXX=clang++-${LLVM_VERSION}
 ENV INTEL_ONEAPI_VERSION=2021.4.0
@@ -22,7 +22,7 @@ RUN apt update && apt install ca-certificates --yes --verbose-versions \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/
 
-RUN apt update && apt upgrade --yes --verbose-versions \
+RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && apt install ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common --yes --verbose-versions \
     && wget -q -O - https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
     && echo "deb [trusted=yes] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker-ce.list \
