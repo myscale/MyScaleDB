@@ -477,8 +477,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 }
                 else
                 {
-                    disk->removeRecursive(vector_tmp_relative_path);
                     LOG_DEBUG(log, "Remove incomplete temporary directory {}", vector_tmp_relative_path);
+                    disk->removeRecursive(vector_tmp_relative_path);
                 }
             }
         }
@@ -571,10 +571,17 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             LOG_DEBUG(log, "Serialize vector index");
             VectorIndex::Status seri_status = vec_index_builder->serialize();
             LOG_DEBUG(log, "Serialization status: {}", seri_status.getCode());
+
             if (!seri_status.fine())
             {
                 /// Remove temporay directory
-                disk->removeRecursive(vector_tmp_relative_path);
+                if (disk->exists(vector_tmp_relative_path))
+                {
+                    LOG_DEBUG(log, "seri_status is not fine, will remove vector_tmp_relative_path {}", vector_tmp_relative_path);
+                    disk->removeRecursive(vector_tmp_relative_path);
+                }
+                else
+                    LOG_DEBUG(log, "seri_status is not fine, vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
                 part->onVectorIndexBuildError(vec_index_desc.name, seri_status.getMessage());
 
@@ -616,7 +623,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
                 {
                     LOG_INFO(log, "Vector index has been dropped, no need to build it.");
-                    disk->removeRecursive(vector_tmp_relative_path);
+                    if (disk->exists(vector_tmp_relative_path))
+                        disk->removeRecursive(vector_tmp_relative_path);
+                    else
+                        LOG_DEBUG(log, "[Dropped] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
                     part->removeVectorIndexInfo(vec_index_desc.name);
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                     return BuildVectorIndexStatus::SUCCESS;
@@ -767,7 +777,10 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const 
     if (!found_vector_file)
     {
         LOG_DEBUG(log, "Failed to find any vector index files in directory {}, will remove it", vector_tmp_relative_path);
-        disk->removeRecursive(vector_tmp_relative_path);
+        if (disk->exists(vector_tmp_relative_path))
+            disk->removeRecursive(vector_tmp_relative_path);
+        else
+            LOG_DEBUG(log, "[moveVectorIndexFilesToFuturePart] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
         return false;
     }

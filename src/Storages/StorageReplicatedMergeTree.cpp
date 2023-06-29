@@ -4477,6 +4477,10 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         startBeingLeader();
 
+        /// Move here to avoid wrongly remove just started background build in restart_thread.
+        /// Temporary directories contain incomplete results of build vector index.
+        clearTemporaryIndexBuildDirectories();
+
         /// In this thread replica will be activated.
         restarting_thread.start();
         /// And this is just a callback
@@ -4495,9 +4499,6 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
         startBackgroundMovesIfNeeded();
 
         part_moves_between_shards_orchestrator.start();
-
-        /// Temporary directories contain incomplete results of vector index building.
-        clearTemporaryIndexBuildDirectories();
     }
     catch (...)
     {
