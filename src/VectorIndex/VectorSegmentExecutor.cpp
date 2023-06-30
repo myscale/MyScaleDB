@@ -191,10 +191,11 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size
                 dimension,
                 total_vec,
                 des,
-                true,
+                false /* load_diskann_after_build */,
                 vector_index_cache_prefix,
                 getDiskIOManager(),
-                true);
+                true /* use_file_checksum */,
+                true /* manage_cache_folder */);
         index->setTrainDataChunkSize(train_block_size);
         index->setAddDataChunkSize(add_block_size);
         printMemoryInfo(log, "Before build");
@@ -264,8 +265,7 @@ Status VectorSegmentExecutor::cache()
         inverted_row_ids_map,
         inverted_row_sources_map,
         disk_mode,
-        fallback_to_flat,
-        vector_index_cache_prefix);
+        fallback_to_flat);
 
     LOG_DEBUG(log, "Cache key: {}", segment_id.getCacheKey().toString());
     mgr->put(segment_id.getCacheKey(), cache_item);
@@ -426,10 +426,11 @@ Status VectorSegmentExecutor::load()
                         dimension,
                         total_vec,
                         des,
-                        true,
+                        false /* load_diskann_after_build */,
                         vector_index_cache_prefix,
                         getDiskIOManager(),
-                        true);
+                        true /* use_file_checksum */,
+                        true /* manage_cache_folder */);
 
                 LOG_INFO(log, "loading vector index from {}", segment_id.getFullPath());
                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
@@ -456,8 +457,7 @@ Status VectorSegmentExecutor::load()
                     inverted_row_ids_map,
                     inverted_row_sources_map,
                     disk_mode,
-                    fallback_to_flat,
-                    vector_index_cache_prefix);
+                    fallback_to_flat);
             }
             catch (const SearchIndexException & e)
             {
@@ -894,7 +894,6 @@ void VectorSegmentExecutor::configureDiskMode()
         {
             vector_index_cache_prefix = segment_id.getVectorIndexCachePrefix();
             LOG_INFO(log, "vector_index_cache_prefix: {}", vector_index_cache_prefix);
-            fs::create_directories(vector_index_cache_prefix);
         }
     }
 }

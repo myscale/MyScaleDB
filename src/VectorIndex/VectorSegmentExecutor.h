@@ -33,8 +33,7 @@ struct IndexWithMeta
         std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
         std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_,
         bool disk_mode_,
-        bool fallback_to_flat_,
-        std::string vector_index_cache_prefix_)
+        bool fallback_to_flat_)
         : index(index_)
         , total_vec(total_vec_)
         , delete_bitmap(delete_bitmap_)
@@ -44,16 +43,7 @@ struct IndexWithMeta
         , inverted_row_sources_map(inverted_row_sources_map_)
         , disk_mode(disk_mode_)
         , fallback_to_flat(fallback_to_flat_)
-        , vector_index_cache_prefix(vector_index_cache_prefix_)
     {
-    }
-
-    ~IndexWithMeta()
-    {
-        if (disk_mode)
-        {
-            fs::remove_all(vector_index_cache_prefix);
-        }
     }
 
     VectorIndexPtr index;
@@ -69,7 +59,6 @@ public:
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
     bool disk_mode;
     bool fallback_to_flat;
-    std::string vector_index_cache_prefix;
 
     void setDeleteBitmap(Search::DenseBitmapPtr delete_bitmap_)
     {
