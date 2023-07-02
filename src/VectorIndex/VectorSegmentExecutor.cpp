@@ -37,6 +37,7 @@ namespace DB::ErrorCodes
 extern const int STD_EXCEPTION;
 extern const int CORRUPTED_DATA;
 extern const int LOGICAL_ERROR;
+extern const int CANNOT_OPEN_FILE;
 }
 
 namespace VectorIndex
@@ -443,7 +444,8 @@ Status VectorSegmentExecutor::load()
                 printMemoryInfo(log, "After load");
                 total_vec = index->numData();
                 LOG_INFO(log, "load total_vec={}", total_vec);
-                readBitMap();
+                if(!readBitMap())
+                    throw DB::Exception("ReadBitMap error", DB::ErrorCodes::CANNOT_OPEN_FILE);
 
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();
