@@ -22,12 +22,10 @@
 #include <Interpreters/VectorIndexEventLog.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
-#include <VectorIndex/DiskIOReader.h>
-#include <VectorIndex/DiskIOWriter.h>
 #include <VectorIndex/IndexException.h>
 #include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/Metadata.h>
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/VectorIndexIO.h>
 #include <SearchIndex/Common/Utils.h>
 #include <SearchIndex/IndexDataFileIO.h>
 #include <Storages/IStorage.h>
@@ -293,7 +291,8 @@ Status VectorSegmentExecutor::serialize()
     {
         auto file_writer = Search::IndexDataFileWriter<Search::AbstractOStream>(
             segment_id.getFullPath(),
-            [](const std::string & name, std::ios::openmode mode) { return std::make_shared<Search::FileBasedOStream>(name, mode); });
+            [this](const std::string & name, std::ios::openmode /*mode*/)
+            { return std::make_shared<VectorIndexWriter>(segment_id.volume->getDisk(), name); });
 
         index->serialize(&file_writer);
         index->saveDataID(&file_writer);
@@ -333,12 +332,12 @@ void VectorSegmentExecutor::handleMergedMaps()
 
     try
     {
-        auto row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            std::make_unique<DB::ReadBufferFromFile>(segment_id.getRowIdsMapFilePath()));
+        auto row_ids_map_buf
+            = std::make_unique<DB::CompressedReadBufferFromFile>(segment_id.volume->getDisk()->readFile(segment_id.getRowIdsMapFilePath()));
         auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowIdsMapFilePath()));
+            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowIdsMapFilePath()));
         auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            std::make_unique<DB::ReadBufferFromFile>(segment_id.getInvertedRowSourcesMapFilePath()));
+            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowSourcesMapFilePath()));
 
         while (!inverted_row_sources_map_buf->eof())
         {
@@ -455,8 +454,8 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 LOG_INFO(log, "loading vector index from {}", segment_id.getFullPath());
                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
                     segment_id.getFullPath(),
-                    [](const std::string & name, std::ios::openmode mode)
-                    { return std::make_shared<Search::FileBasedIStream>(name, mode); });
+                    [this](const std::string & name, std::ios::openmode /*mode*/)
+                    { return std::make_shared<VectorIndexReader>(segment_id.volume->getDisk(), name); });
                 printMemoryInfo(log, "Before load");
                 index->load(&file_reader);
                 index->loadDataID(&file_reader);
@@ -517,9 +516,9 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 des = new_index.des;
                 fallback_to_flat = new_index.fallback_to_flat;
 
-                // For the vector index of the load decouple part, if there are 
-                // multiple threads performing load at the same time, only one 
-                // thread will actually execute load_func to update its own row ids map, 
+                // For the vector index of the load decouple part, if there are
+                // multiple threads performing load at the same time, only one
+                // thread will actually execute load_func to update its own row ids map,
                 // and other threads need to update their own row ids map according to the results of load_func
                 if (!new_index.row_ids_map->empty())
                 {
@@ -794,38 +793,39 @@ Status VectorSegmentExecutor::removeByIds(size_t n, const size_t * ids)
 
 bool VectorSegmentExecutor::writeBitMap()
 {
-    DiskIOWriter bit_map_writer;
     String bitmap_path = segment_id.getBitMapFilePath();
-    bit_map_writer.open(bitmap_path, false);
+    auto writer = segment_id.volume->getDisk()->writeFile(bitmap_path);
 
     if (delete_bitmap == nullptr)
         delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
     size_t size = delete_bitmap->get_size();
-    bit_map_writer.write(&size, sizeof(size_t));
+    writer->write(reinterpret_cast<const char *>(&size), sizeof(size_t));
 
-    bit_map_writer.write(delete_bitmap->get_bitmap(), delete_bitmap->byte_size());
-    bit_map_writer.close();
+    writer->write(reinterpret_cast<const char *>(delete_bitmap->get_bitmap()), delete_bitmap->byte_size());
+    writer->finalize();
 
     return true;
 }
 
 bool VectorSegmentExecutor::readBitMap()
 {
-    DiskIOReader bit_map_reader;
     String read_file_path = segment_id.getBitMapFilePath();
+    auto reader = segment_id.volume->getDisk()->readFile(read_file_path);
 
-    if (!bit_map_reader.open(read_file_path))
-    {
+    if (!reader)
         return false;
-    }
 
     size_t size;
-    bit_map_reader.read(&size, sizeof(size_t));
-    if (!bit_map_reader.good())
+    try
+    {
+        reader->readStrict(reinterpret_cast<char *>(&size), sizeof(size_t));
+    }
+    catch (...)
     {
         LOG_ERROR(log, "Bitmap file read error.");
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted"); 
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
     }
+
     if (delete_bitmap == nullptr)
         delete_bitmap = std::make_shared<Search::DenseBitmap>(size);
 
@@ -837,8 +837,7 @@ bool VectorSegmentExecutor::readBitMap()
         throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
     }
 
-    bit_map_reader.seekg(sizeof(size_t));
-    bit_map_reader.read(delete_bitmap->get_bitmap(), bit_map_size);
+    reader->readStrict(reinterpret_cast<char *>(delete_bitmap->get_bitmap()), bit_map_size);
 
     return true;
 }
@@ -982,13 +981,13 @@ const std::vector<UInt64> VectorSegmentExecutor::readDeleteBitmapAccordingSegmen
     auto table_id = DB::DatabaseCatalog::instance().tryGetByUUID(table_uuid).second->getStorageID();
     if (!table_id)
         throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to get table and database by table uuid");
-    
+
     // Get MergeTree Data Storage
     DB::StoragePtr table = DB::DatabaseCatalog::instance().tryGetTable({table_id.database_name, table_id.table_name}, local_context);
     DB::MergeTreeData * merge_tree = dynamic_cast<DB::MergeTreeData *>(table.get());
     if (!merge_tree)
         throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to fetch MergeTree Data Storage");
-    
+
     // Get the part corresponding to the current segment, Whether to allow reading delete bitmap from part in outdated state?
     auto part = merge_tree->getPartIfExists(segment_id.current_part_name, {DB::MergeTreeDataPartState::Active});
     if (!part)
