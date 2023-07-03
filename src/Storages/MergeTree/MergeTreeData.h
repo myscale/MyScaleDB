@@ -667,6 +667,7 @@ public:
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
     void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
     void clearPrimaryKeyCache(const DataPartsVector & parts);
+    void clearVectorNvmeCache() const;
     /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
     std::pair<bool, bool> needClearVectorIndexCacheAndFile(
         const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;

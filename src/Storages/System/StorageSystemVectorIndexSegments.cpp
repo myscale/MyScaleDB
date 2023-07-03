@@ -8,13 +8,16 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <Interpreters/Context.h>
 #include <Processors/ISource.h>
+#include <QueryPipeline/Pipe.h>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/VectorIndexInfo.h>
 #include <Storages/VirtualColumnUtils.h>
-#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+
+#include <SearchIndex/Common/Utils.h>
+#include <VectorIndex/Metadata.h>
 #include <VectorIndex/SegmentId.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <QueryPipeline/Pipe.h>
 
 namespace DB
 {
@@ -66,6 +69,52 @@ protected:
         const std::set<std::string> & cached_indices,
         MutableColumns & res_columns)
     {
+        std::string owner_part;
+        int owner_part_id;
+        if (vec_info == nullptr || vec_info->owner_part.empty())
+        {
+            owner_part = part->name;
+            owner_part_id = 0;
+        }
+        else
+        {
+            owner_part = vec_info->owner_part;
+            owner_part_id = vec_info->owner_part_id;
+        }
+
+        String vector_index_cache_prefix = fs::path(part->storage.getContext()->getVectorIndexCachePath())
+            / part->storage.getRelativeDataPath() / part->info.getPartNameWithoutMutation() / "";
+
+        const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
+        if (part_storage == nullptr)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+
+        VectorIndex::SegmentId segment_id(
+            getVolumeFromPartStorage(*part_storage),
+            part->getDataPartStorage().getFullPath(),
+            part->name,
+            owner_part,
+            index.name,
+            index.column,
+            vector_index_cache_prefix,
+            owner_part_id);
+
+        VectorIndex::Metadata metadata(segment_id);
+        bool metadata_loaded = true;
+
+        try
+        {
+            auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+            metadata.readText(*buf);
+        }
+        catch (...)
+        {
+            metadata_loaded = false;
+        }
+
         size_t src_index = 0;
         size_t res_index = 0;
 
@@ -82,20 +131,10 @@ protected:
             res_columns[res_index++]->insert(part->name);
         /// 'owner_part' column
         if (column_mask[src_index++])
-        {
-            if (vec_info)
-                res_columns[res_index++]->insert(vec_info->owner_part);
-            else
-                res_columns[res_index++]->insertDefault();
-        }
+            res_columns[res_index++]->insert(owner_part);
         /// 'owner_part_id' column
         if (column_mask[src_index++])
-        {
-            if (vec_info)
-                res_columns[res_index++]->insert(vec_info->owner_part_id);
-            else
-                res_columns[res_index++]->insertDefault();
-        }
+            res_columns[res_index++]->insert(owner_part_id);
         /// 'name' column
         if (column_mask[src_index++])
         {
@@ -103,45 +142,17 @@ protected:
         }
         /// 'type' column
         if (column_mask[src_index++])
-            res_columns[res_index++]->insert(index.type);
+        {
+            if (metadata_loaded && metadata.fallback_to_flat)
+                res_columns[res_index++]->insert(Search::enumToString(Search::IndexType::FLAT));
+            else
+                res_columns[res_index++]->insert(index.type);
+        }
         /// 'status' column
         if (column_mask[src_index++])
         {
-            std::string owner_part;
-            int owner_part_id;
-            if (vec_info == nullptr || vec_info->owner_part.empty())
-            {
-                owner_part = part->name;
-                owner_part_id = 0;
-            }
-            else
-            {
-                owner_part = vec_info->owner_part;
-                owner_part_id = vec_info->owner_part_id;
-            }
-
-            String vector_index_cache_prefix = fs::path(part->storage.getContext()->getVectorIndexCachePath())
-                / part->storage.getRelativeDataPath() / part->info.getPartNameWithoutMutation() / "";
-
-            const DataPartStorageOnDiskBase * part_storage
-                = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
-            if (part_storage == nullptr)
-            {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-            }
-
-            VectorIndex::SegmentId segment_id(
-                getVolumeFromPartStorage(*part_storage),
-                part->getDataPartStorage().getFullPath(),
-                part->name,
-                owner_part,
-                index.name,
-                index.column,
-                vector_index_cache_prefix,
-                owner_part_id);
-
             if (cached_indices.contains(segment_id.getCacheKey().toString()))
-                res_columns[res_index++]->insert("LOADED");
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndexStatus::LOADED));
             else if (vec_info)
                 res_columns[res_index++]->insert(vec_info->statusString());
             else

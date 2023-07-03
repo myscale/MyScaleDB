@@ -436,15 +436,22 @@ public:
         return this->rows_count == 0 || this->rows_count < min_rows_to_build_vector_index;
     }
 
+    /// Get file names with VECTOR_INDEX_FILE_EXTENSION. TODO: Get file names related to the specified vector index name.
+    NameSet getFileNamesForVectorIndex(const String & vec_index_name) const;
+
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
 
    /// lock part for move build vector index, avoid concurrently mutation
    /// new_value is true when called in mutate task, false when called in MutatePlainMergeTreeTask and MutateFromLogENtryTask.
    /// This is used to avoid move happens during mutate task and renameTempPartAndReplace when source part is active.
-    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate(const bool & new_value = false) const
+    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate(const bool & new_value = false, const bool from_fetch_part = false) const
     {
         auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
-        part_is_currently_mutating = new_value;
+
+        /// Fetch part can get lock during mutate.
+        if (!from_fetch_part)
+            part_is_currently_mutating = new_value;
+
         return lock;
     }
 
@@ -453,7 +460,7 @@ public:
         auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
 
         /// Mutate is executed in mutiple threads, lock is required in mutate task and before renameTempPartAndReplace
-        /// Build index files cannot be moved during mutate.
+        /// Build index files cannot be moved during mutate. 
         if (lock.owns_lock() && part_is_currently_mutating)
             lock.unlock();
 

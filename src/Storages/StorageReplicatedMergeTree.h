@@ -39,6 +39,7 @@
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
 #include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+#include <Storages/MergeTree/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
 
 
 namespace DB
@@ -333,6 +334,13 @@ public:
     /// Get a sequential consistent view of current parts.
     ReplicatedMergeTreeQuorumAddedParts::PartitionIdToMaxBlock getMaxAddedBlocks() const;
 
+    /// Check if part is being merged right now via future_parts in queue.
+    bool canSendVectorIndexForPart(const String & part_name) const;
+
+    /// Required only to avoid races between merge and sendVectorIndex
+    std::unordered_set<String> currently_sending_vector_index_parts;
+    std::mutex currently_sending_vector_index_parts_mutex;
+
 private:
     std::atomic_bool are_restoring_replica {false};
 
@@ -358,6 +366,7 @@ private:
     friend class ReplicatedMergeMutateTaskBase;
     friend class MergeTreeVectorIndexBuilderUpdater;
     friend class ReplicatedVectorIndexTask;
+    friend class ReplicatedMergeTreeBuildVIndexStrategyPicker;
 
     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
     using LogEntry = ReplicatedMergeTreeLogEntry;
@@ -410,6 +419,7 @@ private:
     MergeStrategyPicker merge_strategy_picker;
 
     MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
+    ReplicatedMergeTreeBuildVIndexStrategyPicker build_vindex_strategy_picker;
 
     /** The queue of what needs to be done on this replica to catch up with everyone. It is taken from ZooKeeper (/replicas/me/queue/).
      * In ZK entries in chronological order. Here it is not necessary.
@@ -903,6 +913,39 @@ private:
         const String & vector_index_name,
         int32_t log_version,
         bool slow_mode = false);
+
+    /// Required only to avoid races between mutate and fetchVectorIndex
+    std::unordered_set<String> currently_fetching_vector_index_parts;
+    std::mutex currently_fetching_vector_index_parts_mutex;
+
+    /// Fetch built vector index in part from other replica.
+    /// NOTE: First of all tries to find the part on other replica.
+    /// After that tries to fetch the vector index.
+    bool executeFetchVectorIndex(LogEntry & entry, String & replica);
+
+    /// Download the vector index files of the specified part from the specified replica.
+    /// Returns false if vector index files are aready fetching right now.
+    bool fetchVectorIndex(
+        DataPartPtr future_part,
+        const String & part_name,
+        const String & vec_index_name,
+        const StorageMetadataPtr & metadata_snapshot,
+        const String & replica_path,
+        zkutil::ZooKeeper::Ptr zookeeper_ = nullptr,
+        bool try_fetch_shared = true);
+
+    /// Create a finished flag node 'vidx_build_parts/part_name_in_log_entry' on zookeeper for a part
+    /// when vector index build has done, no matter success or not.
+    void createVectorIndexBuildStatusForPart(const String & part_name, const String & vec_index_name, const String & status);
+
+    /// Check if the part in replica has finished vector index building job.
+    bool checkReplicaHaveVIndexInPart(const String & replica, const String & part_name, const String & vec_index_name);
+
+    /// Remove parts with vector index build status from ZooKeeper
+    void removeVecIndexBuildStatusForPartsFromZK(zkutil::ZooKeeperPtr & zookeeper, const Strings & part_names);
+
+    /// Cleanups vidx_build_parts/part_names for vector index build status
+    void cleanupVectorIndexBuildStatusFromZK();
 
     /// Get cached vector index info from zookeeper and load into cache.
     void loadVectorIndexFromZookeeper();

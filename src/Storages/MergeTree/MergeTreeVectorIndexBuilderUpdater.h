@@ -33,6 +33,8 @@ enum class BuildVectorIndexStatus
     BUILD_FAIL = 2,
     META_ERROR = 3,
     MISCONFIGURED = 4,
+    BUILD_SKIPPED = 5,  /// No need to build vector index for this part
+    BUILD_RETRY = 6, /// Retry to move vector index files to part directory
 };
 
 class MergeTreeVectorIndexBuilderUpdater
@@ -61,20 +63,6 @@ public:
     ActionBlocker builds_blocker;
 
 private:
-    class Counter
-    {
-    public:
-        Counter() = default;
-        void put(const String & key, int value);
-        int get(const String & key);
-        int increaseAndGet(const String & key);
-    private:
-        std::map<String, int> counter_;
-        std::mutex mu_;
-    };
-
-    Counter counter;
-
     MergeTreeData & data;
     bool is_replicated = false; /// Mark if replicated
     //const size_t background_pool_size;
