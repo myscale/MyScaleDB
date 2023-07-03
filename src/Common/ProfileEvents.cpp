@@ -538,8 +538,9 @@ The server successfully detected this situation and will download merged part fr
     M(VectorIndexBuildFailEvents, "Number of vector index build fail events.") \
     M(VectorIndexLoadFailEvents, "Number of vector index load fail events") \
     M(CreatedLogEntryForBuildVIndex, "Successfully created log entry to build vector index for part in ReplicatedMergeTree.") \
-    M(NotCreatedLogEntryForBuildVIndex, \
-      "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.")
+    M(NotCreatedLogEntryForBuildVIndex, "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
+    M(ReplicatedPartVectorIndexFetches, "Number of times a vector index in a data part was downloaded from replica of a ReplicatedMergeTree table.") \
+    M(ReplicatedPartVectorIndexFailedFetches, "Number of times a vector index in a data part was failed to download from replica of a ReplicatedMergeTree table.")
 
 namespace ProfileEvents
 {

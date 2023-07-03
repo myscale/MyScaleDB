@@ -19,7 +19,7 @@ StorageID ReplicatedVectorIndexTask::getStorageID()
 
 bool ReplicatedVectorIndexTask::executeStep()
 {
-    auto remove_processed_entry = [&] () -> bool
+    auto remove_processed_entry = [&] (bool need_create_status = true) -> bool
     {
         try
         {
@@ -30,6 +30,30 @@ bool ReplicatedVectorIndexTask::executeStep()
             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
             LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", entry.source_parts.at(0));
 
+            String status_str;
+            if (build_status == BuildVectorIndexStatus::SUCCESS)
+                status_str = "success";
+            else if (build_status == BuildVectorIndexStatus::BUILD_FAIL)
+                status_str = "build_fail";
+            else if (build_status == BuildVectorIndexStatus::NO_DATA_PART)
+            {
+                need_create_status = false;
+                status_str = "no_data_part";
+            }
+            else if (build_status == BuildVectorIndexStatus::BUILD_SKIPPED)
+            {
+                need_create_status = false;
+                status_str = "skipped";
+            }
+            else
+                status_str = "meta_error";
+
+            /// Some cases like build vector index for part is skipped, no need to create status in zookeeper.
+            if (need_create_status)
+                storage.createVectorIndexBuildStatusForPart(entry.source_parts.at(0), entry.index_name, status_str);
+            else
+                LOG_DEBUG(log, "No need to create build status '{}' in zookeeper for part {}", status_str, entry.source_parts.at(0));
+
             /// write latest cached vector index info to zookeeper
             storage.vidx_info_updating_task->schedule();
         }
@@ -39,6 +63,15 @@ bool ReplicatedVectorIndexTask::executeStep()
         }
 
         return false;
+    };
+
+    auto execute_fetch = [&] () -> bool
+    {
+        if (storage.executeFetchVectorIndex(entry, replica_to_fetch))
+            return remove_processed_entry();
+
+        /// Try again in cases when replica cannot send vector index.
+        return true;
     };
 
     switch (state)
@@ -52,8 +85,13 @@ bool ReplicatedVectorIndexTask::executeStep()
             /// Avoid resheduling, execute fetch here, in the same thread.
             if (!res)
             {
-                /// There is no need to build vector index for some reasons.
-                return remove_processed_entry();
+                if (need_fetch)
+                    return execute_fetch();
+                else
+                {
+                    /// There is no need to build vector index for some reasons.
+                    return remove_processed_entry(false);
+                }
             }
 
             state = State::NEED_EXECUTE_BUILD_VECTOR_INDEX;
@@ -69,6 +107,10 @@ bool ReplicatedVectorIndexTask::executeStep()
                 /// For memory limit failure, try to run build 3 times.
                 if (build_status == BuildVectorIndexStatus::BUILD_FAIL && !source_part->vector_index_build_error)
                     return true;
+
+                /// Try to build again when unable to move vector index files due to concurrent mutation
+                if (build_status == BuildVectorIndexStatus::BUILD_RETRY)
+                    return true;
             }
             catch (...)
             {
@@ -79,6 +121,9 @@ bool ReplicatedVectorIndexTask::executeStep()
                 auto part = storage.getActiveContainingPart(entry.source_parts[0]);
                 if (part)
                     part->setBuildError();
+
+                /// Mark build status as fail
+                build_status = BuildVectorIndexStatus::BUILD_FAIL;
 
                 /// Remove build index log entry to let other tables continue to create entry and build vector index.
                 remove_processed_entry();
@@ -124,6 +169,7 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
         return {false, false};
     }
 
+    /// Get active part containing current part to build vector index
     source_part = storage.getActiveContainingPart(source_part_name);
     if (!source_part)
     {
@@ -146,15 +192,30 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
     {
         if (source_part->containVectorIndex(vec_index.name, vec_index.column))
         {
-            LOG_DEBUG(log, "Source part {} already have vector index built", source_part->name);
+            LOG_DEBUG(log, "No need to build vector index for part {} because the covered part {} already has it built",
+                      source_part_name, source_part->name);
             return {false, false};
         }
     }
 
-    /// TODO - add estimation on needed space for vector index building
+    /// TODO - add estimation on needed space for vector index build
 
-    /// TODO - building vector index is more expensive than fetching and it may be betterr to do building index tasks on one replica
+    /// building vector index is more expensive than fetching and it may be better to do build index tasks on single replica
     /// instead of building the same vector index on all replicas.
+    if (storage.build_vindex_strategy_picker.shouldBuildVIndexOnSingleReplica(entry))
+    {
+        std::optional<String> replica_to_execute_build = storage.build_vindex_strategy_picker.pickReplicaToExecuteBuildVectorIndex(entry);
+        if (replica_to_execute_build)
+        {
+            LOG_DEBUG(log,
+                "Prefer fetching vector index in part {} from replica {} due to build_vector_index_on_random_single_replica",
+                source_part_name, replica_to_execute_build.value());
+
+            replica_to_fetch = replica_to_execute_build.value();
+
+            return {false, true};
+        }
+    }
 
     return {true, false};
 }

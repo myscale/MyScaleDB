@@ -16,6 +16,7 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Common/CurrentMetrics.h>
 #include <Common/NetException.h>
+#include <Core/Names.h>
 #include <Disks/IO/createReadBufferFromFileBase.h>
 #include <base/scope_guard.h>
 #include <Poco/Net/HTTPRequest.h>
@@ -31,6 +32,8 @@ namespace CurrentMetrics
 {
     extern const Metric ReplicatedSend;
     extern const Metric ReplicatedFetch;
+    extern const Metric ReplicatedFetchVectorIndex;
+    extern const Metric ReplicatedSendVectorIndex;
 }
 
 namespace DB
@@ -65,6 +68,7 @@ constexpr auto REPLICATION_PROTOCOL_VERSION_WITH_PARTS_ZERO_COPY = 6;
 constexpr auto REPLICATION_PROTOCOL_VERSION_WITH_PARTS_PROJECTION = 7;
 // Reserved for ALTER PRIMARY KEY
 // constexpr auto REPLICATION_PROTOCOL_VERSION_WITH_PARTS_PRIMARY_KEY = 8;
+constexpr auto REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX = 9;
 
 std::string getEndpointId(const std::string & node_id)
 {
@@ -120,9 +124,24 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
     MergeTreePartInfo::fromPartName(part_name, data.format_version);
 
     /// We pretend to work as older server version, to be sure that client will correctly process our version
-    response.addCookie({"server_protocol_version", toString(std::min(client_protocol_version, REPLICATION_PROTOCOL_VERSION_WITH_PARTS_PROJECTION))});
+    bool is_fetch_vector_index = false;
+    String vec_index_name;
+    if (client_protocol_version == REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)
+    {
+        vec_index_name = params.get("vector_index");
 
-    LOG_TRACE(log, "Sending part {}", part_name);
+        response.addCookie({"server_protocol_version", toString(client_protocol_version)});
+        is_fetch_vector_index = true;
+
+        LOG_TRACE(log, "Sending vector index {} in part {}", vec_index_name, part_name);
+    }
+    else
+    {
+        /// We pretend to work as older server version, to be sure that client will correctly process our version
+        response.addCookie({"server_protocol_version", toString(std::min(client_protocol_version, REPLICATION_PROTOCOL_VERSION_WITH_PARTS_PROJECTION))});
+
+        LOG_TRACE(log, "Sending part {}", part_name);
+    }
 
     MergeTreeData::DataPartPtr part;
 
@@ -141,6 +160,109 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
 
     try
     {
+        /// Sepecial handing for vector index in part.
+        if (is_fetch_vector_index)
+        {
+            CurrentMetrics::Increment metric_increment{CurrentMetrics::ReplicatedSendVectorIndex};
+
+            /// Get active part containing the part_name.
+            part = data.getActiveContainingPart(part_name);
+            if (!part)
+            {
+                /// Don't throw exception to avoid multiple fetches for this part.
+                LOG_WARNING(log, "No active part {} in table, cannot send vector index", part_name);
+                response.addCookie({"vector_index_build_status", "part_not_active"});
+                return;
+            }
+
+            /// Check part has same prefix with part_name but different mutation versions
+            const auto part_info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
+            if (!part->info.isFromSamePart(part_info))
+            {
+                LOG_DEBUG(log, "The part {} is covered by merged part {}, no need to fetch vector index.", part_name, part->name);
+                response.addCookie({"vector_index_build_status", "no_need"});
+                return;
+            }
+            else if (part->name != part_name)
+            {
+                LOG_DEBUG(log, "Will send vector index in part {} instead of part {}", part->name, part_name);
+            }
+
+            /// Get vector files from part.
+            if (part->vector_index_build_cancelled || part->vector_index_build_error)
+            {
+                LOG_DEBUG(log, "The vector index {} build in part {} was cancelled or failed with error, cannot send it", vec_index_name, part_name);
+                response.addCookie({"vector_index_build_status", "fail"});
+            }
+            else if (!part->containAnyVectorIndex())
+            {
+                LOG_WARNING(log, "The vector index {} in part {} was not ready, cannot send it", vec_index_name, part_name);
+                response.addCookie({"vector_index_build_status", "not_ready"});
+            }
+            else
+            {
+                /// Handle cases when sending vector index and merge has conflicts.
+                {
+                    std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
+                    if (!data.currently_sending_vector_index_parts.insert(part->name).second)
+                    {
+                        response.addCookie({"vector_index_build_status", "retry"});
+                        LOG_DEBUG(log, "Part {} is already sending vector index right now", part->name);
+                        return;
+                    }
+                }
+
+                SCOPE_EXIT_MEMORY
+                ({
+                    std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
+                    data.currently_sending_vector_index_parts.erase(part->name);
+                });
+
+                /// Check if this part is currently being merged
+                if (!data.canSendVectorIndexForPart(part->name))
+                {
+                    response.addCookie({"vector_index_build_status", "retry"});
+                    LOG_DEBUG(log, "Part {} is currenlty being merged, hence unable to send vector index", part->name);
+                    return;
+                }
+
+                response.addCookie({"vector_index_build_status", "success"});
+
+                if (part->getDataPartStorage().isStoredOnRemoteDisk())
+                {
+                    UInt64 revision = parse<UInt64>(params.get("disk_revision", "0"));
+                    if (revision)
+                        part->getDataPartStorage().syncRevision(revision);
+
+                    revision = part->getDataPartStorage().getRevision();
+                    if (revision)
+                        response.addCookie({"disk_revision", toString(revision)});
+                }
+
+                String remote_fs_metadata = parse<String>(params.get("remote_fs_metadata", ""));
+                std::regex re("\\s*,\\s*");
+                Strings capability(
+                    std::sregex_token_iterator(remote_fs_metadata.begin(), remote_fs_metadata.end(), re, -1),
+                    std::sregex_token_iterator());
+
+                if (data_settings->allow_remote_fs_zero_copy_replication)
+                {
+                    auto disk_type = part->getDataPartStorage().getDiskType();
+                    if (part->getDataPartStorage().supportZeroCopyReplication() && std::find(capability.begin(), capability.end(), disk_type) != capability.end())
+                    {
+                        /// Send metadata if the receiver's capability covers the source disk type.
+                        response.addCookie({"remote_fs_metadata", disk_type});
+                        sendVectorIndexFromDisk(part, vec_index_name, out, true);
+                        return;
+                    }
+                }
+
+                sendVectorIndexFromDisk(part, vec_index_name, out, false);
+            }
+
+            return;
+        }
+
         part = findPart(part_name);
 
         CurrentMetrics::Increment metric_increment{CurrentMetrics::ReplicatedSend};
@@ -275,10 +397,45 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
         files_to_replicate.insert(name);
     }
 
+    /// Check if can send vector index files.
+    bool skip_send_vector_index_files = true;
+    std::unique_lock<std::mutex> move_index_and_fetch_lock;
+
+    if (part->storage.getInMemoryMetadataPtr()->hasVectorIndices())
+    {
+        skip_send_vector_index_files = false;
+
+        std::lock_guard lock(part->storage.currently_vector_indexing_parts_mutex);
+        for (const auto & part_name : part->storage.currently_vector_indexing_parts)
+        {
+            auto info = MergeTreePartInfo::fromPartName(part_name, part->storage.format_version);
+
+            /// If part is currently building vector index, skip to send.
+            if (part->info.contains(info) && (part->info.isFromSamePart(info)))
+            {
+                if (part->containRowIdsMaps())
+                {
+                    /// Only need to lock for decouple part which contains vector index from old parts.
+                    move_index_and_fetch_lock = part->lockPartForIndexMoveAndMutate(/* is_mutating */ false, /* from_fetch_part */ true);
+                }
+                else
+                {
+                    LOG_DEBUG(log, "Skip to send vector index files for part {} which is currently building vector index", part_name);
+                    skip_send_vector_index_files = true;
+                }
+
+                break;
+            }
+        }
+    }
+
     for (const auto & name : file_names_without_checksums)
     {
         if (client_protocol_version < REPLICATION_PROTOCOL_VERSION_WITH_PARTS_DEFAULT_COMPRESSION
             && name == IMergeTreeDataPart::DEFAULT_COMPRESSION_CODEC_FILE_NAME)
+            continue;
+
+        if (skip_send_vector_index_files && endsWith(name, IMergeTreeDataPart::VECTOR_INDEX_FILE_EXTENSION))
             continue;
 
         files_to_replicate.insert(name);
@@ -343,6 +500,61 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
 
     if (!from_remote_disk && isFullPartStorage(part->getDataPartStorage()))
         part->checksums.checkEqual(data_checksums, false);
+
+    return data_checksums;
+}
+
+/// Referenced from sendPartFromDisk()
+MergeTreeData::DataPart::Checksums Service::sendVectorIndexFromDisk(
+    const MergeTreeData::DataPartPtr & part,
+    const String & vec_index_name,
+    WriteBuffer & out,
+    bool from_remote_disk)
+{
+    /// We'll add a list of vector index files with .vidx postfix.
+    /// Get file names for specified vector index.
+    auto vector_index_files_to_replicate = part->getFileNamesForVectorIndex(vec_index_name);
+
+    auto data_part_storage = part->getDataPartStoragePtr();
+    IDataPartStorage::ReplicatedFilesDescription replicated_description;
+
+    if (from_remote_disk)
+    {
+        replicated_description = data_part_storage->getReplicatedFilesDescriptionForRemoteDisk(vector_index_files_to_replicate);
+        if (!part->isProjectionPart())
+            writeStringBinary(replicated_description.unique_id, out);
+    }
+    else
+    {
+        replicated_description = data_part_storage->getReplicatedFilesDescription(vector_index_files_to_replicate);
+    }
+
+    MergeTreeData::DataPart::Checksums data_checksums;
+
+    writeBinary(replicated_description.files.size(), out);
+    for (const auto & [file_name, desc] : replicated_description.files)
+    {
+        writeStringBinary(file_name, out);
+        writeBinary(desc.file_size, out);
+
+        auto file_in = desc.input_buffer_getter();
+        HashingWriteBuffer hashing_out(out);
+        copyDataWithThrottler(*file_in, hashing_out, blocker.getCounter(), data.getSendsThrottler());
+
+        if (blocker.isCancelled())
+            throw Exception(ErrorCodes::ABORTED, "Transferring vecotr index in part to replica was cancelled");
+
+        if (hashing_out.count() != desc.file_size)
+            throw Exception(
+                ErrorCodes::BAD_SIZE_OF_FILE_IN_DATA_PART,
+                "Unexpected size of file {}, expected {} got {}",
+                std::string(fs::path(part->getDataPartStorage().getRelativePath()) / file_name),
+                desc.file_size, hashing_out.count());
+
+        writePODBinary(hashing_out.getHash(), out);
+
+        data_checksums.addFile(file_name, hashing_out.count(), hashing_out.getHash());
+    }
 
     return data_checksums;
 }
@@ -670,6 +882,242 @@ MergeTreeData::MutableDataPartPtr Fetcher::fetchSelectedPart(
         projections, throttler, sync);
 }
 
+/// Referenced from fetchSelectedPart()
+String Fetcher::fetchVectorIndex(
+    const MergeTreeData::DataPartPtr & future_part,
+    const String & source_part_name,
+    const String & vec_index_name,
+    const String & replica_path,
+    const String & host,
+    int port,
+    const ConnectionTimeouts & timeouts,
+    const String & user,
+    const String & password,
+    const String & interserver_scheme,
+    ThrottlerPtr throttler,
+    const String & tmp_prefix_,
+    bool try_zero_copy,
+    DiskPtr disk)
+{
+    if (blocker.isCancelled())
+        throw Exception(ErrorCodes::ABORTED, "Fetching of vector index in part was cancelled");
+
+    /// Use disk of the target part if not provided, different from fetchSelectedPart(), no need to handle cases when disk is not provided.
+    if (!disk)
+    {
+        auto disk_name = future_part->getDataPartStorage().getDiskName();
+        disk = future_part->storage.getStoragePolicy()->getDiskByName(disk_name);
+    }
+
+    /// Use current part's name in log.
+    String future_part_name = future_part->name;
+
+    const auto data_settings = data.getSettings();
+
+    if (data.canUseZeroCopyReplication() && !try_zero_copy)
+        LOG_INFO(log, "Zero copy replication enabled, but trying to fetch vector index {} in part {} without zero copy", vec_index_name, future_part_name);
+
+    /// It should be "tmp-fetch_" and not "tmp_fetch_", because we can fetch part to detached/,
+    /// but detached part name prefix should not contain underscore.
+    static const String TMP_PREFIX = "tmp-fetch_vector_index_";
+    String tmp_prefix = tmp_prefix_.empty() ? TMP_PREFIX : tmp_prefix_;
+    String part_dir = tmp_prefix + future_part_name;
+    auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(part_dir);
+
+    /// Validation of the input that may come from malicious replica.
+    auto source_part_info = MergeTreePartInfo::fromPartName(source_part_name, data.format_version);
+
+    Poco::URI uri;
+    uri.setScheme(interserver_scheme);
+    uri.setHost(host);
+    uri.setPort(port);
+    uri.setQueryParameters(
+    {
+        {"endpoint",                getEndpointId(replica_path)},
+        {"part",                    source_part_name},  /// Use source part's name in log entry to avoid no active part in replica.
+        {"vector_index",            vec_index_name},
+        {"client_protocol_version", toString(REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)},
+        {"compress",                "false"}
+    });
+
+    if (disk)
+    {
+        LOG_TRACE(log, "Will fetch to disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
+        UInt64 revision = disk->getRevision();
+        if (revision)
+            uri.addQueryParameter("disk_revision", toString(revision));
+    }
+
+    Strings capability;
+    if (try_zero_copy && data_settings->allow_remote_fs_zero_copy_replication)
+    {
+        /// disk should always be valid because here use target part's disk
+        if (disk && disk->supportZeroCopyReplication())
+        {
+            LOG_TRACE(log, "Trying to fetch with zero copy replication, provided disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
+            capability.push_back(toString(disk->getDataSourceDescription().type));
+        }
+    }
+
+    if (!capability.empty())
+    {
+        ::sort(capability.begin(), capability.end());
+        capability.erase(std::unique(capability.begin(), capability.end()), capability.end());
+        const String & remote_fs_metadata = boost::algorithm::join(capability, ", ");
+        uri.addQueryParameter("remote_fs_metadata", remote_fs_metadata);
+    }
+    else
+    {
+        if (data.canUseZeroCopyReplication())
+            LOG_INFO(log, "Cannot select any zero-copy disk for {}", future_part_name);
+
+        try_zero_copy = false;
+    }
+
+    Poco::Net::HTTPBasicCredentials creds{};
+    if (!user.empty())
+    {
+        creds.setUsername(user);
+        creds.setPassword(password);
+    }
+
+    std::unique_ptr<PooledReadWriteBufferFromHTTP> in = std::make_unique<PooledReadWriteBufferFromHTTP>(
+        uri,
+        Poco::Net::HTTPRequest::HTTP_POST,
+        nullptr,
+        timeouts,
+        creds,
+        DBMS_DEFAULT_BUFFER_SIZE,
+        0, /* no redirects */
+        static_cast<uint64_t>(data_settings->replicated_max_parallel_fetches_for_host));
+
+    int server_protocol_version = parse<int>(in->getResponseCookie("server_protocol_version", "0"));
+
+    String remote_fs_metadata = parse<String>(in->getResponseCookie("remote_fs_metadata", ""));
+
+    /// Get build status in response cookie for fail cases.
+    String build_status = in->getResponseCookie("vector_index_build_status", "success");
+    if (build_status == "fail")
+    {
+        LOG_DEBUG(log, "Unable to fetch vector index {} in part {} due to build status is fail", vec_index_name, future_part_name);
+        future_part->setBuildError();
+        return {};
+    }
+    else if (build_status == "no_need")
+    {
+        /// The merged part covering this part doesn't exist in this replica.
+        LOG_DEBUG(log, "No need to fetch vector index {} in part {} due to it is covered by merged part in replica",
+                  vec_index_name, future_part_name);
+        future_part->cancelBuild();
+        return {};
+    }
+    else if (build_status == "not_ready")
+    {
+        LOG_WARNING(log, "Replica doesn't have vector index {} in part {}", vec_index_name, future_part_name);
+        return {};
+    }
+    else if (build_status == "part_not_active")
+    {
+        LOG_WARNING(log, "Replica doesn't have active part {}, will try to fetch later", future_part_name);
+        return {};
+    }
+    else if (build_status == "retry")
+    {
+        LOG_WARNING(log, "Replica cannot send vector index right now for part {}, will try to fetch later", future_part_name);
+        return {};
+    }
+
+    /// Check server protocol version for vector index fetch
+    if (server_protocol_version != REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)
+    {
+        LOG_DEBUG(log, "Unable to fetch vector index {} in part {} from old version", vec_index_name, future_part_name);
+        return {};
+    }
+
+    /// No sum_files_size in fetchVectorIndex, sync = false.
+    LOG_TEST(log, "Disk for fetch is disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
+
+    UInt64 revision = parse<UInt64>(in->getResponseCookie("disk_revision", "0"));
+    if (revision)
+        disk->syncRevision(revision);
+
+    if (!remote_fs_metadata.empty())
+    {
+        if (!try_zero_copy)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Got unexpected 'remote_fs_metadata' cookie");
+        if (std::find(capability.begin(), capability.end(), remote_fs_metadata) == capability.end())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Got 'remote_fs_metadata' cookie {}, expect one from {}",
+                            remote_fs_metadata, fmt::join(capability, ", "));
+
+        try
+        {
+            auto output_buffer_getter = [](IDataPartStorage & part_storage, const auto & file_name, size_t file_size)
+            {
+                auto full_path = fs::path(part_storage.getFullPath()) / file_name;
+                return std::make_unique<WriteBufferFromFile>(full_path, std::min<UInt64>(DBMS_DEFAULT_BUFFER_SIZE, file_size));
+            };
+
+            return downloadVectorIndexInPartToDisk(future_part, vec_index_name, replica_path, tmp_prefix, disk, true, *in, output_buffer_getter, throttler, /* sync */ false);
+        }
+        catch (const Exception & e)
+        {
+            if (e.code() != ErrorCodes::S3_ERROR && e.code() != ErrorCodes::ZERO_COPY_REPLICATION_ERROR)
+                throw;
+
+#if USE_AWS_S3
+            if (const auto * s3_exception = dynamic_cast<const S3Exception *>(&e))
+            {
+                /// It doesn't make sense to retry Access Denied or No Such Key
+                if (!s3_exception->isRetryableError())
+                {
+                    tryLogCurrentException(log, fmt::format("while fetching vector index in part: {}", future_part_name));
+                    throw;
+                }
+            }
+#endif
+
+            LOG_WARNING(log, "Will retry fetching vector index without zero-copy: {}", e.message());
+
+            /// It's important to release session from HTTP pool. Otherwise it's possible to get deadlock
+            /// on http pool.
+            try
+            {
+                in.reset();
+            }
+            catch (...)
+            {
+                tryLogCurrentException(log);
+            }
+
+            temporary_directory_lock = {};
+
+            /// Try again but without zero-copy
+            return fetchVectorIndex(future_part, source_part_name, vec_index_name, replica_path, host, port, timeouts,
+                user, password, interserver_scheme, throttler, tmp_prefix, false, disk);
+        }
+    }
+
+    auto storage_id = data.getStorageID();
+    String new_part_path = fs::path(data.getFullPathOnDisk(disk)) / future_part_name / "";
+    auto entry = data.getContext()->getReplicatedFetchList().insert(
+        storage_id.getDatabaseName(), storage_id.getTableName(),
+        source_part_info.partition_id, future_part_name, new_part_path,
+        replica_path, uri, false, 0);
+
+    in->setNextCallback(ReplicatedFetchReadCallback(*entry));
+
+    /// No handling for memory part
+
+    auto output_buffer_getter = [](IDataPartStorage & part_storage, const String & file_name, size_t file_size)
+    {
+        return part_storage.writeFile(file_name, std::min<UInt64>(file_size, DBMS_DEFAULT_BUFFER_SIZE), {});
+    };
+
+    return downloadVectorIndexInPartToDisk(
+        future_part, vec_index_name, replica_path, tmp_prefix,
+        disk, false, *in, output_buffer_getter, throttler, false);
+}
+
 MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToMemory(
     MutableDataPartStoragePtr data_part_storage,
     const String & part_name,
@@ -943,6 +1391,113 @@ MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToDisk(
     }
 
     return new_data_part;
+}
+
+/// Referenced from downloadPartToDisk()
+String Fetcher::downloadVectorIndexInPartToDisk(
+    const MergeTreeData::DataPartPtr & part,
+    const String & vec_index_name,
+    const String & replica_path,
+    const String & tmp_prefix,
+    DiskPtr disk,
+    bool to_remote_disk,
+    PooledReadWriteBufferFromHTTP & in,
+    OutputBufferGetter output_buffer_getter,
+    ThrottlerPtr throttler,
+    bool sync)
+{
+    String part_id;
+    const auto data_settings = data.getSettings();
+    MergeTreeData::DataPart::Checksums data_checksums;
+
+    /// Use current part's name
+    String part_name = part->name;
+
+    if (to_remote_disk)
+    {
+        readStringBinary(part_id, in);
+
+        if (!disk->supportZeroCopyReplication() || !disk->checkUniqueId(part_id))
+            throw Exception(ErrorCodes::ZERO_COPY_REPLICATION_ERROR, "Part {} unique id {} doesn't exist on {} (with type {}).", part_name, part_id, disk->getName(), toString(disk->getDataSourceDescription().type));
+
+        LOG_DEBUG(log, "Downloading vector index {} in part {} unique id {} metadata onto disk {}.", vec_index_name, part_name, part_id, disk->getName());
+    }
+    else
+    {
+        LOG_DEBUG(log, "Downloading vector index {} in part {} onto disk {}.", vec_index_name, part_name, disk->getName());
+    }
+
+    /// We will remove directory if it's already exists. Make precautions.
+    if (tmp_prefix.empty()
+        || part_name.empty()
+        || std::string::npos != tmp_prefix.find_first_of("/.")
+        || std::string::npos != part_name.find_first_of("/."))
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Logical error: tmp_prefix and part_name cannot be empty or contain '.' or '/' characters.");
+
+    auto part_dir = tmp_prefix + part_name;
+    auto part_relative_path = data.getRelativeDataPath();
+    auto volume = std::make_shared<SingleDiskVolume>("volume_vector_index_" + part_name, disk);
+
+    /// Create temporary part storage to write sent vector index files.
+    /// The index files will be moved to actual part storage of target part.
+    auto part_storage_for_loading = std::make_shared<DataPartStorageOnDiskFull>(volume, part_relative_path, part_dir);
+    part_storage_for_loading->beginTransaction();
+
+    if (part_storage_for_loading->exists())
+    {
+        LOG_WARNING(log, "Directory {} already exists, probably result of a failed fetch. Will remove it before fetching vector index in part.",
+            part_storage_for_loading->getFullPath());
+
+        /// Even if it's a temporary part it could be downloaded with zero copy replication and this function
+        /// is executed as a callback.
+        ///
+        /// We don't control the amount of refs for temporary parts so we cannot decide can we remove blobs
+        /// or not. So we are not doing it
+        bool keep_shared = part_storage_for_loading->supportZeroCopyReplication() && data_settings->allow_remote_fs_zero_copy_replication;
+        part_storage_for_loading->removeSharedRecursive(keep_shared);
+    }
+
+    part_storage_for_loading->createDirectories();
+
+    SyncGuardPtr sync_guard;
+    if (data.getSettings()->fsync_part_directory)
+        sync_guard = part_storage_for_loading->getDirectorySyncGuard();
+
+    auto data_part_storage = part->getDataPartStoragePtr();
+
+    CurrentMetrics::Increment metric_increment{CurrentMetrics::ReplicatedFetchVectorIndex};
+
+    /// Download the vector index files by calling downloadBaseOrProjectionPartToDisk()
+    try
+    {
+        downloadBaseOrProjectionPartToDisk(
+            replica_path, part_storage_for_loading, in, output_buffer_getter, data_checksums, throttler, sync);
+    }
+    catch (const Exception &)
+    {
+        /// Remove the whole part directory if fetch of vector index files failed.
+        part_storage_for_loading->removeSharedRecursive(true);
+        part_storage_for_loading->commitTransaction();
+
+        throw;
+    }
+
+    assertEOF(in);
+
+    part_storage_for_loading->commitTransaction();
+
+    /// Now vector index files are stored to temporary part storage.
+
+    if (to_remote_disk)
+    {
+        LOG_DEBUG(log, "Download of vector index {} in part {} unique id {} metadata onto disk {} finished.", vec_index_name, part_name, part_id, disk->getName());
+    }
+    else
+    {
+        LOG_DEBUG(log, "Download of vector index {} in part {} onto disk {} finished.", vec_index_name, part_name, disk->getName());
+    }
+
+    return part_storage_for_loading->getRelativePath();
 }
 
 }

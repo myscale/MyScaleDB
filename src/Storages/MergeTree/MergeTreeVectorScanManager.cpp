@@ -483,7 +483,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
 
     VectorIndexDescription index;
     bool find_index = false;
-    bool is_active = data_part->getState() == MergeTreeDataPartState::Active;
     const VectorIndicesDescription & vector_indices = metadata->vec_indices;
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
@@ -560,7 +559,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         is_shutdown = data_part->storage.isShutdown();
         if (!is_shutdown)
         {
-            VectorIndex::Status status = vec_executor->load(is_active);
+            VectorIndex::Status status = vec_executor->load(data_part->getState() == MergeTreeDataPartState::Active);
             LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
             LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
@@ -624,7 +623,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
             is_shutdown = data_part->storage.isShutdown();
             if (!is_shutdown)
             {
-                VectorIndex::Status status = vec_executor->load(is_active);
+                VectorIndex::Status status = vec_executor->load(data_part->getState() == MergeTreeDataPartState::Active);
                 LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
                 LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 

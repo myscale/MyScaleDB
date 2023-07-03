@@ -96,9 +96,8 @@
 #include <fmt/format.h>
 #include <Poco/Logger.h>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/MergeUtils.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -2397,6 +2396,16 @@ void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
 
         const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
         PrimaryKeyCacheManager::getMgr().removeFromPKCache(cache_key);
+    }
+}
+
+void MergeTreeData::clearVectorNvmeCache() const
+{
+    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / getRelativeDataPath();
+    if (fs::exists(vector_nvme_cache_folder))
+    {
+        LOG_DEBUG(log, "Remove nvme cache folder: {}", vector_nvme_cache_folder);
+        fs::remove_all(vector_nvme_cache_folder);
     }
 }
 

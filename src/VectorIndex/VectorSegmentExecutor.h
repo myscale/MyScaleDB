@@ -27,7 +27,8 @@ struct IndexWithMeta
         std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
         std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_,
         int disk_mode_,
-        bool fallback_to_flat_)
+        bool fallback_to_flat_,
+        String & vector_index_cache_prefix_)
         : index(index_)
         , total_vec(total_vec_)
         , delete_bitmap(delete_bitmap_)
@@ -37,6 +38,7 @@ struct IndexWithMeta
         , inverted_row_sources_map(inverted_row_sources_map_)
         , disk_mode(disk_mode_)
         , fallback_to_flat(fallback_to_flat_)
+        , vector_index_cache_prefix(vector_index_cache_prefix_)
     {
     }
 
@@ -54,6 +56,7 @@ public:
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
     int disk_mode;
     bool fallback_to_flat;
+    String vector_index_cache_prefix;
 
     void setDeleteBitmap(Search::DenseBitmapPtr delete_bitmap_)
     {
@@ -225,6 +228,10 @@ public:
 
         return real_search_result;
     }
+
+    const SegmentId getSegmentId() const {return segment_id;}
+
+    String generateUUIDv4() const { return DB::toString(DB::UUIDHelpers::generateV4()); }
 
     /// Update SegmentId
     void updateSegmentId(const SegmentId & new_segment_id) { segment_id = new_segment_id; }

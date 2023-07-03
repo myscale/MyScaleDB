@@ -12,8 +12,6 @@
 #include <Common/Exception.h>
 
 #include <VectorIndex/BruteForceSearch.h>
-#include <VectorIndex/IOReader.h>
-#include <VectorIndex/IOWriter.h>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"

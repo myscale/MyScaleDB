@@ -2,43 +2,42 @@
 #include "Storages/MergeTree/IDataPartStorage.h"
 
 #include <optional>
-#include <boost/algorithm/string/join.hpp>
 #include <string_view>
+#include <Compression/getCompressionCodecForFile.h>
 #include <Core/Defines.h>
-#include <IO/HashingWriteBuffer.h>
+#include <Core/NamesAndTypes.h>
+#include <DataTypes/DataTypeAggregateFunction.h>
+#include <DataTypes/NestedUtils.h>
 #include <IO/HashingReadBuffer.h>
+#include <IO/HashingWriteBuffer.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
 #include <IO/WriteHelpers.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/localBackup.h>
-#include <Storages/MergeTree/checkDataPart.h>
-#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
-#include <Storages/StorageReplicatedMergeTree.h>
-#include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
-#include <Storages/MergeTree/PartMetadataManagerWithCache.h>
-#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
-#include <Core/NamesAndTypes.h>
-#include <Storages/ColumnsDescription.h>
-#include <Common/StringUtils/StringUtils.h>
-#include <Common/escapeForFileName.h>
-#include <Common/CurrentMetrics.h>
-#include <Common/FieldVisitorsAccurateComparison.h>
-#include <Common/MemoryTrackerBlockerInThread.h>
-#include <base/JSON.h>
-#include <Compression/getCompressionCodecForFile.h>
-#include <Parsers/parseQuery.h>
-#include <Parsers/queryToString.h>
-#include <Parsers/ExpressionElementParsers.h>
-#include <DataTypes/NestedUtils.h>
-#include <DataTypes/DataTypeAggregateFunction.h>
 #include <Interpreters/MergeTreeTransaction.h>
 #include <Interpreters/TransactionLog.h>
 #include <Interpreters/VectorIndexEventLog.h>
+#include <Parsers/ExpressionElementParsers.h>
+#include <Parsers/parseQuery.h>
+#include <Parsers/queryToString.h>
+#include <Storages/ColumnsDescription.h>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
+#include <Storages/MergeTree/PartMetadataManagerWithCache.h>
+#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
+#include <Storages/MergeTree/checkDataPart.h>
+#include <Storages/MergeTree/localBackup.h>
+#include <Storages/StorageReplicatedMergeTree.h>
 #include <VectorIndex/Metadata.h>
 #include <VectorIndex/SegmentId.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/DiskIOReader.h>
+#include <base/JSON.h>
+#include <boost/algorithm/string/join.hpp>
+#include <Common/CurrentMetrics.h>
+#include <Common/FieldVisitorsAccurateComparison.h>
+#include <Common/MemoryTrackerBlockerInThread.h>
+#include <Common/StringUtils/StringUtils.h>
+#include <Common/escapeForFileName.h>
 
 
 namespace CurrentMetrics
@@ -816,6 +815,27 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums(bool include_vector_fil
     }
 
     return result;
+}
+
+NameSet IMergeTreeDataPart::getFileNamesForVectorIndex(const String &) const
+{
+    if (!isStoredOnDisk())
+        return {};
+
+    /// In fetch vector index cases, the vector index should be built for VPart.
+    if (!containAnyVectorIndex())
+        return {};
+
+    NameSet result;
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        /// TODO: get index files for specified vector index
+        if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
+            result.emplace(it->name());
+    }
+
+   return result;
 }
 
 void IMergeTreeDataPart::loadDefaultCompressionCodec()

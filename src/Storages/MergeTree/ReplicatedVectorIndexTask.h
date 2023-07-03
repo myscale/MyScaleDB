@@ -59,7 +59,7 @@ private:
     Poco::Logger * log;
 
     MergeTreeData::DataPartPtr source_part{nullptr};
-    BuildVectorIndexStatus build_status;
+    BuildVectorIndexStatus build_status{BuildVectorIndexStatus::SUCCESS};
     String replica_to_fetch;
 
     enum class State

@@ -30,7 +30,6 @@
 #include <Parsers/ParserSetQuery.h>
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTColumnDeclaration.h>
-#include <Common/logger_useful.h>
 
 
 namespace DB
@@ -365,9 +364,10 @@ bool ParserTablePropertiesDeclarationList::parseImpl(Pos & pos, ASTPtr & node, E
         else if (elem->as<ASTIndexDeclaration>())
             indices->children.push_back(elem);
         else if (elem->as<ASTVectorIndexDeclaration>()) {
-            Poco::Logger * log = &Poco::Logger::get("ParserCreateQuery");
-            LOG_INFO(log, "push vector index elem");
-            vec_indices->children.push_back(elem);
+            if(vec_indices->children.size() == 0)
+                vec_indices->children.push_back(elem);
+            else
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot create vector index {}: only one vector index can be created for this table", elem->as<ASTVectorIndexDeclaration>()->name);
         }
         else if (elem->as<ASTConstraintDeclaration>())
             constraints->children.push_back(elem);

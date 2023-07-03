@@ -185,12 +185,12 @@ private:
         /// used to store row_ids_map_bufs
         std::vector<std::unique_ptr<WriteBuffer>> row_ids_map_bufs;
         std::vector<std::unique_ptr<WriteBufferFromFileBase>> row_ids_map_uncompressed_bufs;
-        std::vector<std::unique_ptr<Poco::TemporaryFile>> row_ids_map_files;
+        std::vector<String> row_ids_map_files;
 
         /// used to store new_to_old_row_ids_map
         std::unique_ptr<WriteBuffer> inverted_row_ids_map_buf;
         std::unique_ptr<WriteBufferFromFileBase> inverted_row_ids_map_uncompressed_buf;
-        std::unique_ptr<Poco::TemporaryFile> inverted_row_ids_map_file;
+        String inverted_row_ids_map_file_path;
         String inverted_row_sources_map_file_path;
     };
 

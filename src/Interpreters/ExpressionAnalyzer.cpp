@@ -744,14 +744,42 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 "Unknown identifier '{}' in distance function", arguments[1]->getColumnName());
         }
 
-      /// In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
         if (dag_node->column)
         {
             if (!isColumnConst(*dag_node->column))
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query vector type for argument {} in distance function", arguments[1]->getColumnName());
+            vector_scan_desc.query_column = dag_node->column;
         }
+        else if (dag_node->function && dag_node->function->getName() == "identity")
+        {
+            // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
+            continue;
+        }
+        else if (arguments[1]->as<ASTFunction>())
+        {
+            // In cases with lambda function, non-const columns require execution.
+            Block temp_block = {{DataTypeUInt8().createColumnConst(1, 0), std::make_shared<DataTypeUInt8>(), "_dummy"}};
+            ColumnWithTypeAndName * new_query_column;
+            try
+            {
+                auto function_ast = arguments[1]->clone();
+                auto syntax_result = TreeRewriter(getContext()).analyze(function_ast, {{"_dummy", std::make_shared <DataTypeUInt8>()}});
+                auto tmp_actions = ExpressionAnalyzer(function_ast, syntax_result, getContext()).getActions(false);
 
-        vector_scan_desc.query_column = dag_node->column;
+                tmp_actions->execute(temp_block, false);
+                new_query_column = temp_block.findByName(arguments[1]->getColumnName());
+            }
+            catch(...)
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "An exception occurred while executing the argument {} in distance function", arguments[1]->getColumnName());
+            }
+            if(!new_query_column->column || !checkColumn<ColumnArray>(*new_query_column->column))
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
+            vector_scan_desc.query_column = new_query_column->column;
+        }
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
+
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
         //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
 

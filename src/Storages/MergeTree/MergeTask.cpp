@@ -350,18 +350,15 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
         ctx->rows_sources_file->keep();
 
         /// create inverted row ids map
-        global_ctx->inverted_row_ids_map_file = createTemporaryFile(ctx->tmp_disk->getPath());
-        global_ctx->inverted_row_ids_map_uncompressed_buf = ctx->tmp_disk->writeFile(fileName(global_ctx->inverted_row_ids_map_file->path()));
-        global_ctx->inverted_row_ids_map_buf = std::make_unique<CompressedWriteBuffer>(*global_ctx->inverted_row_ids_map_uncompressed_buf);
+        global_ctx->inverted_row_ids_map_file_path
+            = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
 
         /// create row ids map for each old part
         for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
         {
-            auto row_ids_map_file = createTemporaryFile(ctx->tmp_disk->getPath());
-            auto row_ids_map_uncompressed_buf = ctx->tmp_disk->writeFile(fileName(row_ids_map_file->path()));
-            global_ctx->row_ids_map_bufs.emplace_back(std::make_unique<CompressedWriteBuffer>(*row_ids_map_uncompressed_buf));
-            global_ctx->row_ids_map_files.emplace_back(std::move(row_ids_map_file));
-            global_ctx->row_ids_map_uncompressed_bufs.emplace_back(std::move(row_ids_map_uncompressed_buf));
+            String row_ids_map_file = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-" + toString(i) + "-"
+                + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+            global_ctx->row_ids_map_files.emplace_back(row_ids_map_file);
         }
         global_ctx->inverted_row_sources_map_file_path = ctx->rows_sources_file->path();
     }
@@ -523,7 +520,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::executeImpl()
 
 bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
 {
-    if (!global_ctx->inverted_row_ids_map_file)
+    if (global_ctx->inverted_row_ids_map_file_path.empty())
         return false;
 
     const auto & primary_key = global_ctx->metadata_snapshot->getPrimaryKey();
@@ -588,6 +585,22 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
     auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
     LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
     rows_sources_read_buf->seek(0, 0);
+
+    /// inverted_row_ids_map file write buffer
+    global_ctx->inverted_row_ids_map_uncompressed_buf = global_ctx->new_data_part->getDataPartStorage().writeFile(
+        global_ctx->inverted_row_ids_map_file_path, 4096, global_ctx->context->getWriteSettings());
+    global_ctx->inverted_row_ids_map_buf = std::make_unique<CompressedWriteBuffer>(*global_ctx->inverted_row_ids_map_uncompressed_buf);
+
+    /// row_ids_map file write buffers
+    global_ctx->row_ids_map_bufs.clear();
+    global_ctx->row_ids_map_uncompressed_bufs.clear();
+    for (const auto & row_ids_map_file : global_ctx->row_ids_map_files)
+    {
+        auto row_ids_map_uncompressed_buf
+            = global_ctx->new_data_part->getDataPartStorage().writeFile(row_ids_map_file, 4096, global_ctx->context->getWriteSettings());
+        global_ctx->row_ids_map_bufs.emplace_back(std::make_unique<CompressedWriteBuffer>(*row_ids_map_uncompressed_buf));
+        global_ctx->row_ids_map_uncompressed_bufs.emplace_back(std::move(row_ids_map_uncompressed_buf));
+    }
 
     /// read data into buffer
     uint64_t new_part_row_id = 0;
@@ -1051,20 +1064,32 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
     {
         for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
         {
-            auto& row_ids_map_tmp_file = global_ctx->row_ids_map_files[i]->path();
-            /// move and rename row ids map file to new dir
-            String row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
-            LOG_DEBUG(ctx->log, "Row ids map tmp file path: {} new file: {}", row_ids_map_tmp_file, row_ids_map_file_path);
-            std::filesystem::rename(row_ids_map_tmp_file, row_ids_map_file_path);
-            /// move and rename vector index files to new dir
-            VectorIndex::renameVectorIndexFiles(toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i]->getDataPartStorage().getFullPath(), global_ctx->new_data_part->getDataPartStorage().getFullPath());
+            /// move vector index files to new dir
+            VectorIndex::moveVectorIndexFiles(
+                toString(i),
+                global_ctx->future_part->parts[i]->name,
+                global_ctx->future_part->parts[i]->getDataPartStorage(),
+                global_ctx->new_data_part->getDataPartStorage());
         }
 
-        String inverted_row_ids_map_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
-        std::filesystem::rename(global_ctx->inverted_row_ids_map_file->path(), inverted_row_ids_map_file_path);
+        /// finalize row sources map info to new data part dir
+        auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(
+            global_ctx->context->getTemporaryVolume()->getDisk()->readFile(fileName(global_ctx->inverted_row_sources_map_file_path)));
+        rows_sources_read_buf->seek(0, 0);
 
-        String inverted_row_sources_file_path = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
-        std::filesystem::rename(global_ctx->inverted_row_sources_map_file_path, inverted_row_sources_file_path);
+        String inverted_row_sources_file_path
+            = global_ctx->new_data_part->getDataPartStorage().getFullPath() + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
+        auto inverted_row_sources_map_uncompressed_buf = global_ctx->new_data_part->getDataPartStorage().writeFile(
+            inverted_row_sources_file_path, 4096, global_ctx->context->getWriteSettings());
+        auto inverted_row_sources_map_buf = std::make_unique<CompressedWriteBuffer>(*inverted_row_sources_map_uncompressed_buf);
+
+        DB::copyData(*rows_sources_read_buf, *inverted_row_sources_map_buf);
+        inverted_row_sources_map_buf->finalize();
+        inverted_row_sources_map_uncompressed_buf->next();
+        inverted_row_sources_map_uncompressed_buf->finalize();
+
+        /// Previously we marked this tmp file to be kept
+        global_ctx->context->getTemporaryVolume()->getDisk()->removeFile(global_ctx->inverted_row_sources_map_file_path);
 
         /// Initialize the vector index metadata for the new part
         global_ctx->new_data_part->loadVectorIndexMetadata();
