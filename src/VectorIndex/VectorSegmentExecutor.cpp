@@ -445,7 +445,7 @@ Status VectorSegmentExecutor::load()
                 total_vec = index->numData();
                 LOG_INFO(log, "load total_vec={}", total_vec);
                 if(!readBitMap())
-                    throw DB::Exception("ReadBitMap error", DB::ErrorCodes::CANNOT_OPEN_FILE);
+                    throw DB::Exception(DB::ErrorCodes::CANNOT_OPEN_FILE, "ReadBitMap error");
 
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();

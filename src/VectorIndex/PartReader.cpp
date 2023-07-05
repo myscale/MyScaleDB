@@ -75,7 +75,7 @@ std::shared_ptr<PartReader::DataChunk> PartReader::sampleData(size_t n)
     reset();
     auto ret = merge(chunks);
     if (ret == nullptr)
-        throw DB::Exception("Cannot sample data from part " + part->name, DB::ErrorCodes::INCORRECT_DATA);
+        throw DB::Exception(DB::ErrorCodes::INCORRECT_DATA, "Cannot sample data from part {}", part->name);
     return ret;
 }
 
