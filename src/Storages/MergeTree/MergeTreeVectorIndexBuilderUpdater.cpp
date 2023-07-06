@@ -508,6 +508,31 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                         return BuildVectorIndexStatus::SUCCESS;
                     }
+
+                    /// In replicated case, slow replica may build vector index for merged data part.
+                    /// Here check the future part has the same prefix name as build part.
+                    if (is_replicated)
+                    {
+                        String future_part_name_prefix = future_part->info.getPartNameWithoutMutation();
+                        if (future_part_name_prefix != part_name_prefix)
+                        {
+                            LOG_DEBUG(
+                                log,
+                                "future part '{}' is a merged part not mutated part from part '{}' build vector index, no need to move.",
+                                future_part_name_prefix,
+                                part_name_prefix);
+                            if (disk->exists(vector_tmp_relative_path))
+                            {
+                                LOG_DEBUG(log, "Will remove unneeded vector index");
+                                disk->removeRecursive(vector_tmp_relative_path);
+                            }
+                            else
+                                LOG_DEBUG(log, "[Unneeded] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
+
+                            VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
+                            return BuildVectorIndexStatus::SUCCESS;
+                        }
+                    }
                 }
                 if (future_part && !future_part->getPartIsMutating())
                 {
@@ -630,6 +655,31 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     part->removeVectorIndexInfo(vec_index_desc.name);
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                     return BuildVectorIndexStatus::SUCCESS;
+                }
+
+                /// In replicated case, slow replica may build vector index for merged data part.
+                /// Here check the future part has the same prefix name as build part.
+                if (is_replicated)
+                {
+                    String future_part_name_prefix = future_part->info.getPartNameWithoutMutation();
+                    if (future_part_name_prefix != part_name_prefix)
+                    {
+                        LOG_DEBUG(
+                            log,
+                            "future part '{}' is a merged part not mutated part from part '{}' build vector index, no need to move.",
+                            future_part_name_prefix,
+                            part_name_prefix);
+                        if (disk->exists(vector_tmp_relative_path))
+                        {
+                            LOG_DEBUG(log, "Will remove unneeded vector index");
+                            disk->removeRecursive(vector_tmp_relative_path);
+                        }
+                        else
+                            LOG_DEBUG(log, "[Unneeded] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
+
+                        VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
+                        return BuildVectorIndexStatus::SUCCESS;
+                    }
                 }
 
                 /// First, move index files to part and apply lightweight delete.

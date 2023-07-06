@@ -1424,6 +1424,35 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
                     return false;
                 }
             }
+
+            /// Check if this replica can merge source parts for vector index.
+            if (data.getInMemoryMetadataPtr()->hasVectorIndices())
+            {
+                MergeTreeData::DataPartPtr prev_part = nullptr;
+
+                /// loop through source parts and compare two adjacent data parts.
+                for (const auto & name : entry.source_parts)
+                {
+                    auto part = data.getPartIfExists(name, {MergeTreeDataPartState::Active});
+                    if (part)
+                    {
+                        if (prev_part)
+                        {
+                            String out_reason;
+                            if (!ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(prev_part, part, &out_reason))
+                            {
+                                out_postpone_reason = fmt::format(
+                                        "Not executing log entry {} for part {} because {}",
+                                        entry.znode_name, entry.new_part_name, out_reason);
+                                LOG_DEBUG(log, fmt::runtime(out_postpone_reason));
+                                return false;
+                            }
+                        }
+
+                        prev_part = part;
+                    }
+                }
+            }
         }
 
         if (!ignore_max_size && sum_parts_size_in_bytes > max_source_parts_size)
@@ -2319,7 +2348,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeTwoParts(
     }
 
     /// Checks related to vector index
-    if (!canMergeWithVectorIndex(left, right))
+    if (!canMergeWithVectorIndex(left, right, out_reason))
         return false;
 
     return MergeTreeData::partsContainSameProjections(left, right);
@@ -2390,20 +2419,29 @@ bool ReplicatedMergeTreeMergePredicate::partParticipatesInReplaceRange(const Mer
 
 bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     const MergeTreeData::DataPartPtr & left,
-    const MergeTreeData::DataPartPtr & right) const
+    const MergeTreeData::DataPartPtr & right,
+    String * out_reason)
 {
     /// Check if part contains merged vector index
     if (left->containRowIdsMaps() || right->containRowIdsMaps())
+    {
+        if (out_reason)
+            *out_reason = "source part " + left->name + " or " + right->name + " is a decouple part";
         return false;
+    }
 
     /// Check if part is building vector index
     {
         std::lock_guard lock(left->storage.currently_vector_indexing_parts_mutex);
         for (const auto & part_name : left->storage.currently_vector_indexing_parts)
         {
-            auto info = MergeTreePartInfo::fromPartName(part_name, queue.format_version);
+            auto info = MergeTreePartInfo::fromPartName(part_name, left->storage.format_version);
             if (left->info.contains(info) || right->info.contains(info))
+            {
+                if (out_reason)
+                    *out_reason = "source part " + left->name + " or " + right->name + " is currently building vector index";
                 return false;
+            }
         }
     }
 
@@ -2421,6 +2459,8 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
         }
         else
         {
+            if (out_reason)
+                *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
             can_merge = false;
             break;
         }
