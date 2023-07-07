@@ -1077,6 +1077,9 @@ public:
     /// error if built was successful. Otherwise update latested failed status.
     void updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message);
 
+    /// Reset vector index status when new vector index is added
+    void resetVectorIndexBuildStatus();
+
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
     /// with `currently_submerging_emerging_mutex`.

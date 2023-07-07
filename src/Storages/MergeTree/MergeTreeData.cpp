@@ -8434,6 +8434,12 @@ void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool 
     }
 }
 
+void MergeTreeData::resetVectorIndexBuildStatus()
+{
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    vector_index_status.clear();
+}
+
 void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)
 {
     auto metadata = getInMemoryMetadata();

@@ -537,6 +537,9 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
     }
     else
     {
+        /// Clear vector index build status
+        resetVectorIndexBuildStatus();
+
         /// handle add vector index command
         background_operations_assignee.trigger();
     }

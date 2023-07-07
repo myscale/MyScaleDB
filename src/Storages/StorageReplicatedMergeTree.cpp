@@ -5189,6 +5189,9 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
             if (old_vec_indices.empty())
             {
                 /// Add vector index case.
+                /// Clear vector index build status
+                resetVectorIndexBuildStatus();
+
                 LOG_INFO(log, "Get add vector index, start background job immediately");
                 background_operations_assignee.trigger();
             }
