@@ -198,6 +198,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
         cmake["-DSANITIZE"] = with_sanitizer
     
     if with_sanitizer == 'memory':
+        cmake["-DENABLE_EMBEDDED_COMPILER"] = "OFF"
         cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
         cmake["-DENABLE_CLICKHOUSE_SERVER"] = "ON"
         cmake["-DENABLE_CLICKHOUSE_CLIENT"] = "ON"
