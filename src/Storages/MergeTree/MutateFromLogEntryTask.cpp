@@ -206,9 +206,6 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     try
     {
         storage.checkPartChecksumsAndCommit(*transaction_ptr, new_part, mutate_task->getHardlinkedFiles());
-
-        /// Safe here, the source part status is Outdated, vector index move cannot find it.
-        future_mutated_part->parts[0]->setPartIsMutating(false);
     }
     catch (const Exception & e)
     {

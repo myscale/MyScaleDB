@@ -64,6 +64,8 @@ private:
     std::shared_ptr<MutationContext> ctx;
     ExecutableTaskPtr task;
 
+    /// Data part lock used for vector index move and mutating conflict
+    std::unique_lock<std::mutex> move_mutate_lock;
 };
 
 [[ maybe_unused]] static MergeTreeData::MutableDataPartPtr executeHere(MutateTaskPtr task)

@@ -388,7 +388,6 @@ public:
     /// Move index files to active part OR new active part after mutation to pick up.
     /// TODO: Remove when build vector index is handled by log entry for replciated MergeTree
     mutable std::mutex vector_index_move_and_mutate_mutex;
-    mutable bool part_is_currently_mutating = false;
 
     mutable bool lightweight_delete_mask_updated = false;
 
@@ -429,16 +428,15 @@ public:
 
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
 
-    bool getPartIsMutating() const
+   /// lock part for move build vector index, avoid concurrently mutation
+    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate() const
     {
-        std::lock_guard lock(vector_index_move_and_mutate_mutex);
-        return part_is_currently_mutating;
+        return std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
     }
 
-    void setPartIsMutating(const bool & new_value) const
+    std::unique_lock<std::mutex> tryLockPartForIndexMoveAndMutate() const
     {
-        std::lock_guard lock(vector_index_move_and_mutate_mutex);
-        part_is_currently_mutating = new_value;
+        return std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
     }
 
     /// Read vector_index_ready file to initialize vector_indxed if exists.

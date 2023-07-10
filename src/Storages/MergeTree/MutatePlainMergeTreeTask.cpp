@@ -99,9 +99,6 @@ bool MutatePlainMergeTreeTask::executeStep()
                 storage.updateMutationEntriesErrors(future_part, true, "");
                 write_part_log({});
 
-                /// Safe here, the source part status is Outdated, vector index move cannot find it.
-                future_part->parts[0]->setPartIsMutating(false);
-
                 /// Update vector index bitmap after mutations with lightweight delete.
                 if (new_part->lightweight_delete_mask_updated)
                 {

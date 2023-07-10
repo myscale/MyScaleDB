@@ -754,9 +754,13 @@ void finalizeMutatedPart(
 
     new_data_part->default_codec = codec;
 
-    ///Origin part is decoupled with merged vector indices or has simple built vector index
+    /// Origin part is decoupled with merged vector indices or has simple built vector index
     if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
         new_data_part->loadVectorIndexMetadata();
+
+    /// Avoid build vector index for part with error
+    if (source_part->vector_index_build_error)
+        new_data_part->setBuildError();
 }
 
 }
@@ -1302,6 +1306,10 @@ private:
             if (vector_files_found)
                 ctx->new_data_part->loadVectorIndexMetadata();
         }
+
+        /// Avoid build vector index for part with error
+        if (ctx->source_part->vector_index_build_error)
+            ctx->new_data_part->setBuildError();
     }
 
     enum class State
@@ -1649,7 +1657,7 @@ bool MutateTask::prepare()
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
     /// Used for vector index move and mutating confict
-    ctx->source_part->setPartIsMutating(true);
+    move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate();
 
     auto context_for_reading = Context::createCopy(ctx->context);
 

@@ -534,15 +534,22 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         }
                     }
                 }
-                if (future_part && !future_part->getPartIsMutating())
-                {
-                    moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
 
-                    if (future_part->containRowIdsMaps())
+                if (future_part)
+                {
+                    /// lock part for move build vector index, avoid concurrently mutation
+                    auto move_mutate_lock = future_part->tryLockPartForIndexMoveAndMutate();
+                    if (move_mutate_lock.owns_lock())
                     {
-                        auto lock = data.lockParts();
-                        VectorIndex::removeRowIdsMaps(future_part, log);
+                        moveVectorIndexFilesToFuturePart(metadata_snapshot, vector_tmp_relative_path, future_part);
+
+                        if (future_part->containRowIdsMaps())
+                        {
+                            auto lock = data.lockParts();
+                            VectorIndex::removeRowIdsMaps(future_part, log);
+                        }
                     }
+                    /// else future part is under mutating, not ready to move vector index.
                 }
                 /// else future part will pick up later at the next time when index built for it.
             }
@@ -680,6 +687,15 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
                         return BuildVectorIndexStatus::SUCCESS;
                     }
+                }
+
+                /// lock part for move build vector index, avoid concurrently mutation
+                auto move_mutate_lock = future_part->tryLockPartForIndexMoveAndMutate();
+                if (!move_mutate_lock.owns_lock())
+                {
+                    LOG_INFO(log, "Will move vector index files later since future part `{}` is under mutating", future_part->name);
+                    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
+                    return BuildVectorIndexStatus::SUCCESS;
                 }
 
                 /// First, move index files to part and apply lightweight delete.
@@ -840,7 +856,7 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePart(const 
 
     disk->removeRecursive(vector_tmp_relative_path);
 
-    LOG_DEBUG(log, "Move vector index files to part {}", dest_part->name);
+    LOG_INFO(log, "Move vector index files to part {}", dest_part->name);
 
     /// Apply lightweight delete bitmap to index's bitmap
     if (dest_part->hasLightweightDelete())
