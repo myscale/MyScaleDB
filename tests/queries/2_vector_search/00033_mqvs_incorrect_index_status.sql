@@ -11,7 +11,7 @@ select table, name, expr, status, latest_failed_part, substr(latest_fail_reason,
 
 ALTER TABLE test_172_status DROP VECTOR INDEX idx;
 
-SYSTEM STOP merges ON test_172_status;
+SYSTEM STOP merges test_172_status;
 ALTER TABLE test_172_status ADD VECTOR INDEX idx data TYPE MSTG;
 
 select table, name, expr, status from system.vector_indices where database = currentDatabase() order by table;
@@ -30,7 +30,7 @@ select table, name, expr, status, latest_failed_part, substr(latest_fail_reason,
 
 ALTER TABLE test_172_replicated_status DROP VECTOR INDEX idx;
 
-SYSTEM STOP merges ON test_172_replicated_status;
+SYSTEM STOP merges test_172_replicated_status;
 ALTER TABLE test_172_replicated_status ADD VECTOR INDEX idx data TYPE MSTG;
 
 select table, name, expr, status from system.vector_indices where database = currentDatabase() order by table;
