@@ -10,7 +10,7 @@ import requests
 import tempfile
 
 
-DEFAULT_URL = 'https://mqdb-release.moqi.com.cn/datasets'
+DEFAULT_URL = 'https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets'
 
 AVAILABLE_DATASETS = {
     'hits': 'hits_v1.tar',

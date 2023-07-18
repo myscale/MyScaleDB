@@ -68,7 +68,7 @@ function start() {
 
 start
 # shellcheck disable=SC2086 # No quotes because I want to split it into words.
-/s3downloader --url-prefix "$DATASETS_URL" --dataset-names $DATASETS
+/s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" --dataset-names $DATASETS
 chmod 777 -R /var/lib/clickhouse
 clickhouse-client --query "SHOW DATABASES"
 

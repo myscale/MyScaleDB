@@ -24,7 +24,7 @@ RUN apt-get update --allow-releaseinfo-change -y \
     && apt-get clean
 
 ENV DATASETS="hits visits"
-ENV DATASETS_URL="https://mqdb-release.moqi.com.cn/datasets"
+ENV DATASETS_URL="https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets"
 # ENV EXPORT_S3_STORAGE_POLICIES=1
 ENV INTEL_ONEAPI_VERSION=2021.4.0
 

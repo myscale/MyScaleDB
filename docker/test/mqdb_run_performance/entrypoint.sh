@@ -20,9 +20,9 @@ fi
 
 function download_left_package
 {
-    # $WORKPATH/s3downloader --url-prefix "https://mqdb-release.moqi.com.cn/" --dataset-names "performance_package" --clickhouse-data-path "$WORKPATH/workspace"
+    # $WORKPATH/s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/" --dataset-names "performance_package" --clickhouse-data-path "$WORKPATH/workspace"
     # TODO: Modified to download according to the commit number
-    wget https://mqdb-release.moqi.com.cn/performance/performance_pack_amd64_${1}.tar.gz -O left.tar.gz || wget https://mqdb-release.moqi.com.cn/performance/performance_pack_amd64.tar.gz -O left.tar.gz
+    wget https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/performance/performance_pack_amd64_${1}.tar.gz -O left.tar.gz || wget https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/performance/performance_pack_amd64.tar.gz -O left.tar.gz
     tar -zxvf left.tar.gz -C $WORKPATH/workspace
     mv $WORKPATH/workspace/performance_pack $WORKPATH/workspace/left
 }
