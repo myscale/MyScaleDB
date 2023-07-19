@@ -774,9 +774,12 @@ class IColumn;
     M(UInt64, max_distributed_depth, 5, "Maximum distributed query depth", 0) \
     M(Bool, database_replicated_always_detach_permanently, false, "Execute DETACH TABLE as DETACH TABLE PERMANENTLY if database engine is Replicated", 0) \
     M(Bool, database_replicated_allow_only_replicated_engine, false, "Allow to create only Replicated tables in database with engine Replicated", 0) \
+    M(Bool, database_replicated_allow_explicit_arguments, true, "Allow to create Replicated database with explicit arguments", 0) \
     M(Bool, database_replicated_allow_replicated_engine_arguments, true, "Allow to create only Replicated tables in database with engine Replicated with explicit arguments", 0) \
     M(Bool, database_replicated_always_convert_table_to_replicated, false, "Always convert tables to Replicated tables in database with engine Replicated", 0) \
-    M(String, database_replicated_default_zk_path_prefix, "", "Fill replicated database engine zk_path with this prefix + database name when creating a database. If empty, zk_path will not be set automatically", 0) \
+    M(Bool, database_replicated_always_execute_with_on_cluster, false, "Always create or drop the Replicated database on all replicas of the cluster", 0) \
+    M(String, database_replicated_default_cluster_name, "", "The name of the cluster on which the Replicated database is created or dropped", 0) \
+    M(String, database_replicated_default_zk_path_prefix, "", "Fill Replicated database engine zk_path with this prefix + database name when creating a database. If empty, zk_path will not be set automatically", 0) \
     M(DistributedDDLOutputMode, distributed_ddl_output_mode, DistributedDDLOutputMode::THROW, "Format of distributed DDL query result", 0) \
     M(UInt64, distributed_ddl_entry_format_version, 3, "Compatibility version of distributed DDL (ON CLUSTER) queries", 0) \
     \

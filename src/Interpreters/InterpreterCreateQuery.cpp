@@ -242,11 +242,33 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         metadata_path = metadata_path / "metadata" / database_name_escaped;
     }
 
+    if (create.storage->engine->name == "Replicated"
+        && !internal && !create.attach)
+    {
+        if (!getContext()->getSettingsRef().allow_experimental_database_replicated)
+            throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
+                            "Replicated is an experimental database engine. "
+                            "Enable allow_experimental_database_replicated to use it.");
+        
+        if (!getContext()->getSettingsRef().database_replicated_allow_explicit_arguments
+        && create.storage->engine->arguments && create.storage->engine->arguments->children.size() != 0)
+            throw Exception(ErrorCodes::INCORRECT_QUERY,
+                                    "Only queries like `CREATE DATABASE <database>` are supported for creating database");
+
+        /// CREATE REPLICATED DATABASE WITH ON CLUSTER CLAUSE
+        if (getContext()->getSettingsRef().database_replicated_always_execute_with_on_cluster
+        && getContext()->getSettingsRef().database_replicated_default_cluster_name.value.size() > 0
+        && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
+        {
+            create.cluster = getContext()->getSettingsRef().database_replicated_default_cluster_name.value;
+            return executeQueryOnCluster(create);
+        }
+    }
+
     if (create.storage->engine->name == "Replicated" && !create.attach)
     {
-        if (!create.storage->engine->arguments) {
+        if (!create.storage->engine->arguments)
             create.storage->engine->arguments = std::make_shared<ASTExpressionList>();
-        }
 
         /// Fill in default parameters
         String default_zk_path_prefix = getContext()->getSettingsRef().database_replicated_default_zk_path_prefix.value;
@@ -267,15 +289,6 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
         throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
                         "MaterializedMySQL is an experimental database engine. "
                         "Enable allow_experimental_database_materialized_mysql to use it.");
-    }
-
-    if (create.storage->engine->name == "Replicated"
-        && !getContext()->getSettingsRef().allow_experimental_database_replicated
-        && !internal && !create.attach)
-    {
-        throw Exception(ErrorCodes::UNKNOWN_DATABASE_ENGINE,
-                        "Replicated is an experimental database engine. "
-                        "Enable allow_experimental_database_replicated to use it.");
     }
 
     if (create.storage->engine->name == "MaterializedPostgreSQL"

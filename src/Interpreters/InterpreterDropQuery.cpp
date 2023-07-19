@@ -57,6 +57,20 @@ InterpreterDropQuery::InterpreterDropQuery(const ASTPtr & query_ptr_, ContextMut
 BlockIO InterpreterDropQuery::execute()
 {
     auto & drop = query_ptr->as<ASTDropQuery &>();
+    
+    /// DROP REPLICATED DATABASE WITH ON CLUSTER CLAUSE
+    if (drop.cluster.empty() && drop.database && !drop.table
+        && drop.kind == ASTDropQuery::Kind::Drop
+        && getContext()->getSettingsRef().database_replicated_always_execute_with_on_cluster
+        && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
+    {
+        const auto & database_name = drop.getDatabase();
+        auto ddl_guard = DatabaseCatalog::instance().getDDLGuard(database_name, "");
+        DatabasePtr database = tryGetDatabase(database_name, drop.if_exists);
+        if (database && database->getEngineName() == "Replicated")
+            drop.cluster = (getContext()->getSettingsRef().database_replicated_default_cluster_name.value.size() > 0) ? getContext()->getSettingsRef().database_replicated_default_cluster_name.value : database_name;
+    }
+
     if (!drop.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {
         DDLQueryOnClusterParams params;
