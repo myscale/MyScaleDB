@@ -2,9 +2,10 @@
 set -e
 
 mkdir -p /etc/docker/
-# "ipv6": true,
-# "fixed-cidr-v6": "fd00::/8",
+
 echo '{
+    "ipv6": true,
+    "fixed-cidr-v6": "fd00::/8",
     "ip-forward": true,
     "log-level": "debug",
     "storage-driver": "overlay2",

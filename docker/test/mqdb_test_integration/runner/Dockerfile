@@ -1,4 +1,4 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-integration-runner:1.8.2 .
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-integration-runner:1.8.4 .
 FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4
 
 # # ARG for quick switch to a given ubuntu mirror
