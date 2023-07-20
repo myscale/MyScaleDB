@@ -1662,8 +1662,6 @@ bool MutateTask::prepare()
 
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
-    auto storage_from_source_part = StorageFromMergeTreeDataPart::create(ctx->source_part);
-
     auto context_for_reading = Context::createCopy(ctx->context);
 
     /// Allow mutations to work when force_index_by_date or force_primary_key is on.
