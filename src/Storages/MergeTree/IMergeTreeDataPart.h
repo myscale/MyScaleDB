@@ -383,11 +383,13 @@ public:
 
     mutable bool small_part = false;
 
+    /// Avoid conflict between move build vector index and mutate
     /// Used when vector index built is finished but the active part is under mutating.
-    /// Note: this is for StorageMergeTree engine only.
-    /// Move index files to active part OR new active part after mutation to pick up.
-    /// TODO: Remove when build vector index is handled by log entry for replciated MergeTree
+    /// Or mutate happens when vector index files are moving.
     mutable std::mutex vector_index_move_and_mutate_mutex;
+
+    /// This variable works with vector_index_move_and_mutate_mutex due to mutate is executed in multiple threads via excutable tasks.
+    mutable bool part_is_currently_mutating = false;
 
     mutable bool lightweight_delete_mask_updated = false;
 
@@ -429,14 +431,25 @@ public:
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
 
    /// lock part for move build vector index, avoid concurrently mutation
-    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate() const
+   /// new_value is true when called in mutate task, false when called in MutatePlainMergeTreeTask and MutateFromLogENtryTask.
+   /// This is used to avoid move happens during mutate task and renameTempPartAndReplace when source part is active.
+    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate(const bool & new_value = false) const
     {
-        return std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
+        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
+        part_is_currently_mutating = new_value;
+        return lock;
     }
 
     std::unique_lock<std::mutex> tryLockPartForIndexMoveAndMutate() const
     {
-        return std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
+        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
+
+        /// Mutate is executed in mutiple threads, lock is required in mutate task and before renameTempPartAndReplace
+        /// Build index files cannot be moved during mutate.
+        if (lock.owns_lock() && part_is_currently_mutating)
+            lock.unlock();
+
+        return lock;
     }
 
     /// Read vector_index_ready file to initialize vector_indxed if exists.

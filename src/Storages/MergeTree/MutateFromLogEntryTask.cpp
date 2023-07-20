@@ -201,6 +201,9 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     if (data_part_storage.hasActiveTransaction())
         data_part_storage.precommitTransaction();
 
+    /// Used for vector index move and mutating conflict
+    auto move_mutate_lock = future_mutated_part->parts[0]->lockPartForIndexMoveAndMutate();
+
     storage.renameTempPartAndReplace(new_part, *transaction_ptr);
 
     try

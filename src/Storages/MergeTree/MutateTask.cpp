@@ -1288,6 +1288,9 @@ private:
         static_pointer_cast<MergedBlockOutputStream>(ctx->out)->finalizePart(ctx->new_data_part, ctx->need_sync);
         ctx->out.reset();
 
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         if (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps())
         {
@@ -1375,6 +1378,9 @@ private:
 
     void prepare()
     {
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         if (ctx->execute_ttl_type != ExecuteTTLType::NONE)
             ctx->files_to_skip.insert("ttl.txt");
 
@@ -1656,8 +1662,7 @@ bool MutateTask::prepare()
 
     ctx->num_mutations = std::make_unique<CurrentMetrics::Increment>(CurrentMetrics::PartMutation);
 
-    /// Used for vector index move and mutating confict
-    move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate();
+    auto storage_from_source_part = StorageFromMergeTreeDataPart::create(ctx->source_part);
 
     auto context_for_reading = Context::createCopy(ctx->context);
 
@@ -1672,6 +1677,9 @@ bool MutateTask::prepare()
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         *ctx->data, ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
     {
+        /// Data part lock used for vector index move and mutating conflict
+        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
+
         NameSet files_to_copy_instead_of_hardlinks;
         auto settings_ptr = ctx->data->getSettings();
         /// In zero-copy replication checksums file path in s3 (blob path) is used for zero copy locks in ZooKeeper. If we will hardlink checksums file, we will have the same blob path

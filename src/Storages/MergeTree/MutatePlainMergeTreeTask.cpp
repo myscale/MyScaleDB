@@ -91,6 +91,9 @@ bool MutatePlainMergeTreeTask::executeStep()
                 if (data_part_storage.hasActiveTransaction())
                     data_part_storage.precommitTransaction();
 
+                /// Data part lock used for vector index move and mutating conflict
+                auto move_mutate_lock = future_part->parts[0]->lockPartForIndexMoveAndMutate();
+
                 MergeTreeData::Transaction transaction(storage, merge_mutate_entry->txn.get());
                 /// FIXME Transactions: it's too optimistic, better to lock parts before starting transaction
                 storage.renameTempPartAndReplace(new_part, transaction);
