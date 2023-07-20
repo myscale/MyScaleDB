@@ -231,7 +231,8 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
         cmake["-DCMAKE_AUTOGEN_VERBOSE"] = "ON"
 
         if build_type in ["Release", "RelWithDebInfo"]:
-            cmake["-DSPLIT_DEBUG_SYMBOLS"] = "ON"
+            if build_type not in ["RelWithDebInfo"]:
+                cmake["-DSPLIT_DEBUG_SYMBOLS"] = "ON"
             if with_sanitizer == '':
                 cmake["-DBUILD_STANDALONE_KEEPER"] = "ON"
 
