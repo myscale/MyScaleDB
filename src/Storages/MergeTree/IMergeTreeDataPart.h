@@ -419,6 +419,8 @@ public:
 
     void setBuildError() const { vector_index_build_error = true; }
 
+    void resetBuildError() const { vector_index_build_error = false; }
+
     void setTuned() const { vector_index_tuned = true; }
 
     void cancelBuild() const {vector_index_build_cancelled = true;}

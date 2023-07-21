@@ -52,6 +52,18 @@ namespace BuildIndexHelpers
         return true;
     }
 
+/// Will not set build error in part when vector index is dropped.
+static void setPartVectorIndexBuildStatus(const MergeTreeDataPartPtr & part, const VectorIndexDescription & vec_index_desc)
+{
+    /// Check vector index exists in table's metadata
+    auto & latest_vec_indices = part->storage.getInMemoryMetadataPtr()->vec_indices;
+    if (!latest_vec_indices.empty() && latest_vec_indices.has(vec_index_desc))
+    {
+        /// Set build error to avoid multiple attempts to build vector index for a part
+        part->setBuildError();
+    }
+}
+
 }
 
 MergeTreeVectorIndexBuilderUpdater::MergeTreeVectorIndexBuilderUpdater(MergeTreeData & data_)
@@ -280,7 +292,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         }
 
         /// Check latest metadata
-        if (part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
+        if (part->storage.getInMemoryMetadataPtr()->getVectorIndices().empty())
         {
             LOG_INFO(log, "Skip build for cancelled vector index {}.", metadata_snapshot->vec_indices[0].name);
             return BuildVectorIndexStatus::SUCCESS;
@@ -293,11 +305,14 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
         }
         String vector_tmp_full_path = data.getFullPathOnDisk(part_storage->getDisk()) + "vector_tmp_" + part->info.getPartNameWithoutMutation() + "/";
+        /// Currently only one vector index is supported, store the build vector index description.
+        auto vector_index_desc = metadata_snapshot->getVectorIndices()[0];
+
         constexpr int maxBuildRetryCount = 3;
         int failed_count = counter.get(vector_tmp_full_path);
         if (failed_count >= maxBuildRetryCount)
         {
-            part->setBuildError();
+            BuildIndexHelpers::setPartVectorIndexBuildStatus(part, vector_index_desc);
             VectorIndexEventLog::addEventLog(
                 data.getContext(),
                 part,
@@ -331,6 +346,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
             }
             else
             {
+                LOG_WARNING(log,"Vector Index build task for part {} failed: {}", part->name, e.message());
                 VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
                 throw;
             }
@@ -344,7 +360,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
             }
             if (status == BuildVectorIndexStatus::BUILD_FAIL)
             {
-                part->setBuildError();
+                BuildIndexHelpers::setPartVectorIndexBuildStatus(part, vector_index_desc);
                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
             }
         }
@@ -572,10 +588,24 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
         part->onVectorIndexBuildStart(vec_index_desc.name);
 
+        /// Used for cancel build vector index
+        auto check_build_canceled = [this, &part, &vec_index_desc]() -> bool
+        {
+            if (builds_blocker.isCancelled() || part->vector_index_build_cancelled)
+                return true;
+
+            /// Check vector index exists in table's metadata
+            auto & latest_vec_indices = part->storage.getInMemoryMetadataPtr()->vec_indices;
+            if (latest_vec_indices.empty() || !latest_vec_indices.has(vec_index_desc))
+                return true;
+
+            return false;
+        };
+
         VectorIndex::SegmentId segment_id(
             part_storage->volume, vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
         VectorIndex::PartReader part_reader(
-            builds_blocker, part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), dim, enforce_fixed_array);
+            part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), check_build_canceled, dim, enforce_fixed_array);
         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
         Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
         VectorIndex::VectorSegmentExecutorPtr vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
@@ -591,7 +621,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         size_t max_build_index_train_block_size = data.getContext()->getSettingsRef().max_build_index_train_block_size;
 
         VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_START);
-        vec_index_builder->buildIndex(&part_reader, slow_mode, max_build_index_train_block_size, max_build_index_add_block_size);
+        vec_index_builder->buildIndex(&part_reader, check_build_canceled, slow_mode, max_build_index_train_block_size, max_build_index_add_block_size);
 
         const auto empty_ids = part_reader.emptyIds();
         if (!empty_ids.empty())

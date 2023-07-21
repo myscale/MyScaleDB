@@ -111,7 +111,7 @@ public:
     std::shared_ptr<Search::SearchResult>
     computeTopDistanceSubset(VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k);
 
-    void buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size);
+    void buildIndex(PartReader * reader, const std::function<bool()> & check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size);
 
     /// Put the index stored in VectorSegmentExecutor into cache.
     Status cache();

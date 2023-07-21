@@ -158,7 +158,7 @@ VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_) : DE
     init();
 }
 
-void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size_t train_block_size, size_t add_block_size)
+void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<bool()> & check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::buildIndex");
 
@@ -200,7 +200,7 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, bool slow_mode, size
         index->setTrainDataChunkSize(train_block_size);
         index->setAddDataChunkSize(add_block_size);
         printMemoryInfo(log, "Before build");
-        index->build(reader, num_threads);
+        index->build(reader, num_threads, check_build_canceled_callbak);
         printMemoryInfo(log, "After build");
     }
     catch (const SearchIndexException & e)

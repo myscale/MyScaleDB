@@ -1,8 +1,9 @@
 0
 0
 0
-test_replicated_vector	v1	HNSWFLAT	3	Built
-test_replicated_vector2	v1	HNSWFLAT	3	Built
+0
+test_replicated_vector	v1	MSTG	3	Built
+test_replicated_vector2	v1	MSTG	3	Built
 --- Original topK result
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -15,8 +16,8 @@ test_replicated_vector2	v1	HNSWFLAT	3	Built
 8	[8,8,8]	187.23
 9	[9,9,9]	237.62997
 --- Lightweight delete on parts with vector index
-test_replicated_vector	v1	HNSWFLAT	3	Built
-test_replicated_vector2	v1	HNSWFLAT	3	Built
+test_replicated_vector	v1	MSTG	3	Built
+test_replicated_vector2	v1	MSTG	3	Built
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 3	[3,3,3]	25.230003
@@ -39,8 +40,8 @@ test_replicated_vector2	v1	HNSWFLAT	3	Built
 16	[16,16,16]	758.42993
 --- Decoupled part when source parts contain lightweight delete
 0
-test_replicated_vector	v1	HNSWFLAT	1	InProgress
-test_replicated_vector2	v1	HNSWFLAT	1	InProgress
+test_replicated_vector	v1	MSTG	1	InProgress
+test_replicated_vector2	v1	MSTG	1	InProgress
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 3	[3,3,3]	25.230003
@@ -62,8 +63,8 @@ test_replicated_vector2	v1	HNSWFLAT	1	InProgress
 15	[15,15,15]	666.02997
 16	[16,16,16]	758.42993
 --- Lightweight delete on decoupled part
-test_replicated_vector	v1	HNSWFLAT	1	InProgress
-test_replicated_vector2	v1	HNSWFLAT	1	InProgress
+test_replicated_vector	v1	MSTG	1	InProgress
+test_replicated_vector2	v1	MSTG	1	InProgress
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 4	[4,4,4]	45.630005

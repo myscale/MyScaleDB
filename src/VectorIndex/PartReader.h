@@ -23,12 +23,15 @@ namespace VectorIndex
 class PartReader : public Search::IndexSourceDataReader<float>
 {
 public:
+
+    using CheckBuildCanceledFunction = std::function<bool()>;
+
     PartReader(
-        const DB::ActionBlocker & builds_blocker_,
         const DB::MergeTreeDataPartPtr & part_,
         const DB::NamesAndTypesList & cols_,
         const DB::StorageMetadataPtr & metadata_snapshot_,
         DB::MarkCache * mark_cache_,
+        const CheckBuildCanceledFunction & check_build_canceled_callback_,
         size_t dimension_,
         bool enforce_fixed_array);
     ~PartReader() override { }
@@ -56,10 +59,10 @@ private:
     using MergeTreeReaderPtr = std::unique_ptr<DB::IMergeTreeReader>;
 
     const Poco::Logger * logger = &Poco::Logger::get("PartReader");
-    const DB::ActionBlocker & builds_blocker;
     const DB::MergeTreeDataPartPtr & part;
     const DB::NamesAndTypesList & cols;
     const DB::MergeTreeIndexGranularity & index_granularity;
+    CheckBuildCanceledFunction check_build_canceled_callback;
     const size_t dimension = 0;
     const size_t total_mask;
     const bool enforce_fixed_array;

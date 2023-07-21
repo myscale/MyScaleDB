@@ -8438,6 +8438,14 @@ void MergeTreeData::resetVectorIndexBuildStatus()
 {
     std::lock_guard lock(currently_vector_index_status_mutex);
     vector_index_status.clear();
+
+    /// Reset vector_index_build_error after add vector index
+    /// In cases when a new vector index is added after an old vector index was dropped.
+    for (const auto & part : getDataPartsForInternalUsage())
+    {
+        if (part->vector_index_build_error)
+            part->resetBuildError();
+    }
 }
 
 void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)

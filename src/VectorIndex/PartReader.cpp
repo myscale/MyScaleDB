@@ -5,17 +5,17 @@
 namespace VectorIndex
 {
 PartReader::PartReader(
-    const DB::ActionBlocker & builds_blocker_,
     const DB::MergeTreeDataPartPtr & part_,
     const DB::NamesAndTypesList & cols_,
     const DB::StorageMetadataPtr & metadata_snapshot_,
     DB::MarkCache * mark_cache_,
+    const CheckBuildCanceledFunction & check_build_canceled_callback_,
     size_t dimension_,
     bool enforce_fixed_array_)
-    : builds_blocker(builds_blocker_)
-    , part(part_)
+    : part(part_)
     , cols(cols_)
     , index_granularity(part->index_granularity)
+    , check_build_canceled_callback(check_build_canceled_callback_)
     , dimension(dimension_)
     , total_mask(part->getMarksCount())
     , enforce_fixed_array(enforce_fixed_array_)
@@ -99,7 +99,7 @@ std::shared_ptr<PartReader::DataChunk> PartReader::readDataImpl(size_t n)
     if (n == 0)
         return nullptr;
 
-    if (builds_blocker.isCancelled() || part->vector_index_build_cancelled)
+    if (check_build_canceled_callback())
         throw DB::Exception(DB::ErrorCodes::ABORTED, "Cancelled building vector index");
 
     size_t remaining_size = part->rows_count - num_rows_read;
