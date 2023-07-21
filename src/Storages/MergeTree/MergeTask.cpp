@@ -528,7 +528,10 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         ExpressionActionsSettings actions_settings;
         MergeTreeReaderSettings reader_settings;
         MarkRanges ranges;
-        ranges.emplace_back(0, global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount());
+        if (global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount() != 0)
+            ranges.emplace_back(0, global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount());
+        else
+            continue;
 
         auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
             *global_ctx->data,
