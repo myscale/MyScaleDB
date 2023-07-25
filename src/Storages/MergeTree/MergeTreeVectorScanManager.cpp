@@ -276,42 +276,15 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 metric_str = v_index.parameters->getValue<String>("metric_type");
             }
             
-            if (data_part->containVectorIndex(v_index.name, v_index.column))
+            segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
+            if (segment_ids.size() >= 1)
             {
                 find_index = true;
                 index = v_index;
-
-                /// For decouple part, background index build will mark the data part's metadata before put it in cache.
-                /// Hence use the old segments first to avoid load vector index.
-                if (data_part->containRowIdsMaps())
-                {
-                    segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
-                    LOG_DEBUG(log, "Index found for decouple part, use old parts' index first when both exist in metadata.");
-                }
-                else
-                {
-                    String vector_index_cache_prefix
-                        = fs::path(data_part->storage.getContext()->getVectorIndexCachePath()) / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
-                    VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column, vector_index_cache_prefix);
-                    segment_ids.emplace_back(std::move(segment_id));
-
-                    LOG_DEBUG(log, "Index found, because current data part contains it");
-                }
-
+                LOG_DEBUG(log, "Index found, because index segment_ids is not empty");
+                String cache_key = segment_ids[0].getCacheKey().toString();
+                LOG_DEBUG(log, "Cache key = {}", cache_key);
                 break;
-            }
-            else
-            {
-                segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
-                if (segment_ids.size() > 1)
-                {
-                    find_index = true;
-                    index = v_index;
-                    LOG_DEBUG(log, "Index found, because index segment_ids is not empty");
-                    String cache_key = segment_ids[0].getCacheKey().toString();
-                    LOG_DEBUG(log, "Cache key = {}", cache_key);
-                    break;
-                }
             }
         }
     }

@@ -295,7 +295,7 @@ Status VectorSegmentExecutor::serialize()
         infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
         infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
         Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
-        auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorReadyFilePath(), 4096);
+        auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
         metadata.writeText(*buf);
 
         return Status(0);
@@ -401,8 +401,10 @@ Status VectorSegmentExecutor::load()
         {
             try
             {
+                if (!segment_id.volume->getDisk()->exists(segment_id.getVectorReadyFilePath()))
+                    throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index is not in the ready state and cannot be loaded");
                 Metadata metadata(segment_id);
-                auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+                auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
                 metadata.readText(*buf);
                 fallback_to_flat = metadata.fallback_to_flat;
                 if (fallback_to_flat)
@@ -686,6 +688,15 @@ Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
 {
     Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
     CacheManager * mgr = CacheManager::getInstance();
+
+    // IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    // if (index_holder != nullptr)
+    // {
+    //     LOG_DEBUG(log, "Abort the query with {} cache", cache_key.toString());
+    //     IndexWithMeta & index = index_holder->value();
+    //     index.index->abort();
+    // }
+
     LOG_DEBUG(log, "Num of cache items before forceExpire {} ", mgr->countItem());
     mgr->forceExpire(cache_key);
     LOG_DEBUG(log, "Num of cache items after forceExpire {} ", mgr->countItem());

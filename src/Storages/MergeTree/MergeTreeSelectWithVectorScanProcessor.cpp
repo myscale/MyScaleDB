@@ -348,7 +348,8 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
         std::optional<Columns> pk_cache_cols_opt = PrimaryKeyCacheManager::getMgr().getPartPkCache(cache_key);
 
-        if (pk_cache_cols_opt.has_value())
+        /// The columns of pk cache obtained by PrimaryKeyCacheManager may be empty
+        if (pk_cache_cols_opt.has_value() && !pk_cache_cols_opt.value().empty())
         {
             LOG_DEBUG(log, "Hit primary key cache, and key is {}", cache_key);
         }
@@ -372,7 +373,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
             }
         }
 
-        if (pk_cache_cols_opt.has_value())
+        if (pk_cache_cols_opt.has_value() && !pk_cache_cols_opt.value().empty())
         {
             Columns pk_cache_cols = pk_cache_cols_opt.value();
 

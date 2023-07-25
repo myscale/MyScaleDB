@@ -142,6 +142,8 @@ struct SegmentId
 
     String getVectorReadyFilePath() const { return getPathPrefix() + VECTOR_INDEX_READY + VECTOR_INDEX_FILE_SUFFIX; }
 
+    String getVectorDescriptionFilePath() const { return getPathPrefix() + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX; }
+
     String getBitMapFilePath() const { return getPathPrefix() + VECTOR_INDEX_BITMAP + VECTOR_INDEX_FILE_SUFFIX; }
 
     bool fromMergedParts() { return current_part_name != owner_part_name; }

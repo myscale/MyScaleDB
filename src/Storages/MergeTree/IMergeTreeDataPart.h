@@ -413,6 +413,9 @@ public:
 
     void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
 
+    /// Force expiry of decouple vector index owned by part
+    void forceAllDecoupledVectorIndexExpire() const;
+
     /// Remove specified vector index from part, both disk and metadata.
     /// If skip_decouple, skip the vector index of old part in decouple part.
     void removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple = false) const;
@@ -454,9 +457,11 @@ public:
         return lock;
     }
 
+    void convertIndexFileForUpgrade(const String & full_relative_path) const;
+
     /// Read vector_index_ready file to initialize vector_indxed if exists.
     /// Otherwise, try to read merged vector_index_ready file if exists.
-    void loadVectorIndexMetadata() const;
+    void loadVectorIndexMetadata(bool need_convert_index_file = false) const;
 
     bool containRowIdsMaps() const
     {

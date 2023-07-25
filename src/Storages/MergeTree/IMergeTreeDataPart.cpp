@@ -642,7 +642,7 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             checkConsistency(require_columns_checksums);
 
         loadDefaultCompressionCodec();
-        loadVectorIndexMetadata();
+        loadVectorIndexMetadata(true);
     }
     catch (...)
     {
@@ -1366,7 +1366,7 @@ void IMergeTreeDataPart::addBuiltVectorIndex(const VectorIndexDescription & vec_
     VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
 
     VectorIndex::Metadata metadata(segment_id);
-    auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+    auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
     metadata.readText(*buf);
 
     auto vector_index_info
@@ -1406,7 +1406,7 @@ void IMergeTreeDataPart::addDecoupledVectorIndices(const std::vector<MergedPartN
                 old_part.id);
 
             VectorIndex::Metadata metadata(segment_id);
-            auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+            auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
             metadata.readText(*buf);
 
             auto vector_index_info = std::make_shared<VectorIndexInfo>(
@@ -1416,6 +1416,41 @@ void IMergeTreeDataPart::addDecoupledVectorIndices(const std::vector<MergedPartN
                 vector_indices_decoupled[vec_index_desc.name].emplace_back(std::move(vector_index_info));
             else
                 vector_indices_decoupled.insert_or_assign(vec_index_desc.name, VectorIndexInfoPtrList{std::move(vector_index_info)});
+        }
+    }
+}
+
+void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
+{
+    if (!containRowIdsMaps())
+    {
+        LOG_WARNING(storage.log, "There is no old index that needs to set the expiration status.");
+        return;
+    }
+        
+    {
+        std::lock_guard lock(decouple_mutex);
+        auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
+
+        String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
+            / info.getPartNameWithoutMutation() / "";
+        for (const auto & old_part : merged_source_parts)
+        {
+            for (const auto & vec_index_desc : vec_indices)
+            {
+                VectorIndex::SegmentId segment_id(
+                    volume,
+                    getFullPath(),
+                    name,
+                    old_part.name,
+                    vec_index_desc.name,
+                    vec_index_desc.column,
+                    vector_index_cache_prefix,
+                    old_part.id);
+
+                VectorIndex::Metadata metadata(segment_id);
+                volume->getDisk()->removeFileIfExists(segment_id.getVectorReadyFilePath());
+            }
         }
     }
 }
@@ -1489,7 +1524,70 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
     removeVectorIndexInfo(index_name);
 }
 
-void IMergeTreeDataPart::loadVectorIndexMetadata() const
+// [TODO] Temporary solution, will be deleted in the next version
+void IMergeTreeDataPart::convertIndexFileForUpgrade(const String & full_relative_path) const
+{
+    auto disk = volume->getDisk();
+    /// Only supports either all index versions are in V1, or all versions are in V2
+    String vector_index_ready_v1 = toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
+    String current_index_ready_version_v2 = toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_SUFFIX;
+    String current_index_description_v2 = toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_SUFFIX;
+
+    for (auto it = disk->iterateDirectory(full_relative_path); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        if (endsWith(file_name, current_index_ready_version_v2))
+        {
+            /// The current version file already exists locally, no need to convert
+            LOG_DEBUG(storage.log, "The current version file already exists locally, does not need to convert");
+            return;
+        }
+    }
+
+    for (auto it = disk->iterateDirectory(full_relative_path); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+        /// convert vector index v1 to v2
+        if (endsWith(file_name, vector_index_ready_v1))
+        {
+            /// The current version file already exists locally, no need to convert
+            /// v1 to v2
+            String v2_vector_index_ready_file = "";
+            String v2_vector_index_description_file = "";
+            Strings tokens;
+            boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
+            if (tokens.size() == 1)
+            {
+                /// for single part with vector index
+                v2_vector_index_ready_file = current_index_ready_version_v2;
+                v2_vector_index_description_file = current_index_description_v2;
+            }
+            else if (tokens.size() == 4)
+            {
+                /// for decouple part with vector index
+                String decouple_vector_prefix = tokens[0] + '-' + tokens[1] + '-' + tokens[2];
+                v2_vector_index_ready_file = decouple_vector_prefix + '-' + current_index_ready_version_v2;
+                v2_vector_index_description_file = decouple_vector_prefix + '-' + current_index_description_v2;
+            }
+            else
+            {
+                LOG_ERROR(storage.log, "File name parsing failed, this is not normal");
+                return;
+            }
+            LOG_DEBUG(storage.log, 
+                      "Convert file {} to {}, and create new ready file {}",
+                      file_name,
+                      v2_vector_index_description_file,
+                      v2_vector_index_ready_file);
+            disk->copy(full_relative_path + file_name, disk, full_relative_path + v2_vector_index_description_file);
+            disk->createFile(full_relative_path + v2_vector_index_ready_file);
+            disk->removeFile(full_relative_path + file_name);
+        }
+    }
+}
+
+void IMergeTreeDataPart::loadVectorIndexMetadata(bool need_convert_index_file) const
 {
     if (!isStoredOnDisk())
         return;
@@ -1498,8 +1596,11 @@ void IMergeTreeDataPart::loadVectorIndexMetadata() const
     if (metadata_snapshot->vec_indices.empty())
         return;
 
+    if (need_convert_index_file)
+        convertIndexFileForUpgrade(getFullRelativePath());
+
     /// Check if single vector index is ready. If not, check decoupled many old vector indices.
-    if (getDataPartStorage().exists(toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX))
+    if (getDataPartStorage().exists(toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_SUFFIX))
         loadSimpleVectorIndexMetadata();
     else
         loadDecoupledVectorIndexMetadata();
@@ -1529,7 +1630,7 @@ void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
 
     /// Find source part names based on vector_index_ready.
     std::vector<MergedPartNameAndId> old_part_names;
-    String ready_file_name = toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
+    String ready_file_name = toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_SUFFIX;
 
     for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
     {

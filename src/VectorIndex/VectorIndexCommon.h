@@ -31,7 +31,8 @@
 #define VECTOR_INDEX_FILE_SUFFIX ".vidx2"
 #define MAX_BRUTE_FORCE_SEARCH_SIZE 50000
 #define MIN_SEGMENT_SIZE 1000000
-#define VECTOR_INDEX_READY "vector_index_ready"
+#define VECTOR_INDEX_DESCRIPTION "vector_index_description"
+#define VECTOR_INDEX_READY "vector_index_ready_v2"
 #define VECTOR_INDEX_BITMAP "vector_bitmap"
 
 namespace DB
