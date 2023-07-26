@@ -1434,13 +1434,15 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
 
         String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
             / info.getPartNameWithoutMutation() / "";
+        auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
+        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
         for (const auto & old_part : merged_source_parts)
         {
             for (const auto & vec_index_desc : vec_indices)
             {
                 VectorIndex::SegmentId segment_id(
                     volume,
-                    getFullPath(),
+                    getDataPartStorage().getFullPath(),
                     name,
                     old_part.name,
                     vec_index_desc.name,
@@ -1449,7 +1451,7 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
                     old_part.id);
 
                 VectorIndex::Metadata metadata(segment_id);
-                volume->getDisk()->removeFileIfExists(segment_id.getVectorReadyFilePath());
+                part_storage.removeFileIfExists(segment_id.getVectorReadyFilePath());
             }
         }
     }
@@ -1527,7 +1529,9 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
 // [TODO] Temporary solution, will be deleted in the next version
 void IMergeTreeDataPart::convertIndexFileForUpgrade(const String & full_relative_path) const
 {
-    auto disk = volume->getDisk();
+    const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
+    auto disk = part_storage->volume->getDisk();
     /// Only supports either all index versions are in V1, or all versions are in V2
     String vector_index_ready_v1 = toString("vector_index_ready") + VECTOR_INDEX_FILE_SUFFIX;
     String current_index_ready_version_v2 = toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_SUFFIX;
@@ -1597,7 +1601,7 @@ void IMergeTreeDataPart::loadVectorIndexMetadata(bool need_convert_index_file) c
         return;
 
     if (need_convert_index_file)
-        convertIndexFileForUpgrade(getFullRelativePath());
+        convertIndexFileForUpgrade(getDataPartStorage().getRelativePath());
 
     /// Check if single vector index is ready. If not, check decoupled many old vector indices.
     if (getDataPartStorage().exists(toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_SUFFIX))

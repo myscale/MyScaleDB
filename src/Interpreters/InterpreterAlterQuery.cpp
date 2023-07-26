@@ -164,8 +164,9 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
                     table->getStorageID().getNameForLogs());
 
             if (mut_command->type == MutationCommand::DELETE && metadata_snapshot->hasVectorIndices())
-                throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "ALTER TABLE ... DELETE is not allowed for table "
-                    + table->getStorageID().getNameForLogs() + " with vector index. Please use DELETE FROM instead");
+                throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                    "ALTER TABLE ... DELETE is not allowed for table {} with vector index. Please use DELETE FROM instead",
+                    table->getStorageID().getNameForLogs());
 
             mutation_commands.emplace_back(std::move(*mut_command));
         }

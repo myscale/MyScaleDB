@@ -545,9 +545,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     auto move_mutate_lock = future_part->tryLockPartForIndexMoveAndMutate();
                     if (move_mutate_lock.owns_lock())
                     {
+                        const DataPartStorageOnDiskBase * future_part_storage
+                            = dynamic_cast<const DataPartStorageOnDiskBase *>(future_part->getDataPartStoragePtr().get());
+                        if (future_part_storage == nullptr)
+                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
                         VectorIndex::SegmentId future_segment(
-                            future_part->volume,
-                            future_part->getFullPath(),
+                            future_part_storage->volume,
+                            future_part->getDataPartStorage().getFullPath(),
                             future_part->name,
                             vec_index_desc.name,
                             vec_index_desc.column,
