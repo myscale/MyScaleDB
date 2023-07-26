@@ -44,6 +44,7 @@ namespace ErrorCodes
     extern const int INCORRECT_QUERY;
     extern const int NOT_IMPLEMENTED;
     extern const int TABLE_IS_READ_ONLY;
+    extern const int QUERY_NOT_ALLOWED;
 }
 
 
@@ -161,6 +162,10 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
             if (mut_command->type == MutationCommand::MATERIALIZE_TTL && !metadata_snapshot->hasAnyTTL())
                 throw Exception(ErrorCodes::INCORRECT_QUERY, "Cannot MATERIALIZE TTL as there is no TTL set for table {}",
                     table->getStorageID().getNameForLogs());
+
+            if (mut_command->type == MutationCommand::DELETE && metadata_snapshot->hasVectorIndices())
+                throw Exception(ErrorCodes::QUERY_NOT_ALLOWED, "ALTER TABLE ... DELETE is not allowed for table "
+                    + table->getStorageID().getNameForLogs() + " with vector index. Please use DELETE FROM instead");
 
             mutation_commands.emplace_back(std::move(*mut_command));
         }

@@ -832,6 +832,7 @@ struct MutationContext
     bool need_prefix = true;
 
     scope_guard temporary_directory_lock;
+    bool need_delete_rows{false};
 };
 
 using MutationContextPtr = std::shared_ptr<MutationContext>;
@@ -1292,7 +1293,8 @@ private:
         auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
-        if (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps())
+        /// Reuse vector index when no rows are deleted
+        if (!ctx->need_delete_rows && (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps()))
         {
             bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
@@ -1669,8 +1671,18 @@ bool MutateTask::prepare()
     context_for_reading->setSetting("force_primary_key", false);
 
     for (const auto & command : *ctx->commands)
+    {
         if (!canSkipMutationCommandForPart(ctx->source_part, command, context_for_reading))
+        {
             ctx->commands_for_part.emplace_back(command);
+
+            /// lightweight delete is changed to update command.
+            /// Currently delete and TTL will delete rows.
+            if (!ctx->need_delete_rows && (command.type == MutationCommand::Type::DELETE ||
+                    command.type == MutationCommand::Type::MATERIALIZE_TTL))
+                ctx->need_delete_rows = true;
+        }
+    }
 
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         *ctx->data, ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
@@ -1783,13 +1795,16 @@ bool MutateTask::prepare()
     /// Check if lightweight delete mask column is updated.
     /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
     /// Support part with simple built index and decoupled part with merged old parts' built index files
-    /// TODO: Should not use vector index when any normal delete command exists.
-    for (const auto & name_type : ctx->updated_header.getNamesAndTypesList())
+    /// When any normal delete or ttl command exists, needs to be build vector index for the new data part.
+    if (!ctx->need_delete_rows)
     {
-        if (name_type.name == LightweightDeleteDescription::FILTER_COLUMN.name)
+        for (const auto & name_type : ctx->updated_header.getNamesAndTypesList())
         {
-            ctx->new_data_part->setDeletedMaskUpdate();
-            break;
+            if (name_type.name == LightweightDeleteDescription::FILTER_COLUMN.name)
+            {
+                ctx->new_data_part->setDeletedMaskUpdate();
+                break;
+            }
         }
     }
 
