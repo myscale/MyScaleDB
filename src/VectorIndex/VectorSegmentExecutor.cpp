@@ -499,6 +499,18 @@ Status VectorSegmentExecutor::load()
                 des = new_index.des;
                 fallback_to_flat = new_index.fallback_to_flat;
 
+                if (!new_index.row_ids_map->empty())
+                {
+                    row_ids_map = new_index.row_ids_map;
+                    inverted_row_ids_map = new_index.inverted_row_ids_map;
+                    inverted_row_sources_map = new_index.inverted_row_sources_map;
+                }
+                else
+                {
+                    // very fast and frequent operations under continuous deletes
+                    updateCacheValueWithRowIdsMaps();
+                }
+
                 DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
                                                      cache_key.getTableUUID(),
                                                      cache_key.getPartName(),
