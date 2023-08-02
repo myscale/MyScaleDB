@@ -137,6 +137,16 @@ build_image:
     - when: manual
       allow_failure: true
 
+build_image_with_license:
+  stage: image
+  when: manual
+  dependencies: ["build_package_with_license", "check_pipeline_already_running"]
+  before_script:
+    - docker/builder/tools/docker-info.sh
+    - docker/builder/tools/docker-buildx.sh
+  script:
+    - docker/builder/tools/image-with-license.sh
+
 build_saas_image:
   stage: image
   when: manual
