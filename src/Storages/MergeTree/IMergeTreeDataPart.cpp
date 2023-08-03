@@ -1625,6 +1625,11 @@ void IMergeTreeDataPart::loadSimpleVectorIndexMetadata() const
 
 void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata() const
 {
+    /// Check if decoupled data part is enabled.
+    /// No need to initialize merged_source_parts when decouple is disabled.
+    if (!storage.getSettings()->enable_decouple_vector_index)
+        return;
+
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
     if (metadata_snapshot->vec_indices.empty())
         return;

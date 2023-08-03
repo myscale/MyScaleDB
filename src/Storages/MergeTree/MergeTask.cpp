@@ -316,7 +316,8 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
     /// whether we have data parts containing vector index.
     bool has_vector_index = false;
 
-    if (global_ctx->data->getSettings()->enable_decouple_vector_index_rebuild_from_merge)
+    /// Check if decoupled data part is enabled. If true, we can use old vector indices before new index is built.
+    if (global_ctx->data->getSettings()->enable_decouple_vector_index)
     {
         for (auto& part : global_ctx->future_part->parts)
         {

@@ -174,7 +174,7 @@ struct Settings;
     \
     /** Vector Search */ \
     M(Bool, enable_primary_key_cache, false, "Enable primary key cache when do vector search.", 0) \
-    M(Bool, enable_decouple_vector_index_rebuild_from_merge, true, "Enable use old vector indices during merge.", 0) \
+    M(Bool, enable_decouple_vector_index, true, "Enable use old vector indices during merge and vector search on decoupled data part.", 0) \
     M(Bool, disable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
     M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
     M(UInt64, min_bytes_to_build_vector_index, 0, "The minimum byte size of data part to build vector index", 0) \

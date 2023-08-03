@@ -90,15 +90,6 @@ static std::vector<SegmentId> getAllSegmentIds(
     return segment_ids;
 }
 
-static bool containRowIdsMaps(const String & data_path)
-{
-    fs::path path = fs::path(data_path) / (DB::toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_SUFFIX);
-    if (fs::exists(path))
-        return true;
-    else
-        return false;
-}
-
 /// Remove old parts' vector index from cache manager and data part.
 static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part, const Poco::Logger * log)
 {
