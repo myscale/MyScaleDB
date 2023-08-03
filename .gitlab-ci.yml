@@ -98,6 +98,7 @@ build_package:
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package --compiler "clang-15"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
     - when: manual
       allow_failure: true
 
@@ -149,13 +150,16 @@ build_image_with_license:
 
 build_saas_image:
   stage: image
-  when: manual
   dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
     - docker/builder/tools/docker-info.sh
     - docker/builder/tools/docker-buildx.sh
   script:
     - docker/builder/tools/saas-image.sh
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+    - when: manual
+      allow_failure: true
 
 upload_performance_file_to_s3:
   stage: deploy
