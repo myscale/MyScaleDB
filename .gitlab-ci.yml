@@ -1,11 +1,11 @@
 image: harbor.internal.moqi.ai/mqdb/builder:2.9.1
 
-# workflow:
-#   rules:
-#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-#     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-#     - if: '$CI_COMMIT_BRANCH =~ /^release\//'
-#     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 before_script:
   - if [[ -f previous_pipeline_status.txt ]]; then

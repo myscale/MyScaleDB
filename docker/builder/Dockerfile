@@ -1,5 +1,5 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9.4 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9.4 . --push
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 . --push
 # docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.9 bash
 
 FROM ubuntu:20.04
@@ -7,7 +7,7 @@ FROM ubuntu:20.04
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=16
+ENV LLVM_VERSION=15
 ENV CC=clang-${LLVM_VERSION}
 ENV CXX=clang++-${LLVM_VERSION}
 ENV INTEL_ONEAPI_VERSION=2021.4.0
