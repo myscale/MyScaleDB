@@ -882,7 +882,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     }
 
     /// only consider no prewhere case
-    if (part->storage.hasLightweightDeletedMask() && !filter)
+    if (part->storage.hasLightweightDeletedMask())
     {
         cols.emplace_back(LightweightDeleteDescription::FILTER_COLUMN);
     }
@@ -913,13 +913,12 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         {});
 
     size_t current_mark = 0;
-    size_t total_rows_to_read = part->rows_count;
+    size_t total_rows_in_part = part->rows_count;
     const auto & index_granularity = part->index_granularity;
 
     size_t num_rows_read = 0;
 
-    ///size_t default_read_num = std::max(index_granularity.getMarkRows(current_mark), max_search_block_size_bytes / 4 / dim);
-    size_t default_read_num = index_granularity.getMarkRows(current_mark);
+    size_t default_read_num = 0;
 
     bool continue_read = false;
 
@@ -934,152 +933,230 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     }
 
     std::vector<int64_t> final_id(k * nq, -1);
-
+    /// has filter, should filter vector data passed to brute force search function, filter already includes LWD _row_exists, won't consider
+    /// LWD either in this case
     if (filter)
     {
-        LOG_TRACE(log, "with filter");
-        /// for debug
-        for (size_t i = 0; i < read_ranges.size(); i++)
-        {
-            LOG_TRACE(
-                log,
-                "read_range row_num: {}, start_mark: {}, end_mark: {}, start_row: {}, ",
-                read_ranges[i].row_num,
-                read_ranges[i].start_mark,
-                read_ranges[i].end_mark,
-                read_ranges[i].start_row);
-        }
-
         size_t filter_parsed = 0;
+        size_t range_num = 0;
+
+        /// for debugging filter
+        size_t part_left_rows = 0;
+        size_t range_left_rows = 0;
+        size_t mark_left_rows = 0;
+
+        size_t current_rows_in_mark = 0;
+        size_t current_rows_in_range = 0;
+
+        /// used to test filter passed in is correct
+        LOG_TRACE(
+            log,
+            "VectorScanManager with filter, Part: {}, Filter Size: {}, Filter Byte Size: {}, Count in Filter is:{}",
+            part->name,
+            filter->get_size(),
+            filter->byte_size(),
+            filter->count()
+            );
+
         for (const auto & single_range : read_ranges)
         {
-            Columns result;
-            result.resize(cols.size());
-            size_t num_rows = reader->readRows(single_range.start_mark, 0, false, single_range.row_num, result);
-            Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(num_rows, true);
-
-            if (num_rows == 0)
-            {
-                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
-                break;
-            }
-            else if (num_rows != single_range.row_num)
-            {
-                LOG_WARNING(
-                    log,
-                    "Part: {}, read row num doesn't match range row_num: {} - {}",
-                    part->name,
-                    num_rows,
-                    single_range.row_num);
-                throw Exception(ErrorCodes::INCORRECT_DATA, "read row num doesn't match range row_num");
-            }
-
-            ///prepare continuous data
-            const auto & one_column = result.back();
-            const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
-            const IColumn & src_data = array->getData();
-            const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
-            const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-            if (!src_data_concrete)
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
-            const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
-            // size_t size = offsets.size();
-            if (src_vec.empty())
-            {
-                num_rows_read += num_rows;
-                continue;
-            }
-
-            //std::vector<float> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
-            std::vector<float> vector_raw_data;
-            vector_raw_data.reserve(single_range.row_num);
-            std::vector<size_t> actual_id_in_range;
-            actual_id_in_range.reserve(single_range.row_num);
-
-            /// filter out the data we want to do ANN on using the filter
-            size_t start_pos = filter_parsed;
-            size_t row_in_range = 0;
-
-            /// this outer for loop's i is the position of data relative to the filter
-            /// imagine filter as a array of array:[0,1,0,0,0,1,...][0,1,0...][...]
-            /// where actually all these arrays are concatenated into a single array and
-            /// each array represents all the rows in a single range
-            for (size_t i = start_pos; i < start_pos + single_range.row_num; ++i)
-            {
-                if (filter->unsafe_test(i))
-                {
-                    size_t vec_start_offset = row_in_range != 0 ? offsets[row_in_range - 1] : 0;
-                    size_t vec_end_offset = offsets[row_in_range];
-                    if (vec_start_offset != vec_end_offset)
-                    {
-                        for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
-                        {
-                            //vector_raw_data[row_in_range * dim + offset - vec_start_offset] = src_vec[offset];
-                            vector_raw_data.emplace_back(src_vec[offset]);
-                        }
-                        actual_id_in_range.emplace_back(row_in_range);
-                    }
-                }
-                row_in_range++;
-            }
-            filter_parsed += single_range.row_num;
-            num_rows_read += num_rows;
-
-            if (vector_raw_data.empty())
-            {
-                LOG_DEBUG(log, "Range: {} - {} has data but all data are empty array", single_range.start_mark, single_range.end_mark);
-                continue;
-            }
-
-            LOG_DEBUG(log, "Part: {}, raw_data size: {}", part->name, vector_raw_data.size());
-
-            auto base_data = std::make_shared<VectorIndex::VectorDataset>(
-                static_cast<int32_t>(actual_id_in_range.size()), static_cast<int32_t>(dim), const_cast<float *>(vector_raw_data.data()));
-
-            searchWrapper(
-                true,
-                query_vector,
-                base_data,
-                k,
-                dim,
-                nq,
-                single_range.start_row,
-                final_id,
-                final_distance,
-                actual_id_in_range,
-                metric,
-                row_exists,
-                0);
-
-            LOG_DEBUG(
+            /// for debug
+            LOG_TRACE(
                 log,
-                "Part: {}, num_rows: {}, vector index name: {}, path: {}",
+                "VectorScanManager Part: {}, Range: {}, Row Numbers in Range: {}, Start Mark: {}, End Mark: {}, start_row: {}, ",
                 part->name,
-                num_rows,
-                "brute force",
-                part->getDataPartStorage().getFullPath());
+                range_num,
+                read_ranges[range_num].row_num,
+                read_ranges[range_num].start_mark,
+                read_ranges[range_num].end_mark,
+                read_ranges[range_num].start_row);
+
+            /// for each single_range, will only fetch data of one mark each time
+            current_mark = single_range.start_mark;
+            current_rows_in_range = 0;
+            range_left_rows = 0;
+            mark_left_rows = 0;
+
+            while (current_mark < single_range.end_mark)
+            {
+
+                Columns result;
+                result.resize(cols.size());
+
+                default_read_num = index_granularity.getMarkRows(current_mark);
+                /// read all rows in one part once, continue_read should be false to only read data of one mark in by one time
+                size_t num_rows = reader->readRows(current_mark, 0, continue_read, default_read_num, result);
+                current_mark ++;
+                current_rows_in_mark = 0;
+
+                if (num_rows == 0)
+                {
+                    /// num_rows equals 0 means vector column is empty, filter should skip those rows
+                    filter_parsed += default_read_num;
+                    continue;
+                }
+
+                /// prepare continuous data
+                /// data of search column stored in one_column, commonly is vector data
+                const auto & one_column = result[0];
+                const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
+                const IColumn & src_data = array->getData();
+                const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
+                const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+                const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
+
+                if (src_vec.empty())
+                    continue;
+
+                std::vector<float> vector_raw_data;
+                vector_raw_data.reserve(dim * offsets.size());
+
+                std::vector<size_t> actual_id_in_range;
+                actual_id_in_range.reserve(offsets.size());
+                /// filter out the data we want to do ANN on using the filter
+                size_t start_pos = filter_parsed;
+
+                /// only for debug
+                LOG_TRACE(
+                    get_logger(),
+                    "filter_parsed:{}",
+                    filter_parsed);
+
+                /// this outer for loop's i is the position of data relative to the filter
+                /// imagine filter as a array of array:[0,1,0,0,0,1,...][0,1,0...][...]
+                /// where actually all these arrays are concatenated into a single array and
+                /// each array represents all the rows in a single range
+                mark_left_rows = 0;
+                for (size_t i = start_pos; i < start_pos + default_read_num; ++i)
+                {
+                    ///filter and num_rows could be larger than real row size in this mark
+                    if (i == filter->get_size())
+                        break;
+
+                    if (filter->unsafe_test(i))
+                    {
+                        size_t vec_start_offset = current_rows_in_mark != 0 ? offsets[current_rows_in_mark - 1] : 0;
+                        size_t vec_end_offset = offsets[current_rows_in_mark];
+                        if(vec_start_offset != vec_end_offset)
+                        {
+                            for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                                vector_raw_data.emplace_back(src_vec[offset]);
+                            /// only for debug
+                            LOG_TRACE(
+                                get_logger(),
+                                "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
+                                current_rows_in_range,
+                                i,
+                                src_vec[vec_start_offset]);
+
+                            actual_id_in_range.emplace_back(current_rows_in_range);
+                            mark_left_rows ++;
+                        }
+                    }
+
+                    current_rows_in_mark++;
+                    current_rows_in_range++;
+                }
+
+                filter_parsed += default_read_num;
+
+                if (vector_raw_data.empty())
+                {
+                    ASSERT(mark_left_rows == 0)
+                    continue;
+                }
+
+                auto base_data = std::make_shared<VectorIndex::VectorDataset>(
+                    static_cast<int32_t>(mark_left_rows),
+                    static_cast<int32_t>(dim),
+                    const_cast<float *>(vector_raw_data.data()));
+
+                ASSERT(vector_raw_data.size() == mark_left_rows * dim)
+
+                Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(mark_left_rows, true);
+
+                /// invokes searchWrapper each time reading one mark, use actual_id_in_range to record the real row id in each range,
+                /// so row_exists bitmap won't be used, and the num_read_rows will be zero for that we use real row id already.
+                searchWrapper(
+                    true,
+                    query_vector,
+                    base_data,
+                    k,
+                    dim,
+                    nq,
+                    0,
+                    final_id,
+                    final_distance,
+                    actual_id_in_range,
+                    metric,
+                    row_exists,
+                    0);
+
+                /// for debug
+                if(mark_left_rows)
+                {
+                    LOG_TRACE(
+                        log,
+                        "Part: {}, Range: {}, Mark: {}, Rows In Mark: {}, rows left in mark: {}, raw_data size: {}, vector index name: {}, path: {}",
+                        part->name,
+                        range_num,
+                        current_mark,
+                        current_rows_in_mark,
+                        mark_left_rows,
+                        vector_raw_data.size(),
+                        "brute force",
+                        part->getDataPartStorage().getFullPath());
+                }
+                range_left_rows += mark_left_rows;
+            }
+
+            /// for debug
+            if(range_left_rows)
+            {
+                LOG_TRACE(
+                    log,
+                    "Part: {}, Range:{}, Total Marks:{}, Rows In Range: {}, filter read:{}, rows left in range:{}",
+                    part->name,
+                    range_num,
+                    single_range.end_mark - single_range.start_mark,
+                    current_rows_in_range,
+                    filter_parsed,
+                    range_left_rows);
+            }
+            range_num ++;
+            part_left_rows += range_left_rows;
         }
-        LOG_DEBUG(log, "Part: {}, num_rows_read: {}, filter read:{}", part->name, num_rows_read, filter_parsed);
+
+        /// for debug
+        if(part_left_rows)
+        {
+            LOG_TRACE(log, "Part:{}, rows left in part:{}", part->name, part_left_rows);
+        }
     }
     else
     {
-        while (num_rows_read < total_rows_to_read)
+        default_read_num = index_granularity.getMarkRows(current_mark);
+        /// has no filter, will pass the vector data and the dense bitmap for deleted rows to search function
+        while (num_rows_read < total_rows_in_part)
         {
-            size_t max_read_row = std::min((total_rows_to_read - num_rows_read), default_read_num);
+            /// for debug
+            LOG_TRACE(
+                log,
+                "VectorScanManager Part: {}, Row numbers in mark: {}, ",
+                part->name,
+                total_rows_in_part);
+
+            size_t max_read_row = std::min((total_rows_in_part - num_rows_read), default_read_num);
             Columns result;
             result.resize(cols.size());
+            /// will read rows of a part, continue_read will be set true after read first time
             size_t num_rows = reader->readRows(current_mark, 0, continue_read, max_read_row, result);
             current_mark ++;
 
             continue_read = true;
 
-            LOG_DEBUG(log, "Part: {}, read num_rows: {}, col size: {}", part->name, num_rows, cols.size());
-
             if (num_rows == 0)
-            {
-                LOG_WARNING(log, "Part: {}, no data read for column {}", part->name, cols.back().name);
                 break;
-            }
 
             const auto & one_column = result[0];
             const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
@@ -1102,7 +1179,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             {
                 size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
                 size_t vec_end_offset = offsets[row];
-                if (vec_start_offset != vec_end_offset)
+                if(vec_start_offset != vec_end_offset)
                 {
                     for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
                     {
@@ -1111,20 +1188,34 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 }
             }
 
-            LOG_DEBUG(log, "Part: {}, raw_data size: {}", part->name, vector_raw_data.size());
+            /// for debug
+            LOG_TRACE(
+                log,
+                "Part: {}, "
+                "raw_data size: {}",
+                part->name,
+                vector_raw_data.size());
 
             int deleted_row_num = 0;
             Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(offsets.size(), true);
 
-            if (part->storage.hasLightweightDeletedMask())
+            //make sure result contain lwd row_exists column
+            if (result.size() == 2 && part->storage.hasLightweightDeletedMask())
             {
-                LOG_DEBUG(log, "Try to get row exists col, result size: {}", result.size());
+                /// for debug
+                LOG_TRACE(
+                    log,
+                    "Try to get row exists col, result size: {}",
+                    result.size());
                 const auto& row_exists_col = result[1];
                 if (row_exists_col)
                 {
                     const ColumnUInt8 * col = checkAndGetColumn<ColumnUInt8>(row_exists_col.get());
                     const auto & col_data = col->getData();
-                    LOG_DEBUG(log, "Col data size: {}", col_data.size());
+                    LOG_TRACE(
+                        log,
+                        "Col data size: {}",
+                        col_data.size());
                     for (size_t i = 0; i < col_data.size(); i++)
                     {
                         if (!col_data[i])
@@ -1141,6 +1232,10 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), const_cast<float *>(vector_raw_data.data()));
 
             std::vector<size_t> place_holder;
+
+            /// invoke searchWrapper each time after reading rows, if a vector is empty, the vector will not be wrote into the base_data.
+            /// while the size of base_data equals with size of reading rows including the rows with empty vector, row_exists bitmap has
+            /// inverted values with _row_exits column of the LWD
             searchWrapper(
                 false,
                 query_vector,
@@ -1158,7 +1253,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
 
             num_rows_read += num_rows;
 
-            LOG_DEBUG(
+            LOG_TRACE(
                 log,
                 "Part: {}, num_rows: {}, vector index name: {}, path: {}",
                 part->name,
@@ -1194,7 +1289,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         {
             if (final_id[label] > -1)
             {
-                LOG_DEBUG(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);
+                LOG_TRACE(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);
                 label_column->insert(final_id[label]);
                 distance_column->insert(final_distance[label]);
             }
@@ -1284,11 +1379,6 @@ void MergeTreeVectorScanManager::searchWrapper(
                 ++tmp_curr_pos;
             }
         }
-    }
-
-    for (int i = 0; i < k * nq; i++)
-    {
-        LOG_TRACE(log, "per_id: {}, per_distance:{}", id_data[i], distance_data[i]);
     }
 
     std::vector<float> intermediate_distance;
