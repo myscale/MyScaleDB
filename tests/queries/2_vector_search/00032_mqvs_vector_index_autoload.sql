@@ -19,8 +19,12 @@ SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDa
 
 ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
 
-SELECT sleep(3);
-SELECT sleep(3);
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+
 
 SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload';
 
@@ -38,7 +42,11 @@ SELECT '--- add vector index';
 
 ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
 
-SELECT sleep(3);
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
 
 SELECT value FROM system.zookeeper WHERE path = '/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1/replicas/r1' AND name = 'vidx_info';
 
@@ -80,8 +88,12 @@ INSERT INTO test_vector_index_autoload SELECT number, [number,number,number] FRO
 
 ALTER TABLE test_vector_index_autoload ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
 
-SELECT sleep(3);
-SELECT sleep(3);
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+
 
 SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload';
 
@@ -99,7 +111,11 @@ SELECT '--- insert again';
 
 INSERT INTO test_vector_index_autoload SELECT number+100, [number+100,number+100,number+100] FROM numbers(100);
 
-SELECT sleep(3);
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
+SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_index_autoload' and database = currentDatabase());
 
 SELECT part, owner_part, owner_part_id, name, status FROM system.vector_index_segments where database = currentDatabase() AND table = 'test_vector_index_autoload' ORDER BY part, owner_part;
 

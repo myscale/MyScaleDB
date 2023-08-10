@@ -51,6 +51,8 @@ function start() {
             --keeper_server.tcp_port 29181 --keeper_server.server_id 3
     fi
 
+    sudo clickhouse start
+
     counter=0
     until clickhouse-client --query "SELECT 1"; do
         if [ "$counter" -gt 120 ]; then
@@ -60,7 +62,6 @@ function start() {
             tail -n1000 /var/log/clickhouse-server/clickhouse-server.log
             break
         fi
-        timeout 120 sudo clickhouse start
         sleep 0.5
         counter=$((counter + 1))
     done
