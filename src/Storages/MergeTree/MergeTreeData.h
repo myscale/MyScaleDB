@@ -860,6 +860,13 @@ public:
             (settings->enable_mixed_granularity_parts || !has_non_adaptive_index_granularity_parts);
     }
 
+    // Returns true if primary key cache is enabled when cache size > 0.
+    bool canUsePrimaryKeyCache() const
+    {
+        const auto settings = getSettings();
+        return settings->enable_primary_key_cache.value && getContext()->getPrimaryKeyCacheSize()>0;
+    }
+
     /// Get constant pointer to storage settings.
     /// Copy this pointer into your scope and you will
     /// get consistent settings.

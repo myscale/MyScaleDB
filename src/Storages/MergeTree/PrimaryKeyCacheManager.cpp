@@ -1,5 +1,6 @@
 #include <memory>
 #include <optional>
+#include <Interpreters/Context.h>
 
 #include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 
@@ -10,6 +11,7 @@ namespace DB
 PrimaryKeyCacheManager::PrimaryKeyCacheManager(size_t max_size)
     : cache_ex(max_size), log(&Poco::Logger::get("PrimaryKeyCacheManager"))
 {
+    LOG_INFO(log, "PrimaryKeyCache size limit is: {}", max_size);
 }
 
 
@@ -50,8 +52,7 @@ bool PrimaryKeyCacheManager::isSupportedPrimaryKey(const KeyDescription & primar
 
 PrimaryKeyCacheManager & PrimaryKeyCacheManager::getMgr()
 {
-    constexpr size_t MaxSize = static_cast<size_t>(1) << 30;
-    static PrimaryKeyCacheManager mgr(MaxSize);
+    static PrimaryKeyCacheManager mgr(Context::getGlobalContextInstance()->getPrimaryKeyCacheSize());
     return mgr;
 }
 

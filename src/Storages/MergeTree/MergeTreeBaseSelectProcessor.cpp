@@ -462,7 +462,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
     const KeyDescription & pk_description = storage_snapshot->metadata->getPrimaryKey();
     const size_t pk_col_size = pk_description.column_names.size();
 
-    const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
+    const bool enable_primary_key_cache = task->data_part->storage.canUsePrimaryKeyCache();
     LOG_DEBUG(log, "Setting enable_primary_key_cache = {}", enable_primary_key_cache);
 
     if (enable_primary_key_cache && task->vector_scan_manager && !task->data_part->hasLightweightDelete())

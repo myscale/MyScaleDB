@@ -900,6 +900,10 @@ public:
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
     void dropIndexUncompressedCache() const;
 
+    /// Primary key cache size limit.
+    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
+    size_t getPrimaryKeyCacheSize() const;
+
     /// Create a cache of index marks of specified size. This can be done only once.
     void setIndexMarkCache(size_t cache_size_in_bytes);
     std::shared_ptr<MarkCache> getIndexMarkCache() const;

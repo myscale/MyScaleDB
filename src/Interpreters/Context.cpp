@@ -260,6 +260,7 @@ struct ContextSharedPart : boost::noncopyable
     std::unique_ptr<AccessControl> access_control;
     mutable ResourceManagerPtr resource_manager;
     mutable UncompressedCachePtr uncompressed_cache;        /// The cache of decompressed blocks.
+    size_t primary_key_cache_size;                          /// The cache size of primary key, default 64 MB.
     mutable MarkCachePtr mark_cache;                        /// Cache of marks in compressed files.
     mutable std::unique_ptr<ThreadPool> load_marks_threadpool; /// Threadpool for loading marks cache.
     mutable std::unique_ptr<ThreadPool> prefetch_threadpool; /// Threadpool for loading marks cache.
@@ -2117,6 +2118,18 @@ void Context::dropIndexUncompressedCache() const
         shared->index_uncompressed_cache->reset();
 }
 
+void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
+{
+    auto lock = getLock();
+    shared->primary_key_cache_size = max_size_in_bytes;
+}
+
+
+size_t Context::getPrimaryKeyCacheSize() const
+{
+    auto lock = getLock();
+    return shared->primary_key_cache_size;
+}
 
 void Context::setIndexMarkCache(size_t cache_size_in_bytes)
 {
