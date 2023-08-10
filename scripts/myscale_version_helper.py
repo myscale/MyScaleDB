@@ -101,7 +101,7 @@ class MyScaleVersion:
     
     def update_version_from_git(self):
         # 在对本地文件存储的 version 进行操作前进行判断，若本地 version 落后于 git 的 version，则先将本地 version 保持和 git 一致
-        git_tag = git_runner.run("git describe --tags --abbrev=0").split('-')[1]
+        git_tag = git_runner.run("git tag --sort=-creatordate | grep '^myscale' | head -n 1").split('-')[1]
         git_tag_parts = removeprefix(string=git_tag, prefix="v").split('.')
         if(local_behind_git(local=(self._major, self._minor, self._patch), 
                             git=(int(git_tag_parts[0]), int(git_tag_parts[1]), int(git_tag_parts[2])))):

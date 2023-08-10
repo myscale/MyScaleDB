@@ -2386,7 +2386,7 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
 
 void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
 {
-    if (!getSettings()->enable_primary_key_cache)
+    if (!canUsePrimaryKeyCache())
         return;
 
     for (const auto & part : parts)

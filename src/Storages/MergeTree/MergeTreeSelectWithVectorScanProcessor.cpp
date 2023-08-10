@@ -278,7 +278,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithVectorScanProcess
 
         /// Initialize primary key cache
         const auto & primary_key = storage_snapshot->metadata->getPrimaryKey();
-        const bool enable_primary_key_cache = task->data_part->storage.getSettings()->enable_primary_key_cache.value;
+        const bool enable_primary_key_cache = task->data_part->storage.canUsePrimaryKeyCache();
         LOG_DEBUG(log, "Reader setting: enable_primary_key_cache = {}", enable_primary_key_cache);
 
         /// consider cache if and only if

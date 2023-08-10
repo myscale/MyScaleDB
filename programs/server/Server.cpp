@@ -1965,6 +1965,18 @@ try
     if (server_settings.index_mark_cache_size)
         global_context->setIndexMarkCache(server_settings.index_mark_cache_size);
 
+    /// Size of cache for primary key, default size is 64 MB.
+    size_t primary_key_cache_size = server_settings.primary_key_cache_size;
+    if (!primary_key_cache_size)
+        LOG_ERROR(log, "When the size of the primary key cache is 0, the primary key cache will be disabled.");
+    if (primary_key_cache_size > max_cache_size)
+    {
+        primary_key_cache_size = max_cache_size;
+        LOG_INFO(log, "Primary key cache size was lowered to {} because the system has low amount of memory",
+            formatReadableSizeWithBinarySuffix(mark_cache_size));
+    }
+    global_context->setPrimaryKeyCacheSize(primary_key_cache_size);
+
     if (server_settings.mmap_cache_size)
         global_context->setMMappedFileCache(server_settings.mmap_cache_size);
 
