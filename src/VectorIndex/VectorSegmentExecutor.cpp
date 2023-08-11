@@ -615,7 +615,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     auto merged_filter = filter;
     // Merge filter and delete_bitmap
     if (!delete_bitmap->all())
-        merged_filter = Search::mergeDenseBitmap(filter, delete_bitmap);
+        merged_filter = Search::intersectDenseBitmaps(filter, delete_bitmap);
 
     if (fallback_to_flat)
         parameters.clear();
