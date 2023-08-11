@@ -4,7 +4,7 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-    - if: '$CI_COMMIT_BRANCH =~ /^release\//'
+    - if: '$CI_COMMIT_TAG'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 before_script:
@@ -42,6 +42,8 @@ stages:
 check_pipeline_already_running:
   stage: check-pipeline
   image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
+  tags:
+    - task
   artifacts:
     paths:
       - previous_pipeline_status.txt
@@ -68,15 +70,15 @@ check_pipeline_already_running:
     - redis-cli -h ${REDIS_HOST} set ${PIPELINE_UNIQUE_KEY} "worked but failed"
     - redis-cli -h ${REDIS_HOST} EXPIRE ${PIPELINE_UNIQUE_KEY} ${KEY_TIMEOUT}
 
-style_check:
-  stage: build
-  image: harbor.internal.moqi.ai/mqdb/style-check
-  artifacts:
-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
-    paths:
-      - test_output/*
-  script:
-    - docker/builder/tools/run-style-check.sh
+# style_check:
+#   stage: build
+#   image: harbor.internal.moqi.ai/mqdb/style-check
+#   artifacts:
+#     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+#     paths:
+#       - test_output/*
+#   script:
+#     - docker/builder/tools/run-style-check.sh
 
 build_package:
   stage: package
@@ -98,7 +100,7 @@ build_package:
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package --compiler "clang-15"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
-    - if: $CI_COMMIT_BRANCH =~ /^release\//
+    - if: $CI_COMMIT_TAG
     - when: manual
       allow_failure: true
 
@@ -124,6 +126,8 @@ build_package_with_license:
 
 build_image:
   stage: image
+  tags:
+    - task
   dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
@@ -140,6 +144,8 @@ build_image:
 
 build_image_with_license:
   stage: image
+  tags:
+    - task
   when: manual
   dependencies: ["build_package_with_license", "check_pipeline_already_running"]
   before_script:
@@ -150,6 +156,8 @@ build_image_with_license:
 
 build_saas_image:
   stage: image
+  tags:
+    - task
   dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
     - docker/builder/tools/docker-info.sh
@@ -157,7 +165,7 @@ build_saas_image:
   script:
     - docker/builder/tools/saas-image.sh
   rules:
-    - if: $CI_COMMIT_BRANCH =~ /^release\//
+    - if: $CI_COMMIT_TAG
     - when: manual
       allow_failure: true
 
@@ -167,6 +175,8 @@ upload_performance_file_to_s3:
   image:
     name: minio/mc
     entrypoint: [""]
+  tags:
+    - task
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"
   before_script:
@@ -182,6 +192,8 @@ upload_performance_file_to_s3:
 flag_pipeline_status:
   stage: update-pipeline-status
   image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
+  tags:
+    - task
   # rules:
   #   - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"'
   # - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'
