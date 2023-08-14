@@ -12,10 +12,15 @@ cp -rfv tests/performance docker/test/mqdb_run_stateful/tests/
 cp -rfv tests/config docker/test/mqdb_run_stateful/tests/
 cp -rfv tests/clickhouse-test docker/test/mqdb_run_stateful/
 
-docker rmi -f run-stateful-test >/dev/null 2>&1 || true
-docker build --rm=true -t run-stateful-test docker/test/mqdb_run_stateful
+ln -snf $WORKPATH/packages /package_folder
+ln -snf $WORKPATH/clickhouse-test /usr/bin/clickhouse-test
+ln -snf $WORKPATH/s3downloader /s3downloader
+ln -snf $WORKPATH/tests /usr/share/clickhouse-test
+ln -snf $WORKPATH/test_output /test_output
 
-docker run --rm --user root --volume=$WORKPATH/test_output:/test_output --cap-add=SYS_PTRACE -e MAX_RUN_TIME=9720 -e ADDITIONAL_OPTIONS="--hung-check --print-time --no-vector-search" --name stateful-test run-stateful-test
+cd /
 
-docker rmi -f run-stateful-test >/dev/null 2>&1 || true
-docker rm -f stateful-test >/dev/null 2>&1 || true
+MAX_RUN_TIME=9720 ADDITIONAL_OPTIONS="--hung-check --print-time --no-vector-search" \
+  DATASETS_URL="https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" \
+  DATASETS="hits visits" \
+  /bin/bash $WORKPATH/run.sh

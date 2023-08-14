@@ -1,6 +1,7 @@
 ######################################## VECTOR TESTS ########################################
 ######### VECTOR TESTS ###########
 vector_search_test:
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   stage: functional-test
   needs:
     - job: build_binary
@@ -17,7 +18,6 @@ vector_search_test:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/vector-search-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
@@ -26,6 +26,8 @@ vector_search_test:
       changes:
         - src/**/*
         - tests/**/*
+    - when: manual
+      allow_failure: true
 
 ###################################### FUNCTIONAL TESTS ######################################
 ########## SMOKE TESTS ###########
@@ -57,10 +59,13 @@ smoke_test:
       changes:
         - src/**/*
         - tests/**/*
+    - when: manual
+      allow_failure: true
 
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
 stateless_test:
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   stage: functional-test
   needs:
     - job: build_binary
@@ -82,7 +87,6 @@ stateless_test:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateless-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateless; fi
@@ -91,9 +95,12 @@ stateless_test:
       changes:
         - src/**/*
         - tests/**/*
+    - when: manual
+      allow_failure: true
 
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   stage: functional-test
   needs:
     - job: build_binary
@@ -115,7 +122,6 @@ stateful_test:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - docker/builder/tools/stateful-test.sh
     - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh mqdb_run_stateful; fi
@@ -124,3 +130,5 @@ stateful_test:
       changes:
         - src/**/*
         - tests/**/*
+    - when: manual
+      allow_failure: true
