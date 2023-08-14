@@ -1,7 +1,5 @@
 0
 0
-0
-0
 test_replicated_vector	v1	MSTG	3	Built
 test_replicated_vector2	v1	MSTG	3	Built
 --- Original topK result
@@ -16,8 +14,10 @@ test_replicated_vector2	v1	MSTG	3	Built
 8	[8,8,8]	187.23
 9	[9,9,9]	237.62997
 --- Lightweight delete on parts with vector index
+0
 test_replicated_vector	v1	MSTG	3	Built
 test_replicated_vector2	v1	MSTG	3	Built
+--- After lightweight, select from test_replicated_vector2 limit 10
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 3	[3,3,3]	25.230003
@@ -28,6 +28,7 @@ test_replicated_vector2	v1	MSTG	3	Built
 8	[8,8,8]	187.23
 9	[9,9,9]	237.62997
 11	[11,11,11]	356.42996
+--- After lightweight, select from test_replicated_vector id>5 limit 10
 6	[6,6,6]	104.43001
 7	[7,7,7]	142.83
 8	[8,8,8]	187.23
@@ -42,6 +43,7 @@ test_replicated_vector2	v1	MSTG	3	Built
 0
 test_replicated_vector	v1	MSTG	1	InProgress
 test_replicated_vector2	v1	MSTG	1	InProgress
+--- After optimize, select from test_replicated_vector limit 10
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 3	[3,3,3]	25.230003
@@ -52,6 +54,7 @@ test_replicated_vector2	v1	MSTG	1	InProgress
 8	[8,8,8]	187.23
 9	[9,9,9]	237.62997
 11	[11,11,11]	356.42996
+--- After optimize, select from test_replicated_vector2 id>5 limit 10
 6	[6,6,6]	104.43001
 7	[7,7,7]	142.83
 8	[8,8,8]	187.23
@@ -63,8 +66,10 @@ test_replicated_vector2	v1	MSTG	1	InProgress
 15	[15,15,15]	666.02997
 16	[16,16,16]	758.42993
 --- Lightweight delete on decoupled part
+0
 test_replicated_vector	v1	MSTG	1	InProgress
 test_replicated_vector2	v1	MSTG	1	InProgress
+--- After lightweight, select from test_replicated_vector2 limit 10
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
 4	[4,4,4]	45.630005
@@ -75,6 +80,7 @@ test_replicated_vector2	v1	MSTG	1	InProgress
 9	[9,9,9]	237.62997
 11	[11,11,11]	356.42996
 12	[12,12,12]	424.82996
+--- After lightweight, select from test_replicated_vector id>5 limit 10
 6	[6,6,6]	104.43001
 7	[7,7,7]	142.83
 8	[8,8,8]	187.23

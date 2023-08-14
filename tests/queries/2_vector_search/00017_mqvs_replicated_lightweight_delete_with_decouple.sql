@@ -12,9 +12,8 @@ SELECT sleep(3);
 INSERT INTO test_replicated_vector SELECT number + 100, [number + 100, number + 100, number + 100] FROM numbers(100);
 INSERT INTO test_replicated_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
 
-SELECT sleep(3);
-SELECT sleep(3);
-SELECT sleep(3);
+SELECT sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95);
+
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT '--- Original topK result';
@@ -26,26 +25,33 @@ set mutations_sync=2;
 delete from test_replicated_vector where id = 2;
 delete from test_replicated_vector where id = 10;
 
-select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+SELECT sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95);
 
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+SELECT '--- After lightweight, select from test_replicated_vector2 limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
+SELECT '--- After lightweight, select from test_replicated_vector id>5 limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
 
 SELECT '--- Decoupled part when source parts contain lightweight delete';
 optimize table test_replicated_vector final;
-SELECT sleep(3);
+select sleep(2);
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
-
+SELECT '--- After optimize, select from test_replicated_vector limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
+SELECT '--- After optimize, select from test_replicated_vector2 id>5 limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 prewhere id > 5 order by d limit 10;
 
 SELECT '--- Lightweight delete on decoupled part';
 delete from test_replicated_vector where id = 3;
 delete from test_replicated_vector where id = 15;
 
-select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+SELECT sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95);
 
+select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
+SELECT '--- After lightweight, select from test_replicated_vector2 limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector2 order by d limit 10;
+SELECT '--- After lightweight, select from test_replicated_vector id>5 limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector prewhere id > 5 order by d limit 10;
 
 DROP TABLE IF EXISTS test_replicated_vector SYNC;

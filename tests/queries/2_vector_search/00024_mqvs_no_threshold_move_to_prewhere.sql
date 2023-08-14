@@ -10,7 +10,7 @@ CREATE TABLE test_vector
     label Enum8('person' = 1, 'building' = 2, 'animal' = 3),
     CONSTRAINT check_length CHECK length(data) = 3
 )
-engine = MergeTree PRIMARY KEY id;
+engine = MergeTree PRIMARY KEY id settings min_bytes_for_wide_part=10485760;
 
 INSERT INTO test_vector SELECT number, [number,number,number], '2022-12-30', 'person' FROM numbers(1000);
 INSERT INTO test_vector SELECT number+1000, [number,number,number], '2022-12-29', 'animal' FROM numbers(1000);
