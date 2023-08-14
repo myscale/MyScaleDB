@@ -1,0 +1,53 @@
+OK
+OK
+OK
+0
+OK
+0
+OK
+OK
+OK
+OK
+table_with_check	index_name	index_name vector TYPE ivfpq(\'metric_type=Cosine\', \'ncentroids=1048\')
+OK
+OK
+table_with_check	index_name	index_name vector TYPE ivfpq(\'metric_type=Cosine\', \'M=8\')
+OK
+OK
+OK
+OK
+OK
+OK
+OK
+table_with_check	index_name	index_name vector TYPE ivfpq(\'metric_type=Cosine\', \'bit_size=10\')
+OK
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=8bit\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=6bit\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=4bit\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=8bit_uniform\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=8bit_direct\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=4bit_uniform\')
+table_with_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=QT_fp16\')
+OK
+OK
+OK
+OK
+OK
+table_with_check	index_name	index_name vector TYPE hnswflat(\'metric_type=Cosine\', \'m=16\')
+OK
+OK
+0
+table_no_check	index_name	index_name vector TYPE mstg(\'metric_type=Cosine\', \'disk_mode=1\')
+table_no_check	index_name	index_name vector TYPE hnswflat(\'metric_type=Cosine\', \'m=7\')
+table_no_check	index_name	index_name vector TYPE ivfsq(\'metric_type=Cosine\', \'bit_size=8Bit\')
+0
+table_with_check	mstg_name	mstg_name vector TYPE mstg(\'metric_type=Cosine\')
+1
+OK
+table_with_check	mstg_name	mstg_name vector TYPE hnswflat(\'metric_type=Cosine\')
+OK
+0
+table_no_check	mstg_name	mstg_name vector TYPE mstg(\'metric_type=Cosine\')
+OK
+table_no_check	mstg_name	mstg_name vector TYPE hnswflat(\'metric_type=Cosine\')
+1

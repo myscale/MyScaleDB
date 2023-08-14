@@ -1367,10 +1367,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         if (search_column_type)
         {
             const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
-
             if (!array_type)
-                throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                    "Search column {} should be Array type", vec_col_name);
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Search column {} should be Array type", vec_col_name);
+            }
+            else
+            {
+                WhichDataType which(array_type->getNestedType());
+                if (!which.isFloat32())
+                    throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "The element type inside the array must be `Float32`.");
+            }
         }
         else
         {

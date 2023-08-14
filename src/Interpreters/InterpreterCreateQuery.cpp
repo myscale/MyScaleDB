@@ -24,6 +24,8 @@
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTIndexDeclaration.h>
+#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ParserCreateQuery.h>
@@ -725,6 +727,8 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
     if (create.columns_list)
     {
+        properties.constraints = getConstraintsDescription(create.columns_list->constraints);
+
         if (create.as_table_function && (create.columns_list->indices || create.columns_list->constraints))
             throw Exception(ErrorCodes::INCORRECT_QUERY, "Indexes and constraints are not supported for table functions");
 
@@ -754,8 +758,21 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
         if (create.columns_list->vec_indices)
             for (const auto & vec_index : create.columns_list->vec_indices->children)
+            {
+                const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
+                if (properties.constraints.empty())
+                {
+                    throw Exception(
+                        ErrorCodes::INCORRECT_QUERY,
+                        "When creating table with a vector index, you need to define the Constraint information for the table.");
+                }
+                if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
+                {
+                    throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
+                }
                 properties.vec_indices.push_back(
-                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns));
+                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+            }
 
         if (create.columns_list->projections)
             for (const auto & projection_ast : create.columns_list->projections->children)
@@ -764,7 +781,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 properties.projections.add(std::move(projection));
             }
 
-        properties.constraints = getConstraintsDescription(create.columns_list->constraints);
+        
     }
     else if (!create.as_table.empty())
     {
@@ -1213,7 +1230,6 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     }
 
     /// TODO throw exception if !create.attach_short_syntax && !create.attach_from_path && !internal
-
     if (create.attach_from_path)
     {
         chassert(!ddl_guard);

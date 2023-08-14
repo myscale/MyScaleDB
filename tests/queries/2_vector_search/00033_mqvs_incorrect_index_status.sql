@@ -1,6 +1,6 @@
 -- Tags: no-parallel
 DROP TABLE IF EXISTS test_172_status SYNC;
-CREATE TABLE test_172_status (id UInt32, data Array(Float32), CONSTRAINT check_length CHECK length(data) = 4) ENGINE = MergeTree ORDER BY id SETTINGS min_bytes_to_build_vector_index = 0;
+CREATE TABLE test_172_status (id UInt32, data Array(Float32), CONSTRAINT check_length CHECK length(data) = 4) ENGINE = MergeTree ORDER BY id SETTINGS min_bytes_to_build_vector_index = 0, vector_index_parameter_check=0;
 
 INSERT INTO test_172_status SELECT number, [number, number, number, number] FROM numbers(1000);
 ALTER TABLE test_172_status ADD VECTOR INDEX idx data TYPE MSTG('unknown=1');
@@ -19,7 +19,7 @@ select table, name, expr, status from system.vector_indices where database = cur
 DROP TABLE test_172_status;
 
 DROP TABLE IF EXISTS test_172_replicated_status SYNC;
-CREATE TABLE test_172_replicated_status (id UInt32, data Array(Float32), CONSTRAINT check_length CHECK length(data) = 4) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00033/test_172_status', 'r1') ORDER BY id SETTINGS min_bytes_to_build_vector_index = 0;
+CREATE TABLE test_172_replicated_status (id UInt32, data Array(Float32), CONSTRAINT check_length CHECK length(data) = 4) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00033/test_172_status', 'r1') ORDER BY id SETTINGS min_bytes_to_build_vector_index = 0, vector_index_parameter_check=0;
 
 INSERT INTO test_172_replicated_status SELECT number, [number, number, number, number] FROM numbers(1000);
 ALTER TABLE test_172_replicated_status ADD VECTOR INDEX idx data TYPE MSTG('unknown=1');

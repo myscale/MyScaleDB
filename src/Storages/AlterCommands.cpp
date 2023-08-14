@@ -33,6 +33,7 @@
 #include <Storages/IStorage.h>
 #include <Storages/LightweightDeleteDescription.h>
 #include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Common/typeid_cast.h>
 #include <Common/randomSeed.h>
 #include <Common/logger_useful.h>
@@ -102,6 +103,35 @@ String getColumnNameFromLengthCheck(const ASTPtr & constraint_decl)
     return res;
 }
 
+}
+
+bool getParameterCheckStatus(StorageInMemoryMetadata & metadata, ContextPtr context)
+{
+std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
+bool use_parameter_check = storage_settings->vector_index_parameter_check;
+LOG_TRACE(
+    &Poco::Logger::get("AlterCommand"),
+    "[getParameterCheckStatus] vector_index_parameter_check value in MergeTreeSetting: {}",
+    use_parameter_check);
+if (metadata.hasSettingsChanges())
+{
+    const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
+    for (const auto & changed_setting : current_changes)
+    {
+        const auto & setting_name = changed_setting.name;
+        const auto & new_value = changed_setting.value;
+        if (setting_name == "vector_index_parameter_check")
+        {
+            use_parameter_check = new_value.get<bool>();
+            LOG_TRACE(
+                &Poco::Logger::get("AlterCommand"),
+                "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
+                use_parameter_check);
+            break;
+        }
+    }
+}
+return use_parameter_check;
 }
 
 std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_ast)
@@ -820,7 +850,10 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
 
         auto insert_it = metadata.vec_indices.end();
 
-        metadata.vec_indices.emplace(insert_it, VectorIndexDescription::getVectorIndexFromAST(vec_index_decl, metadata.columns));
+        metadata.vec_indices.emplace(
+            insert_it,
+            VectorIndexDescription::getVectorIndexFromAST(
+                vec_index_decl, metadata.columns, metadata.constraints, getParameterCheckStatus(metadata, context)));
     }
     else if (type == DROP_VECTOR_INDEX)
     {
@@ -1160,7 +1193,11 @@ void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context
     {
         try
         {
-            vec_index = VectorIndexDescription::getVectorIndexFromAST(vec_index.definition_ast, metadata_copy.columns);
+            vec_index = VectorIndexDescription::getVectorIndexFromAST(
+                vec_index.definition_ast,
+                metadata_copy.columns,
+                metadata_copy.getConstraints(),
+                getParameterCheckStatus(metadata, context));
         }
         catch (Exception & exception)
         {

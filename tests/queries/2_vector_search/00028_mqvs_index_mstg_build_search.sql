@@ -2,7 +2,7 @@
 
 DROP TABLE IF EXISTS test_mstg SYNC;
 
-CREATE TABLE test_mstg(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 8) engine=MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, min_bytes_to_build_vector_index=1;
+CREATE TABLE test_mstg(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 8) engine=MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, min_bytes_to_build_vector_index=1, vector_index_parameter_check=0;
 INSERT INTO test_mstg SELECT number, [number, number + 7, number + 6, number + 5, number + 4, number + 3, number + 2, number + 1] FROM numbers(1000);
 OPTIMIZE TABLE test_mstg FINAL;
 
