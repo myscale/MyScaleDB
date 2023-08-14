@@ -1,17 +1,17 @@
 FROM ubuntu:20.04 as builder
 
 ARG TARGETARCH
-ARG version=22.3.7.5
+ARG version=23.3.2.1
 
 RUN mkdir -pv /builder/mqdb
 
 ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
 
 
-FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
+FROM harbor.internal.moqi.ai/mqdb/runtime:1.4 as runtime
 
 ARG TARGETARCH
-ARG version=22.3.7.5
+ARG version=23.3.2.1
 
 VOLUME ["/var/lib/clickhouse", "/etc/clickhouse-server", "/etc/clickhouse-client/"]
 EXPOSE 9000 8123 9009
