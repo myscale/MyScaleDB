@@ -24,10 +24,13 @@ cp -rfv tests/performance docker/test/mqdb_run_stateless/tests/
 cp -rfv tests/config docker/test/mqdb_run_stateless/tests/
 cp -rfv tests/clickhouse-test docker/test/mqdb_run_stateless/
 
-docker rm -f stateless-test >/dev/null 2>&1 || true
-docker build --rm=true -t run-stateless-test docker/test/mqdb_run_stateless
+ln -snf $WORKPATH/packages /package_folder
+ln -snf $WORKPATH/clickhouse-test /usr/bin/clickhouse-test
+ln -snf $WORKPATH/tests /usr/share/clickhouse-test
+ln -snf $WORKPATH/test_output /test_output
 
-docker run --rm --user root --volume=$WORKPATH/test_output:/test_output --cap-add=SYS_PTRACE -e MAX_RUN_TIME=9720 -e S3_URL="https://clickhouse-datasets.s3.amazonaws.com" -e ADDITIONAL_OPTIONS="--hung-check --print-time --no-stateless --no-stateful $FORCE_RETRY" --name stateless-test run-stateless-test
+cd /
 
-docker rm -f stateless-test >/dev/null 2>&1 || true
-docker rmi -f run-stateless-test >/dev/null 2>&1 || true
+MAX_RUN_TIME=9720 S3_URL="https://clickhouse-datasets.s3.amazonaws.com" \
+  ADDITIONAL_OPTIONS="--hung-check --print-time --no-stateless --no-stateful $FORCE_RETRY" \
+  /bin/bash $WORKPATH/run.sh
