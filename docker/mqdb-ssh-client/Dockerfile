@@ -1,7 +1,7 @@
 FROM ubuntu:20.04 as builder
 
 ARG TARGETARCH
-ARG version=22.3.7.5
+ARG version=23.3.2.1
 
 RUN mkdir -pv /builder/mqdb
 
@@ -10,10 +10,10 @@ ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
 ADD https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/clickhouse-backup-linux-${TARGETARCH:-amd64}.tar.gz /builder/clickhouse-backup/
 RUN cd /builder/clickhouse-backup/ && tar -xf clickhouse-backup-linux-${TARGETARCH:-amd64}.tar.gz
 
-FROM harbor.internal.moqi.ai/mqdb/runtime:1.2 as runtime
+FROM harbor.internal.moqi.ai/mqdb/runtime:1.4 as runtime
 
 ARG TARGETARCH
-ARG version=22.3.7.5
+ARG version=23.3.2.1
 
 RUN apt update \
     && apt install inetutils-ping rsync openssh-server --yes \
