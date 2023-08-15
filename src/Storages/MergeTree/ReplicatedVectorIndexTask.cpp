@@ -28,6 +28,7 @@ bool ReplicatedVectorIndexTask::executeStep()
 
             std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
+            LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", entry.source_parts.at(0));
 
             /// write latest cached vector index info to zookeeper
             storage.vidx_info_updating_task->schedule();
@@ -119,17 +120,23 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
 
     if (metadata_snapshot->vec_indices.empty())
     {
-        LOG_DEBUG(log, "Metadata of source part {} doesn't have vector index; will skip to build it", source_part_name);
+        LOG_DEBUG(log, "Metadata of source part {} doesn't have vector index, will skip to build it", source_part_name);
         return {false, false};
     }
 
     source_part = storage.getActiveContainingPart(source_part_name);
     if (!source_part)
     {
-        LOG_DEBUG(log, "Source part {} for vector index building is not ready; will skip to build vector index", source_part_name);
+        LOG_DEBUG(log, "Source part {} for vector index building is not ready, will skip to build vector index", source_part_name);
         return {false, false};
     }
-    /// No need to check part name, mutations are not blocked by build vector index. 
+    /// No need to check part name, mutations are not blocked by build vector index.
+    auto info = MergeTreePartInfo::fromPartName(source_part_name, storage.format_version);
+    if (!source_part->info.isFromSamePart(info))
+    {
+        LOG_DEBUG(log, "Source part {} for vector index building is covered by part {}, will skip to build vector index", source_part_name, source_part->name);
+        return {false, false};
+    }
 
     /// If we already have this vector index in this part, we do not need to do anything.
 

@@ -150,7 +150,12 @@ bool MergeTreeVectorIndexBuilderUpdater::allowToBuildVectorIndex(const bool slow
     {
         /// Check slow mode build vector index log entry in queue
         if (builds_count_in_queue >= server_settings.background_slow_mode_vector_pool_size)
+        {
+            LOG_DEBUG(log, "[allowToBuildVectorIndex] Number of queued build vector index enties ({})"
+                    " is greater than background_slow_mode_vector_pool_size ({}), so won't select new parts to build vector index",
+                    builds_count_in_queue, server_settings.background_slow_mode_vector_pool_size);
             return false;
+        }
 
         occupied = CurrentMetrics::values[CurrentMetrics::BackgroundSlowModeVectorIndexPoolTask].load(std::memory_order_relaxed);
 
@@ -161,7 +166,12 @@ bool MergeTreeVectorIndexBuilderUpdater::allowToBuildVectorIndex(const bool slow
     {
         /// Check build vector index log entry in queue
         if (builds_count_in_queue >= server_settings.background_vector_pool_size)
+        {
+            LOG_DEBUG(log, "[allowToBuildVectorIndex] Number of queued build vector index enties ({})"
+                    " is greater than background_vector_pool_size ({}), so won't select new parts to build vector index",
+                    builds_count_in_queue, server_settings.background_vector_pool_size);
             return false;
+        }
 
         occupied = CurrentMetrics::values[CurrentMetrics::BackgroundVectorIndexPoolTask].load(std::memory_order_relaxed);
 
@@ -194,7 +204,11 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
 
         /// ReplicatedMergeTree depends on virtual_parts for merge, MergeTree depends on currently_merging_mutating_parts
         if (is_replicated && data.partIsAssignedToBackgroundOperation(part))
+        {
+            LOG_DEBUG(log, "Skip to select part {} build vector index due to part is assigned to background operation", part->name);
             continue;
+        }
+
 
         if (part->containRowIdsMaps() && data.getSettings()->disable_rebuild_for_decouple)
             continue;
@@ -207,16 +221,28 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
                 continue;
 
             bool skip_build_index = false;
+            std::vector<String> need_remove_parts;
             for (const auto & part_name : data.currently_vector_indexing_parts)
             {
                 auto info = MergeTreePartInfo::fromPartName(part_name, data.format_version);
                 if (part->info.contains(info))
                 {
-                    LOG_DEBUG(log, "Skip for future part {} due to origin part {}", part->name, part_name);
-                    skip_build_index = true;
-                    break;
+                    if (part->info.isFromSamePart(info))
+                    {
+                        LOG_DEBUG(log, "Skip to select future mutation part {} build vector index due to the same origin part {}", part->name, part_name);
+                        skip_build_index = true;
+                        break;
+                    }
+                    else
+                    {
+                        LOG_DEBUG(log, "Remove possible stale or not needed part {} due to covered part {} exists", part_name, part->name);
+                        need_remove_parts.emplace_back(part_name);
+                    }
                 }
             }
+
+            for (const auto & part_name : need_remove_parts)
+                data.currently_vector_indexing_parts.erase(part_name);
 
             if (skip_build_index)
                 continue;

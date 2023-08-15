@@ -319,11 +319,18 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
     /// Check if decoupled data part is enabled. If true, we can use old vector indices before new index is built.
     if (global_ctx->data->getSettings()->enable_decouple_vector_index)
     {
-        for (auto& part : global_ctx->future_part->parts)
+        size_t num_parts_with_vector_index = 0;
+        size_t num_parts = global_ctx->future_part->parts.size();
+
+        /// We use old vector indices only when all the merged source parts have index.
+        for (auto & part : global_ctx->future_part->parts)
         {
             if (part->containAnyVectorIndex())
-                has_vector_index = true;
+                num_parts_with_vector_index++;
         }
+
+        if (num_parts > 0 && (num_parts_with_vector_index == num_parts))
+            has_vector_index = true;
     }
 
     if (has_vector_index)

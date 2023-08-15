@@ -113,6 +113,14 @@ struct MergeTreePartInfo
     /// Referenced from getPartName, but not include mutation.
     String getPartNameWithoutMutation() const;
 
+    /// True if two parts has same part_name except mutation version and merge level.
+    bool isFromSamePart(const MergeTreePartInfo & rhs) const
+    {
+        return partition_id == rhs.partition_id
+            && min_block == rhs.min_block
+            && max_block == rhs.max_block;
+    }
+
     UInt64 getBlocksCount() const
     {
         return static_cast<UInt64>(max_block - min_block + 1);

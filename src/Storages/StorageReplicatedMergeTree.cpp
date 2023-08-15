@@ -3168,7 +3168,12 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
     {
         auto task = std::make_shared<ReplicatedVectorIndexTask>(
             *this, selected_entry, vec_index_builder_updater, common_assignee_trigger);
-        assignee.scheduleVectorIndexTask(task);
+
+        /// slow mode uses a different background pool.
+        if (selected_entry->log_entry->slow_mode)
+            assignee.scheduleSlowModeVectorIndexTask(task);
+        else
+            assignee.scheduleVectorIndexTask(task);
         return true;
     }
     else
@@ -3335,8 +3340,13 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                     create_result = createLogEntryToBuildVIndexForPart(
                                 vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred.getVersion(), slow_mode);
 
-                    std::lock_guard lock(currently_vector_indexing_parts_mutex);
-                    currently_vector_indexing_parts.insert(vector_index_entry->part_name);
+                    /// Only add when create log entry successfully.
+                    if(create_result == CreateMergeEntryResult::Ok)
+                    {
+                        std::lock_guard lock(currently_vector_indexing_parts_mutex);
+                        currently_vector_indexing_parts.insert(vector_index_entry->part_name);
+                        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", vector_index_entry->part_name);
+                    }
                 }
             }
         }
