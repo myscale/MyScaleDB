@@ -287,6 +287,7 @@ void ReplicatedMergeTreeQueue::insertUnlocked(
     {
         std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
         storage.currently_vector_indexing_parts.insert(entry->source_parts.at(0));
+        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", entry->source_parts.at(0));
     }
 }
 
@@ -1425,34 +1426,11 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
                 }
             }
 
-            /// Check if this replica can merge source parts for vector index.
-            if (data.getInMemoryMetadataPtr()->hasVectorIndices())
-            {
-                MergeTreeData::DataPartPtr prev_part = nullptr;
-
-                /// loop through source parts and compare two adjacent data parts.
-                for (const auto & name : entry.source_parts)
-                {
-                    auto part = data.getPartIfExists(name, {MergeTreeDataPartState::Active});
-                    if (part)
-                    {
-                        if (prev_part)
-                        {
-                            String out_reason;
-                            if (!ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(prev_part, part, &out_reason))
-                            {
-                                out_postpone_reason = fmt::format(
-                                        "Not executing log entry {} for part {} because {}",
-                                        entry.znode_name, entry.new_part_name, out_reason);
-                                LOG_DEBUG(log, fmt::runtime(out_postpone_reason));
-                                return false;
-                            }
-                        }
-
-                        prev_part = part;
-                    }
-                }
-            }
+            /// No need to check if this replica can merge parts with vector indices.
+            /// If one replica choose to merge these parts, we will merge them.
+            /// If not all parts with vector index, the merged part will not use old vector indices.
+            /// New build vector index log entry will come for this merged part.
+            /// TODO: need double check when implement single replica feature, is it needed to check vector index status inside source part?
         }
 
         if (!ignore_max_size && sum_parts_size_in_bytes > max_source_parts_size)
@@ -2422,6 +2400,11 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     const MergeTreeData::DataPartPtr & right,
     String * out_reason)
 {
+    /// No need to check if there is no vector index on the table.
+    auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
+    if (!metadata_snapshot->hasVectorIndices())
+        return true;
+
     /// Check if part contains merged vector index
     if (left->containRowIdsMaps() || right->containRowIdsMaps())
     {
@@ -2436,7 +2419,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
         for (const auto & part_name : left->storage.currently_vector_indexing_parts)
         {
             auto info = MergeTreePartInfo::fromPartName(part_name, left->storage.format_version);
-            if (left->info.contains(info) || right->info.contains(info))
+            if (left->info.isFromSamePart(info) || right->info.isFromSamePart(info))
             {
                 if (out_reason)
                     *out_reason = "source part " + left->name + " or " + right->name + " is currently building vector index";
@@ -2447,7 +2430,6 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
 
     /// Check if two parts contain vector index files.
     /// Two parts can be merged when both have built vector index or both not.
-    auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
     bool can_merge = true;
     for (const auto & vec_index : metadata_snapshot->vec_indices)
     {

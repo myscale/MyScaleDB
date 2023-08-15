@@ -22,10 +22,13 @@ struct VectorIndexEntry
      , data(data_)
      , is_replicated(is_replicated_)
     {
-        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", part_name);
-        /// insert for replicated merge tree to avoid creating log entry multiple times for the same part.
-        std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
-        data.currently_vector_indexing_parts.insert(part_name);
+        /// Replicated merge tree cases will do the add when create log entry is sucessfull or pull log entry.
+        if (!is_replicated)
+        {
+            LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", part_name);
+            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
+            data.currently_vector_indexing_parts.insert(part_name);
+        }
     }
 
     ~VectorIndexEntry() 
