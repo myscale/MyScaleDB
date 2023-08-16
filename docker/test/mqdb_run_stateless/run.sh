@@ -141,7 +141,8 @@ function run_tests() {
         01658_read_file_to_stringcolumn 01600_detach_permanently 01527_clickhouse_local_optimize \
         02047 01039 00993 02207 02117 02226 01606_git_import 01945_show_debug_warning 02420_stracktrace_debug_symbols \
         02435_rollback_cancelled_queries 02345_implicit_transaction 01193_metadata_loading 01880_remote_ipv6 \
-        01103_check_cpu_instructions_at_startup 02125_many_mutations 02161_addressToLineWithInlines 2>&1 |
+        01103_check_cpu_instructions_at_startup 02125_many_mutations 02161_addressToLineWithInlines \
+        01680_date_time_add_ubsan 2>&1 |
         ts '%Y-%m-%d %H:%M:%S' |
         tee -a test_output/test_result.txt
     set -e
