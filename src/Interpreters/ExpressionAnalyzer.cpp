@@ -9,6 +9,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSubquery.h>
@@ -43,6 +44,7 @@
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/parseAggregateFunctionParameters.h>
 
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/StorageDistributed.h>
 #include <Storages/StorageDictionary.h>
 #include <Storages/StorageJoin.h>
@@ -753,9 +755,43 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
         //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
 
-        LOG_DEBUG(log, "[analyzeVectorScan] search_column: {}, query_column: {}", vector_scan_desc.search_column_name, vector_scan_desc.query_column_name);
+        LOG_DEBUG(
+            log,
+            "[analyzeVectorScan] search_column: {}, query_column: {}",
+            vector_scan_desc.search_column_name,
+            vector_scan_desc.query_column_name);
+
+        auto metadata_snapshot = storage() ? storage()->getInMemoryMetadataPtr() : nullptr;
+        String index_type = "";
+        // Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
+        std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(getContext()->getMergeTreeSettings());
+        bool use_parameter_check = storage_settings->vector_index_parameter_check;
+        LOG_TRACE(log, "[makeVectorScanDescriptions] vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
+        // Obtain the type of the vector index recorded in the meta_data.
+        if (metadata_snapshot && metadata_snapshot->getVectorIndices().size() == 1)
+        {
+            index_type = metadata_snapshot->getVectorIndices()[0].type;
+            LOG_TRACE(log, "[makeVectorScanDescriptions] The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+        }
+        // Use the user-defined `vector_index_parameter_check`.
+        if (metadata_snapshot && metadata_snapshot->hasSettingsChanges())
+        {
+            const auto current_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+            for (const auto & changed_setting : current_changes)
+            {
+                const auto & setting_name = changed_setting.name;
+                const auto & new_value = changed_setting.value;
+                if (setting_name == "vector_index_parameter_check")
+                {
+                    use_parameter_check = new_value.get<bool>();
+                    LOG_TRACE(
+                        log, "[makeVectorScanDescriptions] vector_index_parameter_check value in sql definition: {}", use_parameter_check);
+                    break;
+                }
+            }
+        }
         //parse vector scan's params, such as: top_k, n_probe ...
-        String param_str = parseVectorScanParameters(node, getContext());
+        String param_str = parseVectorScanParameters(node, getContext(), Poco::toUpper(index_type), use_parameter_check);
         if (!param_str.empty())
         {
             try
@@ -764,7 +800,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 vector_scan_desc.vector_parameters = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
                 vector_scan_desc.vector_parameters->set("metric_type", syntax->vector_scan_metric_type);
             }
-            catch([[maybe_unused]] const std::exception& e)
+            catch ([[maybe_unused]] const std::exception & e)
             {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
             }

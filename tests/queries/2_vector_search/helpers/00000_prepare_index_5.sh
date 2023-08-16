@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
-clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0;"
+clickhouse-client -q "CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=0, vector_index_parameter_check=0;"
 clickhouse-client -q "INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(10000);"
 clickhouse-client -q "INSERT INTO test_vector SELECT number + 10000, [number + 10000, number + 10000, number + 10000] FROM numbers(10000);"
 clickhouse-client -q "INSERT INTO test_vector SELECT number + 20000, [number + 20000, number + 20000, number + 20000] FROM numbers(10000);"
