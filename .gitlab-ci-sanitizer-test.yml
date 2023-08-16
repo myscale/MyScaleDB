@@ -133,7 +133,7 @@ vector-test-asan:
     - docker/builder/tools/docker-info.sh
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/vector-search-test.sh
+    - ADDRESS_SANITIZER_TEST=true docker/builder/tools/vector-search-test.sh
     # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
     - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
@@ -144,6 +144,7 @@ vector-test-asan:
 # disable TSAN due to #89
 .vector-test-tsan:
   stage: sanitizer-test
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   needs:
     - job: build_with_sanitizer_tsanbinary
       artifacts: true
@@ -164,7 +165,6 @@ vector-test-asan:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - replace_openmp=true
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
@@ -179,6 +179,7 @@ vector-test-asan:
 # disable MSAN due to #89
 .vector-test-msan:
   stage: sanitizer-test
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   needs:
     - job: build_with_sanitizer_msanbinary
       artifacts: true
@@ -199,7 +200,6 @@ vector-test-asan:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
@@ -210,6 +210,7 @@ vector-test-asan:
 
 vector-test-ubsan:
   stage: sanitizer-test
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
   needs:
     - job: build_with_sanitizer_ubsanbinary
       artifacts: true
@@ -230,7 +231,6 @@ vector-test-ubsan:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
