@@ -2475,24 +2475,26 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
         vec_elem.database_name = table_id.database_name;
         vec_elem.table_name = table_id.table_name;
     }
+    for (const DataPartPtr & part : parts_to_remove)
+    {
+        if (vec_event_log &&
+            part->containAnyVectorIndex() &&
+            vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+        {
+            vec_elem.part_name = part->name;
+            vec_elem.partition_id = part->info.partition_id;
+            vec_event_log->add(vec_elem);
+        }
+    }
 
     const auto settings = getSettings();
 
-    auto remove_single_thread = [this, &parts_to_remove, part_names_succeed, vec_event_log, vec_elem]()
+    auto remove_single_thread = [this, &parts_to_remove, part_names_succeed]()
     {
         LOG_DEBUG(
             log, "Removing {} parts from filesystem (serially): Parts: [{}]", parts_to_remove.size(), fmt::join(parts_to_remove, ", "));
         for (const DataPartPtr & part : parts_to_remove)
         {
-            if (part->containAnyVectorIndex() &&
-                vec_event_log &&
-                vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
-            {
-                vec_elem.part_name = part->name;
-                vec_elem.partition_id = part->info.partition_id;
-                vec_event_log->add(vec_elem);
-            }
-
             asMutableDeletingPart(part)->remove();
             if (part_names_succeed)
                 part_names_succeed->insert(part->name);
@@ -2528,15 +2530,6 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
         for (const DataPartPtr & part : parts_to_remove)
         {
-            if (part->containAnyVectorIndex() &&
-                vec_event_log &&
-                vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
-            {
-                vec_elem.part_name = part->name;
-                vec_elem.partition_id = part->info.partition_id;
-                vec_event_log->add(vec_elem);
-            }
-
             pool.scheduleOrThrowOnError([&part, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup()]
             {
                 SCOPE_EXIT_SAFE(
@@ -2598,7 +2591,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
         sum_of_ranges += parts_in_range.size();
 
         pool.scheduleOrThrowOnError(
-            [this, range, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup(), batch = std::move(parts_in_range), vec_event_log, vec_elem]
+            [this, range, &part_names_mutex, part_names_succeed, thread_group = CurrentThread::getGroup(), batch = std::move(parts_in_range)]
         {
             SCOPE_EXIT_SAFE(
                 if (thread_group)
@@ -2611,15 +2604,6 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
 
             for (const auto & part : batch)
             {
-                if (part->containAnyVectorIndex() &&
-                    vec_event_log &&
-                    vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
-                {
-                    vec_elem.part_name = part->name;
-                    vec_elem.partition_id = part->info.partition_id;
-                    vec_event_log->add(vec_elem);
-                }
-
                 asMutableDeletingPart(part)->remove();
                 if (part_names_succeed)
                 {
