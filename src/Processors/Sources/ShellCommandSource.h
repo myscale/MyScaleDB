@@ -5,6 +5,7 @@
 #include <Common/logger_useful.h>
 #include <base/BorrowedObjectPool.h>
 
+#include <Common/ShellCommandSettings.h>
 #include <Common/ShellCommand.h>
 #include <Common/ThreadPool.h>
 
@@ -34,9 +35,6 @@ struct ShellCommandSourceConfiguration
     size_t number_of_rows_to_read = 0;
     /// Max block size
     size_t max_block_size = DEFAULT_BLOCK_SIZE;
-    /// Will throw if the command exited with
-    /// non-zero status code
-    size_t check_exit_code = false;
 };
 
 class ShellCommandSourceCoordinator
@@ -57,6 +55,15 @@ public:
 
         /// Timeout for writing data to command stdin
         size_t command_write_timeout_milliseconds = 10000;
+
+        /// Reaction when external command outputs data to its stderr.
+        ExternalCommandStderrReaction stderr_reaction = ExternalCommandStderrReaction::NONE;
+
+        /// Will throw if the command exited with
+        /// non-zero status code.
+        /// NOTE: If executable pool is used, we cannot check exit code,
+        /// which makes this configuration no effect.
+        size_t check_exit_code = false;
 
         /// Pool size valid only if executable_pool = true
         size_t pool_size = 16;

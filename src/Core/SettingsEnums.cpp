@@ -203,4 +203,11 @@ IMPLEMENT_SETTING_ENUM(ORCCompression, ErrorCodes::BAD_ARGUMENTS,
      {"zlib", FormatSettings::ORCCompression::ZLIB},
      {"lz4", FormatSettings::ORCCompression::LZ4}})
 
+IMPLEMENT_SETTING_ENUM(ExternalCommandStderrReaction, ErrorCodes::BAD_ARGUMENTS,
+    {{"none", ExternalCommandStderrReaction::NONE},
+     {"log", ExternalCommandStderrReaction::LOG},
+     {"log_first", ExternalCommandStderrReaction::LOG_FIRST},
+     {"log_last", ExternalCommandStderrReaction::LOG_LAST},
+     {"throw", ExternalCommandStderrReaction::THROW}})
+
 }
