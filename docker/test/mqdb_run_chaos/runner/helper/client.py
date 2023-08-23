@@ -160,15 +160,27 @@ class ChaosClient:
         return True
 
     def scale_up(self, name, namespace):
-        chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
-        chi.spec.configuration.clusters[0].layout.replicasCount += 1
-        self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+        for _ in range(10):
+            try:
+                chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
+                chi.spec.configuration.clusters[0].layout.replicasCount += 1
+                self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+                break
+            except Exception as e:
+                logger.warn(str(e))
+                logger.info("retry scale up")
 
     def scale_down(self, name, namespace):
-        chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
-        if chi.spec.configuration.clusters[0].layout.replicasCount > 1:
-            chi.spec.configuration.clusters[0].layout.replicasCount -= 1
-            self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+        for _ in range(10):
+            try:
+                chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
+                if chi.spec.configuration.clusters[0].layout.replicasCount > 1:
+                    chi.spec.configuration.clusters[0].layout.replicasCount -= 1
+                    self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+                break
+            except Exception as e:
+                logger.warn(str(e))
+                logger.info("retry scale down")
 
     def is_chi_completed(self, name, namespace):
         return self.api_group["Cluster"].get(name=name, namespace=namespace).status.status == "Completed"

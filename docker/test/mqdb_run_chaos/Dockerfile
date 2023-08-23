@@ -17,7 +17,9 @@ RUN python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-
     pyyaml \
     numpy \
     prometheus-api-client  \
-    kubernetes
+    kubernetes  \
+    locust \
+    pandas
 
 RUN python3 -m pip install --upgrade requests
 

@@ -87,7 +87,6 @@ data:
     
       insert_data: "INSERT INTO gist1m SELECT id, vector, false FROM s3(
           'https://mqdb-public-1253802058.cos.ap-beijing.myqcloud.com/public/gist_960_1m.parquet',
-          'AKIDIQI6evvf8LHxMTJtDF0UifLktlLegRv8', 'xe3B2cvxiCRP5UdU5PTGlzw71e06uSji',
           'Parquet',
           'id Int32, vector Array(Float32)'
       )"
@@ -131,7 +130,7 @@ spec:
       serviceAccountName: chaos-runner
       containers:
         - name: test
-          image: harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:1.0
+          image: harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:2.0
           imagePullPolicy: Always
           command: ["bash", "run_chaos.sh"]
           resources:

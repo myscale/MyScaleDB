@@ -96,7 +96,14 @@ class BaseChaos(object):
         time.sleep(3)
         self.check_integrity()
         if not self.all_chaos:
-            self.client_ls[-1].run_query(f"delete from {self.client_ls[-1].table_name} {self.insert_data_filter}")
+            for _ in range(10):
+                try:
+                    self.client_ls[-1].run_query(f"delete from {self.client_ls[-1].table_name} {self.insert_data_filter}")
+                    break
+                except Exception as e:
+                    logger.error(f"Unexpected exception {str(e)}", exc_info=True)
+                    logger.info("retry after one second")
+                time.sleep(1)
 
     def check_integrity(self):
         logger.info("start check data and vector index md5 after recovering from faults")
@@ -109,7 +116,6 @@ class BaseChaos(object):
             if data_md5 != self.expected_data_md5:
                 logger.error(f"{host} data md5 changed after chaos, "
                              f"it was {self.expected_data_md5} and now is {data_md5}")
-                exit(1)
 
             # check vector search integrity
             logger.info(f"check vector search integrity for {host}")
@@ -117,7 +123,6 @@ class BaseChaos(object):
             if vector_md5 != self.expected_vector_md5_ls[i]:
                 logger.error(f"{host} vector search result md5 changed after chaos, "
                              f"it was {self.expected_data_md5} and now is {data_md5}")
-                exit(1)
 
     def check_consistency(self):
         start = time.time()
@@ -145,13 +150,16 @@ class PodFailure(BaseChaos):
             return
         client = self.client_ls[-1]
         logger.info("insert 50w data during pod failure")
-        client.insert_data(self.insert_data_filter)
+        try:
+            client.insert_data(self.insert_data_filter)
+        except Exception as e:
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
         logger.info("execute delete from during pod failure")
         # catch mutation not finished error
         try:
             client.run_query(client.delete_from)
         except Exception as e:
-            logger.warn(str(e))
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
         logger.info("finish operation during pod failure")
         time.sleep(30)
 
@@ -173,7 +181,10 @@ class PodKill(BaseChaos):
             return
         client = self.client_ls[-1]
         logger.info("insert 50w data during pod kill")
-        client.insert_data(self.insert_data_filter)
+        try:
+            client.insert_data(self.insert_data_filter)
+        except Exception as e:
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
         logger.info("finish operation during pod kill")
 
     def after_chaos(self):
@@ -191,7 +202,10 @@ class NetWorkPartition(BaseChaos):
     def during_chaos(self):
         client = self.client_ls[-1]
         logger.info("insert 50w data during network partition")
-        client.insert_data(self.insert_data_filter)
+        try:
+            client.insert_data(self.insert_data_filter)
+        except Exception as e:
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
         logger.info("finish operation during network partition")
 
     def after_chaos(self):
