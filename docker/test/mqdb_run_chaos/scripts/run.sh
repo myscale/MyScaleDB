@@ -43,6 +43,21 @@ function setup_mqdb()
   sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
 }
 
+function check_fatal()
+{
+  for (( i=0; i<2; i++ )); do
+      set +e
+      kubectl exec -n ${current_namespace} "chi-chaos-test-clickhouse-0-"$i"-0" -- clickhouse-client -q 'select count(*) from system.crash_log'
+      if [ $? -eq 60 ]
+      then
+        echo "replica$i not found fatal error"
+      else
+        echo "replica$i got fatal error"
+        exit 1
+      fi
+  done
+}
+
 function check_job_status()
 {
   cur_time=0
@@ -58,6 +73,8 @@ function check_job_status()
         generate_urls $start_time $end_time
         echo "grafana url: $GRAFANA_URL"
         echo "job log url: $JOB_LOKI_URL"
+        echo "check fatal error"
+        check_fatal
         exit 1
       elif [ "$state" == "Completed" ]
       then
@@ -66,6 +83,8 @@ function check_job_status()
         generate_urls $start_time $end_time
         echo "grafana url: $GRAFANA_URL"
         echo "job log url: $JOB_LOKI_URL"
+        echo "check fatal error"
+        check_fatal
         kubectl delete ns $current_namespace
         exit 0
       else

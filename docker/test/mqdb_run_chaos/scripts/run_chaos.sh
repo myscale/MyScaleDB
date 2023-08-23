@@ -31,4 +31,12 @@ done
 sleep 3m
 echo "start qps performance check"
 python3 runner/performance.py --config-file config.yaml
+
+echo "start multi process test"
+locust -f runner/multi.py --headless --host localhost -u 500 -r 100 --only-summary -t 15m
+sleep 15m
+
+echo "check replicas data count"
+python3 runner/check.py
+
 echo "finish chaos test"

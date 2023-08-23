@@ -26,7 +26,8 @@ vector_search_test:
       changes:
         - src/**/*
         - tests/**/*
-    - when: manual
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
       allow_failure: true
 
 ###################################### FUNCTIONAL TESTS ######################################
@@ -59,7 +60,8 @@ smoke_test:
       changes:
         - src/**/*
         - tests/**/*
-    - when: manual
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
       allow_failure: true
 
 ### FUNCTIONAL STATELESS TESTS ###
@@ -95,7 +97,8 @@ stateless_test:
       changes:
         - src/**/*
         - tests/**/*
-    - when: manual
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
       allow_failure: true
 
 ### FUNCTIONAL STATEFUL TESTS ####
@@ -130,5 +133,6 @@ stateful_test:
       changes:
         - src/**/*
         - tests/**/*
-    - when: manual
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
       allow_failure: true
