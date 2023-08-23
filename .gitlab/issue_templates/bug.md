@@ -1,34 +1,26 @@
-## Summary
+## **概述**
 
-(Summarize the bug encountered concisely)
+(简洁地总结遇到的 Bug)
 
-## Steps to reproduce
+## **复现步骤**
 
-(How one can reproduce the issue - this is very important)
+(提供复现问题的步骤、代码和 SQL 语句 - 这一点非常重要)
 
-## Example Project
+## **当前的 Bug 行为是什么？**
 
-(If possible, please create an example project here on GitLab.com that exhibits the problematic
-behavior, and link to it here in the bug report.
-If you are using an older version of GitLab, this will also determine whether the bug has been fixed
-in a more recent version)
+(实际发生了什么)
 
-## What is the current bug behavior?
+## **预期的正确行为是什么？**
 
-(What actually happens)
+(你应该看到什么)
 
-## What is the expected correct behavior?
+## **相关日志和/或截图**
 
-(What you should see instead)
+(粘贴任何相关的日志 - 请使用代码块(```)来格式化控制台输出、日志和代码，否则很难阅读)
 
-## Relevant logs and/or screenshots
+## **可能的修复**
 
-(Paste any relevant logs - please use code blocks (```) to format console output, logs, and code, as
-it's very hard to read otherwise.)
-
-## Possible fixes
-
-(If you can, link to the line of code that might be responsible for the problem)
+(如果可以，链接到可能导致问题的代码行)
 
 /label ~bug 
 /cc @linpengt @shelly @qliu
