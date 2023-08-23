@@ -27,6 +27,12 @@ build_binary:
     - tar -zcf performance_pack_amd64.tar.gz performance_pack
     - mv performance_pack_amd64.tar.gz artifacts/.
     # - docker/builder/build.py --output artifacts --build-type Release --arch linux-aarch64 --package
+    - |-
+      if [ "$CI_MERGE_REQUEST_LABELS" = "quick-image" ]; then
+        docker/builder/tools/docker-info.sh
+        docker/builder/tools/docker-buildx.sh
+        docker/builder/tools/quick-image.sh
+      fi
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
 
