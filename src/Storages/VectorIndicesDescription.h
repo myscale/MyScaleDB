@@ -26,33 +26,33 @@ struct VectorIndexDescription
     const String saas_index_parameter =
         R"({
             "MSTG": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] }
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] }
             },
             "FLAT": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] }
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] }
             },
             "IVFFLAT": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
                 "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] }
             },
             "IVFPQ": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
                 "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] },
                 "M": {"type": "int", "case_sensitive": "false", "range":[0, 2147483647], "candidates":[] },
                 "bit_size": {"type": "int", "case_sensitive": "false", "range":[2, 12], "candidates":[] }
             },
             "IVFSQ": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
                 "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] },
                 "bit_size": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["4bit","6bit","8bit","8bit_uniform", "8bit_direct", "4bit_uniform", "QT_fp16"] }
             },
             "HNSWFLAT": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
                 "m": {"type": "int", "case_sensitive": "false", "range":[8, 128], "candidates":[] },
                 "ef_c": {"type": "int", "case_sensitive": "false", "range":[16, 1024], "candidates":[] }
             },
             "HNSWSQ": {
-                "metric_type": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
                 "m": {"type": "int", "case_sensitive": "false", "range":[8, 128], "candidates":[] },
                 "ef_c": {"type": "int", "case_sensitive": "false", "range":[16, 1024], "candidates":[] },
                 "bit_size": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["4bit","6bit","8bit","8bit_uniform", "8bit_direct", "4bit_uniform", "QT_fp16"] }
