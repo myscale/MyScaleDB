@@ -26,6 +26,7 @@ vector_search_test:
       changes:
         - src/**/*
         - tests/**/*
+        - contrib/**/*
     - if: $CI_PIPELINE_SOURCE != "schedule"
       when: manual
       allow_failure: true
@@ -60,6 +61,7 @@ smoke_test:
       changes:
         - src/**/*
         - tests/**/*
+        - contrib/**/*
     - if: $CI_PIPELINE_SOURCE != "schedule"
       when: manual
       allow_failure: true
@@ -97,6 +99,7 @@ stateless_test:
       changes:
         - src/**/*
         - tests/**/*
+        - contrib/**/*
     - if: $CI_PIPELINE_SOURCE != "schedule"
       when: manual
       allow_failure: true
@@ -133,6 +136,7 @@ stateful_test:
       changes:
         - src/**/*
         - tests/**/*
+        - contrib/**/*
     - if: $CI_PIPELINE_SOURCE != "schedule"
       when: manual
       allow_failure: true
