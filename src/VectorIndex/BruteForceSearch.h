@@ -1,12 +1,6 @@
 #pragma once
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdocumentation"
-#pragma GCC diagnostic ignored "-Wdeprecated"
-#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-#pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
 #include <faiss/utils/distances.h>
 #include <SearchIndex/VectorIndex.h>
-#pragma GCC diagnostic pop
 #include <VectorIndex/Status.h>
 
 namespace VectorIndex

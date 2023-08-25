@@ -1,7 +1,4 @@
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated"
 #include <SearchIndex/Common/Utils.h>
-#pragma GCC diagnostic pop
 #include <Storages/VectorIndexInfo.h>
 #include <VectorIndex/Metadata.h>
 

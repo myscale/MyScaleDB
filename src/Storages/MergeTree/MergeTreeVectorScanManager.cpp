@@ -21,8 +21,6 @@
 #include <VectorIndex/VectorSegmentExecutor.h>
 
 #include <memory>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
 
 /// #define profile
 
@@ -81,7 +79,11 @@ std::vector<float> getQueryVectorInBatch(const IColumn * query_vectors_column, c
     const IColumn & query_vectors = query_vectors_col->getData();
     auto & offsets = query_vectors_col->getOffsets();
 
-    query_vector_num = offsets.size();
+
+    if (offsets.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Number of offsets.size() exceeds the limit of int data type");
+    query_vector_num = static_cast<int>(offsets.size());
+
     for (size_t row = 0; row < offsets.size(); ++row)
     {
         size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
@@ -408,7 +410,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
         }
 
         if (brute_force)
-            return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, dim, k, is_batch, metric);
+            return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
 
         for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
         {
@@ -437,7 +439,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 OpenTelemetry::SpanHolder span4("MergeTreeVectorScanManager::vectorScan()::find_index::segment_batch_generate_results");
                 for (int64_t label = 0; label < k * vec_data->getVectorNum(); ++label)
                 {
-                    UInt32 vector_id = label / k;
+                    UInt32 vector_id = static_cast<uint32_t>(label / k);
                     if (per_id[label] > -1)
                     {
                         label_column->insert(per_id[label]);
@@ -464,7 +466,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
         if (is_batch)
         {
             OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::data_part_batch_generate_results");
-            tmp_vector_scan_result->query_vector_num = vec_data->getVectorNum();
+            tmp_vector_scan_result->query_vector_num = static_cast<int>(vec_data->getVectorNum());
             tmp_vector_scan_result->result_columns[1] = std::move(vector_id_column);
             tmp_vector_scan_result->result_columns[2] = std::move(distance_column);
         }
@@ -484,7 +486,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     }
     else
     {
-        return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, dim, k, is_batch, metric);
+        return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
     }
 }
 
@@ -807,8 +809,10 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
 
                     /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
                     int low = 0;
-                    int high = part_offset_size - 1;
                     int mid;
+                    if (part_offset_size - 1 > static_cast<size_t>(std::numeric_limits<int>::max()))
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Number of part_offset_size exceeds the limit of int data type");
+                    int high = static_cast<int>(part_offset_size - 1);
 
                     /// label_value (row id) = part_offset.
                     /// We can use binary search to quickly locate part_offset for current label.
@@ -897,7 +901,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
 
     tmp_vector_scan_result->is_batch = is_batch;
     tmp_vector_scan_result->top_k = k;
-    tmp_vector_scan_result->query_vector_num = nq;
+    tmp_vector_scan_result->query_vector_num = static_cast<int>(nq);
 
     MergeTreeReaderSettings reader_settings = {.save_marks_in_cache = true};
 
@@ -1083,7 +1087,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                     base_data,
                     k,
                     dim,
-                    nq,
+                    static_cast<int>(nq),
                     0,
                     final_id,
                     final_distance,
@@ -1242,8 +1246,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 base_data,
                 k,
                 dim,
-                nq,
-                num_rows_read,
+                static_cast<int>(nq),
+                static_cast<int>(num_rows_read),
                 final_id,
                 final_distance,
                 place_holder,
@@ -1270,7 +1274,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     {
         for (size_t label = 0; label < k * nq; ++label)
         {
-            UInt32 vector_id = label / k;
+            UInt32 vector_id = static_cast<uint32_t>(label / k);
             if (final_id[label] > -1)
             {
                 label_column->insert(final_id[label]);
@@ -1427,5 +1431,3 @@ void MergeTreeVectorScanManager::searchWrapper(
     final_id = std::move(intermediate_ids);
 }
 }
-
-#pragma GCC diagnostic pop
