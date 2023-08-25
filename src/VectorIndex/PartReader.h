@@ -1,10 +1,7 @@
 #pragma once
 
 #include <random>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-builtins"
 #include <Storages/MergeTree/IMergeTreeReader.h>
-#pragma GCC diagnostic pop
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Common/logger_useful.h>
 #include <Common/Exception.h>

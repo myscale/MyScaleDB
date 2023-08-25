@@ -14,11 +14,7 @@
 
 #include <VectorIndex/Dataset.h>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <SearchIndex/VectorIndex.h>
-#pragma GCC diagnostic pop
 
 namespace DB
 {

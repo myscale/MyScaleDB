@@ -8,14 +8,7 @@
 #include <VectorIndex/PartReader.h>
 #include <VectorIndex/SegmentId.h>
 #include <VectorIndex/Status.h>
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-#pragma GCC diagnostic ignored "-Wsuggest-destructor-override"
-#pragma GCC diagnostic ignored "-Wdocumentation"
-#pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
 #include <SearchIndex/VectorSearch.h>
-#pragma GCC diagnostic pop
 
 namespace VectorIndex
 {
