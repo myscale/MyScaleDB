@@ -753,9 +753,14 @@ std::string getLicenseFileContent(const std::string & path)
     return license_file_content;
 }
 
-std::string getLicenseClusterName(const std::string & path)
+std::string getLicenseClusterName(const std::string & path, Poco::Logger * log)
 {
     std::string license_file_content = getLicenseFileContent(path);
+    if (license_file_content.empty())
+    {
+        LOG_ERROR(log, "License is empty, server will be terminated");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Empty license");
+    }
     size_t begin_idx_cluster_tag = license_file_content.find(CLUSTER_NAME_TAG);
     size_t end_idx_cluster_tag = license_file_content.rfind(CLUSTER_NAME_TAG);
     std::string cluster_name = license_file_content.substr(
@@ -953,7 +958,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
         zkutil::ZooKeeperPtr zookeeper = context->getZooKeeper();
         zookeeper->tryCreate(LICENSE_CLUSTERS_PREFIX, "", zkutil::CreateMode::Persistent);
 
-        std::string cluster_name = getLicenseClusterName(license_file_path);
+        std::string cluster_name = getLicenseClusterName(license_file_path, log);
 
         std::string cluster_prefix = fmt::format(fmt::runtime(LICENSE_CLUSTER_PREFIX_FMT), cluster_name);
         std::string license_content_path = fmt::format(fmt::runtime(LICENSE_CONTENT_FMT), cluster_name);
@@ -961,7 +966,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
 
         if (zookeeper->exists(cluster_prefix))
         {
-            LOG_INFO(log, "Checking license in cluster mode.");
+            LOG_INFO(log, "Checking license in cluster mode, cluster_prefix is {}", cluster_prefix);
 
             std::string active_node_path = fmt::format(fmt::runtime(ACTIVE_NODE_FMT), cluster_name, machine_id_digest);
             std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
@@ -1013,7 +1018,7 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
         }
         else
         {
-            LOG_INFO(log, "Init license data in Zookeeper.");
+            LOG_INFO(log, "Init license data in Zookeeper, cluster_prefix is {}", cluster_prefix);
 
             std::string license_file_content = getLicenseFileContent(license_file_path);
 
@@ -1095,7 +1100,23 @@ void offlineInstanceInZookeeper(const Poco::Util::AbstractConfiguration & config
 
         std::string license_file_path_prefix = getLicenseFilePathPrefix(config);
         std::string license_file_path = license_file_path_prefix + LICENSE_FILE_NAME;
-        std::string cluster_name = getLicenseClusterName(license_file_path);
+        std::string cluster_name = "";
+        try
+        {
+            cluster_name = getLicenseClusterName(license_file_path, log);
+        }
+        catch (const Exception & e)
+        {
+            if (e.code() == ErrorCodes::LICENSE_ERROR)
+            {
+                zookeeper->tryRemove(LICENSE_CLUSTERS_PREFIX);
+            }
+            return;
+        }
+        catch (...)
+        {
+            return;
+        }        
 
         std::string machine_id_digest = getMachineIDDigest();
         std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
