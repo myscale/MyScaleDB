@@ -168,6 +168,15 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
                     "ALTER TABLE ... DELETE is not allowed for table {} with vector index. Please use DELETE FROM instead",
                     table->getStorageID().getNameForLogs());
 
+
+            if (mut_command->type == MutationCommand::UPDATE && metadata_snapshot->hasVectorIndices()){
+                for(auto vectorIndexDescription : metadata_snapshot->getVectorIndices()){
+                    if(mut_command->column_to_update_expression.contains(vectorIndexDescription.column))
+                        throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
+                                        " ALTER UPDATE vector column with index is not allowed, Please use DELETE and INSERT statement instead");
+                }
+            }
+
             mutation_commands.emplace_back(std::move(*mut_command));
         }
         else if (auto live_view_command = LiveViewCommand::parse(command_ast))
