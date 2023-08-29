@@ -20,6 +20,8 @@ public:
 
     void close() override;
 
+    bool good() override;
+
     std::string name;
     std::fstream fs;
 };

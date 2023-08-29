@@ -1424,7 +1424,7 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
 {
     if (!containRowIdsMaps())
     {
-        LOG_WARNING(storage.log, "There is no old index that needs to set the expiration status.");
+        LOG_INFO(storage.log, "No vector index to be set expiration satus.");
         return;
     }
         
@@ -1450,8 +1450,42 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
                     vector_index_cache_prefix,
                     old_part.id);
 
-                VectorIndex::Metadata metadata(segment_id);
                 part_storage.removeFileIfExists(segment_id.getVectorReadyFilePath());
+            }
+        }
+    }
+}
+
+void IMergeTreeDataPart::CancelLoadingVIOfInactivePart() const
+{
+    if (!containRowIdsMaps())
+    {
+        LOG_INFO(storage.log, "No vector index to be canceled from loading.");
+        return;
+    }
+        
+    {
+        std::lock_guard lock(decouple_mutex);
+        auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
+
+        String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
+            / info.getPartNameWithoutMutation() / "";
+        auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
+        for (const auto & old_part : merged_source_parts)
+        {
+            for (const auto & vec_index_desc : vec_indices)
+            {
+                VectorIndex::SegmentId segment_id(
+                    volume,
+                    getDataPartStorage().getFullPath(),
+                    name,
+                    old_part.name,
+                    vec_index_desc.name,
+                    vec_index_desc.column,
+                    vector_index_cache_prefix,
+                    old_part.id);
+
+                VectorIndex::VectorSegmentExecutor::cancelVectorIndexLoading(segment_id.getCacheKey());
             }
         }
     }

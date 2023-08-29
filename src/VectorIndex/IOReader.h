@@ -20,6 +20,8 @@ public:
 
     virtual void close() = 0;
 
+    virtual bool good() = 0;
+
     virtual ~IOReader() = default;
 };
 

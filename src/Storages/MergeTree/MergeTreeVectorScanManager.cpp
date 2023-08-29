@@ -11,6 +11,7 @@
 #include <Interpreters/OpenTelemetrySpanLog.h>
 
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
+#include <Storages/MergeTree/MergeTreeDataPartState.h>
 
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
@@ -31,6 +32,7 @@ namespace ErrorCodes
 {
     extern const int QUERY_WAS_CANCELLED;
     extern const int ILLEGAL_COLUMN;
+    extern const int INVALID_VECTOR_INDEX;
 }
 
 template <typename FloatType>
@@ -235,6 +237,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScan()");
     VectorIndexDescription index;
     bool find_index = false;
+    bool is_active = data_part->getState() == MergeTreeDataPartState::Active;
     const VectorIndicesDescription & vector_indices = metadata->vec_indices;
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
@@ -325,11 +328,18 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
             is_shutdown = data_part->storage.isShutdown();
             if (!is_shutdown)
             {
-                VectorIndex::Status status = vec_executor->load();
+                VectorIndex::Status status = vec_executor->load(is_active);
                 LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
                 LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
-                if (!status.fine())
+                if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
+                {
+                    /// inactive part reload vector index cache, behavior is prohibited
+                    LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                    context->getQueryContext()->killCurrentQuery();
+                    throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+                }
+                else if (!status.fine())
                 {
                     /// case of merged vector indices had been removed, we need to use new vector index files
                     LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
@@ -381,11 +391,18 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 is_shutdown = data_part->storage.isShutdown();
                 if (!is_shutdown)
                 {
-                    VectorIndex::Status status = vec_executor->load();
+                    VectorIndex::Status status = vec_executor->load(is_active);
                     LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
                     LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
-                    if (!status.fine())
+                    if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
+                    {
+                        /// inactive part reload vector index cache, behavior is prohibited
+                        LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                        context->getQueryContext()->killCurrentQuery();
+                        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+                    }
+                    else if (!status.fine())
                     {
                         LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
                     }

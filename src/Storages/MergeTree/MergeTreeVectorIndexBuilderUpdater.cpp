@@ -596,11 +596,10 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                             data.getSettings()->default_mstg_disk_mode);
 
                         moveVectorIndexFilesToFuturePartAndCache(metadata_snapshot, vector_tmp_relative_path, future_part, vec_index_builder);
-
+                    
                         if (future_part->containRowIdsMaps())
                         {
                             auto lock = data.lockParts();
-                            future_part->forceAllDecoupledVectorIndexExpire();
                             VectorIndex::removeRowIdsMaps(future_part, log);
                         }
                     }
@@ -788,14 +787,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// First, move index files to part and apply lightweight delete.
                 moveVectorIndexFilesToFuturePartAndCache(metadata_snapshot, vector_tmp_relative_path, future_part, vec_index_builder);
 
-                // LOG_DEBUG(log, "Cache index: status: {}", seri_status.getCode());
-                // vec_index_builder->cache();
-                // LOG_DEBUG(log, "After cache: status: {}", seri_status.getCode());
-
                 if (future_part->containRowIdsMaps())
                 {
                     auto lock = data.lockParts();
-                    future_part->forceAllDecoupledVectorIndexExpire();
                     VectorIndex::removeRowIdsMaps(future_part, log);
                 }
             }
@@ -925,6 +919,8 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
     {
         /// Finally, create the ready file to ensure that the index is available when the ready file exists
         disk->createFile(dest_relative_path + VECTOR_INDEX_READY + VECTOR_INDEX_FILE_SUFFIX);
+        /// remove Decouple merge sorce part vector index ready file
+        dest_part->forceAllDecoupledVectorIndexExpire();
     }
 
     disk->removeRecursive(vector_tmp_relative_path);
@@ -936,9 +932,12 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
     {
         LOG_DEBUG(log, "Cannot cache item, will load from index file");
         if (!vec_executor->load().fine())
-            LOG_WARNING(log, "Cannot load cache item form ready file, this might be a bug");
+            LOG_ERROR(log, "Unable to load index from file in ready state, which is highly likely a bug");
     }
+    /// Try cancel Decouple Index Cache Load
+    dest_part->CancelLoadingVIOfInactivePart();
 
+    /// new index online
     for (auto & vec_index_desc : metadata_snapshot->vec_indices)
         dest_part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
 
@@ -947,8 +946,6 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
     {
         LOG_DEBUG(log, "Apply lightweight delete to vector index in part {}", dest_part->name);
         dest_part->onLightweightDelete();
-        /// Need to reload delete bitmap from disk. The delete_bitmap in vec_index_builder doesn't contain rows deleted by lightweight.
-        vec_executor->reloadDeleteBitMap();
     }
 
     return true;

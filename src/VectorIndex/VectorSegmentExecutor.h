@@ -3,6 +3,7 @@
 #include <Common/logger_useful.h>
 #include <Compression/CompressionInfo.h>
 #include <Storages/VectorIndicesDescription.h>
+#include <VectorIndex/CacheManager.h>
 #include <VectorIndex/Dataset.h>
 #include <VectorIndex/IndexException.h>
 #include <VectorIndex/PartReader.h>
@@ -45,6 +46,7 @@ struct IndexWithMeta
 private:
     Search::DenseBitmapPtr delete_bitmap;
     mutable std::mutex mutex_of_delete_bitmap;
+    mutable std::mutex mutex_of_row_id_maps;
 public:
     Search::Parameters des;
     std::shared_ptr<std::vector<UInt64>> row_ids_map;
@@ -63,6 +65,11 @@ public:
     {
         std::lock_guard<std::mutex> lg(mutex_of_delete_bitmap);
         return delete_bitmap;
+    }
+
+    std::unique_lock<std::mutex> tryLockIndexForUpdateRowIdsMaps() const
+    {
+        return std::unique_lock<std::mutex>(mutex_of_row_id_maps, std::try_to_lock);
     }
 };
 using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
@@ -91,7 +98,7 @@ public:
 
     /// Load index from segment_id,
     /// If hit in cache then simply redirect pointer.
-    Status load();
+    Status load(bool isActivePart = true);
 
     /// A method that wraps VectorIndex::search() and does some check and post-process.
     std::shared_ptr<Search::SearchResult> search(
@@ -119,7 +126,7 @@ public:
     /// cancel building the current vector index, free associated resources.
     Status cancelBuild();
 
-    void updateCacheValueWithRowIdsMaps();
+    void updateCacheValueWithRowIdsMaps(const IndexWithMetaHolderPtr index_holder);
 
     static void setCacheManagerSizeInBytes(size_t size);
 
@@ -135,11 +142,17 @@ public:
 
     /// expire the related index from cache.
     static Status removeFromCache(const CacheKey & cache_key);
+    /// According to the cache key to cancel load vector index
+    static void cancelVectorIndexLoading(const CacheKey & cache_key);
 
     Search::DenseBitmapPtr getRealBitmap(const Search::DenseBitmapPtr & filter)
     {
         if (!segment_id.fromMergedParts())
             return filter;
+        
+        if (inverted_row_ids_map->empty() && !filter->to_vector().empty())
+            LOG_ERROR(log, "Inverted row ids maps empty, This mast be a bug! cache key: {}",
+                segment_id.getCacheKey().toString());
 
         Search::DenseBitmapPtr real_filter = std::make_shared<Search::DenseBitmap>(total_vec);
         /// Transfer row IDs in the decoupled data part to real row IDs of the old data part.
@@ -166,6 +179,10 @@ public:
     void updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids);
 
     bool supportTwoStageSearch() const { return index->supportTwoStageSearch(); }
+
+    const std::vector<UInt64> readDeleteBitmapAccordingSegmentId() const;
+
+    void convertBitmap(const std::vector<UInt64> & deleted_row_ids);
 
 private:
     void init();
