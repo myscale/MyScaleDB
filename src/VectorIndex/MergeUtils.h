@@ -37,6 +37,47 @@ renameVectorIndexFiles(const String & part_id, const String & part_name, const S
     }
 }
 
+static std::vector<SegmentId> getAllOldSegementIds(
+    const String & data_path, const DB::MergeTreeDataPartPtr & data_part, const String & index_name, const String & index_column)
+{
+    std::vector<SegmentId> segment_ids;
+    if (!data_part)
+        return segment_ids;
+
+    const DB::DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DB::DataPartStorageOnDiskBase *>(data_part->getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        return segment_ids;
+    }
+    auto volume = getVolumeFromPartStorage(*part_storage);
+    if (data_part->containRowIdsMaps())
+    {
+        auto old_parts = data_part->getMergedSourceParts();
+
+        for (const auto & old_part : old_parts)
+        {
+            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
+                / data_part->storage.getRelativeDataPath()
+                / DB::MergeTreePartInfo::fromPartName(old_part.name, DB::MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
+                      .getPartNameWithoutMutation()
+                / "";
+            SegmentId segment_id(
+                volume,
+                data_path,
+                data_part->name,
+                old_part.name,
+                index_name,
+                index_column,
+                vector_index_cache_prefix,
+                old_part.id);
+            segment_ids.emplace_back(std::move(segment_id));
+        }
+    }
+
+    return segment_ids;
+}
+
 static std::vector<SegmentId> getAllSegmentIds(
     const String & data_path, const DB::MergeTreeDataPartPtr & data_part, const String & index_name, const String & index_column)
 {

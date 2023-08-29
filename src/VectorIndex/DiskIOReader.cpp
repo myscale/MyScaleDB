@@ -30,4 +30,9 @@ void DiskIOReader::close()
 {
     fs.close();
 }
+
+bool DiskIOReader::good()
+{
+    return fs.good();
+}
 }

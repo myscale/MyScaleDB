@@ -413,8 +413,11 @@ public:
 
     void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
 
-    /// Force expiry of decouple vector index owned by part
+    /// Force decoupled vector index owned by current part expired
     void forceAllDecoupledVectorIndexExpire() const;
+
+    /// Cancel loading of all decoupled vector index owned by current part
+    void CancelLoadingVIOfInactivePart() const;
 
     /// Remove specified vector index from part, both disk and metadata.
     /// If skip_decouple, skip the vector index of old part in decouple part.

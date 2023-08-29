@@ -2,6 +2,7 @@
 #include <VectorIndex/CacheManager.h>
 
 #include <VectorIndex/IndexException.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
 #include <Interpreters/VectorIndexEventLog.h>
 
 namespace DB::ErrorCodes
@@ -11,6 +12,17 @@ extern const int LOGICAL_ERROR;
 
 namespace VectorIndex
 {
+
+size_t IndexWithMetaWeightFunc::operator()(const IndexWithMeta & index_meta) const
+{
+    return index_meta.index->getResourceUsage().memory_usage_bytes;
+}
+
+void IndexWithMetaReleaseFunction::operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr)
+{
+    if (index_meta_ptr)
+        index_meta_ptr.reset();
+}
 
 CacheManager::CacheManager(int) : log(&Poco::Logger::get("CacheManager"))
 {

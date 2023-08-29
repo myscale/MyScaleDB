@@ -7,7 +7,7 @@
 
 #include <Common/LRUResourceCache.h>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/SegmentId.h>
 
 namespace std
 {
@@ -21,26 +21,22 @@ struct hash<VectorIndex::CacheKey>
 namespace VectorIndex
 {
 
+struct IndexWithMeta;
+using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
+
 static bool m = false;
 static size_t cache_size_in_bytes = 0;
 
 class IndexWithMetaWeightFunc
 {
 public:
-    size_t operator()(const IndexWithMeta & index_meta) const
-    {
-        return index_meta.index->getResourceUsage().memory_usage_bytes;
-    }
+    size_t operator()(const IndexWithMeta & index_meta) const;
 };
 
 class IndexWithMetaReleaseFunction
 {
 public:
-    void operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr)
-    {
-        if (index_meta_ptr)
-            index_meta_ptr.reset();
-    }
+    void operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr);
 };
 
 using VectorIndexCacheType

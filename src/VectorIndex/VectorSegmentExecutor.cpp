@@ -6,9 +6,10 @@
 
 #include <boost/algorithm/string/split.hpp>
 
+#include <Common/getNumberOfPhysicalCPUCores.h>
+#include <Common/logger_useful.h>
 #include <Common/Exception.h>
 #include <Common/HashTable/HashMap.h>
-#include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/MemoryStatisticsOS.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/CompressedReadBufferFromFile.h>
@@ -27,17 +28,21 @@
 #include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/Metadata.h>
 #include <VectorIndex/VectorIndexCommon.h>
-
-#include <Common/logger_useful.h>
 #include <SearchIndex/Common/Utils.h>
 #include <SearchIndex/IndexDataFileIO.h>
+#include <Storages/IStorage.h>
 
-namespace DB::ErrorCodes
+namespace DB
 {
-extern const int STD_EXCEPTION;
-extern const int CORRUPTED_DATA;
-extern const int LOGICAL_ERROR;
-extern const int CANNOT_OPEN_FILE;
+    namespace ErrorCodes
+    {
+        extern const int STD_EXCEPTION;
+        extern const int CORRUPTED_DATA;
+        extern const int LOGICAL_ERROR;
+        extern const int CANNOT_OPEN_FILE;
+        extern const int INVALID_VECTOR_INDEX;
+    }
+    using StoragePtr = std::shared_ptr<IStorage>;
 }
 
 namespace VectorIndex
@@ -216,7 +221,7 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
     delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
 }
 
-void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
+void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps(const IndexWithMetaHolderPtr index_holder)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::updateCacheValueWithRowIdsMaps");
     try
@@ -225,24 +230,30 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps()
     }
     catch (const DB::Exception & e)
     {
-        LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
-        return;
+        LOG_ERROR(log, "Failed to load inverted row ids map entries, error: {}", e.what());
+        throw;
     }
 
     if (inverted_row_sources_map->empty())
     {
         return;
     }
-    CacheKey cache_key = segment_id.getCacheKey();
-    CacheManager * mgr = CacheManager::getInstance();
-    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
     if (index_holder)
     {
         IndexWithMeta & index_with_meta = index_holder->value();
-        index_with_meta.fallback_to_flat = fallback_to_flat;
-        index_with_meta.row_ids_map = this->row_ids_map;
-        index_with_meta.inverted_row_ids_map = this->inverted_row_ids_map;
-        index_with_meta.inverted_row_sources_map = this->inverted_row_sources_map;
+        auto update_row_id_maps_lock = index_with_meta.tryLockIndexForUpdateRowIdsMaps();
+        if (update_row_id_maps_lock.owns_lock() && index_with_meta.inverted_row_sources_map->empty())
+        {
+            LOG_DEBUG(log, "Update row id maps, cache key = {}", segment_id.getCacheKey().toString());
+            index_with_meta.fallback_to_flat = fallback_to_flat;
+            index_with_meta.inverted_row_ids_map = this->inverted_row_ids_map;
+            index_with_meta.inverted_row_sources_map = this->inverted_row_sources_map;
+            index_with_meta.row_ids_map = this->row_ids_map;
+        }
+        else
+        {
+            LOG_DEBUG(log, "Other thread is updating row id maps, no need to update, cache key = {}", segment_id.getCacheKey().toString());
+        }
     }
     /// not handle empty cache case here.
 }
@@ -285,8 +296,6 @@ Status VectorSegmentExecutor::serialize()
         index->serialize(&file_writer);
         index->saveDataID(&file_writer);
         printMemoryInfo(log, "After serialization");
-
-        writeBitMap();
 
         std::string version = index->getVersion().toString();
         auto usage = index->getResourceUsage();
@@ -372,7 +381,8 @@ void VectorSegmentExecutor::handleMergedMaps()
     LOG_DEBUG(log, "Loaded {} inverted row ids map entries", inverted_row_ids_map->size());
 }
 
-Status VectorSegmentExecutor::load()
+/// For INVALID_VECTOR_INDEX error, vectorscan query will failed, will not retry
+Status VectorSegmentExecutor::load(bool isActivePart)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::load");
     CacheManager * mgr = CacheManager::getInstance();
@@ -386,6 +396,9 @@ Status VectorSegmentExecutor::load()
     IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
     if (index_holder == nullptr)
     {
+        if (!isActivePart)
+            /// InActive part, Cancel Load Vector Index
+            return Status(DB::ErrorCodes::INVALID_VECTOR_INDEX, "Part is inactive, will not reload index!");
         LOG_DEBUG(log, "Miss cache, cache_key_str = {}", cache_key_str);
         /// We don't want multiple execution engines loading index concurrently, so we use getOrSet method of LRUResourceCache
         /// to ensure that only one execution engine may read from disk at any time.
@@ -402,7 +415,7 @@ Status VectorSegmentExecutor::load()
             try
             {
                 if (!segment_id.volume->getDisk()->exists(segment_id.getVectorReadyFilePath()))
-                    throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index is not in the ready state and cannot be loaded");
+                    throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Index is not in the ready state and cannot be loaded");
                 Metadata metadata(segment_id);
                 auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
                 metadata.readText(*buf);
@@ -446,11 +459,12 @@ Status VectorSegmentExecutor::load()
                 printMemoryInfo(log, "After load");
                 total_vec = index->numData();
                 LOG_INFO(log, "load total_vec={}", total_vec);
-                if(!readBitMap())
-                    throw DB::Exception(DB::ErrorCodes::CANNOT_OPEN_FILE, "ReadBitMap error");
-
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();
+
+                auto del_row_ids = readDeleteBitmapAccordingSegmentId();
+                delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
+                convertBitmap(del_row_ids);
 
                 return std::make_shared<IndexWithMeta>(
                     index,
@@ -499,16 +513,15 @@ Status VectorSegmentExecutor::load()
                 des = new_index.des;
                 fallback_to_flat = new_index.fallback_to_flat;
 
+                // For the vector index of the load decouple part, if there are 
+                // multiple threads performing load at the same time, only one 
+                // thread will actually execute load_func to update its own row ids map, 
+                // and other threads need to update their own row ids map according to the results of load_func
                 if (!new_index.row_ids_map->empty())
                 {
                     row_ids_map = new_index.row_ids_map;
                     inverted_row_ids_map = new_index.inverted_row_ids_map;
                     inverted_row_sources_map = new_index.inverted_row_sources_map;
-                }
-                else
-                {
-                    // very fast and frequent operations under continuous deletes
-                    updateCacheValueWithRowIdsMaps();
                 }
 
                 DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
@@ -575,8 +588,36 @@ Status VectorSegmentExecutor::load()
         }
         else
         {
-            // very fast and frequent operations under continuous deletes
-            updateCacheValueWithRowIdsMaps();
+            // very fast and frequent operations under continuous deletes.
+            // When reading row ids map related files, the files may be deleted,
+            // resulting in reading failure. It is necessary to ensure that
+            // the load thread is aware of the status when reading fails,
+            // otherwise there will be problems when using the damaged row ids map directly
+            try
+            {
+                updateCacheValueWithRowIdsMaps(std::move(index_holder));
+            }
+            catch(const DB::Exception & e)
+            {
+                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                     cache_key.getTableUUID(),
+                                                     cache_key.getPartName(),
+                                                     cache_key.getPartitionID(),
+                                                     DB::VectorIndexEventLogElement::LOAD_ERROR,
+                                                     DB::ExecutionStatus(e.code(), e.message()));
+                return Status(e.code(), e.message());
+
+            }
+            catch(...)
+            {
+                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
+                                                     cache_key.getTableUUID(),
+                                                     cache_key.getPartName(),
+                                                     cache_key.getPartitionID(),
+                                                     DB::VectorIndexEventLogElement::LOAD_ERROR,
+                                                     DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, "Unknown error"));
+                return Status(2, "Load failed");
+            }
         }
 
         return Status();
@@ -696,19 +737,28 @@ Status VectorSegmentExecutor::searchWithoutIndex(
     return status;
 }
 
-Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
+void VectorSegmentExecutor::cancelVectorIndexLoading(const CacheKey & cache_key)
 {
     Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
     CacheManager * mgr = CacheManager::getInstance();
 
-    // IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
-    // if (index_holder != nullptr)
-    // {
-    //     LOG_DEBUG(log, "Abort the query with {} cache", cache_key.toString());
-    //     IndexWithMeta & index = index_holder->value();
-    //     index.index->abort();
-    // }
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (index_holder != nullptr)
+    {
+        IndexWithMeta & index = index_holder->value();
+        Search::IndexStatus index_status = index.index->getStatus();
+        if (index_status == Search::IndexStatus::LOADING)
+        {
+            LOG_DEBUG(log, "Index {} is in {}, will be aborted", cache_key.toString(), index_status);
+            index.index->abort();
+        }
+    }
+}
 
+Status VectorSegmentExecutor::removeFromCache(const CacheKey & cache_key)
+{
+    Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
+    CacheManager * mgr = CacheManager::getInstance();
     LOG_DEBUG(log, "Num of cache items before forceExpire {} ", mgr->countItem());
     mgr->forceExpire(cache_key);
     LOG_DEBUG(log, "Num of cache items after forceExpire {} ", mgr->countItem());
@@ -767,6 +817,11 @@ bool VectorSegmentExecutor::readBitMap()
 
     size_t size;
     bit_map_reader.read(&size, sizeof(size_t));
+    if (!bit_map_reader.good())
+    {
+        LOG_ERROR(log, "Bitmap file read error.");
+        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted"); 
+    }
     if (delete_bitmap == nullptr)
         delete_bitmap = std::make_shared<Search::DenseBitmap>(size);
 
@@ -797,15 +852,17 @@ std::list<std::pair<CacheKey, Search::Parameters>> VectorSegmentExecutor::getAll
 
 void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64> & deleted_row_ids)
 {
-    if (segment_id.fromMergedParts())
+    /// Update bitmap in cache if exists
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+    if (segment_id.fromMergedParts() ||
+        !index_holder ||
+        deleted_row_ids.empty())
         return;
 
-    /// Read the delete bitmap
-    if (!readBitMap())
-    {
-        LOG_WARNING(log, "Skip to update unreadable vector bitmap file for part {}", segment_id.current_part_name);
-        return;
-    }
+    delete_bitmap = std::make_shared<Search::DenseBitmap>(*index_holder->value().getDeleteBitmap());
 
     /// Map new deleted row ids to row ids in old part and update delete bitmap
     bool need_update = false;
@@ -823,33 +880,25 @@ void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64> & deleted_row
     if (!need_update)
         return;
 
-    /// Flush the updated delete bitmap to disk
-    writeBitMap();
-
     /// Update bitmap in cache if exists
-    CacheManager * mgr = CacheManager::getInstance();
-    CacheKey cache_key = segment_id.getCacheKey();
-
-    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
     if (index_holder)
         index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
 void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids)
 {
-    if (!segment_id.fromMergedParts())
+    /// Update bitmap in cache if exists
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+
+    if (!segment_id.fromMergedParts() ||
+        !index_holder ||
+        deleted_row_ids.empty())
         return;
 
-    /// Read the delete bitmap
-    if (!readBitMap())
-    {
-        LOG_WARNING(
-            log,
-            "Skip to update unreadable vector bitmap file: owner part {}, current part {}",
-            segment_id.owner_part_name,
-            segment_id.current_part_name);
-        return;
-    }
+    delete_bitmap = std::make_shared<Search::DenseBitmap>(*index_holder->value().getDeleteBitmap());
 
     /// Call handleMergedMaps() to get inverted_row_ids_map and inverted_row_sources_map
     try
@@ -882,14 +931,6 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64> & delet
     if (!need_update)
         return;
 
-    /// Flush the updated delete bitmap to disk
-    writeBitMap();
-
-    /// Update bitmap in cache if exists
-    CacheManager * mgr = CacheManager::getInstance();
-    CacheKey cache_key = segment_id.getCacheKey();
-
-    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
     if (index_holder)
         index_holder->value().setDeleteBitmap(delete_bitmap);
 }
@@ -922,4 +963,95 @@ void VectorSegmentExecutor::configureDiskMode()
         }
     }
 }
+
+const std::vector<UInt64> VectorSegmentExecutor::readDeleteBitmapAccordingSegmentId() const
+{
+    // Get mergedatapart information according to context
+    auto local_context = DB::Context::createCopy(DB::Context::getGlobalContextInstance());
+    DB::UUID table_uuid = DB::VectorIndexEventLog::parseUUID(segment_id.getCacheKey().getTableUUID());
+
+    // Get database and table name
+    if (!DB::DatabaseCatalog::instance().tryGetByUUID(table_uuid).second)
+        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to get table and database by table uuid");
+    auto table_id = DB::DatabaseCatalog::instance().tryGetByUUID(table_uuid).second->getStorageID();
+    if (!table_id)
+        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to get table and database by table uuid");
+    
+    // Get MergeTree Data Storage
+    DB::StoragePtr table = DB::DatabaseCatalog::instance().tryGetTable({table_id.database_name, table_id.table_name}, local_context);
+    DB::MergeTreeData * merge_tree = dynamic_cast<DB::MergeTreeData *>(table.get());
+    if (!merge_tree)
+        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to fetch MergeTree Data Storage");
+    
+    // Get the part corresponding to the current segment, Whether to allow reading delete bitmap from part in outdated state?
+    auto part = merge_tree->getPartIfExists(segment_id.current_part_name, {DB::MergeTreeDataPartState::Active});
+    if (!part)
+        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Cannot get active part according to the segment");
+
+    LOG_INFO(log,
+             "Read Delete Bitmap From Part {}, Current segment_id Part {}, Own Part {}",
+             part->name,
+             segment_id.current_part_name,
+             segment_id.owner_part_name);
+    auto row_exists_column_opt = part->readRowExistsColumn();
+    std::vector<UInt64> del_row_ids; /// Store deleted row ids
+    if (!row_exists_column_opt.has_value())
+    {
+        LOG_INFO(log, "row_exists column is empty in part {}, Delete bitmap will be all set to true", part->name);
+        return del_row_ids;
+    }
+
+    const DB::ColumnUInt8 * row_exists_col = typeid_cast<const DB::ColumnUInt8 *>(row_exists_column_opt.value().get());
+    if (row_exists_col == nullptr)
+    {
+        LOG_WARNING(log, "row_exists column type is not UInt8 in part {}", part->name);
+        return del_row_ids;
+    }
+
+    const DB::ColumnUInt8::Container & vec_res = row_exists_col->getData();
+    for (size_t pos = 0; pos < vec_res.size(); pos++)
+    {
+        if (!vec_res[pos])
+            del_row_ids.push_back(static_cast<UInt64>(pos));
+    }
+
+    return del_row_ids;
+}
+
+void VectorSegmentExecutor::convertBitmap(const std::vector<UInt64> & deleted_row_ids)
+{
+    if (segment_id.fromMergedParts())
+        if (!inverted_row_sources_map ||
+            !inverted_row_ids_map)
+        {
+            LOG_ERROR(log, "Convert Bitmap From Merge Parts, But inverted row is empty. This is Bug!");
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Inverted Row Id Data corruption");
+        }
+
+    if (segment_id.fromMergedParts())
+    {
+        for (auto & new_row_id : deleted_row_ids)
+        {
+            if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
+            {
+                UInt64 old_row_id = (*inverted_row_ids_map)[new_row_id];
+                if (delete_bitmap->is_member(old_row_id))
+                {
+                    delete_bitmap->unset(old_row_id);
+                }
+            }
+        }
+    }
+    else
+    {
+        for (auto & del_row_id : deleted_row_ids)
+        {
+            if (delete_bitmap->is_member(del_row_id))
+            {
+                delete_bitmap->unset(del_row_id);
+            }
+        }
+    }
+}
+
 }

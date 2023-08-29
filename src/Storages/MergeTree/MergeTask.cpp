@@ -32,6 +32,8 @@
 #include <Processors/Transforms/TTLCalcTransform.h>
 #include <Processors/Transforms/DistinctSortedTransform.h>
 #include <Processors/Transforms/DistinctTransform.h>
+#include <VectorIndex/CacheManager.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/MergeUtils.h>
 #include <IO/WriteIntText.h>
 
@@ -1066,6 +1068,28 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
 
         /// Initialize the vector index metadata for the new part
         global_ctx->new_data_part->loadVectorIndexMetadata();
+
+        // For the decouple part, the row ids map in the cache needs to be updated in advance, 
+        // otherwise, the thread that searches for the decouple part for the first time will 
+        // perform an io operation of read row ids map
+        const VectorIndicesDescription & vector_indices = global_ctx->new_data_part->storage.getInMemoryMetadataPtr()->vec_indices;
+        for (auto & v_index : vector_indices)
+            for (auto & segment_id : VectorIndex::getAllOldSegementIds(
+                                        global_ctx->new_data_part->getDataPartStorage().getFullPath(),
+                                        global_ctx->new_data_part,
+                                        v_index.name,
+                                        v_index.column))
+            {
+                VectorIndex::CacheKey cache_key = segment_id.getCacheKey();
+                VectorIndex::CacheManager * mgr = VectorIndex::CacheManager::getInstance();
+                VectorIndex::IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+                VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+                if (index_holder)
+                {
+                    LOG_DEBUG(ctx->log, "Update row ids map at the end of the merge task");
+                    vec_executor.updateCacheValueWithRowIdsMaps(std::move(index_holder));
+                }
+            }
     }
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
