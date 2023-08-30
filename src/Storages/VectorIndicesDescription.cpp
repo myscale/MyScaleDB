@@ -75,8 +75,7 @@ bool VectorIndexDescription::operator==(const VectorIndexDescription & other) co
         data_type == other.data_type &&
         sample_block.equal(other.sample_block) &&
         parameters == other.parameters &&
-        dim == other.dim &&
-        definition_ast == other.definition_ast;
+        dim == other.dim;
 }
 
 VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(const ASTPtr & definition_ast, const ColumnsDescription & columns)
