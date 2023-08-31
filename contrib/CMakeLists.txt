@@ -193,9 +193,6 @@ add_contrib (google-benchmark-cmake google-benchmark)
 
 add_contrib (ulid-c-cmake ulid-c)
 
-set(ENABLE_FAISS ON)
-set(ENABLE_SCANN ON)
-set(ENABLE_DISKANN OFF)
 set(MYSCALE_MODE ON)
 set(MYSCALE_MODE_WITH_UPGRADE ON)
 set(SI_PYBIND OFF)

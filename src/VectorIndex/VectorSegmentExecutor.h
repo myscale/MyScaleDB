@@ -208,7 +208,9 @@ private:
         }
     }
 
+#ifdef ENABLE_SCANN
     std::shared_ptr<Search::DiskIOManager> getDiskIOManager();
+#endif
     void configureDiskMode();
 
     static std::once_flag once;
