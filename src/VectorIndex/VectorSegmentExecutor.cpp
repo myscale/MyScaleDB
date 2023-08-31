@@ -199,7 +199,9 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
                 des,
                 false /* load_diskann_after_build */,
                 vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
                 getDiskIOManager(),
+#endif
                 true /* use_file_checksum */,
                 true /* manage_cache_folder */);
         index->setTrainDataChunkSize(train_block_size);
@@ -444,7 +446,9 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                         des,
                         false /* load_diskann_after_build */,
                         vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
                         getDiskIOManager(),
+#endif
                         true /* use_file_checksum */,
                         true /* manage_cache_folder */);
 
@@ -935,6 +939,7 @@ void VectorSegmentExecutor::updateMergedBitMap(const std::vector<UInt64> & delet
         index_holder->value().setDeleteBitmap(delete_bitmap);
 }
 
+#ifdef ENABLE_SCANN
 std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
 {
     static std::mutex mutex;
@@ -948,6 +953,7 @@ std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
         io_manager = std::make_shared<Search::DiskIOManager>(max_threads, 64);
     return io_manager;
 }
+#endif
 
 void VectorSegmentExecutor::configureDiskMode()
 {
