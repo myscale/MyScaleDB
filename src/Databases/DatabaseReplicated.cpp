@@ -30,10 +30,12 @@
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTDropQuery.h>
 #include <Parsers/ASTFunction.h>
+#include <Parsers/ASTDeleteQuery.h>
 #include <Parsers/formatAST.h>
 #include <Parsers/parseQuery.h>
 #include <Parsers/ParserCreateQuery.h>
 #include <Parsers/queryToString.h>
+#include <Storages/AlterCommands.h>
 
 namespace DB
 {
@@ -1387,16 +1389,62 @@ bool DatabaseReplicated::shouldReplicateQuery(const ContextPtr & query_context, 
     if (query_context->getClientInfo().is_replicated_database_internal)
         return false;
 
+    const auto is_replicated_table = [&](const ASTPtr & ast)
+    {
+        auto table_id = query_context->resolveStorageID(ast, Context::ResolveOrdinary);
+        StoragePtr table = DatabaseCatalog::instance().getTable(table_id, query_context);
+
+        return table->supportsReplication();
+    };
+
+    const auto has_many_shards = [&]()
+    {
+        /// If there is only 1 shard then there is no need to replicate some queries.
+        auto current_cluster = tryGetCluster();
+        return
+            !current_cluster || /// Couldn't get the cluster, so we don't know how many shards there are.
+            current_cluster->getShardsInfo().size() > 1;
+    };
+
     /// Some ALTERs are not replicated on database level
     if (const auto * alter = query_ptr->as<const ASTAlterQuery>())
     {
-        return !alter->isAttachAlter() && !alter->isFetchAlter() && !alter->isDropPartitionAlter();
+        if (alter->isAttachAlter() || alter->isFetchAlter() || alter->isDropPartitionAlter())
+            return false;
+
+        if (has_many_shards() || !is_replicated_table(query_ptr))
+            return true;
+
+        try
+        {
+            /// Metadata alter should go through database
+            for (const auto & child : alter->command_list->children)
+                if (AlterCommand::parse(child->as<ASTAlterCommand>()))
+                    return true;
+
+            /// It's ALTER PARTITION or mutation, doesn't involve database
+            return false;
+        }
+        catch (...)
+        {
+            tryLogCurrentException(log);
+        }
+
+        return true;
     }
 
     /// DROP DATABASE is not replicated
     if (const auto * drop = query_ptr->as<const ASTDropQuery>())
     {
-        return drop->table.get();
+        if (drop->table.get())
+            return drop->kind != ASTDropQuery::Truncate;
+
+        return false;
+    }
+
+    if (query_ptr->as<const ASTDeleteQuery>() != nullptr)
+    {
+        return has_many_shards() || !is_replicated_table(query_ptr);
     }
 
     return true;
