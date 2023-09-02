@@ -677,7 +677,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
         }
 
         // Transfer the results to newRowIds
-        if (!first_stage_only)
+        /// if (!first_stage_only) Use new row ids for decouple part
         {
             DB::OpenTelemetry::SpanHolder span_transfer_id("VectorSegmentExecutor::performSearch()::transferToNewRowIds");
             transferToNewRowIds(ret);

@@ -235,10 +235,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     const Search::DenseBitmapPtr filter)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScan()");
-    VectorIndexDescription index;
     bool find_index = false;
-    bool is_active = data_part->getState() == MergeTreeDataPartState::Active;
-    const VectorIndicesDescription & vector_indices = metadata->vec_indices;
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
     const VectorScanDescription & desc = descs[0];
@@ -262,173 +259,16 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
     LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
 
-    String metric_str = data_part->storage.getSettings()->vector_search_metric_type;
+    String metric_str;
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_path, data_part);
 
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(data_part->getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
-
-    std::vector<VectorIndex::SegmentId> segment_ids;
-    for (auto & v_index : vector_indices)
-    {
-        if (v_index.column == search_column_name)
-        {
-            if (v_index.parameters && v_index.parameters->has("metric_type"))
-            {
-                metric_str = v_index.parameters->getValue<String>("metric_type");
-            }
-            
-            segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
-            if (segment_ids.size() >= 1)
-            {
-                find_index = true;
-                index = v_index;
-                LOG_DEBUG(log, "Index found, because index segment_ids is not empty");
-                String cache_key = segment_ids[0].getCacheKey().toString();
-                LOG_DEBUG(log, "Cache key = {}", cache_key);
-                break;
-            }
-        }
-    }
+    find_index = vec_executors.size() > 0;
 
     Search::Metric metric = VectorIndex::getMetric(metric_str);
 
     if (find_index)
     {
-        LOG_DEBUG(log, "Find index, segment_ids size: {}", segment_ids.size());
-        Search::IndexType index_type = VectorIndex::getIndexType(index.type);
-        Search::Parameters index_params = VectorIndex::convertPocoJsonToMap(index.parameters);
-        index_params.erase("metric_type");
-        DB::OpenTelemetry::SpanHolder span2("MergeTreeVectorScanManager::vectorScan()::find_index");
-        span2.addAttribute("vectorScan.segment_ids", segment_ids.size());
-
-        std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
-        bool retry = false;
-        bool brute_force = false;
-        bool is_shutdown = false;
-
-        size_t min_bytes_to_build_vector_index = data_part->storage.getSettings()->min_bytes_to_build_vector_index;
-        bool default_mstg_disk_mode = data_part->storage.getSettings()->default_mstg_disk_mode;
-        for (VectorIndex::SegmentId & segment_id : segment_ids)
-        {
-            LOG_DEBUG(log, "Create vector segment executor for : {}", segment_id.getFullPath());
-            // FIXME (qliu): rows_count is wrong for decoupled parts
-            VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
-                segment_id,
-                index_type,
-                metric,
-                dim,
-                data_part->rows_count,
-                index_params,
-                min_bytes_to_build_vector_index,
-                default_mstg_disk_mode);
-            is_shutdown = data_part->storage.isShutdown();
-            if (!is_shutdown)
-            {
-                VectorIndex::Status status = vec_executor->load(is_active);
-                LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
-                LOG_DEBUG(log, "Load vector index: {}", status.getCode());
-
-                if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
-                {
-                    /// inactive part reload vector index cache, behavior is prohibited
-                    LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
-                    context->getQueryContext()->killCurrentQuery();
-                    throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
-                }
-                else if (!status.fine())
-                {
-                    /// case of merged vector indices had been removed, we need to use new vector index files
-                    LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
-                    retry = true;
-                    brute_force = true;
-                    break;
-                }
-            }
-            else
-            {
-                break;
-            }
-            vec_executors.emplace_back(vec_executor);
-        }
-
-        if (!is_shutdown && data_part->storage.isShutdown())
-        {
-            retry = false;
-            for (VectorIndex::SegmentId & segment_id : segment_ids)
-            {
-                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
-            }
-        }
-
-        if (retry)
-        {
-            vec_executors.clear();
-            segment_ids.clear();
-            if (data_part->containVectorIndex(index.name, index.column))
-            {
-                String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-                    / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
-                VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column, vector_index_cache_prefix);
-                segment_ids.emplace_back(std::move(segment_id));
-            }
-
-            if (segment_ids.size() == 1)
-            {
-                LOG_DEBUG(log, "Create vector segment executor for : {}", segment_ids[0].getFullPath());
-                VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
-                    segment_ids[0],
-                    index_type,
-                    metric,
-                    dim,
-                    data_part->rows_count,
-                    index_params,
-                    min_bytes_to_build_vector_index,
-                    default_mstg_disk_mode);
-                is_shutdown = data_part->storage.isShutdown();
-                if (!is_shutdown)
-                {
-                    VectorIndex::Status status = vec_executor->load(is_active);
-                    LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
-                    LOG_DEBUG(log, "Load vector index: {}", status.getCode());
-
-                    if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
-                    {
-                        /// inactive part reload vector index cache, behavior is prohibited
-                        LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
-                        context->getQueryContext()->killCurrentQuery();
-                        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
-                    }
-                    else if (!status.fine())
-                    {
-                        LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
-                    }
-                    else
-                    {
-                        vec_executors.emplace_back(vec_executor);
-                        brute_force = false;
-                    }
-                }
-            }
-        }
-
-        if (is_shutdown || data_part->storage.isShutdown())
-        {
-            if (retry && !is_shutdown && segment_ids.size() == 1)
-            {
-                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_ids[0].getCacheKey());
-            }
-            LOG_WARNING(log, "Query using vector index was canceled due to a concurrent detach or drop table or database query.");
-            context->getQueryContext()->killCurrentQuery();
-            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
-        }
-
-        if (brute_force)
-            return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
-
+        /// find index
         for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
         {
             OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::search");
@@ -447,9 +287,20 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
             LOG_DEBUG(log, "Start search: vector num: {}", vec_data->getVectorNum());
 
-            auto search_results = vec_executor->search(vec_data, k, real_filter, search_params);
+            /// Although the vector index type support two stage search, the actual built index may fallback to flat.
+            bool first_stage_only = false;
+            if (support_two_stage_search && vec_executor->supportTwoStageSearch())
+                first_stage_only = true;
+
+            LOG_DEBUG(log, "first stage only = {}", first_stage_only);
+
+            auto search_results = vec_executor->search(vec_data, k, real_filter, search_params, first_stage_only);
             auto per_id = search_results->getResultIndices();
             auto per_distance = search_results->getResultDistances();
+
+            /// Update k value to num_reorder in two search stage.
+            if (first_stage_only)
+                k = search_results->getNumCandidates();
 
             if (is_batch)
             {
@@ -464,7 +315,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                         distance_column->insert(per_distance[label]);
                     }
                 }
-                
             }
             else
             {
@@ -505,6 +355,314 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     {
         return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
     }
+}
+
+VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
+    const MergeTreeData::DataPartPtr & data_part,
+    const std::vector<UInt64> & row_ids,
+    const std::vector<Float32> & distances)
+{
+    /// Reference vectorScan() for non-batch vector search
+    OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::executeSecondStageVectorScan()");
+    span.addAttribute("secondsearchstage.num_reorder", row_ids.size());
+    const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
+
+    const VectorScanDescription & desc = descs[0];
+
+    VectorScanResultPtr tmp_vector_scan_result = std::make_shared<VectorScanResult>();
+
+    tmp_vector_scan_result->result_columns.resize(2);
+    auto distance_column = DataTypeFloat32().createColumn();
+    auto label_column = DataTypeUInt32().createColumn();
+
+    /// Determine the top k value, no more than passed in row_ids size.
+    int k = desc.topk > 0 ? desc.topk : VectorIndex::DEFAULT_TOPK;
+    span.addAttribute("secondsearchstage.origin_topk", k);
+    size_t num_reorder = row_ids.size();
+    if (k > static_cast<int>(num_reorder))
+        k = static_cast<int>(num_reorder);
+
+    /// Get segment ids for vector index
+    const String data_path = data_part->getDataPartStorage().getFullPath();
+
+    [[maybe_unused]] String metric_str;
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_path, data_part);
+
+    bool brute_force = vec_executors.size() == 0;
+    if (brute_force)
+    {
+        /// Data part has no vector index, no need to do two stage search.
+        for (int64_t label = 0; label < k; label++)
+        {
+            label_column->insert(row_ids[label]);
+            distance_column->insert(distances[label]);
+        }
+    }
+    else
+    {
+        /// Prepare paramters for computeTopDistanceSubset() if index supports two stage search
+        auto vec_data = generateVectorDataset(false, desc);
+        auto first_stage_result = Search::SearchResult::createTopKHolder(1, num_reorder);
+        auto sr_indices = first_stage_result->getResultIndices();
+        auto sr_distances = first_stage_result->getResultDistances();
+
+        for (size_t i = 0; i < row_ids.size(); i++)
+        {
+            sr_indices[i] = row_ids[i];
+            sr_distances[i] = distances[i];
+        }
+
+        OpenTelemetry::SpanHolder span2("MergeTreeVectorScanManager::executeSecondStageVectorScan()::before calling computeTopDistanceSubset");
+
+        for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
+        {
+            std::shared_ptr<Search::SearchResult> real_first_stage_result = nullptr;
+
+            {
+                OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::executeSecondStageVectorScan()::TransferToOldRowIds()");
+                /// Try to transfer to old part's row ids for decouple part. And skip if no need.
+                real_first_stage_result = vec_executor->TransferToOldRowIds(first_stage_result);
+            }
+
+            /// No rows needed from this old data part
+            if (!real_first_stage_result)
+                continue;
+
+            std::shared_ptr<Search::SearchResult> search_results;
+            {
+                OpenTelemetry::SpanHolder span4("MergeTreeVectorScanManager::executeSecondStageVectorScan()::computeTopDistanceSubset()");
+                if (vec_executor->supportTwoStageSearch())
+                {
+                    search_results = vec_executor->computeTopDistanceSubset(vec_data, real_first_stage_result, k);
+                }
+                else
+                    search_results = real_first_stage_result;
+            }
+
+            /// Cut first stage result count (num_reorder) to top k for cases where index not support two stage search
+            auto real_result_size = search_results->getNumCandidates();
+            if (real_result_size > k)
+                real_result_size = k;
+
+            auto per_id = search_results->getResultIndices();
+            auto per_distance = search_results->getResultDistances();
+
+            for (int64_t label = 0; label < real_result_size; ++label)
+            {
+                if (per_id[label] > -1)
+                {
+                    label_column->insert(per_id[label]);
+                    distance_column->insert(per_distance[label]);
+                }
+            }
+        }
+    }
+
+    if (label_column->size() > 0)
+    {
+        tmp_vector_scan_result->top_k = k;
+        tmp_vector_scan_result->computed = true;
+        tmp_vector_scan_result->result_columns[0] = std::move(label_column);
+        tmp_vector_scan_result->result_columns[1] = std::move(distance_column);
+    }
+    else /// no result
+    {
+        tmp_vector_scan_result->computed = false;
+        LOG_DEBUG(log, "[executeSecondStageVectorScan] Failed to get second stage result for part {}", data_part->name);
+    }
+
+    return tmp_vector_scan_result;
+}
+
+std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::prepareForVectorScan(
+    String & metric_str,
+    const String & data_path,
+    const MergeTreeData::DataPartPtr & data_part)
+{
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
+
+    VectorIndexDescription index;
+    bool find_index = false;
+    bool is_active = data_part->getState() == MergeTreeDataPartState::Active;
+    const VectorIndicesDescription & vector_indices = metadata->vec_indices;
+    const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
+
+    const VectorScanDescription & desc = descs[0];
+    const String search_column_name = desc.search_column_name;
+
+    UInt64 dim = desc.search_column_dim;
+
+    metric_str = data_part->storage.getSettings()->vector_search_metric_type;
+
+    const DataPartStorageOnDiskBase * part_storage
+        = dynamic_cast<const DataPartStorageOnDiskBase *>(data_part->getDataPartStoragePtr().get());
+    if (part_storage == nullptr)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+    }
+
+    std::vector<VectorIndex::SegmentId> segment_ids;
+    for (auto & v_index : vector_indices)
+    {
+        if (v_index.column == search_column_name)
+        {
+            if (v_index.parameters && v_index.parameters->has("metric_type"))
+            {
+                metric_str = v_index.parameters->getValue<String>("metric_type");
+            }
+
+            segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
+            if (segment_ids.size() >= 1)
+            {
+                find_index = true;
+                index = v_index;
+                LOG_DEBUG(log, "Index found, because index segment_ids is not empty");
+                String cache_key = segment_ids[0].getCacheKey().toString();
+                LOG_DEBUG(log, "Cache key = {}", cache_key);
+                break;
+            }
+        }
+    }
+
+    /// Will use brute force search.
+    if (!find_index)
+        return vec_executors;
+
+    Search::Metric metric = VectorIndex::getMetric(metric_str);
+
+    LOG_DEBUG(log, "Find index, segment_ids size: {}", segment_ids.size());
+    Search::IndexType index_type = VectorIndex::getIndexType(index.type);
+    Search::Parameters index_params = VectorIndex::convertPocoJsonToMap(index.parameters);
+    index_params.erase("metric_type");
+    DB::OpenTelemetry::SpanHolder span2("MergeTreeVectorScanManager::vectorScan()::find_index");
+    span2.addAttribute("vectorScan.segment_ids", segment_ids.size());
+
+    bool retry = false;
+    bool brute_force = false;
+    bool is_shutdown = false;
+
+    size_t min_bytes_to_build_vector_index = data_part->storage.getSettings()->min_bytes_to_build_vector_index;
+    bool default_mstg_disk_mode = data_part->storage.getSettings()->default_mstg_disk_mode;
+    for (VectorIndex::SegmentId & segment_id : segment_ids)
+    {
+        LOG_DEBUG(log, "Create vector segment executor for : {}", segment_id.getFullPath());
+        // FIXME (qliu): rows_count is wrong for decoupled parts
+        VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+            segment_id,
+            index_type,
+            metric,
+            dim,
+            data_part->rows_count,
+            index_params,
+            min_bytes_to_build_vector_index,
+            default_mstg_disk_mode);
+
+        is_shutdown = data_part->storage.isShutdown();
+        if (!is_shutdown)
+        {
+            VectorIndex::Status status = vec_executor->load(is_active);
+            LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
+            LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+
+            if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
+            {
+                /// inactive part reload vector index cache, behavior is prohibited
+                LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                context->getQueryContext()->killCurrentQuery();
+                throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+            }
+            else if (!status.fine())
+            {
+                /// case of merged vector indices had been removed, we need to use new vector index files
+                LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
+                retry = true;
+                brute_force = true;
+                break;
+            }
+        }
+        else
+        {
+            break;
+        }
+        vec_executors.emplace_back(std::move(vec_executor));
+    }
+
+    if (!is_shutdown && data_part->storage.isShutdown())
+    {
+        retry = false;
+        for (VectorIndex::SegmentId & segment_id : segment_ids)
+        {
+            VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+        }
+    }
+
+    if (retry)
+    {
+        vec_executors.clear();
+        segment_ids.clear();
+        if (data_part->containVectorIndex(index.name, index.column))
+        {
+            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
+                / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
+            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column, vector_index_cache_prefix);
+            segment_ids.emplace_back(std::move(segment_id));
+        }
+
+        if (segment_ids.size() == 1)
+        {
+            LOG_DEBUG(log, "Create vector segment executor for : {}", segment_ids[0].getFullPath());
+            VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
+                segment_ids[0],
+                index_type,
+                metric,
+                dim,
+                data_part->rows_count,
+                index_params,
+                min_bytes_to_build_vector_index,
+                default_mstg_disk_mode);
+
+            is_shutdown = data_part->storage.isShutdown();
+            if (!is_shutdown)
+            {
+                VectorIndex::Status status = vec_executor->load(is_active);
+                LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
+                LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+
+                if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
+                {
+                    /// inactive part reload vector index cache, behavior is prohibited
+                    LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                    context->getQueryContext()->killCurrentQuery();
+                    throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+                }
+                else if (!status.fine())
+                {
+                    LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
+                }
+                else
+                {
+                    vec_executors.emplace_back(std::move(vec_executor));
+                    brute_force = false;
+                }
+            }
+        }
+    }
+
+    if (is_shutdown || data_part->storage.isShutdown())
+    {
+        if (retry && !is_shutdown && segment_ids.size() == 1)
+        {
+            VectorIndex::VectorSegmentExecutor::removeFromCache(segment_ids[0].getCacheKey());
+        }
+        LOG_WARNING(log, "Query using vector index was canceled due to a concurrent detach or drop table or database query.");
+        context->getQueryContext()->killCurrentQuery();
+        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+    }
+
+    if (brute_force)
+        vec_executors.clear();
+
+    return vec_executors;
 }
 
 void MergeTreeVectorScanManager::mergeResult(

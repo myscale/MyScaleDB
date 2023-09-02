@@ -166,6 +166,66 @@ public:
         return real_filter;
     }
 
+    std::shared_ptr<Search::SearchResult> TransferToOldRowIds(const std::shared_ptr<Search::SearchResult> & result)
+    {
+        if (!segment_id.fromMergedParts())
+            return result;
+
+        if (!result)
+        {
+            LOG_DEBUG(&Poco::Logger::get("TransferToOldRowIds"), "SearchResult is NIL");
+            return result;
+        }
+
+        if (inverted_row_sources_map->empty())
+        {
+            LOG_DEBUG(log, "Skip to transfter to old row ids");
+            return nullptr;
+        }
+
+        long inverted_size = static_cast<long>(inverted_row_sources_map->size());
+
+        /// Transfer row IDs in the decoupled data part to real row IDs of the old data part.
+        /// TODO: Not handle batch distance cases.
+        auto new_distances = result->getResultDistances();
+        auto new_ids = result->getResultIndices();
+
+        std::vector<UInt64> real_row_ids;
+        std::vector<DB::Float32> distances;
+        for (int i = 0; i < result->getNumCandidates(); i++)
+        {
+            auto new_row_id = new_ids[i];
+
+            if (new_row_id == -1 || new_row_id >= inverted_size)
+                continue;
+
+            if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
+            {
+                real_row_ids.emplace_back((*inverted_row_ids_map)[new_row_id]);
+                distances.emplace_back(new_distances[i]);
+            }
+        }
+
+        if (real_row_ids.size() == 0)
+            return nullptr;
+
+        /// Prepare search result for this old part
+        size_t real_num_reorder = real_row_ids.size();
+        std::shared_ptr<Search::SearchResult> real_search_result =
+                Search::SearchResult::createTopKHolder(result->numQueries(), real_num_reorder);
+
+        auto per_ids = real_search_result->getResultIndices();
+        auto per_distances = real_search_result->getResultDistances();
+
+        for (size_t i = 0; i < real_num_reorder; i++)
+        {
+            per_ids[i] = real_row_ids[i];
+            per_distances[i] = distances[i];
+        }
+
+        return real_search_result;
+    }
+
     /// Update SegmentId
     void updateSegmentId(const SegmentId & new_segment_id) { segment_id = new_segment_id; }
 

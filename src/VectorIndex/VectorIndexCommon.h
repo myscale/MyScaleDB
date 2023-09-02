@@ -44,8 +44,9 @@ namespace VectorIndex
 
 const int DEFAULT_TOPK = 30;
 
-using VectorIndexPtr = std::shared_ptr<
-    Search::VectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>>;
+using SearchVectorIndex = Search::VectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>;
+using VectorIndexPtr = std::shared_ptr<SearchVectorIndex>;
+
 
 static inline std::string ParametersToString(const Search::Parameters & params)
 {

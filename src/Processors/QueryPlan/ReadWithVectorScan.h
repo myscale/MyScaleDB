@@ -57,6 +57,11 @@ private:
     const size_t preferred_max_column_in_block_size_bytes;
     const bool sample_factor_column_queried;
 
+    bool support_two_stage_search = false;      /// True if two stage search is used.
+    UInt64 num_reorder = 0;   /// number of candidates for first stage search
+    bool need_remove_part_virual_column = true; /// _part virtual column is needed only for two stage search
+    bool need_remove_part_offset_column = true; /// _part_offset virtual column
+
     std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read;
 
     Poco::Logger * log;
