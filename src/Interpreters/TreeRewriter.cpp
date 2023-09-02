@@ -1388,7 +1388,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         if (metadata_snapshot && !table_is_remote)
         {
             /// 1 for ASC, -1 for DESC
-            int direction = 1;
+            direction = 1;
 
             auto order_by = select_query->orderBy();
             if (!order_by)
@@ -1431,7 +1431,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                 if (vector_index_desc.column == vec_col_name)
                 {
                     const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
-                    if(index_parameter.contains("metric_type"))
+                    if (index_parameter.contains("metric_type"))
                     {
                         /// Get metric_type in index definition
                         metric_type = index_parameter.at("metric_type");

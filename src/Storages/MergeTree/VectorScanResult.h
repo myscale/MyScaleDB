@@ -11,7 +11,7 @@ struct VectorScanResult
 {
     bool is_batch;
     bool computed;
-    int top_k;
+    int top_k;   /// Will be reused to store num_reorder in two stage search
     int query_vector_num;
     MutableColumns result_columns;
     std::vector<bool> was_result_processed;  /// Mark if the result was processed or not.

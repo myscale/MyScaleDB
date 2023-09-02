@@ -808,6 +808,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         /// top_k is get from limit N
         vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
+        vector_scan_desc.direction = syntax->direction;
 
         LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 

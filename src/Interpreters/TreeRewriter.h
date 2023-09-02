@@ -54,6 +54,7 @@ struct TreeRewriterResult
     String vector_scan_metric_type;
     UInt64 limit_length = 0;
     bool vector_from_right_table = false;
+    int direction = 1;
 
     /// Which column is needed to be ARRAY-JOIN'ed to get the specified.
     /// For example, for `SELECT s.v ... ARRAY JOIN a AS s` will get "s.v" -> "a.v".

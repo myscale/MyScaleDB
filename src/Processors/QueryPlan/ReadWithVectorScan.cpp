@@ -3,6 +3,11 @@
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/Sources/NullSource.h>
+#include <Processors/Transforms/MergeSortingTransform.h>
+#include <Processors/Transforms/PartialSortingTransform.h>
+#include <Processors/Transforms/VectorScanRecomputeTransform.h>
+#include <Processors/Transforms/VectorScanSplitTransform.h>
+#include <Processors/Merges/MergingSortedTransform.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
@@ -84,6 +89,87 @@ ReadWithVectorScan::ReadWithVectorScan(
 
     if (enable_parallel_reading)
         read_task_callback = context->getMergeTreeReadTaskCallback();
+
+    /// Determine if we can use two stage search
+    if (context->getSettingsRef().two_stage_search_option > 0 && !metadata_for_reading->vec_indices.empty())
+    {
+        /// Currently support one vector index
+        auto vector_index = metadata_for_reading->vec_indices[0];
+
+        /// Check vector index type
+        Search::IndexType type;
+        Search::findEnumByName(vector_index.type, type);
+
+        bool disk_mode = data.getSettings()->default_mstg_disk_mode;
+
+        const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index.parameters);
+        if (index_parameter.contains("disk_mode"))
+            disk_mode = index_parameter.getParam<bool>("disk_mode", disk_mode);
+
+        auto vector_scan_info_ptr = query_info.vector_scan_info;
+
+        bool adaptive_two_stage = context->getSettingsRef().two_stage_search_option == 1;
+
+        /// Currently two stage search doesn't support batch distance
+        if (disk_mode && (type == Search::IndexType::MSTG) && vector_scan_info_ptr && !vector_scan_info_ptr->is_batch)
+        {
+            /// Prepare for number of cadidates (num_reorder) for first stage search
+            auto vector_scan_desc = vector_scan_info_ptr->vector_scan_descs[0];
+            Search::Parameters search_params = VectorIndex::convertPocoJsonToMap(vector_scan_desc.vector_parameters);
+
+            UInt64 total_rows = 0;
+            for (auto part : prepared_parts)
+                total_rows += part->rows_count;
+
+            /// Use total rows of all parts to get num_reorder for first search stage
+            num_reorder = VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.topk, search_params);
+
+            LOG_DEBUG(log, "num_reorder for first stage = {}", num_reorder);
+
+            /// In adaptive two stage search option, enable only when disk_mode = true and saved IO count is larger than 1000
+            if (adaptive_two_stage)
+            {
+                UInt32 total_num_reorder = 0;
+                for (auto part : prepared_parts)
+                {
+                    /// get num_reorder for every part
+                    total_num_reorder += VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(
+                                            type, disk_mode, part->rows_count, vector_scan_desc.topk, search_params);
+                }
+
+                LOG_DEBUG(log, "num_reorder for first stage = {}, total_num_reorder for all parts = {}", num_reorder, total_num_reorder);
+
+                if (total_num_reorder - num_reorder > 1000)
+                    support_two_stage_search = true;
+            }
+            else /// Always enable
+                support_two_stage_search = true;
+
+            /// Add virtual columns which are needed for two stage seach
+            if (support_two_stage_search)
+            {
+                for (auto & name : virt_column_names)
+                {
+                    if (name == "_part")
+                    {
+                        need_remove_part_virual_column = false;
+                        continue;
+                    }
+                    else if (name == "_part_offset")
+                    {
+                        need_remove_part_offset_column = false;
+                        continue;
+                    }
+                }
+
+                if (need_remove_part_virual_column)
+                    virt_column_names.emplace_back("_part");
+
+                if (need_remove_part_offset_column)
+                    virt_column_names.emplace_back("_part_offset");
+            }
+        }
+    }
 }
 
 MergeTreeDataSelectAnalysisResultPtr ReadWithVectorScan::selectRangesToRead(MergeTreeData::DataPartsVector parts) const
@@ -192,8 +278,6 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
 
     const auto & settings = context->getSettingsRef();
 
-    Pipes res;
-
     size_t num_streams = requested_num_streams;
     if (num_streams > 1)
     {
@@ -202,6 +286,9 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
             num_streams = parts_with_range.size();
     }
 
+/*
+   /// Comment following code, since in two stage search we fail to parallel reading with additional sort transform
+    Pipes res;
     const size_t min_parts_per_stream = (parts_with_range.size() - 1) / num_streams + 1;
     for (size_t i = 0; i < num_streams && !parts_with_range.empty(); ++i)
     {
@@ -215,7 +302,92 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
         res.emplace_back(readFromParts(std::move(new_parts), column_names, settings.use_uncompressed_cache));
     }
 
+
     auto pipe = Pipe::unitePipes(std::move(res));
+    */
+
+    auto pipe = readFromParts(std::move(parts_with_range), column_names, settings.use_uncompressed_cache);
+
+    /// Add transforms for two search stage
+    if (support_two_stage_search)
+    {
+        /// Set sort description based on vector scan column
+        SortDescription sort_description;
+
+        auto vector_scan_info_ptr = query_info.vector_scan_info;
+        auto vector_scan_desc = vector_scan_info_ptr->vector_scan_descs[0];
+        /// TODO: batch_distance
+        sort_description.emplace_back(vector_scan_desc.column_name, vector_scan_desc.direction);
+
+        /// First sort and merge rows (vector scan search returned unsorted result) read from a data part.
+        pipe.addSimpleTransform([&](const Block & header)
+        {
+            return std::make_shared<PartialSortingTransform>(header, sort_description);
+        });
+
+        /// MegeSorting Transform will just return if input only has one chunk.
+        pipe.addSimpleTransform([&](const Block & header)
+        {
+            return std::make_shared<MergeSortingTransform>(
+                header, sort_description, max_block_size, num_reorder, false, 0, 0, 0, nullptr, 0);
+        });
+
+        /// Second sort rows from different pipes
+        if (pipe.numOutputPorts() > 1)
+        {
+            auto transform = std::make_shared<MergingSortedTransform>(
+                    pipe.getHeader(),
+                    pipe.numOutputPorts(),
+                    sort_description,
+                    max_block_size,
+                    SortingQueueStrategy::Batch,
+                    num_reorder /// limit
+                    );
+
+            pipe.addTransform(std::move(transform));
+        }
+
+        /// Split num_reorder candidate rows based on data part and put them to different output ports for parallel
+        auto split_transform = std::make_shared<VectorScanSplitTransform>(
+        pipe.getHeader(),
+        num_streams,
+        num_reorder
+        );
+        pipe.addTransform(std::move(split_transform));
+
+        auto output_header = pipe.getHeader().cloneEmpty();
+
+        /// Remove _part / _part_offset virtual columns if not needed for select results
+        if (need_remove_part_virual_column)
+            output_header.erase("_part");
+        if (need_remove_part_offset_column)
+            output_header.erase("_part_offset");
+
+        auto input_header = pipe.getHeader();
+
+        /// Add multiple VectorScanRecomputeTransforms for two stage to get accurate distance for given cadidates.
+        pipe.transform([&](OutputPortRawPtrs ports)
+        {
+            Processors reorders;
+            reorders.reserve(ports.size());
+
+            for (auto * port : ports)
+            {
+                auto vector_scan_manager =
+                    std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context, support_two_stage_search);
+                auto reorder = std::make_shared<VectorScanRecomputeTransform>(
+                        input_header,
+                        output_header,
+                        vector_scan_manager,
+                        data
+                        );
+                connect(*port, reorder->getInputPort());
+                reorders.push_back(reorder);
+            }
+
+            return reorders;
+        });
+    }
 
     return pipe;
 }
@@ -242,7 +414,8 @@ Pipe ReadWithVectorScan::readFromParts(
 
     for (const auto & part : parts)
     {
-        auto vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
+        auto vector_scan_manager =
+            std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context, support_two_stage_search);
 
         /// ToConfirm
         std::optional<ParallelReadingExtension> extension;

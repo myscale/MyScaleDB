@@ -16,6 +16,12 @@
 
 #include <SearchIndex/VectorIndex.h>
 
+namespace VectorIndex
+{
+    class VectorSegmentExecutor;
+    using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;
+}
+
 namespace DB
 {
 
@@ -29,7 +35,12 @@ public:
     MergeTreeVectorScanManager(
         StorageMetadataPtr metadata_,
         VectorScanInfoPtr vector_scan_info_,
-        ContextPtr context_) : metadata(metadata_), vector_scan_info(vector_scan_info_), context(context_) {}
+        ContextPtr context_,
+        bool support_two_stage_search_ = false)
+        : metadata(metadata_)
+        , vector_scan_info(vector_scan_info_)
+        , context(context_)
+        , support_two_stage_search(support_two_stage_search_) {}
 
     void executeBeforeRead(const String& data_path, const MergeTreeData::DataPartPtr & data_part);
 
@@ -47,6 +58,13 @@ public:
         const MergeTreeData::DataPartPtr & data_part,
         const ReadRanges & read_ranges,
         const Search::DenseBitmapPtr filter);
+
+    /// Two search search: execute vector scan to get accurate distance values
+    /// If part doesn't have vector index or real index type doesn't support, just use passed in values.
+    VectorScanResultPtr executeSecondStageVectorScan(
+        const MergeTreeData::DataPartPtr & data_part,
+        const std::vector<UInt64> & row_ids,
+        const std::vector<Float32> & distances);
 
     void mergeResult(
         Columns & pre_result,
@@ -68,6 +86,7 @@ private:
     StorageMetadataPtr metadata;
     VectorScanInfoPtr vector_scan_info;
     ContextPtr context;
+    bool support_two_stage_search;  /// True if vector index in metadata support two stage search
 
     /// lock vector scan result
     std::mutex mutex;
@@ -80,10 +99,17 @@ private:
 
     VectorScanResultPtr vectorScan(
         bool is_batch,
-        const String& data_path,
+        const String & data_path,
         const MergeTreeData::DataPartPtr & data_part = nullptr,
         const ReadRanges & read_ranges = ReadRanges(),
         const Search::DenseBitmapPtr filter = nullptr);
+
+    /// Do preparition of finding index for vectorScan() and executeSecondStageVectorScan()
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> prepareForVectorScan(
+        String & metric_str,
+        const String & data_path,
+        const MergeTreeData::DataPartPtr & data_part = nullptr
+    );
 
     /// brute force vector search
     VectorScanResultPtr vectorScanWithoutIndex(
