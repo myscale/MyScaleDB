@@ -1,5 +1,6 @@
 import os.path
 import time
+import numpy as np
 from .utils import logger
 import clickhouse_connect
 from prometheus_api_client import PrometheusConnect
@@ -16,11 +17,11 @@ class DBClient:
                  username="default",
                  password="",
                  table_name=None,
+                 vector_dimension=None,
                  table_ddl=None,
                  insert_data_sql=None,
                  vector_index_sql=None,
                  delete_from=None,
-                 alter_update=None,
                  build_timeout=None):
 
         self.host = host
@@ -28,21 +29,24 @@ class DBClient:
         self.username = username
         self.password = password
         self.table_name = table_name
+        self.vector_dimension = vector_dimension
         self.table_ddl = table_ddl
         self.insert_data_sql = insert_data_sql
         self.vector_index_sql = vector_index_sql
         self.build_timeout = build_timeout
         self.delete_from = delete_from
-        self.alter_update = alter_update
 
-    def run_query(self, query):
-        logger.info("run query %s", query)
-        res = clickhouse_connect.get_client(
+    def get_client(self):
+        return clickhouse_connect.get_client(
             host=self.host,
             port=self.port,
             username=self.username,
             password=self.password
-        ).query(query).result_rows
+        )
+
+    def run_query(self, query):
+        logger.info("run query %s", query)
+        res = self.get_client().query(query).result_rows
         return res
 
     def select_count(self, select_filter=""):
@@ -56,6 +60,16 @@ class DBClient:
         if len(insert_filter) > 0:
             insert_query += insert_filter
         self.run_query(insert_query)
+
+    def insert_batch(self, start_id, batch_size):
+        data_batch = []
+        for i in range(batch_size):
+            vector = np.random.rand(self.vector_dimension).tolist()
+            data_batch.append([start_id + i, vector])
+        try:
+            self.get_client().insert(self.table_name, data_batch, column_names=['id', 'vector'])
+        except Exception as e:
+            logger.error("failed to insert batch data, got error {}".format(str(e)))
 
     def check_vector_build_status(self, timeout):
         check_query = "select table, status from system.vector_indices"
@@ -163,8 +177,9 @@ class ChaosClient:
         for _ in range(10):
             try:
                 chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
-                chi.spec.configuration.clusters[0].layout.replicasCount += 1
-                self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+                if chi.spec.configuration.clusters[0].layout.replicasCount == 1:
+                    chi.spec.configuration.clusters[0].layout.replicasCount += 1
+                    self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
                 break
             except Exception as e:
                 logger.warn(str(e))
@@ -174,13 +189,25 @@ class ChaosClient:
         for _ in range(10):
             try:
                 chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
-                if chi.spec.configuration.clusters[0].layout.replicasCount > 1:
+                if chi.spec.configuration.clusters[0].layout.replicasCount == 2:
                     chi.spec.configuration.clusters[0].layout.replicasCount -= 1
                     self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
                 break
             except Exception as e:
                 logger.warn(str(e))
                 logger.info("retry scale down")
+
+    def update_image(self, name, namespace, image_tag):
+        for _ in range(10):
+            try:
+                chi = self.api_group["Cluster"].get(name=name, namespace=namespace)
+                if chi.spec.templates.podTemplates[0].spec.containers[0].name == "clickhouse":
+                    chi.spec.templates.podTemplates[0].spec.containers[0].image = "harbor.internal.moqi.ai/mqdb/mqdb:" + str(image_tag)
+                    self.api_group["Cluster"].patch(body=chi, content_type="application/merge-patch+json")
+                break
+            except Exception as e:
+                logger.warn(str(e))
+                logger.info("retry update image")
 
     def is_chi_completed(self, name, namespace):
         return self.api_group["Cluster"].get(name=name, namespace=namespace).status.status == "Completed"

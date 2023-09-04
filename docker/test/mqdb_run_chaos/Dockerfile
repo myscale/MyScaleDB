@@ -1,4 +1,4 @@
-# harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:1.0
+# harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:2.1
 FROM abihf/wget as downloader
 RUN wget https://github.com/ClickHouse/ClickHouse/releases/download/v22.12.5.34-stable/clickhouse-client-22.12.5.34-amd64.tgz && \
     wget https://github.com/ClickHouse/ClickHouse/releases/download/v22.12.5.34-stable/clickhouse-common-static-22.12.5.34-amd64.tgz

@@ -25,13 +25,14 @@ class Config:
         self.port = self.server_config["port"]
         self.user = self.server_config["username"]
         self.password = self.server_config["password"]
+        self.base_image = self.server_config["base_image"]
+        self.upgrade_image = self.server_config["upgrade_image"]
 
         # queries
         self.queries = self.config_file["queries"]
         self.create_table = self.queries["create_table"]
         self.insert_data = self.queries["insert_data"]
         self.build_index = self.queries["build_index"]
-        self.alter_update = self.queries["alter_update"]
         self.delete_from = self.queries["delete_from"]
 
         # chaos config
@@ -42,8 +43,9 @@ class Config:
         # others
         self.table_name = self.config_file["table_name"]
         self.build_timeout = convert_to_seconds(self.config_file["build_index_timeout"])
-        self.sync_timeout = convert_to_seconds(self.config_file["sync_data_timeout"])
+        self.vector_dimension = int(self.config_file["vector_dimension"])
         self.prom_host = self.config_file["prom_host"]
+        self.chaos_timeout = convert_to_seconds(self.config_file["chaos_timeout"])
 
 
 def convert_to_seconds(s):

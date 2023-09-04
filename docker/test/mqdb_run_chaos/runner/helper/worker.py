@@ -1,6 +1,7 @@
 import time
-from .utils import logger, is_server_alive
-from .chaos import PodKill, PodFailure, NetWorkPartition
+from .utils import logger, is_server_alive, get_md5
+import os
+import subprocess
 
 
 def check_all_replicas_vector(client_ls, build_timeout):
@@ -11,7 +12,85 @@ def check_all_replicas_vector(client_ls, build_timeout):
         if not client_ls[i].check_vector_build_status(300):
             logger.error("index building failed for replica {} within {}s"
                          .format(i + 1, (i + 1) * 300 + build_timeout))
-            exit(1)
+            exit(-1)
+
+
+def check_data_integrity(host, output_path="data.csv"):
+    """
+    select some data and save in output_path, then return its md5sum
+    """
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
+    # use clickhouse-client faster and easier for saving large numbers of data than clickhouse connect
+    client_command = f"clickhouse-client -h {host} -q 'select * from gist1m where id < 10000 order by id' > {output_path}"
+    subprocess.run(client_command, shell=True, text=True, capture_output=True)
+    time.sleep(1)
+    return get_md5(output_path)
+
+
+def check_vector_integrity(host, output_path="vector.csv", query_path="queries/check_vector_integrity.sql"):
+    """
+    run vector search defined in query_path and save the result in output_path, then return its md5sum
+    """
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
+    # use clickhouse-client faster and easier for running multiple queries defined in a file than clickhouse connect
+    client_command = f"clickhouse-client -h {host} --multiquery {query_path} > {output_path}"
+    subprocess.run(client_command, shell=True, text=True, capture_output=True)
+    time.sleep(1)
+    return get_md5(output_path)
+
+
+def is_cluster_running(host_prefix, replica=2):
+    """
+    check whether the cluster is running
+    """
+    for i in range(replica):
+        if not is_server_alive(host_prefix + str(i)):
+            return False
+
+    return True
+
+
+def check_replicas_consistency(client, retry=0):
+    """
+    check whether two replicas have the same number of data
+    """
+    while retry >= 0:
+        try:
+            res = client.run_query(
+                "select total_rows from clusterAllReplicas('{cluster}', system.tables) where name = 'gist1m'")
+            if len(res) != 2:
+                logger.warn(f"just got {len(res)} result, probably cluster file not updated")
+                return False
+            elif res[0][0] != res[1][0]:
+                logger.error(f"two replicas have different data {res[0][0]} {res[1][0]}")
+                return False
+            logger.info(f"two replicas have the same data")
+            return True
+        except Exception as e:
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
+            retry -= 1
+
+    return False
+
+
+def check_replicas_consistency_with_timeout(client, timeout):
+    """
+    check two replicas consistency within timeout
+    """
+    start = time.time()
+    while not check_replicas_consistency(client):
+        if time.time() - start > timeout:
+            logger.error(f"after {timeout}s, replicas still have different data")
+            exit(-1)
+        logger.info("replicas still have different data")
+        logger.info("sleep 5s and then recheck consistency")
+        time.sleep(5)
+    pass_time = time.time() - start
+    logger.info(f"after {pass_time}s, replicas have same data")
 
 
 def inject_fault(chaos_client, fault_n, faults_ls):
@@ -46,95 +125,96 @@ def inject_fault(chaos_client, fault_n, faults_ls):
     return faults_ls[fault_n]["qps_timeout"]
 
 
-def run_performance_check(faults_ls, fault_interval, chaos_client, prom_client):
+def insert_data_during_chaos(host_prefix, timeout, client, all_chaos):
     """
-    check whether all replicas QPS could recover from faults after {qps_timeout}s defined in chaos config
+    insert batch data into cluster until cluster running
     """
-    for i in range(len(faults_ls)):
-        expected_qps = prom_client.query()
-        time.sleep(inject_fault(chaos_client, i, faults_ls))
-        curr_qps = prom_client.query()
-        for key, value in expected_qps.items():
-            if key not in curr_qps.keys():
-                logger.error(f"replica {key} qps failed to recover")
-            else:
-                logger.info(f"replica {key} current qps is {curr_qps[key]} and expected {value}")
-                if value - curr_qps[key] > 30:
-                    logger.error(f"replica {key} qps failed to recover")
-                logger.info(f"replica {key} successfully recover within expected time")
+    start = time.time()
+    # insert batch beginning id
+    start_id = 500000
+    i = 0
+    while (i < 10) or (not is_cluster_running(host_prefix)):
 
-        logger.info(f"sleep {fault_interval}s")
-        time.sleep(fault_interval)
+        if time.time() - start > timeout:
+            logger.error(f"after {timeout}s, still has unavailable pod")
+            exit(1)
+
+        if not all_chaos:
+            logger.info("insert 1000 data")
+            client.insert_batch(start_id, 1000)
+            start_id += 1000
+            time.sleep(1)
+        i += 1
 
 
-def run_consistency_check(faults_ls, fault_interval, chaos_client, client_ls, host_prefix):
+def insert_data_during_update_chi(timeout, client, chaos_client, config):
     """
-    check structural data and vector integrity and consistency
+    insert batch data into cluster until chi completed
     """
-    for i in range(len(faults_ls)):
-        timeout = inject_fault(chaos_client, i, faults_ls)
+    start = time.time()
+    start_id = 500000
+    i = 0
+    while (i < 10) or (not chaos_client.is_chi_completed(config.chi_name, config.namespace)):
+        if time.time() - start > timeout:
+            logger.error(f"after {timeout}s, still has unavailable pod")
+            exit(1)
 
-        fault_name = faults_ls[i]["name"]
-        if "all" in fault_name:
-            all_chaos = True
-        else:
-            all_chaos = False
-
-        if "failure" in fault_name:
-            chaos = PodFailure(client_ls, host_prefix, timeout + 120, all_chaos)
-        elif "kill" in fault_name:
-            chaos = PodKill(client_ls, host_prefix, timeout + 120, all_chaos)
-        elif "network" in fault_name:
-            chaos = NetWorkPartition(client_ls, host_prefix, timeout + 120, all_chaos)
-
-        # before chaos
-        chaos.before_chaos()
-        # during chaos
-        chaos.during_chaos()
-        # after chaos
-        chaos.after_chaos()
-
-        logger.info(f"sleep {fault_interval}s")
-        time.sleep(fault_interval)
+        logger.info("insert 1000 data")
+        client.insert_batch(start_id, 1000)
+        start_id += 1000
+        time.sleep(1)
+        i += 1
 
 
-def scale_up_and_check(config, chaos_client, client_ls):
+def clear_insert_data(client):
+    """
+    delete insert data during test
+    """
+    for _ in range(10):
+        try:
+            client.run_query(f"delete from {client.table_name} where id >= 500000")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected exception {str(e)}", exc_info=True)
+            logger.info("retry after one second")
+            time.sleep(1)
+
+
+def scale_up_cluster_and_check(config, chaos_client, client, timeout):
     """
     scale up cluster and check its status
     """
     chaos_client.scale_up(config.chi_name, config.namespace)
-
-    # check new replica running
-    begin = time.time()
-    while True:
-        if is_server_alive(client_ls[-2].host):
-            logger.info("new replica running")
-            break
-        elif time.time() - begin > 600:
-            logger.error("after 600s, new replica is still not running")
-            exit(-1)
-        logger.info("sleep 5s and wait for new replica running")
-        time.sleep(5)
-
-    # check the process of new replica synchronizing data
-    begin = time.time()
-    while client_ls[-2].select_count() != client_ls[0].select_count():
-        if time.time() - begin > config.sync_timeout:
-            logger.error(f"after {config.sync_timeout}s, new replica still not finish syncing data")
-            exit(-1)
-        logger.info(f"new replica has {client_ls[-2].select_count()} data now, expected {client_ls[0].select_count()}")
-        time.sleep(5)
-    logger.info(f"after {time.time() - begin}s, new replica complete synchronizing data process")
-
-    while not chaos_client.is_chi_completed(config.chi_name, config.namespace):
-        logger.info("sleep 5s and wait chi completed")
-        time.sleep(5)
+    logger.info("start inject data during scale up")
+    insert_data_during_update_chi(timeout, client, chaos_client, config)
+    logger.info("cluster is running and finish operation during scale up")
+    check_replicas_consistency_with_timeout(client, 300)
+    # clear insert test data
+    clear_insert_data(client)
+    logger.info("finish checking scale up cluster")
 
 
-def scale_down_and_check(config, chaos_client):
+def scale_down_cluster_and_check(config, chaos_client, client, timeout):
     """
     scale down cluster and check its status
     """
     chaos_client.scale_down(config.chi_name, config.namespace)
-    logger.info("sleep 180s and wait for cluster scaling down")
-    time.sleep(180)
+    logger.info("start inject data during scale down")
+    insert_data_during_update_chi(timeout, client, chaos_client, config)
+    # clear insert test data
+    clear_insert_data(client)
+    logger.info("finish checking scale down cluster")
+
+
+def update_cluster_image_and_check(config, chaos_client, client, timeout, image_tag):
+    """
+    upgrade cluster and check its status
+    """
+    chaos_client.update_image(config.chi_name, config.namespace, image_tag)
+    logger.info("start inject data during upgrade")
+    insert_data_during_update_chi(timeout, client, chaos_client, config)
+    logger.info("cluster is running and finish operation during upgrade")
+    check_replicas_consistency_with_timeout(client, 300)
+    # clear insert test data
+    clear_insert_data(client)
+    logger.info("finish checking upgrade cluster")
