@@ -62,6 +62,8 @@ data:
     # server config
     server:
       namespace: "CHAOS_NAMESPACE"
+      base_image: "BASE_IMAGE"
+      upgrade_image: "IMAGE_VERSION"
       chi_name: chaos-test
       cluster_name: clickhouse
       replica: 2
@@ -71,7 +73,8 @@ data:
     
     table_name: "gist1m"
     build_index_timeout: 1h
-    sync_data_timeout: 5m
+    chaos_timeout: "CHAOS_TIMEOUT"
+    vector_dimension: 960
     benchmark_parallel: 4
     prom_host: "http://kube-prometheus-kube-prome-prometheus.monitoring:9090"
     
@@ -80,19 +83,17 @@ data:
       create_table: "CREATE TABLE gist1m (
           id UInt32,
           vector Array(Float32),
-          CONSTRAINT check_length CHECK length(vector) = 960,
-          updated Bool
+          CONSTRAINT check_length CHECK length(vector) = 960
       ) ENGINE = MergeTree
       ORDER BY id"
     
-      insert_data: "INSERT INTO gist1m SELECT id, vector, false FROM s3(
+      insert_data: "INSERT INTO gist1m SELECT id, vector FROM s3(
           'https://mqdb-public-1253802058.cos.ap-beijing.myqcloud.com/public/gist_960_1m.parquet',
           'Parquet',
           'id Int32, vector Array(Float32)'
       )"
     
       build_index: "ALTER TABLE gist1m ADD VECTOR INDEX vector_idx vector TYPE MSTG('metric_type=IP')"
-      alter_update: "ALTER TABLE gist1m UPDATE updated = true where id > 500000 and id < 700000"
       delete_from: "DELETE FROM gist1m WHERE id > 600000 and id <= 800000"
     
     # chaos config
@@ -130,7 +131,7 @@ spec:
       serviceAccountName: chaos-runner
       containers:
         - name: test
-          image: harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:2.0
+          image: harbor.internal.moqi.ai/mqdb/mqdb-test-chaos-runner:2.1
           imagePullPolicy: Always
           command: ["bash", "run_chaos.sh"]
           resources:

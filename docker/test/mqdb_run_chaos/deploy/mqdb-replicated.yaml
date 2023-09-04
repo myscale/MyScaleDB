@@ -328,7 +328,7 @@ spec:
               effect: NoExecute
           containers:
             - name: clickhouse
-              image: harbor.internal.moqi.ai/mqdb/mqdb:IMAGE_VERSION
+              image: harbor.internal.moqi.ai/mqdb/mqdb:BASE_IMAGE
               securityContext:
                 privileged: true
               command:

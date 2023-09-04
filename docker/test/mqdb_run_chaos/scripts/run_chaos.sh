@@ -20,7 +20,7 @@ getConfig
 find ./chaos-mesh -type f -name "*.yaml" -print0 | xargs -0 sed -i "s?CHAOS_NAMESPACE?$NAMESPACE?"
 
 echo "start operation consistency and data integrity check"
-python3 runner/consistency.py --config-file config.yaml
+python3 runner/run.py --config-file config.yaml consistency
 echo "finish consistency check"
 
 echo "start run benchmark query"
@@ -30,13 +30,13 @@ done
 
 sleep 3m
 echo "start qps performance check"
-python3 runner/performance.py --config-file config.yaml
+python3 runner/run.py --config-file config.yaml performance
 
 echo "start multi process test"
 locust -f runner/multi.py --headless --host localhost -u 500 -r 100 --only-summary -t 15m
 sleep 15m
 
 echo "check replicas data count"
-python3 runner/check.py
+python3 runner/run.py --config-file config.yaml check
 
 echo "finish chaos test"

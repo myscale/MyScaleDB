@@ -38,7 +38,10 @@ function setup_mqdb()
 {
   cp -f docker/test/mqdb_run_chaos/deploy/chaos-runner.yaml docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
   cp -f docker/test/mqdb_run_chaos/deploy/mqdb-replicated.yaml docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
-  sed -i "s?IMAGE_VERSION?$VERSION_STRING-$GIT_COMMIT?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?IMAGE_VERSION?$VERSION_STRING-$GIT_COMMIT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
+  sed -i "s?CHAOS_TIMEOUT?$CHAOS_TIMEOUT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
+  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
   sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
   sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
 }
