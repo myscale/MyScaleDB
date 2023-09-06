@@ -145,7 +145,7 @@ VectorSegmentExecutor::VectorSegmentExecutor(
     size_t total_vec_,
     Search::Parameters des_,
     size_t min_bytes_to_build_vector_index_,
-    bool DEFAULT_DISK_MODE_)
+    int DEFAULT_DISK_MODE_)
     : DEFAULT_DISK_MODE(DEFAULT_DISK_MODE_)
     , segment_id(segment_id_)
     , type(type_)
@@ -158,7 +158,7 @@ VectorSegmentExecutor::VectorSegmentExecutor(
     init();
 }
 
-VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_) : DEFAULT_DISK_MODE(false), segment_id(segment_id_)
+VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_) : DEFAULT_DISK_MODE(0), segment_id(segment_id_)
 {
     init();
 }
@@ -945,7 +945,7 @@ std::shared_ptr<Search::DiskIOManager> VectorSegmentExecutor::getDiskIOManager()
     static std::mutex mutex;
     static std::shared_ptr<Search::DiskIOManager> io_manager = nullptr;
 
-    if (type != Search::IndexType::MSTG || !disk_mode)
+    if (type != Search::IndexType::MSTG || disk_mode == 0)
         return nullptr;
 
     std::lock_guard<std::mutex> lock(mutex);

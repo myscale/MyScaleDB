@@ -542,7 +542,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
     bool is_shutdown = false;
 
     size_t min_bytes_to_build_vector_index = data_part->storage.getSettings()->min_bytes_to_build_vector_index;
-    bool default_mstg_disk_mode = data_part->storage.getSettings()->default_mstg_disk_mode;
+    int default_mstg_disk_mode = data_part->storage.getSettings()->default_mstg_disk_mode;
     for (VectorIndex::SegmentId & segment_id : segment_ids)
     {
         LOG_DEBUG(log, "Create vector segment executor for : {}", segment_id.getFullPath());

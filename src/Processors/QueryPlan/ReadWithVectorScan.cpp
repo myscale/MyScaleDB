@@ -100,11 +100,11 @@ ReadWithVectorScan::ReadWithVectorScan(
         Search::IndexType type;
         Search::findEnumByName(vector_index.type, type);
 
-        bool disk_mode = data.getSettings()->default_mstg_disk_mode;
+        int disk_mode = data.getSettings()->default_mstg_disk_mode;
 
         const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index.parameters);
         if (index_parameter.contains("disk_mode"))
-            disk_mode = index_parameter.getParam<bool>("disk_mode", disk_mode);
+            disk_mode = index_parameter.getParam<int>("disk_mode", disk_mode);
 
         auto vector_scan_info_ptr = query_info.vector_scan_info;
 
@@ -126,7 +126,7 @@ ReadWithVectorScan::ReadWithVectorScan(
 
             LOG_DEBUG(log, "num_reorder for first stage = {}", num_reorder);
 
-            /// In adaptive two stage search option, enable only when disk_mode = true and saved IO count is larger than 1000
+            /// In adaptive two stage search option, enable only when disk_mode > 0 and saved IO count is larger than 1000
             if (adaptive_two_stage)
             {
                 UInt32 total_num_reorder = 0;
