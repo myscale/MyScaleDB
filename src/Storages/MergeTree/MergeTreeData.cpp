@@ -8453,7 +8453,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 
     String metric_str = getSettings()->vector_search_metric_type;
     size_t min_bytes_to_build_vector_index = getSettings()->min_bytes_to_build_vector_index;
-    bool default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
+    int default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
 
     for (const auto & data_part : getDataPartsVectorForInternalUsage())
     {

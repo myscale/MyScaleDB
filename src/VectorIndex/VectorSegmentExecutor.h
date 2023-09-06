@@ -26,7 +26,7 @@ struct IndexWithMeta
         std::shared_ptr<std::vector<UInt64>> row_ids_map_,
         std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
         std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_,
-        bool disk_mode_,
+        int disk_mode_,
         bool fallback_to_flat_)
         : index(index_)
         , total_vec(total_vec_)
@@ -52,7 +52,7 @@ public:
     std::shared_ptr<std::vector<UInt64>> row_ids_map;
     std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map;
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
-    bool disk_mode;
+    int disk_mode;
     bool fallback_to_flat;
 
     void setDeleteBitmap(Search::DenseBitmapPtr delete_bitmap_)
@@ -89,7 +89,7 @@ public:
         size_t total_vec_,
         Search::Parameters des_,
         size_t min_bytes_to_build_vector_index_,
-        bool DEFAULT_DISK_MODE_);
+        int DEFAULT_DISK_MODE_);
 
     explicit VectorSegmentExecutor(const SegmentId & segment_id_);
 
@@ -277,7 +277,7 @@ private:
     static int max_threads;
 
     const Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
-    const bool DEFAULT_DISK_MODE;
+    const int DEFAULT_DISK_MODE;
 
     SegmentId segment_id; // this index's related segment_id and file write position.
     Search::IndexType type;
@@ -293,7 +293,7 @@ private:
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map = std::make_shared<std::vector<uint8_t>>();
 
     bool fallback_to_flat = false;
-    bool disk_mode = false;
+    int disk_mode = false;
     std::string vector_index_cache_prefix;
 };
 

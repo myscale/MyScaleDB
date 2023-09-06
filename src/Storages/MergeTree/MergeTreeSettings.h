@@ -181,7 +181,7 @@ struct Settings;
     M(String, vector_search_metric_type, "L2", "Default metric type for brute force search", 0) \
     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
     M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
-    M(Bool, default_mstg_disk_mode, false, "Default disk mode value for MSTG.", 0) \
+    M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
     M(Bool, vector_index_parameter_check, true, "Enable checking for vector index parameters and vector search parameters.", 0) \
     M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
     M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
