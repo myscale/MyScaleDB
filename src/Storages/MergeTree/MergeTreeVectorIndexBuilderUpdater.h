@@ -61,20 +61,6 @@ public:
     ActionBlocker builds_blocker;
 
 private:
-    class Counter
-    {
-    public:
-        Counter() = default;
-        void put(const String & key, int value);
-        int get(const String & key);
-        int increaseAndGet(const String & key);
-    private:
-        std::map<String, int> counter_;
-        std::mutex mu_;
-    };
-
-    Counter counter;
-
     MergeTreeData & data;
     bool is_replicated = false; /// Mark if replicated
     //const size_t background_pool_size;
