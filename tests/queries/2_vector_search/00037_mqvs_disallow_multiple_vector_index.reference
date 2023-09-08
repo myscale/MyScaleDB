@@ -1,0 +1,31 @@
+test single vector column table
+add a vector index
+OK
+add other vector index
+OK
+create a vector index with if not exists
+OK
+create a vector index
+OK
+test_single_vector	v1	HNSWFLAT
+test multiple vector columns table
+add a vector index on vector1 column
+OK
+add other vector index on vector1 column
+OK
+add a vector index on vector2 column
+OK
+create other vector index on vector1 column
+OK
+create a vector index on vector2 column
+OK
+test_multiple_vector	v1	HNSWFLAT
+test create single vector column table with single vector index
+OK
+test_single_vector_table_with_single_index	v1	HNSWFLAT
+test create single vector column table with multiple vector indices
+OK
+test create multiple vector columns table with single vector index
+OK
+test create multiple vector columns table with multiple vector indices
+OK

@@ -33,6 +33,7 @@ StorageSystemVectorIndexSegments::StorageSystemVectorIndexSegments(const Storage
         {"owner_part_id", std::make_shared<DataTypeInt32>()},
         {"name", std::make_shared<DataTypeString>()},
         {"type", std::make_shared<DataTypeString>()},
+        {"dimension", std::make_shared<DataTypeInt32>()},
         {"status", std::make_shared<DataTypeString>()},
         {"total_vectors", std::make_shared<DataTypeUInt64>()},
         {"memory_usage_bytes", std::make_shared<DataTypeUInt64>()},
@@ -82,9 +83,6 @@ protected:
             owner_part_id = vec_info->owner_part_id;
         }
 
-        String vector_index_cache_prefix = fs::path(part->storage.getContext()->getVectorIndexCachePath())
-            / part->storage.getRelativeDataPath() / part->info.getPartNameWithoutMutation() / "";
-
         const DataPartStorageOnDiskBase * part_storage
             = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
         if (part_storage == nullptr)
@@ -99,21 +97,7 @@ protected:
             owner_part,
             index.name,
             index.column,
-            vector_index_cache_prefix,
             owner_part_id);
-
-        VectorIndex::Metadata metadata(segment_id);
-        bool metadata_loaded = true;
-
-        try
-        {
-            auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
-            metadata.readText(*buf);
-        }
-        catch (...)
-        {
-            metadata_loaded = false;
-        }
 
         size_t src_index = 0;
         size_t res_index = 0;
@@ -137,16 +121,22 @@ protected:
             res_columns[res_index++]->insert(owner_part_id);
         /// 'name' column
         if (column_mask[src_index++])
-        {
             res_columns[res_index++]->insert(index.name);
-        }
         /// 'type' column
         if (column_mask[src_index++])
         {
-            if (metadata_loaded && metadata.fallback_to_flat)
-                res_columns[res_index++]->insert(Search::enumToString(Search::IndexType::FLAT));
+            if (vec_info)
+                res_columns[res_index++]->insert(vec_info->type);
             else
                 res_columns[res_index++]->insert(index.type);
+        }
+        /// 'dimension' column
+        if (column_mask[src_index++])
+        {
+            if (vec_info)
+                res_columns[res_index++]->insert(vec_info->dimension);
+            else
+                res_columns[res_index++]->insert(index.dim);
         }
         /// 'status' column
         if (column_mask[src_index++])
@@ -156,7 +146,7 @@ protected:
             else if (vec_info)
                 res_columns[res_index++]->insert(vec_info->statusString());
             else
-                res_columns[res_index++]->insertDefault();
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndexStatus::PENDING));
         }
         /// 'total_vectors' column
         if (column_mask[src_index++])
@@ -265,15 +255,18 @@ protected:
                     continue;
 
                 auto data_parts = data->getDataPartsVectorForInternalUsage();
-
-                const auto indices = metadata_snapshot->getVectorIndices();
+                auto indices = metadata_snapshot->getVectorIndices();
 
                 for (const auto & part : data_parts)
                 {
                     std::lock_guard lock(part->vector_indices_mutex);
 
-                    for (const auto & index : indices)
+                    for (auto & index : indices)
                     {
+                        if (!index.dim)
+                            index.dim
+                                = static_cast<int>(metadata_snapshot->getConstraints().getArrayLengthByColumnName(index.column).first);
+
                         bool found = false;
                         if (part->containRowIdsMaps())
                         {

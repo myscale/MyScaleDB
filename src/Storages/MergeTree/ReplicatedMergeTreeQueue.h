@@ -12,6 +12,7 @@
 #include <Storages/MergeTree/PinnedPartUUIDs.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeQuorumAddedParts.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeAltersSequence.h>
+#include <Storages/MergeTree/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
 #include <Storages/MergeTree/DropPartsRanges.h>
 
 #include <Common/ZooKeeper/ZooKeeper.h>
@@ -69,6 +70,7 @@ private:
 
     StorageReplicatedMergeTree & storage;
     ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker;
+    ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker;
     MergeTreeDataFormatVersion format_version;
 
     String zookeeper_path;
@@ -304,7 +306,10 @@ private:
     size_t current_multi_batch_size = 1;
 
 public:
-    ReplicatedMergeTreeQueue(StorageReplicatedMergeTree & storage_, ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker_);
+    ReplicatedMergeTreeQueue(
+        StorageReplicatedMergeTree & storage_,
+        ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker_,
+        ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker_);
     ~ReplicatedMergeTreeQueue() = default;
 
     /// Clears queue state
@@ -511,6 +516,9 @@ public:
     /// the same amount of times.
     void addDropReplaceIntent(const MergeTreePartInfo& intent);
     void removeDropReplaceIntent(const MergeTreePartInfo& intent);
+
+    /// Check if part is currently being merged.
+    bool canSendVectorIndexForPart(const String & part_name) const;
 };
 
 using CommittingBlocks = std::unordered_map<String, std::set<Int64>>;

@@ -141,6 +141,9 @@ void StorageMergeTree::startup()
     /// Temporary directories contain incomplete results of vector index building.
     clearTemporaryIndexBuildDirectories();
 
+    /// clear nvme cache
+    clearVectorNvmeCache();
+
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();
     time_after_previous_cleanup_temporary_directories.restart();
@@ -592,6 +595,11 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
     {
         /// Clear vector index build status
         resetVectorIndexBuildStatus();
+
+        /// Create vector index info
+        for (const auto & part : getDataPartsForInternalUsage())
+            for (auto & vec_index_desc : getInMemoryMetadata().vec_indices)
+                part->addNewVectorIndex(vec_index_desc);
 
         /// handle add vector index command
         background_operations_assignee.trigger();

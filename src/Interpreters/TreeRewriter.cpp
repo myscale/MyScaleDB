@@ -1282,33 +1282,6 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         }
     }
 
-    /// Check for dynamic subcolumns in unknown required columns.
-    if (!unknown_required_source_columns.empty())
-    {
-        for (const NameAndTypePair & pair : source_columns_ordinary)
-        {
-            if (!pair.type->hasDynamicSubcolumns())
-                continue;
-
-            for (auto it = unknown_required_source_columns.begin(); it != unknown_required_source_columns.end();)
-            {
-                auto [column_name, dynamic_subcolumn_name] = Nested::splitName(*it);
-
-                if (column_name == pair.name)
-                {
-                    if (auto dynamic_subcolumn_type = pair.type->tryGetSubcolumnType(dynamic_subcolumn_name))
-                    {
-                        source_columns.emplace_back(*it, dynamic_subcolumn_type);
-                        it = unknown_required_source_columns.erase(it);
-                        continue;
-                    }
-                }
-
-                ++it;
-            }
-        }
-    }
-
     /// insert distance func columns into source columns here
     if (!vector_scan_funcs.empty() && !vector_from_right_table)
     {
@@ -1749,6 +1722,13 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     result.collectForVectorScanFunctions(select_query, tables_with_columns, getContext());
 
     result.collectUsedColumns(query, true);
+
+    if (!result.missed_subcolumns.empty())
+    {
+        for (const String & column_name : result.missed_subcolumns)
+            replaceMissedSubcolumnsInQuery(query, column_name);
+        result.missed_subcolumns.clear();
+    }
 
     if (!result.missed_subcolumns.empty())
     {

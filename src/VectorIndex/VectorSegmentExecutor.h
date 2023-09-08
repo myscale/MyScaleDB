@@ -14,6 +14,13 @@
 namespace VectorIndex
 {
 
+enum class BuildMemoryCheckResult
+{
+    OK, /// ok to build
+    LATER, /// currently unable to build, maybe try again later
+    NEVER, /// size required greater than limit
+};
+
 struct IndexWithMeta
 {
     IndexWithMeta() = delete;
@@ -27,7 +34,8 @@ struct IndexWithMeta
         std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map_,
         std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map_,
         int disk_mode_,
-        bool fallback_to_flat_)
+        bool fallback_to_flat_,
+        String & vector_index_cache_prefix_)
         : index(index_)
         , total_vec(total_vec_)
         , delete_bitmap(delete_bitmap_)
@@ -37,6 +45,7 @@ struct IndexWithMeta
         , inverted_row_sources_map(inverted_row_sources_map_)
         , disk_mode(disk_mode_)
         , fallback_to_flat(fallback_to_flat_)
+        , vector_index_cache_prefix(vector_index_cache_prefix_)
     {
     }
 
@@ -49,11 +58,13 @@ private:
     mutable std::mutex mutex_of_row_id_maps;
 public:
     Search::Parameters des;
+    mutable std::shared_mutex rwLock_of_row_id_maps;
     std::shared_ptr<std::vector<UInt64>> row_ids_map;
     std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map;
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
     int disk_mode;
     bool fallback_to_flat;
+    String vector_index_cache_prefix;
 
     void setDeleteBitmap(Search::DenseBitmapPtr delete_bitmap_)
     {
@@ -75,6 +86,7 @@ public:
 using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
 
 
+
 class VectorSegmentExecutor
 {
     /// The exposed api set which should be called by users trying to use vector index;
@@ -92,6 +104,22 @@ public:
         int DEFAULT_DISK_MODE_);
 
     explicit VectorSegmentExecutor(const SegmentId & segment_id_);
+
+    ~VectorSegmentExecutor()
+    {
+        if (!build_memory_size_recorded)
+            return;
+
+        /// decrease build memory size reserved before build. see checkBuildMemory()
+        std::lock_guard lock(build_memory_mutex);
+        current_build_memory_size -= build_memory_size_recorded;
+
+        LOG_DEBUG(
+            &Poco::Logger::get("VectorSegmentExecutor"),
+            "after build: size = {}, current_total = {}",
+            build_memory_size_recorded,
+            current_build_memory_size);
+    }
 
     /// Serialize and store index at segment_id
     Status serialize();
@@ -130,6 +158,8 @@ public:
 
     static void setCacheManagerSizeInBytes(size_t size);
 
+    static void setBuildMemorySizeInBytes(size_t size);
+
     static std::list<std::pair<CacheKey, Search::Parameters>> getAllCacheNames();
 
     static Status searchWithoutIndex(
@@ -149,7 +179,7 @@ public:
     {
         if (!segment_id.fromMergedParts())
             return filter;
-        
+
         if (inverted_row_ids_map->empty() && !filter->to_vector().empty())
             LOG_ERROR(log, "Inverted row ids maps empty, This mast be a bug! cache key: {}",
                 segment_id.getCacheKey().toString());
@@ -226,11 +256,12 @@ public:
         return real_search_result;
     }
 
+    const SegmentId getSegmentId() const {return segment_id;}
+
+    String generateUUIDv4() const { return DB::toString(DB::UUIDHelpers::generateV4()); }
+
     /// Update SegmentId
     void updateSegmentId(const SegmentId & new_segment_id) { segment_id = new_segment_id; }
-
-    /// Reload delete bitmap from disk.
-    bool reloadDeleteBitMap() { return readBitMap(); }
 
     /// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
     void updateBitMap(const std::vector<UInt64> & deleted_row_ids);
@@ -244,18 +275,20 @@ public:
 
     void convertBitmap(const std::vector<UInt64> & deleted_row_ids);
 
+    Search::IndexResourceUsage getIndexResourceUsage();
+
+    Search::IndexType getIndexType() { return type; }
+
 private:
     void init();
 
-    bool writeBitMap();
-
-    bool readBitMap();
+    String getUniqueVectorIndexCachePrefix() const;
 
     void handleMergedMaps();
 
     void transferToNewRowIds(std::shared_ptr<Search::SearchResult> & result)
     {
-        if (row_ids_map->empty())
+        if (row_ids_map->empty() && !segment_id.fromMergedParts())
         {
             return;
         }
@@ -276,6 +309,17 @@ private:
     static std::once_flag once;
     static int max_threads;
 
+    static std::mutex build_memory_mutex;
+    /// global memory size limit for index building
+    static size_t build_memory_size_limit;
+    /// current total memory size reserved for index building globally
+    static size_t current_build_memory_size;
+
+    /// check if index to build will exceed build memory size limit
+    static BuildMemoryCheckResult checkBuildMemorySize(size_t size);
+
+    void checkBuildMemory(size_t size);
+
     const Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
     const int DEFAULT_DISK_MODE;
 
@@ -295,6 +339,9 @@ private:
     bool fallback_to_flat = false;
     int disk_mode = false;
     std::string vector_index_cache_prefix;
+
+    /// build memory reserved before build
+    size_t build_memory_size_recorded = 0;
 };
 
 using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;

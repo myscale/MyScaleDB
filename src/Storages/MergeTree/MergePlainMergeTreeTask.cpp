@@ -161,16 +161,14 @@ void MergePlainMergeTreeTask::finish()
     {
         if (new_part->containAnyVectorIndex())
         {
-            /// Pass empty string for index_name and column name, all vector index will be removed from this part.
-            String dummy_name;
-            new_part->removeVectorIndex(dummy_name, dummy_name);
-            new_part->removeAllVectorIndexInfo();
-
+            new_part->removeAllVectorIndex();
             LOG_DEBUG(storage.log, "Remove vector index from part {} due to dropped in metadata", new_part->name);
         }
         else if (new_part->containRowIdsMaps())
         {
-            new_part->removeAllRowIdsMaps(true);
+            std::lock_guard lock(new_part->vector_index_checksums_mutex);
+            new_part->removeAllRowIdsMaps();
+            new_part->vector_index_checksums_map.clear();
             LOG_DEBUG(storage.log, "Remove old parts' vector index from decouple part {} due to dropped in metadata", new_part->name);
         }
 

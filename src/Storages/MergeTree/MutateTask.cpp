@@ -983,7 +983,11 @@ void finalizeMutatedPart(
 
     /// Origin part is decoupled with merged vector indices or has simple built vector index
     if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
+    {
+        new_data_part->loadVectorIndexChecksums();
         new_data_part->loadVectorIndexMetadata();
+        source_part->removeAllVectorIndexInfo();
+    }
 
     /// Avoid build vector index for part with error
     if (source_part->vector_index_build_error)
@@ -1769,7 +1773,10 @@ private:
 
             /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
             if (vector_files_found)
+            {
+                ctx->new_data_part->loadVectorIndexChecksums();
                 ctx->new_data_part->loadVectorIndexMetadata();
+            }
         }
 
         /// Avoid build vector index for part with error

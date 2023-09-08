@@ -91,31 +91,31 @@ inverted_row_sources_map_exists=0
 
 # check if all files related to decoupled parts exists
 for f in $merged_dir/*; do
-  if [[ "$(basename $f)" == *"-row_ids_map.vidx2" ]]; then
+  if [[ "$(basename $f)" == *"-row_ids_map.vidx3" ]]; then
     row_ids_map_exists=1
     continue
   fi
 
-  if [[ "$(basename $f)" == "merged-inverted_row_ids_map.vidx2" ]]; then
+  if [[ "$(basename $f)" == "merged-inverted_row_ids_map.vidx3" ]]; then
     inverted_row_ids_map_exists=1
     continue
   fi
 
-  if [[ "$(basename $f)" == "merged-inverted_row_sources_map.vidx2" ]]; then
+  if [[ "$(basename $f)" == "merged-inverted_row_sources_map.vidx3" ]]; then
     inverted_row_sources_map_exists=1
   fi
 done
 
 if [ $row_ids_map_exists -eq 0 ]; then
-  echo "row_ids_map.vidx2 not found"
+  echo "row_ids_map.vidx3 not found"
 fi
 
 if [ $inverted_row_ids_map_exists -eq 0 ]; then
-  echo "merged-inverted_row_ids_map.vidx2 not found"
+  echo "merged-inverted_row_ids_map.vidx3 not found"
 fi
 
 if [ $inverted_row_sources_map_exists -eq 0 ]; then
-  echo "merged-inverted_row_sources_map.vidx2 not found"
+  echo "merged-inverted_row_sources_map.vidx3 not found"
 fi
 
 clickhouse-client -q "DROP TABLE test_vector_index_s3 sync"

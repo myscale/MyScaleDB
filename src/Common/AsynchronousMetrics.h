@@ -105,6 +105,9 @@ private:
     /// On first run we will only collect the values to subtract later.
     bool first_run TSA_GUARDED_BY(data_mutex) = true;
     TimePoint previous_update_time TSA_GUARDED_BY(data_mutex);
+#if defined(OS_LINUX)
+    Int64 base_shared = 0 TSA_GUARDED_BY(data_mutex);
+#endif
 
     AsynchronousMetricValues values TSA_GUARDED_BY(data_mutex);
 

@@ -68,6 +68,7 @@ ColumnsDescription PartLogElement::getColumnsDescription()
             {"RemovePart",    static_cast<Int8>(REMOVE_PART)},
             {"MutatePart",    static_cast<Int8>(MUTATE_PART)},
             {"MovePart",      static_cast<Int8>(MOVE_PART)},
+            {"DownloadVectorIndex",      static_cast<Int8>(DOWNLOAD_VECTOR_INDEX)},
         }
     );
 

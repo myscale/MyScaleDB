@@ -80,8 +80,7 @@ public:
     size_t countItem() const;
     void forceExpire(const CacheKey & cache_key);
     IndexWithMetaHolderPtr load(const CacheKey & cache_key,
-                                std::function<IndexWithMetaPtr()> load_func,
-                                std::function<void()> release_callback = {});
+                                std::function<IndexWithMetaPtr()> load_func);
     std::list<std::pair<CacheKey, Search::Parameters>> getAllItems();
 
     static CacheManager * getInstance();

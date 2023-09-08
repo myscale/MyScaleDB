@@ -23,12 +23,14 @@
 #include <SearchIndex/SearchIndexCommon.h>
 #include <SearchIndex/VectorIndex.h>
 
-#define VECTOR_INDEX_FILE_SUFFIX ".vidx2"
+#define VECTOR_INDEX_FILE_SUFFIX ".vidx3"
 #define MAX_BRUTE_FORCE_SEARCH_SIZE 50000
 #define MIN_SEGMENT_SIZE 1000000
 #define VECTOR_INDEX_DESCRIPTION "vector_index_description"
 #define VECTOR_INDEX_READY "vector_index_ready_v2"
 #define VECTOR_INDEX_BITMAP "vector_bitmap"
+#define VECTOR_INDEX_CHECKSUMS "vector_index_checksums"
+#define DECOUPLE_OWNER_PARTS_RESTORE_PREFIX "restore"
 
 namespace DB
 {

@@ -73,7 +73,6 @@ struct SegmentId
     String owner_part_name;
     String vector_index_name;
     String column_name;
-    String vector_index_cache_prefix;
     UInt8 owner_part_id;
 
     SegmentId(
@@ -83,7 +82,6 @@ struct SegmentId
         const String & owner_part_name_,
         const String & vector_index_name_,
         const String & column_name_,
-        const String & vector_index_cache_prefix_,
         UInt8 owner_part_id_)
         : volume(volume_)
         , data_part_path(data_part_path_)
@@ -91,7 +89,6 @@ struct SegmentId
         , owner_part_name(owner_part_name_)
         , vector_index_name(vector_index_name_)
         , column_name(column_name_)
-        , vector_index_cache_prefix(vector_index_cache_prefix_)
         , owner_part_id(owner_part_id_)
     {
     }
@@ -102,15 +99,13 @@ struct SegmentId
         const String & data_part_path_,
         const String & current_part_name_,
         const String & vector_index_name_,
-        const String & column_name_,
-        const String & vector_index_cache_prefix_)
+        const String & column_name_)
         : volume(volume_)
         , data_part_path(data_part_path_)
         , current_part_name(current_part_name_)
         , owner_part_name(current_part_name_)
         , vector_index_name(vector_index_name_)
         , column_name(column_name_)
-        , vector_index_cache_prefix(vector_index_cache_prefix_)
         , owner_part_id(0)
     {
     }
@@ -134,13 +129,9 @@ struct SegmentId
 
     CacheKey getCacheKey() const
     {
-        fs::path full_path(data_part_path);
-        /// use parent data path, need to call parent_path() twice,
-        /// according to https://en.cppreference.com/w/cpp/filesystem/path/parent_path
-        return CacheKey{full_path.parent_path().parent_path().string(), cutMutVer(owner_part_name), vector_index_name, column_name};
+        return CacheKey{
+            getPartRelativePath(fs::path(data_part_path).parent_path()), cutMutVer(owner_part_name), vector_index_name, column_name};
     }
-
-    String getVectorReadyFilePath() const { return getPathPrefix() + VECTOR_INDEX_READY + VECTOR_INDEX_FILE_SUFFIX; }
 
     String getVectorDescriptionFilePath() const { return getPathPrefix() + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX; }
 
@@ -157,7 +148,16 @@ struct SegmentId
         return data_part_path + "/" + "merged-inverted_row_sources_map" + VECTOR_INDEX_FILE_SUFFIX;
     }
 
-    String getVectorIndexCachePrefix() const { return vector_index_cache_prefix; }
+    static String getPartRelativePath(const String & table_path)
+    {
+        /// get table relative path from data_part_path,
+        /// for example: table_path: /var/lib/clickhouse/store/0e3/0e3..../all_1_1_0 or store/0e3/0e3..../,
+        /// return path: store/0e3/0e3....
+        auto path = fs::path(table_path).parent_path();
+        return fs::path(path.parent_path().parent_path().filename())
+               / path.parent_path().filename()
+               / path.filename();
+    }
 
     UInt8 getOwnPartId() const { return owner_part_id; }
 };

@@ -16,6 +16,8 @@
     M(ReplicatedFetch, "Number of data parts being fetched from replica") \
     M(ReplicatedSend, "Number of data parts being sent to replicas") \
     M(ReplicatedChecks, "Number of data parts checking for consistency") \
+    M(ReplicatedFetchVectorIndex, "Number of vector indices in data part being fetched from replica") \
+    M(ReplicatedSendVectorIndex, "Number of vector indices in data part being sent to replicas") \
     M(BackgroundMergesAndMutationsPoolTask, "Number of active merges and mutations in an associated background pool") \
     M(BackgroundMergesAndMutationsPoolSize, "Limit on number of active merges and mutations in an associated background pool") \
     M(BackgroundFetchesPoolTask, "Number of active fetches in an associated background pool") \
@@ -278,6 +280,9 @@
     M(FilesystemCacheDelayedCleanupElements, "Filesystem cache elements in background cleanup queue") \
     M(FilesystemCacheHoldFileSegments, "Filesystem cache file segment which are currently hold as unreleasable") \
     M(AsyncInsertCacheSize, "Number of async insert hash id in cache") \
+    M(VectorIndexCacheManagerSize, "Vector index cache manager size limit in bytes.") \
+    M(AllVectorIndexMemorySize, "Total search memory in bytes of all vector indices.") \
+    M(LoadedVectorIndexMemorySize, "Current total search memory in bytes of loaded vector indices.") \
     M(S3Requests, "S3 requests count") \
     M(KeeperAliveConnections, "Number of alive connections") \
     M(KeeperOutstandingRequests, "Number of outstanding requests") \

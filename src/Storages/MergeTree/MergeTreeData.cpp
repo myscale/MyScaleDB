@@ -2777,6 +2777,16 @@ void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
     }
 }
 
+void MergeTreeData::clearVectorNvmeCache() const
+{
+    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
+    if (fs::exists(vector_nvme_cache_folder))
+    {
+        LOG_INFO(log, "Remove nvme cache folder: {}", vector_nvme_cache_folder);
+        fs::remove_all(vector_nvme_cache_folder);
+    }
+}
+
 void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
@@ -5663,12 +5673,25 @@ MergeTreeData::PartsBackupEntries MergeTreeData::backupParts(
         if (hold_table_lock && !table_lock)
             table_lock = lockForShare(local_context->getCurrentQueryId(), local_context->getSettingsRef().lock_acquire_timeout);
 
+        /// combine checksums and vector index checksums
+        auto files_without_checksums = part->getFileNamesWithoutChecksums(false);
+        auto checksums_ = part->checksums;
+        {
+            std::lock_guard lock(part->vector_index_checksums_mutex);
+            for (const auto & [index_name, vector_index_checksums] : part->vector_index_checksums_map)
+            {
+                auto vector_index_checksums_tmp = vector_index_checksums;
+                checksums_.add(std::move(vector_index_checksums_tmp));
+                files_without_checksums.insert(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
+            }
+        }
+
         if (backup_settings.check_projection_parts)
             part->checkConsistencyWithProjections(/* require_part_metadata= */ true);
 
         BackupEntries backup_entries_from_part;
         part->getDataPartStorage().backup(
-            part->checksums,
+            checksums_,
             part->getFileNamesWithoutChecksums(),
             data_path_in_backup,
             backup_settings,
@@ -5946,6 +5969,8 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::loadPartRestoredFromBackup(cons
         builder.withPartFormatFromDisk();
         part = std::move(builder).build();
         part->version.setCreationTID(Tx::PrehistoricTID, nullptr);
+        /// convert decouple owner parts name
+        part->convertIndexFileForRestore();
         part->loadColumnsChecksumsIndexes(/* require_columns_checksums= */ false, /* check_consistency= */ true);
     };
 

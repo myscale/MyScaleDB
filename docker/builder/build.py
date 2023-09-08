@@ -151,6 +151,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
     cmake["-DCMAKE_INSTALL_PREFIX"] = "/usr"
     cmake["-DCMAKE_INSTALL_SYSCONFDIR"] = "/etc"
     cmake["-DCMAKE_INSTALL_LOCALSTATEDIR"] = "/var"
+    cmake["-DENABLE_THINLTO"] = "OFF"
     # disable rust api
     cmake["-DENABLE_RUST"] = "OFF"
     cmake["-DCMAKE_BUILD_TYPE"] = build_type
@@ -196,7 +197,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
-    
+
     if with_sanitizer == 'memory':
         cmake["-DENABLE_EMBEDDED_COMPILER"] = "OFF"
         cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
@@ -387,7 +388,7 @@ def package(name: str, arch: str, package: bool, with_sanitizer: str, build_type
         if build_type == "Debug":
             version += "+debug"
 
-        packages = ["deb", "rpm", "apk"]
+        packages = ["deb"] # currently we don't need rpm and apk packages
         for pkg in packages:
             cmd = f'for conf in `find . -iname "*.yaml"`;do nfpm package --config $conf --packager {pkg}; done'
             command(cmd, shell=True, cwd=output, env={"OS": target_os, "ARCH": target_arch, "VERSION_STRING": version})
@@ -516,7 +517,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--image-version",
-        default="2.1",
+        default="2.9.1",
     )
 
     parser.add_argument(

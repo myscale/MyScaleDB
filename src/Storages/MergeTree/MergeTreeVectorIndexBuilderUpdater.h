@@ -33,6 +33,8 @@ enum class BuildVectorIndexStatus
     BUILD_FAIL = 2,
     META_ERROR = 3,
     MISCONFIGURED = 4,
+    BUILD_SKIPPED = 5,  /// No need to build vector index for this part
+    BUILD_RETRY = 6, /// Retry to move vector index files to part directory
 };
 
 class MergeTreeVectorIndexBuilderUpdater
@@ -61,20 +63,6 @@ public:
     ActionBlocker builds_blocker;
 
 private:
-    class Counter
-    {
-    public:
-        Counter() = default;
-        void put(const String & key, int value);
-        int get(const String & key);
-        int increaseAndGet(const String & key);
-    private:
-        std::map<String, int> counter_;
-        std::mutex mu_;
-    };
-
-    Counter counter;
-
     MergeTreeData & data;
     bool is_replicated = false; /// Mark if replicated
     //const size_t background_pool_size;
@@ -87,9 +75,13 @@ private:
     buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool slow_mode);
 
     /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
-    bool moveVectorIndexFilesToFuturePartAndCache(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part, const VectorIndex::VectorSegmentExecutorPtr vec_executor);
-
-    void undoBuildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part);
+    /// And finally write vector index checksums file.
+    bool moveVectorIndexFilesToFuturePartAndCache(
+        const StorageMetadataPtr & metadata_snapshot,
+        const String & vector_tmp_relative_path,
+        const MergeTreeDataPartPtr & dest_part,
+        const VectorIndex::VectorSegmentExecutorPtr vec_executor,
+        const String & vector_index_name);
 
     bool isSlowModePart(const MergeTreeDataPartPtr & part)
     {

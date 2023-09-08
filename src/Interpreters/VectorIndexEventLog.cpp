@@ -35,7 +35,8 @@ NamesAndTypesList VectorIndexEventLogElement::getNamesAndTypes()
             {"LoadCanceled",      static_cast<Int8>(LOAD_CANCELD)},
             {"LoadFailed",    static_cast<Int8>(LOAD_FAILED)},
             {"LoadError",    static_cast<Int8>(LOAD_ERROR)},
-            {"Unload",      static_cast<Int8>(UNLOAD)},
+            // {"Unload",      static_cast<Int8>(UNLOAD)},
+            {"CacheExpire",      static_cast<Int8>(CACHE_EXPIRE)},
             {"WillUnload",      static_cast<Int8>(WILLUNLOAD)},
             {"Cleared",      static_cast<Int8>(CLEARED)},
         }
@@ -46,7 +47,9 @@ NamesAndTypesList VectorIndexEventLogElement::getNamesAndTypes()
         {"database", std::make_shared<DataTypeString>()},
         {"table", std::make_shared<DataTypeString>()},
         {"part_name", std::make_shared<DataTypeString>()},
+        {"current_part_name", std::make_shared<DataTypeString>()},
         {"partition_id", std::make_shared<DataTypeString>()},
+        {"thread_id", std::make_shared<DataTypeString>()},
 
         {"event_type", std::move(event_type_datatype)},
         {"event_date", std::make_shared<DataTypeDate>()},
@@ -65,7 +68,9 @@ void VectorIndexEventLogElement::appendToBlock(MutableColumns & columns) const
     columns[i++]->insert(database_name);
     columns[i++]->insert(table_name);
     columns[i++]->insert(part_name);
+    columns[i++]->insert(current_part_name);
     columns[i++]->insert(partition_id);
+    columns[i++]->insert(thread_id);
 
     columns[i++]->insert(event_type);
     columns[i++]->insert(DateLUT::instance().toDayNum(event_time).toUnderType());
@@ -83,6 +88,7 @@ void VectorIndexEventLog::addEventLog(
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
+    const String & current_part_name,
     const ExecutionStatus & execution_status)
 {
     if (!log_entry) return;
@@ -90,7 +96,15 @@ void VectorIndexEventLog::addEventLog(
     elem.database_name = db_name;
     elem.table_name = table_name;
     elem.part_name = part_name;
+    if (current_part_name != "")
+        elem.current_part_name = current_part_name;
+    else
+        elem.current_part_name = part_name;
     elem.partition_id = partition_id;
+    if (unlikely(!current_thread))
+        elem.thread_id = toString(0);
+    else
+        elem.thread_id = toString(current_thread->thread_id);
     elem.event_type = event_type;
     const auto time_now = std::chrono::system_clock::now();
 
@@ -110,6 +124,7 @@ void VectorIndexEventLog::addEventLog(
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
+    const String & current_part_name,
     const ExecutionStatus & execution_status)
 {
     VectorIndexEventLogPtr log_entry = current_context->getVectorIndexEventLog();
@@ -117,9 +132,13 @@ void VectorIndexEventLog::addEventLog(
     try
     {
         if (log_entry)
-            addEventLog(log_entry, db_name,
-                        table_name, part_name,
-                        partition_id, event_type,
+            addEventLog(log_entry,
+                        db_name,
+                        table_name,
+                        part_name,
+                        partition_id,
+                        event_type,
+                        current_part_name,
                         execution_status);
     }
     catch (...)
@@ -139,12 +158,13 @@ void VectorIndexEventLog::addEventLog(
     try
     {
         if(log_entry)
-            addEventLog(log_entry, 
+            addEventLog(log_entry,
                         data_part->storage.getStorageID().database_name,
-                        data_part->storage.getStorageID().table_name, 
+                        data_part->storage.getStorageID().table_name,
                         data_part->name,
                         data_part->info.partition_id,
                         event_type,
+                        data_part->name,
                         execution_status);
     }
     catch (...)
@@ -159,6 +179,7 @@ void VectorIndexEventLog::addEventLog(
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
+    const String & current_part_name,
     const ExecutionStatus & execution_status)
 {
     VectorIndexEventLogPtr log_entry = current_context->getVectorIndexEventLog();
@@ -176,6 +197,7 @@ void VectorIndexEventLog::addEventLog(
                             part_name,
                             partition_id,
                             event_type,
+                            current_part_name,
                             execution_status);
         }
     }

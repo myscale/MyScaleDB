@@ -30,7 +30,7 @@ struct VectorIndexEventLogElement
         LOAD_CANCELD = 10,
         LOAD_FAILED = 11,
         LOAD_ERROR = 12,
-        UNLOAD = 13,
+        CACHE_EXPIRE = 13,
         WILLUNLOAD = 14,
         CLEARED = 15,
         DEFAULT = 16,
@@ -38,7 +38,9 @@ struct VectorIndexEventLogElement
     String database_name;
     String table_name;
     mutable String part_name;
+    mutable String current_part_name;
     mutable String partition_id;
+    mutable String thread_id;
 
     Type event_type = DEFAULT;
     time_t event_time = 0;
@@ -69,6 +71,7 @@ public:
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,
+        const String & current_part_name = "",
         const ExecutionStatus & execution_status = {});
     
     static void addEventLog(
@@ -78,6 +81,7 @@ public:
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,
+        const String & current_part_name = "",
         const ExecutionStatus & execution_status = {});
     
     static void addEventLog(
@@ -92,6 +96,7 @@ public:
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,
+        const String & current_part_name = "",
         const ExecutionStatus & execution_status = {});
 
     static std::optional<std::pair<String, String>> getDbAndTableNameFromUUID(const UUID & table_uuid);

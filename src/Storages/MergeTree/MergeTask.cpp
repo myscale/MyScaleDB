@@ -23,7 +23,6 @@
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
-#include <Storages/MergeTree/MergeTreeInOrderSelectProcessor.h>
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Transforms/MaterializingTransform.h>
 #include <Processors/Transforms/FilterTransform.h>
@@ -43,10 +42,14 @@
 #include <Interpreters/MergeTreeTransaction.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 
-#include <VectorIndex/CacheManager.h>
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/MergeUtils.h>
+#include <IO/HashingReadBuffer.h>
 #include <IO/WriteIntText.h>
+#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
+#include <VectorIndex/CacheManager.h>
+#include <VectorIndex/MergeUtils.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <Common/ActionBlocker.h>
+#include <Common/logger_useful.h>
 
 namespace ProfileEvents
 {
@@ -801,8 +804,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                     global_ctx->future_part->parts[source_num]->getDataPartStorage().getFullPath(),
                     global_ctx->future_part->parts[source_num]->name,
                     vec_index_desc.name,
-                    vec_index_desc.column,
-                    "");
+                    vec_index_desc.column);
                 VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
                 vec_executor.updateBitMap(deleteRowIds);
             }
@@ -1258,16 +1260,20 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         global_ctx->to->finalizePart(global_ctx->new_data_part, ctx->need_sync, &global_ctx->storage_columns, &global_ctx->checksums_gathered_columns);
 
     /// finalize row ids map info to new data part dir
+    /// generate new merged vector index files checksums and combine them
+    std::unordered_map<String, DB::MergeTreeDataPartChecksums> vector_index_checksums_map_tmp;
     if (!global_ctx->row_ids_map_files.empty())
     {
         for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
         {
             /// move vector index files to new dir
-            VectorIndex::moveVectorIndexFiles(
-                toString(i),
-                global_ctx->future_part->parts[i]->name,
-                global_ctx->future_part->parts[i]->getDataPartStorage(),
-                global_ctx->new_data_part->getDataPartStorage());
+            auto checksums_map = VectorIndex::moveVectorIndexFiles(
+                toString(i), global_ctx->future_part->parts[i]->name, global_ctx->future_part->parts[i], global_ctx->new_data_part);
+
+            for (auto & [index_name, checksums_] : checksums_map)
+            {
+                vector_index_checksums_map_tmp[index_name].add(std::move(checksums_));
+            }
         }
 
         /// finalize row sources map info to new data part dir
@@ -1288,6 +1294,46 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
 
         /// Previously we marked this tmp file to be kept
         global_ctx->context->getTemporaryVolume()->getDisk()->removeFile(global_ctx->inverted_row_sources_map_file_path);
+
+        /// add merged-inverted_row_ids_map and merged-inverted_row_sources_map to vector_index_checksums_map
+        NameSet index_map_filenames
+            = {toString("merged-inverted_row_sources_map") + VECTOR_INDEX_FILE_SUFFIX,
+               toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_SUFFIX};
+        /// TODO: temporary solution to add merged-*-row_ids_map to map, need to change it when multi vector index supported
+        for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
+        {
+            String row_ids_map_filename
+                = "merged-" + toString(i) + "-" + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
+            index_map_filenames.emplace(row_ids_map_filename);
+        }
+
+        std::vector<std::tuple<String, UInt64, MergeTreeDataPartChecksum::uint128>> checksums_results;
+        for (const auto & map_filename : index_map_filenames)
+        {
+            auto file_buf = global_ctx->new_data_part->getDataPartStoragePtr()->readFile(map_filename, {}, std::nullopt, std::nullopt);
+            HashingReadBuffer hashing_buf(*file_buf);
+            hashing_buf.ignoreAll();
+            checksums_results.emplace_back(map_filename, hashing_buf.count(), hashing_buf.getHash());
+        }
+
+        {
+            std::lock_guard(global_ctx->new_data_part->vector_index_checksums_mutex);
+            global_ctx->new_data_part->vector_index_checksums_map = vector_index_checksums_map_tmp;
+            for (auto & [vector_index_name, vector_index_checksums] : global_ctx->new_data_part->vector_index_checksums_map)
+            {
+                for (const auto & [filename_, file_size_, hash_] : checksums_results)
+                    vector_index_checksums.addFile(filename_, file_size_, hash_);
+
+                /// write new part decoupled vector index checksums file
+                auto out_checksums = global_ctx->new_data_part->getDataPartStoragePtr()->writeFile(
+                    global_ctx->new_data_part->getDataPartStorage().getFullPath() + vector_index_name + "-" + VECTOR_INDEX_CHECKSUMS
+                        + VECTOR_INDEX_FILE_SUFFIX,
+                    4096,
+                    {});
+                vector_index_checksums.write(*out_checksums);
+                out_checksums->finalize();
+            }
+        }
 
         /// Initialize the vector index metadata for the new part
         global_ctx->new_data_part->loadVectorIndexMetadata();

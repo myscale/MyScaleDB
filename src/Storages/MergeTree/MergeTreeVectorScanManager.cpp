@@ -7,6 +7,7 @@
 
 #include <Columns/ColumnArray.h>
 
+#include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 
@@ -20,6 +21,7 @@
 #include <VectorIndex/Status.h>
 #include <VectorIndex/VectorIndexCommon.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/SearchThreadLimiter.h>
 
 #include <memory>
 
@@ -483,7 +485,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
 
     VectorIndexDescription index;
     bool find_index = false;
-    bool is_active = data_part->getState() == MergeTreeDataPartState::Active;
     const VectorIndicesDescription & vector_indices = metadata->vec_indices;
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
@@ -560,7 +561,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         is_shutdown = data_part->storage.isShutdown();
         if (!is_shutdown)
         {
-            VectorIndex::Status status = vec_executor->load(is_active);
+            VectorIndex::Status status = vec_executor->load(data_part->getState() == MergeTreeDataPartState::Active);
             LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
             LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
@@ -602,9 +603,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         segment_ids.clear();
         if (data_part->containVectorIndex(index.name, index.column))
         {
-            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-                / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
-            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column, vector_index_cache_prefix);
+            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column);
             segment_ids.emplace_back(std::move(segment_id));
         }
 
@@ -624,7 +623,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
             is_shutdown = data_part->storage.isShutdown();
             if (!is_shutdown)
             {
-                VectorIndex::Status status = vec_executor->load(is_active);
+                VectorIndex::Status status = vec_executor->load(data_part->getState() == MergeTreeDataPartState::Active);
                 LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
                 LOG_DEBUG(log, "Load vector index: {}", status.getCode());
 
@@ -1047,6 +1046,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const Search::Metric & metric)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScanWithoutIndex()");
+    /// Limit the number of vector index search threads to 2 * number of physical cores
+    static VectorIndex::LimiterSharedContext vector_index_context(getNumberOfPhysicalCPUCores() * 2);
+    VectorIndex::SearchThreadLimiter limiter(vector_index_context, log);
     NamesAndTypesList cols;
     /// get search vector column info
     auto col_and_type = this->metadata->getColumns().getAllPhysical().tryGetByName(search_column);
@@ -1187,7 +1189,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 if (src_vec.empty())
                     continue;
 
-                std::vector<float> vector_raw_data;
+                std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data;
                 vector_raw_data.reserve(dim * offsets.size());
 
                 std::vector<size_t> actual_id_in_range;
@@ -1352,7 +1354,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 continue;
             }
 
-            std::vector<float> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
+            std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
 
             for (size_t row = 0; row < offsets.size(); ++row)
             {
@@ -1516,7 +1518,7 @@ void MergeTreeVectorScanManager::searchWrapper(
     std::vector<int64_t> tmp_per_id;
     float * distance_data;
     int64_t * id_data;
-    
+
     if (delete_id_num > 0)
     {
         tmp_per_id = std::vector<int64_t>((k + delete_id_num) * nq);
