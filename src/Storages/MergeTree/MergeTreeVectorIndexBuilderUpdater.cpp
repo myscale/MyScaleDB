@@ -1,17 +1,16 @@
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 #include <Core/ServerSettings.h>
 #include <DataTypes/DataTypeArray.h>
+#include <Interpreters/VectorIndexEventLog.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <VectorIndex/DiskIOReader.h>
-#include <Interpreters/VectorIndexEventLog.h>
+#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 #include <VectorIndex/Metadata.h>
 #include <VectorIndex/PartReader.h>
-#include <VectorIndex/VectorSegmentExecutor.h>
 #include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
+#include <Common/ActionBlocker.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
-#include <Common/ActionBlocker.h>
 #include <Common/StringUtils/StringUtils.h>
 
 namespace ProfileEvents

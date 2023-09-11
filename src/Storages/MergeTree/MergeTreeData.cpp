@@ -96,9 +96,8 @@
 #include <fmt/format.h>
 #include <Poco/Logger.h>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/DiskIOReader.h>
 #include <VectorIndex/MergeUtils.h>
+#include <VectorIndex/VectorSegmentExecutor.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
