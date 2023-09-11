@@ -333,23 +333,6 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         /// Currently only one vector index is supported, store the build vector index description.
         auto vector_index_desc = metadata_snapshot->getVectorIndices()[0];
 
-        constexpr int maxBuildRetryCount = 3;
-        int failed_count = counter.get(vector_tmp_full_path);
-        if (failed_count >= maxBuildRetryCount)
-        {
-            BuildIndexHelpers::setPartVectorIndexBuildStatus(part, vector_index_desc);
-            VectorIndexEventLog::addEventLog(
-                data.getContext(),
-                part,
-                VectorIndexEventLogElement::BUILD_ERROR,
-                ExecutionStatus(
-                    ErrorCodes::MEMORY_LIMIT_EXCEEDED,
-                    "part = " + part->name + ", has MEMORY_LIMIT_EXCEEDED for max retry times " + std::to_string(failed_count)));
-            throw Exception(ErrorCodes::MEMORY_LIMIT_EXCEEDED, "part = {}, has MEMORY_LIMIT_EXCEEDED for max retry times {}", part->name, failed_count);
-        }
-
-        bool mem_limit_happened = false;
-
         BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
         try
         {
@@ -361,28 +344,13 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         }
         catch (Exception & e)
         {
-            if (e.code() == ErrorCodes::MEMORY_LIMIT_EXCEEDED)
-            {
-                status = BuildVectorIndexStatus::BUILD_FAIL;
-                int temp_value = counter.increaseAndGet(part->getDataPartStorage().getRelativePath());
-                LOG_WARNING(log, "Vector index build task for part {} has MEMORY_LIMIT_EXCEEDED for {} times", part->name, temp_value);
-                VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
-                mem_limit_happened = true;
-            }
-            else
-            {
-                LOG_WARNING(log,"Vector Index build task for part {} failed: {}", part->name, e.message());
-                VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
-                throw;
-            }
+            LOG_WARNING(log,"Vector Index build task for part {} failed: {}", part->name, e.message());
+            VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
+            throw;
         }
 
         if (status != BuildVectorIndexStatus::SUCCESS)
         {
-            if (mem_limit_happened)
-            {
-                undoBuildVectorIndexForOnePart(metadata_snapshot, part);
-            }
             if (status == BuildVectorIndexStatus::BUILD_FAIL)
             {
                 BuildIndexHelpers::setPartVectorIndexBuildStatus(part, vector_index_desc);
@@ -831,44 +799,6 @@ void MergeTreeVectorIndexBuilderUpdater::undoBuildVectorIndexForOnePart(
     if (disk->exists(vector_tmp_relative_path) && !disk->exists(vector_tmp_relative_path + "/" + vector_index_description_file_name))
     {
         disk->removeRecursive(vector_tmp_relative_path);
-    }
-}
-
-void MergeTreeVectorIndexBuilderUpdater::Counter::put(const String & key, int value)
-{
-    std::lock_guard<std::mutex> lg(mu_);
-
-    counter_[key] = value;
-}
-
-int MergeTreeVectorIndexBuilderUpdater::Counter::get(const String & key)
-{
-    std::lock_guard<std::mutex> lg(mu_);
-
-    if (counter_.find(key) == counter_.cend())
-    {
-        return 0;
-    }
-    else
-    {
-        return counter_[key];
-    }
-}
-
-int MergeTreeVectorIndexBuilderUpdater::Counter::increaseAndGet(const String & key)
-{
-    std::lock_guard<std::mutex> lg(mu_);
-
-    if (counter_.find(key) == counter_.cend())
-    {
-        counter_[key] = 1;
-        return 1;
-    }
-    else
-    {
-        int t = counter_[key] + 1;
-        counter_[key] = t;
-        return t;
     }
 }
 
