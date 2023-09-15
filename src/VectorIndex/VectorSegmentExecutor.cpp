@@ -483,12 +483,15 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             catch (const SearchIndexException & e)
             {
                 LOG_ERROR(log, "SearchIndexException: {}", e.what());
+                /// Destruct the index in advance to ensure that removing vector index cache will not affect the next load
+                index.reset();
                 throw IndexException(e.getCode(), e.what());
             }
-            catch (const DB::Exception & e)
+            catch (...)
             {
-                LOG_DEBUG(log, "Failed to load inverted row ids map entries, error: {}", e.what());
-                throw e;
+                LOG_ERROR(log, "Failed to load vector index, cache key={}", segment_id.getCacheKey().toString());
+                index.reset();
+                throw;
             }
         };
         auto global_context = DB::Context::getGlobalContextInstance();
@@ -989,7 +992,7 @@ const std::vector<UInt64> VectorSegmentExecutor::readDeleteBitmapAccordingSegmen
         throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to fetch MergeTree Data Storage");
 
     // Get the part corresponding to the current segment, Whether to allow reading delete bitmap from part in outdated state?
-    auto part = merge_tree->getPartIfExists(segment_id.current_part_name, {DB::MergeTreeDataPartState::Active});
+    auto part = merge_tree->getPartIfExists(segment_id.current_part_name, {DB::MergeTreeDataPartState::Active, DB::MergeTreeDataPartState::Outdated});
     if (!part)
         throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Cannot get active part according to the segment");
 
