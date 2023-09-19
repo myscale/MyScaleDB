@@ -36,6 +36,7 @@
 #include <Interpreters/getTableExpressions.h>
 #include <Interpreters/replaceAliasColumnsInQuery.h>
 #include <Interpreters/replaceForPositionalArguments.h>
+#include <Interpreters/replaceMissedSubcolumnsInQuery.h>
 
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionVisitor.h>
@@ -55,6 +56,7 @@
 
 #include <DataTypes/NestedUtils.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeObject.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 
 #include <IO/WriteHelpers.h>
@@ -995,6 +997,10 @@ void TreeRewriterResult::collectSourceColumns(bool add_special)
             source_columns.swap(columns_from_storage);
         else
             source_columns.insert(source_columns.end(), columns_from_storage.begin(), columns_from_storage.end());
+
+        auto metadata_snapshot = storage->getInMemoryMetadataPtr();
+        auto metadata_column_descriptions = metadata_snapshot->getColumns();
+        source_columns_ordinary = metadata_column_descriptions.getOrdinary();
     }
 
     source_columns_set = removeDuplicateColumns(source_columns);
@@ -1167,14 +1173,30 @@ void TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         }
     }
 
-    /// insert distance func columns into source columns here
-    if (!vector_scan_funcs.empty() && !vector_from_right_table)
+    /// Collect missed object subcolumns
+    if (!unknown_required_source_columns.empty())
     {
-        for (auto node : vector_scan_funcs)
+        for (const NameAndTypePair & pair : source_columns_ordinary)
         {
-            const String distance_col_name = node->getColumnName();
-            addDistanceFuncColName(distance_col_name, source_columns);
-            unknown_required_source_columns.erase(distance_col_name);
+            for (auto it = unknown_required_source_columns.begin(); it != unknown_required_source_columns.end();)
+            {
+                size_t object_pos = it->find('.');
+                if (object_pos != std::string::npos)
+                {
+                    String object_name = it->substr(0, object_pos);
+                    if (pair.name == object_name && pair.type->getTypeId() == TypeIndex::Object)
+                    {
+                        const auto * object_type = typeid_cast<const DataTypeObject *>(pair.type.get());
+                        if (object_type->getSchemaFormat() == "json" && object_type->hasNullableSubcolumns())
+                        {
+                            missed_subcolumns.insert(*it);
+                            it = unknown_required_source_columns.erase(it);
+                            continue;
+                        }
+                    }
+                }
+                ++it;
+            }
         }
     }
 
@@ -1593,6 +1615,13 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
 
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 
+    if (!result.missed_subcolumns.empty())
+    {
+        for (const String & column_name : result.missed_subcolumns)
+            replaceMissedSubcolumnsInQuery(query, column_name);
+        result.missed_subcolumns.clear();
+    }
+
     result.required_source_columns_before_expanding_alias_columns = result.required_source_columns.getNames();
 
     /// rewrite filters for select query, must go after getArrayJoinedColumns
@@ -1687,7 +1716,17 @@ TreeRewriterResultPtr TreeRewriter::analyze(
     else
         assertNoAggregates(query, "in wrong place");
 
-    result.collectUsedColumns(query, false, settings.query_plan_optimize_primary_key);
+    bool is_ok = result.collectUsedColumns(query, false, settings.query_plan_optimize_primary_key, no_throw);
+    if (!is_ok)
+        return {};
+
+    if (!result.missed_subcolumns.empty())
+    {
+        for (const String & column_name : result.missed_subcolumns)
+            replaceMissedSubcolumnsInQuery(query, column_name);
+        result.missed_subcolumns.clear();
+    }
+
     return std::make_shared<const TreeRewriterResult>(result);
 }
 
