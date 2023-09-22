@@ -151,6 +151,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
     cmake["-DCMAKE_INSTALL_PREFIX"] = "/usr"
     cmake["-DCMAKE_INSTALL_SYSCONFDIR"] = "/etc"
     cmake["-DCMAKE_INSTALL_LOCALSTATEDIR"] = "/var"
+    cmake["-DENABLE_THINLTO"] = "OFF"
     # disable rust api
     cmake["-DENABLE_RUST"] = "OFF"
     cmake["-DCMAKE_BUILD_TYPE"] = build_type
