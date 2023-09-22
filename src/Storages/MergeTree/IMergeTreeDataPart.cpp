@@ -1380,10 +1380,7 @@ void IMergeTreeDataPart::addBuiltVectorIndex(const VectorIndexDescription & vec_
 
     std::lock_guard lock(vector_indices_mutex);
 
-    String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
-        / info.getPartNameWithoutMutation() / "";
-
-    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
+    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
 
     VectorIndex::Metadata metadata(segment_id);
     auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
@@ -1408,9 +1405,6 @@ void IMergeTreeDataPart::addDecoupledVectorIndices(const std::vector<MergedPartN
 
     auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
 
-    String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
-        / info.getPartNameWithoutMutation() / "";
-
     for (const auto & old_part : old_parts)
     {
         for (const auto & vec_index_desc : vec_indices)
@@ -1422,7 +1416,6 @@ void IMergeTreeDataPart::addDecoupledVectorIndices(const std::vector<MergedPartN
                 old_part.name,
                 vec_index_desc.name,
                 vec_index_desc.column,
-                vector_index_cache_prefix,
                 old_part.id);
 
             VectorIndex::Metadata metadata(segment_id);
@@ -1452,8 +1445,6 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
         std::lock_guard lock(decouple_mutex);
         auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
 
-        String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
-            / info.getPartNameWithoutMutation() / "";
         auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
         IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
         for (const auto & old_part : merged_source_parts)
@@ -1467,7 +1458,6 @@ void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
                     old_part.name,
                     vec_index_desc.name,
                     vec_index_desc.column,
-                    vector_index_cache_prefix,
                     old_part.id);
 
                 part_storage.removeFileIfExists(segment_id.getVectorReadyFilePath());
@@ -1488,8 +1478,6 @@ void IMergeTreeDataPart::CancelLoadingVIOfInactivePart() const
         std::lock_guard lock(decouple_mutex);
         auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
 
-        String vector_index_cache_prefix = fs::path(storage.getContext()->getVectorIndexCachePath()) / storage.getRelativeDataPath()
-            / info.getPartNameWithoutMutation() / "";
         auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
         for (const auto & old_part : merged_source_parts)
         {
@@ -1502,7 +1490,6 @@ void IMergeTreeDataPart::CancelLoadingVIOfInactivePart() const
                     old_part.name,
                     vec_index_desc.name,
                     vec_index_desc.column,
-                    vector_index_cache_prefix,
                     old_part.id);
 
                 VectorIndex::VectorSegmentExecutor::cancelVectorIndexLoading(segment_id.getCacheKey());
@@ -1886,7 +1873,7 @@ void IMergeTreeDataPart::onLightweightDelete() const
     {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
     }
-    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column, "");
+    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
     VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
 
     /// Update vector index deleted bitmap for the part on disk and cache if exists.
@@ -1949,7 +1936,7 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
     }
     for (const auto & old_part : old_parts)
     {
-        VectorIndex::SegmentId segment_id(part_storage->volume, data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, "", old_part.id);
+        VectorIndex::SegmentId segment_id(part_storage->volume, data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, old_part.id);
         VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
         /// Update merged deleted bitmap for the old part on disk and cache if exists.
         vec_executor.updateMergedBitMap(new_del_ids);

@@ -82,9 +82,6 @@ protected:
             owner_part_id = vec_info->owner_part_id;
         }
 
-        String vector_index_cache_prefix = fs::path(part->storage.getContext()->getVectorIndexCachePath())
-            / part->storage.getRelativeDataPath() / part->info.getPartNameWithoutMutation() / "";
-
         const DataPartStorageOnDiskBase * part_storage
             = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
         if (part_storage == nullptr)
@@ -99,7 +96,6 @@ protected:
             owner_part,
             index.name,
             index.column,
-            vector_index_cache_prefix,
             owner_part_id);
 
         VectorIndex::Metadata metadata(segment_id);

@@ -59,18 +59,6 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
     }
     LOG_INFO(log, "Put into cache: cache_key = {}", cache_key.toString());
 
-    auto global_context = DB::Context::getGlobalContextInstance();
-    auto release_callback = [cache_key, global_context]()
-    {
-        if (!global_context->isShutdown())
-            DB::VectorIndexEventLog::addEventLog(
-                global_context,
-                cache_key.getTableUUID(),
-                cache_key.getPartName(),
-                cache_key.getPartitionID(),
-                DB::VectorIndexEventLogElement::UNLOAD);
-    };
-
     DB::VectorIndexEventLog::addEventLog(
         DB::Context::getGlobalContextInstance(),
         cache_key.getTableUUID(),
@@ -79,7 +67,7 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
         DB::VectorIndexEventLogElement::LOAD_START);
 
     if (!cache->getOrSet(
-            cache_key, [&]() { return index; }, release_callback))
+            cache_key, [&]() { return index; }))
     {
         LOG_DEBUG(log, "Put into cache: {} failed", cache_key.toString());
         DB::VectorIndexEventLog::addEventLog(
@@ -126,12 +114,19 @@ size_t CacheManager::countItem() const
 void CacheManager::forceExpire(const CacheKey & cache_key)
 {
     LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
+    auto global_context = DB::Context::getGlobalContextInstance();
+    if (global_context)
+        DB::VectorIndexEventLog::addEventLog(
+            global_context,
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::CACHE_EXPIRE);
     return cache->tryRemove(cache_key);
 }
 
 IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, 
-                                          std::function<IndexWithMetaPtr()> load_func,
-                                          std::function<void()> release_callback)
+                                          std::function<IndexWithMetaPtr()> load_func)
 {
     if (!cache)
     {
@@ -139,7 +134,7 @@ IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key,
     }
     LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
 
-    return cache->getOrSet(cache_key, load_func, release_callback);
+    return cache->getOrSet(cache_key, load_func);
 }
 
 void CacheManager::setCacheSize(size_t size_in_bytes)

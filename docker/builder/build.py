@@ -197,7 +197,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
-    
+
     if with_sanitizer == 'memory':
         cmake["-DENABLE_EMBEDDED_COMPILER"] = "OFF"
         cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
@@ -517,7 +517,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--image-version",
-        default="2.1",
+        default="2.9.1",
     )
 
     parser.add_argument(
