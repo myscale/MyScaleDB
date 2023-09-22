@@ -43,6 +43,8 @@ namespace DB
     using StoragePtr = std::shared_ptr<IStorage>;
 }
 
+namespace fs = std::filesystem;
+
 namespace VectorIndex
 {
 
@@ -277,7 +279,8 @@ Status VectorSegmentExecutor::cache()
         inverted_row_ids_map,
         inverted_row_sources_map,
         disk_mode,
-        fallback_to_flat);
+        fallback_to_flat,
+        vector_index_cache_prefix);
 
     LOG_DEBUG(log, "Cache key: {}", segment_id.getCacheKey().toString());
     mgr->put(segment_id.getCacheKey(), cache_item);
@@ -478,7 +481,8 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                     inverted_row_ids_map,
                     inverted_row_sources_map,
                     disk_mode,
-                    fallback_to_flat);
+                    fallback_to_flat,
+                    vector_index_cache_prefix);
             }
             catch (const SearchIndexException & e)
             {
@@ -966,7 +970,7 @@ void VectorSegmentExecutor::configureDiskMode()
             des.setParam("disk_mode", disk_mode);
         if (disk_mode)
         {
-            vector_index_cache_prefix = segment_id.getVectorIndexCachePrefix();
+            vector_index_cache_prefix = fs::path(segment_id.getVectorIndexCachePrefix()).parent_path().string() + '-' + generateUUIDv4() + '/';
             LOG_INFO(log, "vector_index_cache_prefix: {}", vector_index_cache_prefix);
         }
     }
