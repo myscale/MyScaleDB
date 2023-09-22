@@ -24,6 +24,12 @@ include:
   - "/.gitlab-ci-stability-test.yml"
   - "/.gitlab-ci-chaos-test.yml"
 
+.init-docker: &init-docker
+  - docker/builder/tools/docker-info.sh
+  - echo $HARBOR_PASSWORD | docker login harbor.internal.moqi.ai --username "$(echo $HARBOR_USER_B64 | base64 -d)" --password-stdin
+  - echo $DOCKERHUB_PASSWORD | docker login --username $DOCKERHUB_USERNAME --password-stdin
+  - docker/builder/tools/docker-buildx.sh
+
 stages:
   - check-pipeline
   - build
@@ -133,8 +139,7 @@ build_image:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
-    - docker/builder/tools/docker-info.sh
-    - docker/builder/tools/docker-buildx.sh
+    - *init-docker
   script:
     - docker/builder/tools/image.sh
   rules:
@@ -149,8 +154,7 @@ build_image_with_license:
   when: manual
   dependencies: ["build_package_with_license", "check_pipeline_already_running"]
   before_script:
-    - docker/builder/tools/docker-info.sh
-    - docker/builder/tools/docker-buildx.sh
+    - *init-docker
   script:
     - docker/builder/tools/image-with-license.sh
 
@@ -160,8 +164,7 @@ build_saas_image:
     - task
   dependencies: ["build_package", "check_pipeline_already_running"]
   before_script:
-    - docker/builder/tools/docker-info.sh
-    - docker/builder/tools/docker-buildx.sh
+    - *init-docker
   script:
     - docker/builder/tools/saas-image.sh
   rules:
