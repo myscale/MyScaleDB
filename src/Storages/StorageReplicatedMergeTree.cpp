@@ -4491,6 +4491,9 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
         /// Temporary directories contain incomplete results of build vector index.
         clearTemporaryIndexBuildDirectories();
 
+        /// clear nvme cache
+        clearVectorNvmeCache();
+
         /// In this thread replica will be activated.
         restarting_thread.start();
         /// And this is just a callback

@@ -146,6 +146,9 @@ void StorageMergeTree::startup()
     /// Temporary directories contain incomplete results of vector index building.
     clearTemporaryIndexBuildDirectories();
 
+    /// clear nvme cache
+    clearVectorNvmeCache();
+
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();
     time_after_previous_cleanup_temporary_directories.restart();

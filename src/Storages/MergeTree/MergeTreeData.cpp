@@ -2399,6 +2399,16 @@ void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
     }
 }
 
+void MergeTreeData::clearVectorNvmeCache() const
+{
+    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / getRelativeDataPath();
+    if (fs::exists(vector_nvme_cache_folder))
+    {
+        LOG_DEBUG(log, "Remove nvme cache folder: {}", vector_nvme_cache_folder);
+        fs::remove_all(vector_nvme_cache_folder);
+    }
+}
+
 void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
