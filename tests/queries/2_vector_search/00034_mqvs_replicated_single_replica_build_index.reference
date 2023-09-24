@@ -1,0 +1,8 @@
+0
+0
+t_rep_vector	v1	Built
+t_rep_vector_2	v1	Built
+Test drop one of two replicas, vector index should build sucessfully
+0
+t_rep_vector	v1	Built
+build_vector_index_on_random_single_replica

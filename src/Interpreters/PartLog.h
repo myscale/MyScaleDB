@@ -26,6 +26,7 @@ struct PartLogElement
         REMOVE_PART = 4,
         MUTATE_PART = 5,
         MOVE_PART = 6,
+        DOWNLOAD_VECTOR_INDEX = 7,
     };
 
     /// Copy of MergeAlgorithm since values are written to disk.

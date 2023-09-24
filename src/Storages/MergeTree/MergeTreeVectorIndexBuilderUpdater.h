@@ -33,6 +33,8 @@ enum class BuildVectorIndexStatus
     BUILD_FAIL = 2,
     META_ERROR = 3,
     MISCONFIGURED = 4,
+    BUILD_SKIPPED = 5,  /// No need to build vector index for this part
+    BUILD_RETRY = 6, /// Retry to move vector index files to part directory
 };
 
 class MergeTreeVectorIndexBuilderUpdater

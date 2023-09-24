@@ -52,6 +52,12 @@ private:
         bool from_remote_disk,
         bool send_projections);
 
+    MergeTreeData::DataPart::Checksums sendVectorIndexFromDisk(
+        const MergeTreeData::DataPartPtr & part,
+        const String & vec_index_name,
+        WriteBuffer & out,
+        bool from_remote_disk);
+
     /// StorageReplicatedMergeTree::shutdown() waits for all parts exchange handlers to finish,
     /// so Service will never access dangling reference to storage
     StorageReplicatedMergeTree & data;
@@ -81,6 +87,23 @@ public:
         bool to_detached = false,
         const String & tmp_prefix_ = "",
         std::optional<CurrentlySubmergingEmergingTagger> * tagger_ptr = nullptr,
+        bool try_zero_copy = true,
+        DiskPtr dest_disk = nullptr);
+
+    /// Downloads vector index files to tmp_directory, then moves to target part.
+    String fetchVectorIndex(
+        const MergeTreeData::DataPartPtr & future_part,
+        const String & source_part_name,
+        const String & vec_index_name,
+        const String & replica_path,
+        const String & host,
+        int port,
+        const ConnectionTimeouts & timeouts,
+        const String & user,
+        const String & password,
+        const String & interserver_scheme,
+        ThrottlerPtr throttler,
+        const String & tmp_prefix_ = "",
         bool try_zero_copy = true,
         DiskPtr dest_disk = nullptr);
 
@@ -134,6 +157,18 @@ private:
        size_t projections,
        MergeTreeData::DataPart::Checksums & checksums,
        ThrottlerPtr throttler);
+
+    String downloadVectorIndexInPartToDisk(
+            const MergeTreeData::DataPartPtr & part,
+            const String & vec_index_name,
+            const String & replica_path,
+            const String & tmp_prefix,
+            DiskPtr disk,
+            bool to_remote_disk,
+            PooledReadWriteBufferFromHTTP & in,
+            OutputBufferGetter output_buffer_getter,
+            ThrottlerPtr throttler,
+            bool sync);
 
     StorageReplicatedMergeTree & data;
     Poco::Logger * log;
