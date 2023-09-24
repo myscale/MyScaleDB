@@ -212,6 +212,10 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
         if (part->containRowIdsMaps() && data.getSettings()->disable_rebuild_for_decouple)
             continue;
 
+        /// Part already has vector index or no need to build.
+        if (part->containAnyVectorIndex() || part->isSmallPart(min_rows_to_build_vector_index))
+           continue;
+
         /// Since building vector index doesn't block mutation on the part, the new part need to check if any covered part is building vindex.
         /// The new part already blocked merge to select it, hence it's safe here. all_1_1_0 can avoid index build selection for future parts all_1_1_0_*
         {
@@ -292,7 +296,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
     if (metadata_snapshot->vec_indices.empty())
     {
         LOG_INFO(log, "No vector index declared");
-        return BuildVectorIndexStatus::SUCCESS;
+        return BuildVectorIndexStatus::BUILD_SKIPPED;
     }
 
     Stopwatch watch;
@@ -301,12 +305,13 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
     LOG_INFO(log, "Start vector index build task for {}, slow_mode: {}", part_name, slow_mode);
 
     /// One part is selected to build index.
+    BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
     {
         MergeTreeDataPartPtr part = data.getActiveContainingPart(part_name);
         if (!part)
         {
             LOG_INFO(log, "Part {} is not active, no need to build index", part_name);
-            return BuildVectorIndexStatus::SUCCESS;
+            return BuildVectorIndexStatus::NO_DATA_PART;
         }
 
         if (part->vector_index_build_cancelled)
@@ -320,7 +325,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         if (part->storage.getInMemoryMetadataPtr()->getVectorIndices().empty())
         {
             LOG_INFO(log, "Skip build for cancelled vector index {}.", metadata_snapshot->vec_indices[0].name);
-            return BuildVectorIndexStatus::SUCCESS;
+            return BuildVectorIndexStatus::BUILD_SKIPPED;
         }
 
         const DataPartStorageOnDiskBase * part_storage
@@ -333,7 +338,6 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         /// Currently only one vector index is supported, store the build vector index description.
         auto vector_index_desc = metadata_snapshot->getVectorIndices()[0];
 
-        BuildVectorIndexStatus status = BuildVectorIndexStatus::SUCCESS;
         try
         {
             if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
@@ -367,7 +371,7 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
     LOG_INFO(log, "Vector index build task for {} finished in {} sec, slow_mode: {}", part_name, watch.elapsedSeconds(), slow_mode);
 
     // TODO: handle fail case
-    return BuildVectorIndexStatus::SUCCESS;
+    return status;
 }
 
 BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOnePart(
@@ -454,8 +458,12 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         /// Create temporary directory to store built vector index files.
         /// The director name starts with prefix "vector_tmp_" + part_name w/o_mutation, e.g. part all_1_1_0_5: vector_tmp_all_1_1_0
         String part_name_prefix = part->info.getPartNameWithoutMutation();
-        String vector_tmp_relative_path = data.getRelativeDataPath() + "vector_tmp_" + part_name_prefix + "/";
-        String vector_tmp_full_path = data.getFullPathOnDisk(disk) + "vector_tmp_" + part_name_prefix + "/";
+        String tmp_vector_index_dir = "vector_tmp_" + part_name_prefix;
+        String vector_tmp_relative_path = data.getRelativeDataPath() + tmp_vector_index_dir + "/";
+        String vector_tmp_full_path = data.getFullPathOnDisk(disk) + tmp_vector_index_dir + "/";
+
+        /// Add lock to avoid wronly remove of temporary directory
+        auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(tmp_vector_index_dir);
 
         String vector_index_cache_prefix = fs::path(data.getContext()->getVectorIndexCachePath()) / data.getRelativeDataPath() / part_name_prefix / "";
 
@@ -503,21 +511,19 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     {
                         LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
                         VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
-                        return BuildVectorIndexStatus::SUCCESS;
+                        return BuildVectorIndexStatus::BUILD_SKIPPED;
                     }
 
                     /// In replicated case, slow replica may build vector index for merged data part.
                     /// Here check the future part has the same prefix name as build part.
                     if (is_replicated)
                     {
-                        String future_part_name_prefix = future_part->info.getPartNameWithoutMutation();
-                        if (future_part_name_prefix != part_name_prefix)
+                        if (!future_part->info.isFromSamePart(part->info))
                         {
                             LOG_DEBUG(
                                 log,
                                 "future part '{}' is a merged part not mutated part from part '{}' build vector index, no need to move.",
-                                future_part_name_prefix,
-                                part_name_prefix);
+                                future_part->name, part->name);
                             if (disk->exists(vector_tmp_relative_path))
                             {
                                 LOG_DEBUG(log, "Will remove unneeded vector index");
@@ -527,7 +533,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                                 LOG_DEBUG(log, "[Unneeded] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
                             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
-                            return BuildVectorIndexStatus::SUCCESS;
+                            return BuildVectorIndexStatus::BUILD_SKIPPED;
                         }
                     }
                 }
@@ -570,7 +576,11 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                             VectorIndex::removeRowIdsMaps(future_part, log);
                         }
                     }
-                    /// else future part is under mutating, not ready to move vector index.
+                    else
+                    {
+                        /// else future part is under mutating, not ready to move vector index.
+                        return BuildVectorIndexStatus::BUILD_RETRY;
+                    }
                 }
                 /// else future part will pick up later at the next time when index built for it.
             }
@@ -679,7 +689,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     part->onVectorIndexBuildError(vec_index_desc.name, "failed to find future part");
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
 
-                    return BuildVectorIndexStatus::SUCCESS;
+                    return BuildVectorIndexStatus::BUILD_SKIPPED;
                 }
             }
 
@@ -696,21 +706,19 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         LOG_DEBUG(log, "[Dropped] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
                     part->removeVectorIndexInfo(vec_index_desc.name);
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
-                    return BuildVectorIndexStatus::SUCCESS;
+                    return BuildVectorIndexStatus::BUILD_SKIPPED;
                 }
 
                 /// In replicated case, slow replica may build vector index for merged data part.
                 /// Here check the future part has the same prefix name as build part.
                 if (is_replicated)
                 {
-                    String future_part_name_prefix = future_part->info.getPartNameWithoutMutation();
-                    if (future_part_name_prefix != part_name_prefix)
+                    if (!future_part->info.isFromSamePart(part->info))
                     {
                         LOG_DEBUG(
                             log,
                             "future part '{}' is a merged part not mutated part from part '{}' build vector index, no need to move.",
-                            future_part_name_prefix,
-                            part_name_prefix);
+                            future_part->name, part->name);
                         if (disk->exists(vector_tmp_relative_path))
                         {
                             LOG_DEBUG(log, "Will remove unneeded vector index");
@@ -720,7 +728,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                             LOG_DEBUG(log, "[Unneeded] vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
                         VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
-                        return BuildVectorIndexStatus::SUCCESS;
+                        return BuildVectorIndexStatus::BUILD_SKIPPED;
                     }
                 }
 
@@ -730,7 +738,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 {
                     LOG_INFO(log, "Will move vector index files later since future part `{}` is under mutating", future_part->name);
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
-                    return BuildVectorIndexStatus::SUCCESS;
+                    return BuildVectorIndexStatus::BUILD_RETRY;
                 }
 
                 /// Second, update delete bitmap in memory in currently builder, which will be put in cache.
@@ -764,6 +772,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         else
         {
             part->onVectorIndexBuildError(vec_index_desc.name, "build has been cancelled.");
+            return BuildVectorIndexStatus::BUILD_SKIPPED;
         }
     }
 

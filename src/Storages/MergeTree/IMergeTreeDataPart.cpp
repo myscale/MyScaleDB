@@ -817,6 +817,27 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums(bool include_vector_fil
     return result;
 }
 
+NameSet IMergeTreeDataPart::getFileNamesForVectorIndex(const String &) const
+{
+    if (!isStoredOnDisk())
+        return {};
+
+    /// In fetch vector index cases, the vector index should be built for VPart.
+    if (!containAnyVectorIndex())
+        return {};
+
+    NameSet result;
+
+    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+    {
+        /// TODO: get index files for specified vector index
+        if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
+            result.emplace(it->name());
+    }
+
+   return result;
+}
+
 void IMergeTreeDataPart::loadDefaultCompressionCodec()
 {
     /// In memory parts doesn't have any compression
