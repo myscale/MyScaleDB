@@ -116,7 +116,7 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
 
     /// Add columns because we don't want to read empty blocks
     injectRequiredColumns(
-        LoadedMergeTreeDataPartInfoForReader(data_part, alter_conversions),
+        LoadedMergeTreeDataPartInfoForReader(data_part),
         storage_snapshot,
         storage.supportsSubcolumns(),
         columns_to_read);
