@@ -19,7 +19,7 @@ SELECT sleep(2);
 SELECT 'Lambda function in distance function';
 select id, distance(vector, arrayMap(x -> (x / 1.), range(1, 4))) AS d
 FROM test_with_clause_process_function
-ORDER BY d
+ORDER BY (d, id)
 LIMIT 5;
 
 SELECT 'Lambda function inside WITH clause';
