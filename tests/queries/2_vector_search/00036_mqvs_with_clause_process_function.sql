@@ -17,7 +17,7 @@ ALTER TABLE test_with_clause_process_function ADD VECTOR INDEX vec_ind vector TY
 SELECT sleep(2);
 
 SELECT 'Lambda function in distance function';
-select id, distance(vector, arrayMap(x -> (x / 1.), range(1, 4))) AS d
+SELECT id, distance(vector, arrayMap(x -> (x / 1.), range(1, 4))) AS d
 FROM test_with_clause_process_function
 ORDER BY (d, id)
 LIMIT 5;
@@ -30,18 +30,18 @@ SELECT
     id,
     distance(vector, generated_vector) AS d
 FROM test_with_clause_process_function
-ORDER BY d ASC
+ORDER BY (d, id) ASC
 LIMIT 5;
 
 SELECT 'Scalar Subquery inside WITH clause in distance function';
 WITH(
         SELECT arrayMap(x -> (x / 1.), range(1, 4))
     ) AS target_vector
-select id FROM (
-select id, distance(vector, target_vector) as dist
-from test_with_clause_process_function
-order by dist
-limit 10
+SELECT id FROM (
+SELECT id, distance(vector, target_vector) AS dist
+FROM test_with_clause_process_function
+ORDER BY (dist, id)
+LIMIT 10
 );
 
 DROP TABLE test_with_clause_process_function;
