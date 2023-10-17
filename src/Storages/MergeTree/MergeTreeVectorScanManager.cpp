@@ -601,9 +601,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         segment_ids.clear();
         if (data_part->containVectorIndex(index.name, index.column))
         {
-            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-                / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
-            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column, vector_index_cache_prefix);
+            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column);
             segment_ids.emplace_back(std::move(segment_id));
         }
 

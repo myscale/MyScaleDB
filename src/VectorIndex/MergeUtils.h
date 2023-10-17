@@ -82,11 +82,6 @@ static std::vector<SegmentId> getAllOldSegementIds(
 
         for (const auto & old_part : old_parts)
         {
-            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-                / data_part->storage.getRelativeDataPath()
-                / DB::MergeTreePartInfo::fromPartName(old_part.name, DB::MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
-                      .getPartNameWithoutMutation()
-                / "";
             SegmentId segment_id(
                 volume,
                 data_path,
@@ -94,7 +89,6 @@ static std::vector<SegmentId> getAllOldSegementIds(
                 old_part.name,
                 index_name,
                 index_column,
-                vector_index_cache_prefix,
                 old_part.id);
             segment_ids.emplace_back(std::move(segment_id));
         }
@@ -121,9 +115,7 @@ static std::vector<SegmentId> getAllSegmentIds(
     /// If no merged old parts' index files, decide whether we have simple built vector index.
     if (data_part->containVectorIndex(index_name, index_column))
     {
-        String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-            / data_part->storage.getRelativeDataPath() / data_part->info.getPartNameWithoutMutation() / "";
-        SegmentId segment_id(volume, data_path, data_part->name, index_name, index_column, vector_index_cache_prefix);
+        SegmentId segment_id(volume, data_path, data_part->name, index_name, index_column);
         segment_ids.emplace_back(std::move(segment_id));
     }
 
@@ -135,11 +127,6 @@ static std::vector<SegmentId> getAllSegmentIds(
 
         for (const auto & old_part : old_parts)
         {
-            String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-                / data_part->storage.getRelativeDataPath()
-                / DB::MergeTreePartInfo::fromPartName(old_part.name, DB::MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
-                      .getPartNameWithoutMutation()
-                / "";
             SegmentId segment_id(
                 volume,
                 data_path,
@@ -147,7 +134,6 @@ static std::vector<SegmentId> getAllSegmentIds(
                 old_part.name,
                 index_name,
                 index_column,
-                vector_index_cache_prefix,
                 old_part.id);
             segment_ids.emplace_back(std::move(segment_id));
         }
@@ -178,11 +164,6 @@ static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part, const P
     auto volume = getVolumeFromPartStorage(*part_storage);
     for (const auto & old_part : old_parts)
     {
-        String vector_index_cache_prefix = fs::path(data_part->storage.getContext()->getVectorIndexCachePath())
-            / data_part->storage.getRelativeDataPath()
-            / DB::MergeTreePartInfo::fromPartName(old_part.name, DB::MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
-                    .getPartNameWithoutMutation()
-            / "";
         SegmentId segment_id(
             volume,
             data_part->getDataPartStorage().getFullPath(),
@@ -190,7 +171,6 @@ static void removeRowIdsMaps(const DB::MergeTreeDataPartPtr & data_part, const P
             old_part.name,
             vec_index_desc.name,
             vec_index_desc.column,
-            vector_index_cache_prefix,
             old_part.id);
         old_segments.emplace_back(std::move(segment_id));
     }

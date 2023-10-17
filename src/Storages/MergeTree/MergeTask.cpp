@@ -687,8 +687,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                     global_ctx->future_part->parts[source_num]->getDataPartStorage().getFullPath(),
                     global_ctx->future_part->parts[source_num]->name,
                     vec_index_desc.name,
-                    vec_index_desc.column,
-                    "");
+                    vec_index_desc.column);
                 VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
                 vec_executor.updateBitMap(deleteRowIds);
             }
