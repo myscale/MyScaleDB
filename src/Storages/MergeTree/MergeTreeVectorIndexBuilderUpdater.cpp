@@ -465,8 +465,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         /// Add lock to avoid wronly remove of temporary directory
         auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(tmp_vector_index_dir);
 
-        String vector_index_cache_prefix = fs::path(data.getContext()->getVectorIndexCachePath()) / data.getRelativeDataPath() / part_name_prefix / "";
-
         /// Since the vector index is stored in a temporary directory, add check for it too.
         if (disk->exists(part->getDataPartStorage().getRelativePath() + vector_index_ready_file_name))
             read_file_path = part->getDataPartStorage().getFullPath() + vector_index_ready_file_name;
@@ -553,8 +551,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                             future_part->getDataPartStorage().getFullPath(),
                             future_part->name,
                             vec_index_desc.name,
-                            vec_index_desc.column,
-                            vector_index_cache_prefix);
+                            vec_index_desc.column);
                         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
                         Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
 
@@ -618,7 +615,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         };
 
         VectorIndex::SegmentId segment_id(
-            part_storage->volume, vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column, vector_index_cache_prefix);
+            part_storage->volume, vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column);
         VectorIndex::PartReader part_reader(
             part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), check_build_canceled, dim, enforce_fixed_array);
         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
@@ -755,8 +752,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                     future_part->getDataPartStorage().getFullPath(),
                     future_part->name,
                     vec_index_desc.name,
-                    vec_index_desc.column,
-                    vector_index_cache_prefix);
+                    vec_index_desc.column);
                 vec_index_builder->updateSegmentId(future_segment);
 
                 /// First, move index files to part and apply lightweight delete.
@@ -796,7 +792,7 @@ void MergeTreeVectorIndexBuilderUpdater::undoBuildVectorIndexForOnePart(
     {
         String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
         part->removeVectorIndex(vec_index_desc.name, vec_index_desc.column, true);
-        VectorIndex::SegmentId segment_id(part_storage->volume, part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column, "");
+        VectorIndex::SegmentId segment_id(part_storage->volume, part->getDataPartStorage().getFullPath(), part->name, vec_index_desc.name, vec_index_desc.column);
         VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
     }
 

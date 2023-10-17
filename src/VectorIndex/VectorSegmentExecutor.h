@@ -51,6 +51,7 @@ private:
     mutable std::mutex mutex_of_row_id_maps;
 public:
     Search::Parameters des;
+    mutable std::shared_mutex rwLock_of_row_id_maps;
     std::shared_ptr<std::vector<UInt64>> row_ids_map;
     std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map;
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map;
@@ -254,6 +255,8 @@ public:
 private:
     void init();
 
+    String getUniqueVectorIndexCachePrefix() const;
+
     bool writeBitMap();
 
     bool readBitMap();
@@ -262,7 +265,7 @@ private:
 
     void transferToNewRowIds(std::shared_ptr<Search::SearchResult> & result)
     {
-        if (row_ids_map->empty())
+        if (row_ids_map->empty() && !segment_id.fromMergedParts())
         {
             return;
         }

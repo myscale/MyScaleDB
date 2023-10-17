@@ -223,6 +223,21 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
     delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
 }
 
+String VectorSegmentExecutor::getUniqueVectorIndexCachePrefix() const
+{
+    auto global_context = DB::Context::getGlobalContextInstance();
+    if (global_context)
+    {
+        return fs::path(global_context->getVectorIndexCachePath())
+            / SegmentId::getPartRelativePath(fs::path(segment_id.data_part_path).parent_path())
+            / String(cutMutVer(segment_id.owner_part_name) + '-' + generateUUIDv4()) / "";
+    }
+    else
+    {
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Cannot get Vector Index Cache prefix!");
+    }
+}
+
 void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps(const IndexWithMetaHolderPtr index_holder)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::updateCacheValueWithRowIdsMaps");
@@ -247,6 +262,7 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps(const IndexWithMetaHo
         if (update_row_id_maps_lock.owns_lock() && index_with_meta.inverted_row_sources_map->empty())
         {
             LOG_DEBUG(log, "Update row id maps, cache key = {}", segment_id.getCacheKey().toString());
+            std::unique_lock<std::shared_mutex> lock(index_with_meta.rwLock_of_row_id_maps);
             index_with_meta.fallback_to_flat = fallback_to_flat;
             index_with_meta.inverted_row_ids_map = this->inverted_row_ids_map;
             index_with_meta.inverted_row_sources_map = this->inverted_row_sources_map;
@@ -412,7 +428,8 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             cache_key.getTableUUID(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
-            DB::VectorIndexEventLogElement::LOAD_START);
+            DB::VectorIndexEventLogElement::LOAD_START,
+            segment_id.current_part_name);
 
         auto load_func = [&]() -> IndexWithMetaPtr
         {
@@ -499,20 +516,10 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             }
         };
         auto global_context = DB::Context::getGlobalContextInstance();
-        auto release_callback = [cache_key, global_context]()
-        {
-            if (!global_context->isShutdown())
-                DB::VectorIndexEventLog::addEventLog(
-                    global_context,
-                    cache_key.getTableUUID(),
-                    cache_key.getPartName(),
-                    cache_key.getPartitionID(),
-                    DB::VectorIndexEventLogElement::UNLOAD);
-        };
 
         try
         {
-            index_holder = mgr->load(cache_key, load_func, release_callback);
+            index_holder = mgr->load(cache_key, load_func);
             LOG_DEBUG(log, "Num of item after cache {}", mgr->countItem());
             if (index_holder)
             {
@@ -527,56 +534,74 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 // multiple threads performing load at the same time, only one
                 // thread will actually execute load_func to update its own row ids map,
                 // and other threads need to update their own row ids map according to the results of load_func
-                if (!new_index.row_ids_map->empty())
+                
                 {
-                    row_ids_map = new_index.row_ids_map;
-                    inverted_row_ids_map = new_index.inverted_row_ids_map;
-                    inverted_row_sources_map = new_index.inverted_row_sources_map;
+                    std::shared_lock<std::shared_mutex> lock(new_index.rwLock_of_row_id_maps);
+                    if (!new_index.row_ids_map->empty())
+                    {
+                        row_ids_map = new_index.row_ids_map;
+                        inverted_row_ids_map = new_index.inverted_row_ids_map;
+                        inverted_row_sources_map = new_index.inverted_row_sources_map;
+                    }
                 }
+                
+                if (row_ids_map->empty())
+                    updateCacheValueWithRowIdsMaps(std::move(index_holder));
 
-                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                     cache_key.getTableUUID(),
-                                                     cache_key.getPartName(),
-                                                     cache_key.getPartitionID(),
-                                                     DB::VectorIndexEventLogElement::LOAD_SUCCEED);
+
+                DB::VectorIndexEventLog::addEventLog(
+                    DB::Context::getGlobalContextInstance(),
+                    cache_key.getTableUUID(),
+                    cache_key.getPartName(),
+                    cache_key.getPartitionID(),
+                    DB::VectorIndexEventLogElement::LOAD_SUCCEED,
+                    segment_id.current_part_name);
                 return Status();
             }
         }
         catch (const IndexException & e)
         {
-            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                 cache_key.getTableUUID(),
-                                                 cache_key.getPartName(),
-                                                 cache_key.getPartitionID(),
-                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
-                                                 DB::ExecutionStatus(e.code(), e.message()));
+            DB::VectorIndexEventLog::addEventLog(
+                DB::Context::getGlobalContextInstance(),
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::LOAD_ERROR,
+                segment_id.current_part_name,
+                DB::ExecutionStatus(e.code(), e.message()));
             return Status(e.code(), e.message());
         }
         catch (const DB::Exception & e)
         {
-            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                 cache_key.getTableUUID(),
-                                                 cache_key.getPartName(),
-                                                 cache_key.getPartitionID(),
-                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
-                                                 DB::ExecutionStatus(e.code(), e.message()));
+            DB::VectorIndexEventLog::addEventLog(
+                DB::Context::getGlobalContextInstance(),
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::LOAD_ERROR,
+                segment_id.current_part_name,
+                DB::ExecutionStatus(e.code(), e.message()));
             return Status(e.code(), e.message());
         }
         catch (const std::exception & e)
         {
-            DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                 cache_key.getTableUUID(),
-                                                 cache_key.getPartName(),
-                                                 cache_key.getPartitionID(),
-                                                 DB::VectorIndexEventLogElement::LOAD_ERROR,
-                                                 DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, e.what()));
+            DB::VectorIndexEventLog::addEventLog(
+                DB::Context::getGlobalContextInstance(),
+                cache_key.getTableUUID(),
+                cache_key.getPartName(),
+                cache_key.getPartitionID(),
+                DB::VectorIndexEventLogElement::LOAD_ERROR,
+                segment_id.current_part_name,
+                DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, e.what()));
             return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
         }
-        DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                             cache_key.getTableUUID(),
-                                             cache_key.getPartName(),
-                                             cache_key.getPartitionID(),
-                                             DB::VectorIndexEventLogElement::LOAD_FAILED);
+        DB::VectorIndexEventLog::addEventLog(
+            DB::Context::getGlobalContextInstance(),
+            cache_key.getTableUUID(),
+            cache_key.getPartName(),
+            cache_key.getPartitionID(),
+            DB::VectorIndexEventLogElement::LOAD_FAILED,
+            segment_id.current_part_name);
 
         return Status(2, "Load failed");
     }
@@ -590,13 +615,17 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         delete_bitmap = new_index.getDeleteBitmap();
 
         des = new_index.des;
-        if (!new_index.row_ids_map->empty())
         {
-            row_ids_map = new_index.row_ids_map;
-            inverted_row_ids_map = new_index.inverted_row_ids_map;
-            inverted_row_sources_map = new_index.inverted_row_sources_map;
+            std::shared_lock<std::shared_mutex> lock(new_index.rwLock_of_row_id_maps);
+            if (!new_index.row_ids_map->empty())
+            {
+                row_ids_map = new_index.row_ids_map;
+                inverted_row_ids_map = new_index.inverted_row_ids_map;
+                inverted_row_sources_map = new_index.inverted_row_sources_map;
+            }
         }
-        else
+
+        if (row_ids_map->empty())
         {
             // very fast and frequent operations under continuous deletes.
             // When reading row ids map related files, the files may be deleted,
@@ -609,23 +638,27 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             }
             catch(const DB::Exception & e)
             {
-                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                     cache_key.getTableUUID(),
-                                                     cache_key.getPartName(),
-                                                     cache_key.getPartitionID(),
-                                                     DB::VectorIndexEventLogElement::LOAD_ERROR,
-                                                     DB::ExecutionStatus(e.code(), e.message()));
+                DB::VectorIndexEventLog::addEventLog(
+                    DB::Context::getGlobalContextInstance(),
+                    cache_key.getTableUUID(),
+                    cache_key.getPartName(),
+                    cache_key.getPartitionID(),
+                    DB::VectorIndexEventLogElement::LOAD_ERROR,
+                    segment_id.current_part_name,
+                    DB::ExecutionStatus(e.code(), e.message()));
                 return Status(e.code(), e.message());
 
             }
             catch(...)
             {
-                DB::VectorIndexEventLog::addEventLog(DB::Context::getGlobalContextInstance(),
-                                                     cache_key.getTableUUID(),
-                                                     cache_key.getPartName(),
-                                                     cache_key.getPartitionID(),
-                                                     DB::VectorIndexEventLogElement::LOAD_ERROR,
-                                                     DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, "Unknown error"));
+                DB::VectorIndexEventLog::addEventLog(
+                    DB::Context::getGlobalContextInstance(),
+                    cache_key.getTableUUID(),
+                    cache_key.getPartName(),
+                    cache_key.getPartitionID(),
+                    DB::VectorIndexEventLogElement::LOAD_ERROR,
+                    segment_id.current_part_name,
+                    DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, "Unknown error"));
                 return Status(2, "Load failed");
             }
         }
@@ -970,7 +1003,7 @@ void VectorSegmentExecutor::configureDiskMode()
             des.setParam("disk_mode", disk_mode);
         if (disk_mode)
         {
-            vector_index_cache_prefix = fs::path(segment_id.getVectorIndexCachePrefix()).parent_path().string() + '-' + generateUUIDv4() + '/';
+            vector_index_cache_prefix = getUniqueVectorIndexCachePrefix();
             LOG_INFO(log, "vector_index_cache_prefix: {}", vector_index_cache_prefix);
         }
     }
