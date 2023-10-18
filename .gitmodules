@@ -338,3 +338,6 @@
 [submodule "contrib/search-index"]
 	path = contrib/search-index
 	url = git@git.moqi.ai:mqdb/search-index.git
+[submodule "tests/stability"]
+	path = tests/stability
+	url = git@git.moqi.ai:shanfengp/stability-test.git
