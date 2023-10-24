@@ -122,7 +122,7 @@ ReadWithVectorScan::ReadWithVectorScan(
                 total_rows += part->rows_count;
 
             /// Use total rows of all parts to get num_reorder for first search stage
-            num_reorder = VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.topk, search_params);
+            num_reorder = VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
 
             LOG_DEBUG(log, "num_reorder for first stage = {}", num_reorder);
 
@@ -134,7 +134,7 @@ ReadWithVectorScan::ReadWithVectorScan(
                 {
                     /// get num_reorder for every part
                     total_num_reorder += VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(
-                                            type, disk_mode, part->rows_count, vector_scan_desc.topk, search_params);
+                                            type, disk_mode, part->rows_count, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
                 }
 
                 LOG_DEBUG(log, "num_reorder for first stage = {}, total_num_reorder for all parts = {}", num_reorder, total_num_reorder);
