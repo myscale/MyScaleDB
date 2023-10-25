@@ -14,6 +14,13 @@
 namespace VectorIndex
 {
 
+enum class BuildMemoryCheckResult
+{
+    OK, /// ok to build
+    LATER, /// currently unable to build, maybe try again later
+    NEVER, /// size required greater than limit
+};
+
 struct IndexWithMeta
 {
     IndexWithMeta() = delete;
@@ -79,6 +86,7 @@ public:
 using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
 
 
+
 class VectorSegmentExecutor
 {
     /// The exposed api set which should be called by users trying to use vector index;
@@ -96,6 +104,22 @@ public:
         int DEFAULT_DISK_MODE_);
 
     explicit VectorSegmentExecutor(const SegmentId & segment_id_);
+
+    ~VectorSegmentExecutor()
+    {
+        if (!build_memory_size_recorded)
+            return;
+
+        /// decrease build memory size reserved before build. see checkBuildMemory()
+        std::lock_guard lock(build_memory_mutex);
+        current_build_memory_size -= build_memory_size_recorded;
+
+        LOG_DEBUG(
+            &Poco::Logger::get("VectorSegmentExecutor"),
+            "after build: size = {}, current_total = {}",
+            build_memory_size_recorded,
+            current_build_memory_size);
+    }
 
     /// Serialize and store index at segment_id
     Status serialize();
@@ -122,8 +146,6 @@ public:
 
     Status removeByIds(size_t n, const size_t * ids);
 
-    Search::DenseBitmapPtr getDeleteBitMap() { return this->delete_bitmap; }
-
     /// Return total number of vectors.
     int64_t getRawDataSize();
 
@@ -133,6 +155,8 @@ public:
     void updateCacheValueWithRowIdsMaps(const IndexWithMetaHolderPtr index_holder);
 
     static void setCacheManagerSizeInBytes(size_t size);
+
+    static void setBuildMemorySizeInBytes(size_t size);
 
     static std::list<std::pair<CacheKey, Search::Parameters>> getAllCacheNames();
 
@@ -153,7 +177,7 @@ public:
     {
         if (!segment_id.fromMergedParts())
             return filter;
-        
+
         if (inverted_row_ids_map->empty() && !filter->to_vector().empty())
             LOG_ERROR(log, "Inverted row ids maps empty, This mast be a bug! cache key: {}",
                 segment_id.getCacheKey().toString());
@@ -237,9 +261,6 @@ public:
     /// Update SegmentId
     void updateSegmentId(const SegmentId & new_segment_id) { segment_id = new_segment_id; }
 
-    /// Reload delete bitmap from disk.
-    bool reloadDeleteBitMap() { return readBitMap(); }
-
     /// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
     void updateBitMap(const std::vector<UInt64> & deleted_row_ids);
 
@@ -252,14 +273,17 @@ public:
 
     void convertBitmap(const std::vector<UInt64> & deleted_row_ids);
 
+    Search::IndexResourceUsage getIndexResourceUsage();
+
+    Search::IndexType getIndexType() { return type; }
+
+    /// True if the vector index is stored in cache. Used for lightweight delete.
+    bool storedInCache();
+
 private:
     void init();
 
     String getUniqueVectorIndexCachePrefix() const;
-
-    bool writeBitMap();
-
-    bool readBitMap();
 
     void handleMergedMaps();
 
@@ -286,6 +310,17 @@ private:
     static std::once_flag once;
     static int max_threads;
 
+    static std::mutex build_memory_mutex;
+    /// global memory size limit for index building
+    static size_t build_memory_size_limit;
+    /// current total memory size reserved for index building globally
+    static size_t current_build_memory_size;
+
+    /// check if index to build will exceed build memory size limit
+    static BuildMemoryCheckResult checkBuildMemorySize(size_t size);
+
+    void checkBuildMemory(size_t size);
+
     const Poco::Logger * log = &Poco::Logger::get("VectorSegmentExecutor");
     const int DEFAULT_DISK_MODE;
 
@@ -305,6 +340,9 @@ private:
     bool fallback_to_flat = false;
     int disk_mode = false;
     std::string vector_index_cache_prefix;
+
+    /// build memory reserved before build
+    size_t build_memory_size_recorded = 0;
 };
 
 using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;

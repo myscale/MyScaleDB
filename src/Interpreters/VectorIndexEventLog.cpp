@@ -46,6 +46,7 @@ NamesAndTypesList VectorIndexEventLogElement::getNamesAndTypes()
     return {
         {"database", std::make_shared<DataTypeString>()},
         {"table", std::make_shared<DataTypeString>()},
+        {"index_name", std::make_shared<DataTypeString>()},
         {"part_name", std::make_shared<DataTypeString>()},
         {"current_part_name", std::make_shared<DataTypeString>()},
         {"partition_id", std::make_shared<DataTypeString>()},
@@ -67,6 +68,7 @@ void VectorIndexEventLogElement::appendToBlock(MutableColumns & columns) const
 
     columns[i++]->insert(database_name);
     columns[i++]->insert(table_name);
+    columns[i++]->insert(index_name);
     columns[i++]->insert(part_name);
     columns[i++]->insert(current_part_name);
     columns[i++]->insert(partition_id);
@@ -85,6 +87,7 @@ void VectorIndexEventLog::addEventLog(
     VectorIndexEventLogPtr log_entry, 
     const String & db_name,
     const String & table_name,
+    const String & index_name,
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
@@ -95,6 +98,7 @@ void VectorIndexEventLog::addEventLog(
     VectorIndexEventLogElement elem;
     elem.database_name = db_name;
     elem.table_name = table_name;
+    elem.index_name = index_name;
     elem.part_name = part_name;
     if (current_part_name != "")
         elem.current_part_name = current_part_name;
@@ -121,6 +125,7 @@ void VectorIndexEventLog::addEventLog(
     ContextPtr current_context,
     const String & db_name,
     const String & table_name,
+    const String & index_name,
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
@@ -135,6 +140,7 @@ void VectorIndexEventLog::addEventLog(
             addEventLog(log_entry,
                         db_name,
                         table_name,
+                        index_name,
                         part_name,
                         partition_id,
                         event_type,
@@ -150,6 +156,7 @@ void VectorIndexEventLog::addEventLog(
 void VectorIndexEventLog::addEventLog(
     ContextPtr current_context,
     const MergeTreeDataPartPtr & data_part,
+    const String & index_name,
     VectorIndexEventLogElement::Type event_type,
     const ExecutionStatus & execution_status)
 {
@@ -161,6 +168,7 @@ void VectorIndexEventLog::addEventLog(
             addEventLog(log_entry,
                         data_part->storage.getStorageID().database_name,
                         data_part->storage.getStorageID().table_name,
+                        index_name,
                         data_part->name,
                         data_part->info.partition_id,
                         event_type,
@@ -176,6 +184,7 @@ void VectorIndexEventLog::addEventLog(
 void VectorIndexEventLog::addEventLog(
     ContextPtr current_context,
     const String & table_uuid,
+    const String & index_name,
     const String & part_name,
     const String & partition_id,
     VectorIndexEventLogElement::Type event_type,
@@ -194,6 +203,7 @@ void VectorIndexEventLog::addEventLog(
                 addEventLog(log_entry, 
                             ret->first,
                             ret->second,
+                            index_name,
                             part_name,
                             partition_id,
                             event_type,

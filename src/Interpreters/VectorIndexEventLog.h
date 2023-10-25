@@ -37,6 +37,7 @@ struct VectorIndexEventLogElement
     };
     String database_name;
     String table_name;
+    String index_name; /// Support multiple vector indices
     mutable String part_name;
     mutable String current_part_name;
     mutable String partition_id;
@@ -68,6 +69,7 @@ public:
         VectorIndexEventLogPtr log_entry, 
         const String & db_name,
         const String & table_name,
+        const String & index_name,
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,
@@ -78,6 +80,7 @@ public:
         ContextPtr current_context,
         const String & db_name,
         const String & table_name,
+        const String & index_name,
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,
@@ -87,12 +90,14 @@ public:
     static void addEventLog(
         ContextPtr current_context,
         const MergeTreeDataPartPtr & data_part,
+        const String & index_name,
         VectorIndexEventLogElement::Type event_type,
         const ExecutionStatus & execution_status = {});
 
     static void addEventLog(
         ContextPtr current_context,
         const String & table_uuid,
+        const String & index_name,
         const String & part_name,
         const String & partition_id,
         VectorIndexEventLogElement::Type event_type,

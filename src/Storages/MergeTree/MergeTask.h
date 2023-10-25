@@ -182,6 +182,15 @@ private:
 
         scope_guard temporary_directory_lock;
 
+        /// Support multiple vector indices
+        /// In multiple vector indices case, two replicas may have inconsistent vector indices,
+        /// i.e. one replica has two vector indices built on two parts, while the slow replica has one part with v1 and v2, another part with only v1.
+        /// Currently, ignore the incomplete vector index if not all merged parts contain it.
+        /// True if all merged data parts containing the vector index.
+        std::unordered_map<String, bool> all_parts_have_vector_index;
+        bool can_be_decouple = false;
+        bool only_one_vpart_merged = false; /// True if only one VPart is merged.
+
         /// used to store row_ids_map_bufs
         std::vector<std::unique_ptr<WriteBuffer>> row_ids_map_bufs;
         std::vector<std::unique_ptr<WriteBufferFromFileBase>> row_ids_map_uncompressed_bufs;

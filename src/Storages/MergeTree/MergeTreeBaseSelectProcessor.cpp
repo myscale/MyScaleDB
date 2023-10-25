@@ -661,7 +661,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
                 }
             }
             task->vector_scan_manager->executeAfterRead(
-                task->data_part->getDataPartStorage().getFullPath(),
                 task->data_part,
                 ordered_columns,
                 read_result.num_rows,

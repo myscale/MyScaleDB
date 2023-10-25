@@ -4,7 +4,7 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-    - if: '$CI_COMMIT_TAG'
+    - if: "$CI_COMMIT_TAG"
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 before_script:
@@ -31,7 +31,7 @@ include:
   - docker/builder/tools/docker-buildx.sh
 
 stages:
-  - check-pipeline
+  - pre-check
   - build
   - functional-test
   - performance-test
@@ -46,7 +46,7 @@ stages:
   - chaos-test
 
 check_pipeline_already_running:
-  stage: check-pipeline
+  stage: pre-check
   image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
   tags:
     - task
@@ -75,6 +75,18 @@ check_pipeline_already_running:
       fi
     - redis-cli -h ${REDIS_HOST} set ${PIPELINE_UNIQUE_KEY} "worked but failed"
     - redis-cli -h ${REDIS_HOST} EXPIRE ${PIPELINE_UNIQUE_KEY} ${KEY_TIMEOUT}
+
+check_keeper_changed:
+  stage: pre-check
+  script:
+    - exit 1
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - src/Common/ZooKeeper/*
+        - src/Common/ZooKeeper/**/*
+        - src/Coordination/*
+        - src/Coordination/**/*
 
 # style_check:
 #   stage: build

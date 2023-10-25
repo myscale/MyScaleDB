@@ -755,12 +755,15 @@ void finalizeMutatedPart(
     new_data_part->default_codec = codec;
 
     /// Origin part is decoupled with merged vector indices or has simple built vector index
-    if (source_part->containRowIdsMaps() || source_part->containAnyVectorIndex())
+    if (source_part->containAnyRowIdsMaps() || source_part->containAnyVectorIndex())
+    {
+        new_data_part->loadVectorIndexChecksums();
         new_data_part->loadVectorIndexMetadata();
+        source_part->removeAllVectorIndexInfo();
+    }
 
-    /// Avoid build vector index for part with error
-    if (source_part->vector_index_build_error)
-        new_data_part->setBuildError();
+    /// TODO: Should new part inherit build error from old part?
+    /// Retry build vector index for new parts.
 }
 
 }
@@ -1294,7 +1297,7 @@ private:
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         /// Reuse vector index when no rows are deleted
-        if (!ctx->need_delete_rows && (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containRowIdsMaps()))
+        if (!ctx->need_delete_rows && (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containAnyRowIdsMaps()))
         {
             bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
@@ -1307,14 +1310,16 @@ private:
                 vector_files_found = true;
             }
 
-            /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
+            /// TODO: build index marks the vector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
             if (vector_files_found)
+            {
+                ctx->new_data_part->loadVectorIndexChecksums();
                 ctx->new_data_part->loadVectorIndexMetadata();
+            }
         }
 
-        /// Avoid build vector index for part with error
-        if (ctx->source_part->vector_index_build_error)
-            ctx->new_data_part->setBuildError();
+        /// TODO: Should new part inherit build error from old part?
+        /// Retry build vector index for new parts.
     }
 
     enum class State

@@ -157,6 +157,10 @@ void StorageMergeTree::startup()
     if (isStaticStorage())
         return;
 
+    /// Initilize vector index build status for each index
+    for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
+        addVectorIndexBuildStatus(vec_index_desc.name);
+
     try
     {
         background_operations_assignee.start();
@@ -519,33 +523,44 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
 
 void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_index_commands)
 {
-    if (vector_index_commands.size() == 1 && vector_index_commands.back().drop_command)
+    /// Handle multiple index commands case
+    for (auto & vec_index_command : vector_index_commands)
     {
-        auto drop_vector_index = vector_index_commands[0];
-
-        /// Delete vector index files.
-        for (const auto & part : getDataPartsForInternalUsage())
+        /// Handle drop vector index command
+        if (vec_index_command.drop_command)
         {
-            // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+            String vec_index_name = vec_index_command.index_name;
 
-            /// Clear cache first, now getAllSegementIds() is based on vector index files
-            auto segment_ids = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, drop_vector_index.index_name, drop_vector_index.column_name);
-            for (auto & segment_id : segment_ids)
+            /// Delete vector index files.
+            for (const auto & part : getDataPartsForInternalUsage())
             {
-                VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+                // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
+                VectorIndex::removeVectorIndexFromPartAndCache(part, vec_index_name, vec_index_command.column_name, log);
             }
-            /// Delete files in part directory if exists and metadata
-            part->removeVectorIndex(drop_vector_index.index_name, drop_vector_index.column_name);
+
+            /// Remove build status for this dropped index
+            removeVectorIndexBuildStatus(vec_index_name);
+        }
+        else
+        {
+            /// handle add vector index command
+            /// Add build status for new vector index
+            addVectorIndexBuildStatus(vec_index_command.index_name);
+
+            /// Create vector index info
+            /// Get vector index desc for the newly added index
+            for (auto & vec_index_desc : getInMemoryMetadata().getVectorIndices())
+            {
+                if (vec_index_desc.name != vec_index_command.index_name)
+                    continue;
+
+                for (const auto & part : getDataPartsForInternalUsage())
+                    part->addNewVectorIndex(vec_index_desc);
+            }
         }
     }
-    else
-    {
-        /// Clear vector index build status
-        resetVectorIndexBuildStatus();
 
-        /// handle add vector index command
-        background_operations_assignee.trigger();
-    }
+    background_operations_assignee.trigger();
 }
 
 
@@ -878,9 +893,15 @@ void StorageMergeTree::loadMutations()
 
 bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right)
 {
-    if (left->containRowIdsMaps() || right->containRowIdsMaps())
+    /// No need to check if there is no vector index on the table.
+    if (!metadata_snapshot->hasVectorIndices())
+        return true;
+
+    /// Check if part contains merged vector index
+    if (left->containAnyRowIdsMaps() || right->containAnyRowIdsMaps())
         return false;
 
+    /// Check if part is building vector index
     {
         std::lock_guard lock(currently_vector_indexing_parts_mutex);
         for (const auto & part_name : currently_vector_indexing_parts)
@@ -894,21 +915,15 @@ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadat
         }
     }
 
-    bool can_merge = true;
-    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    /// Check if two parts contain vector index files.
+    /// Two parts can be merged when both have built vector index or both not.
+    for (const auto & vec_index : metadata_snapshot->getVectorIndices())
     {
-        if ((left->containVectorIndex(vec_index.name, vec_index.column) && right->containVectorIndex(vec_index.name, vec_index.column)) 
-            || (!left->containVectorIndex(vec_index.name, vec_index.column) && !right->containVectorIndex(vec_index.name, vec_index.column)))
-        {
-            /// can merge case
-        }
-        else
-        {
-            can_merge = false;
-        }
-        
+        if (left->containVectorIndex(vec_index.name) != right->containVectorIndex(vec_index.name))
+            return false;
     }
-    return can_merge;
+
+    return true;
 }
 
 MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(

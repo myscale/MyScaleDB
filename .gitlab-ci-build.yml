@@ -13,7 +13,6 @@ build_binary:
     when: always
     paths:
       - artifacts/*.deb
-      - artifacts/clickhouse
       - artifacts/performance_pack_*
       - build/CMakeFiles/CMakeOutput.log
       - build/CMakeFiles/CMakeError.log
@@ -22,10 +21,12 @@ build_binary:
     - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --arch linux-x86_64 --package
-    - cp build/programs/clickhouse artifacts/.
-    - docker/builder/tools/package_performance.sh all
-    - tar -zcf performance_pack_amd64.tar.gz performance_pack
-    - mv performance_pack_amd64.tar.gz artifacts/.
+    - |-
+      if [ "$CI_COMMIT_REF_NAME" = "$CI_DEFAULT_BRANCH" ]; then
+        docker/builder/tools/package_performance.sh all
+        tar -zcf performance_pack_amd64.tar.gz performance_pack
+        mv performance_pack_amd64.tar.gz artifacts/.
+      fi
     # - docker/builder/build.py --output artifacts --build-type Release --arch linux-aarch64 --package
     - |-
       if [ "$CI_MERGE_REQUEST_LABELS" = "quick-image" ]; then

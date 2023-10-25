@@ -549,6 +549,28 @@ void MergeTreeData::checkProperties(
         }
     }
 
+    if (!new_metadata.vec_indices.empty())
+    {
+        std::unordered_set<String> vec_indices_names;
+        std::unordered_set<String> vec_columns_names;
+
+        for (const auto & vec_index : new_metadata.vec_indices)
+        {
+            /// Check if vector index name is duplicated
+            if (vec_indices_names.find(vec_index.name) != vec_indices_names.end())
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index with name {} already exists", backQuote(vec_index.name));
+
+            vec_indices_names.insert(vec_index.name);
+
+            /// TODO: Currently we do not support multiple vector indexes on the same column
+            if (vec_columns_names.find(vec_index.column) != vec_columns_names.end())
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Column {} already has a vector index, not allowed to have another with name {}",
+                                backQuote(vec_index.column), backQuote(vec_index.name));
+
+            vec_columns_names.insert(vec_index.column);
+        }
+    }
+
     if (!new_metadata.projections.empty())
     {
         std::unordered_set<String> projections_names;
@@ -2307,10 +2329,10 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
 
     for (const auto & part : parts)
     {
-        for (const auto & vec_index_desc : meta_snapshot->vec_indices)
+        for (const auto & vec_index_desc : meta_snapshot->getVectorIndices())
         {
             auto segment_ids
-                = VectorIndex::getAllSegmentIds(part->getDataPartStorage().getFullPath(), part, vec_index_desc.name, vec_index_desc.column);
+                = VectorIndex::getAllSegmentIds(part, vec_index_desc.name, vec_index_desc.column);
             for (auto & segment_id : segment_ids)
             {
                 auto cache_key = segment_id.getCacheKey();
@@ -2352,32 +2374,54 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
         return std::make_pair(true, false);
     }
 
+    /// Support multiple vector indices
+    /// The active part contains the part in the cache_key.
+    /// First make sure the vector index info in cache key is same with defined in metadata. If not exists or not same, remove cache and file.
+    String index_name = cache_key.vector_index_name;
+
+    /// Check if vector index has been dropped.
+    if (!metadata_snapshot->getVectorIndices().has(index_name))
+        return std::make_pair(true, true);
+
     bool existed = false;
     auto old_part_info = MergeTreePartInfo::fromPartName(cache_key.part_name_no_mutation, format_version);
     bool is_same = part->info == old_part_info;
     bool is_mutate = !is_same && part->info.getPartNameWithoutMutation() == cache_key.part_name_no_mutation;
 
     /// Check vector index in cache is same as metadata
-    if (!metadata_snapshot->vec_indices.empty())
+    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
-        /// Currently only one vector index is allowed.
-        const auto & vec_index_desc = metadata_snapshot->vec_indices[0];
+        /// Find description for this vector index.
+        if (cache_key.vector_index_name != vec_index_desc.name)
+            continue;
 
-        LOG_DEBUG(
+        /// Check if the description is same with the cache key.
+        /// Check column name
+        if (cache_key.column_name != vec_index_desc.column)
+        {
+            LOG_DEBUG(
             log,
-            "Cache: {} {}, metadata: {} {}",
+            "Cache: index_name {} column {}, metadata: index_name {} column {}",
             cache_key.vector_index_name,
             cache_key.column_name,
             vec_index_desc.name,
             vec_index_desc.column);
 
+            return std::make_pair(true, true);
+        }
+
+        /// Here the vector index is valid.
+        /// When remove old parts, we can remove it from cache only when it is not used by future part (mutation or merge).
         /// Further check the part status, decouple part or VPart with single vector index
-        if (cache_key.vector_index_name == vec_index_desc.name && cache_key.column_name == vec_index_desc.column
-            && ((is_same && part->containVectorIndex(cache_key.vector_index_name, cache_key.column_name))
-                || (!is_same && (part->containRowIdsMaps() || is_mutate))))
+        if ((is_same && part->containVectorIndex(index_name))
+                || (!is_same && (part->containRowIdsMaps(index_name) || is_mutate)))
         {
             existed = true;
+            break;
         }
+
+        /// Already found the vector index in metadata with the same name as cache key.
+        break;
     }
 
     return std::make_pair(!existed, is_same);
@@ -5132,14 +5176,22 @@ BackupEntries MergeTreeData::backupParts(const DataPartsVector & data_parts, con
         if (hold_table_lock && !table_lock)
             table_lock = lockForShare(local_context->getCurrentQueryId(), local_context->getSettingsRef().lock_acquire_timeout);
 
+        /// combine checksums and vector index checksums
+        auto files_without_checksums = part->getFileNamesWithoutChecksums(false);
+        auto checksums_ = part->checksums;
+        {
+            std::lock_guard lock(part->vector_index_checksums_mutex);
+            for (const auto & [index_name, vector_index_checksums] : part->vector_index_checksums_map)
+            {
+                auto vector_index_checksums_tmp = vector_index_checksums;
+                checksums_.add(std::move(vector_index_checksums_tmp));
+                files_without_checksums.insert(VectorIndex::getVectorIndexChecksumsFileName(index_name));
+            }
+        }
+
         BackupEntries backup_entries_from_part;
         part->getDataPartStorage().backup(
-            part->checksums,
-            part->getFileNamesWithoutChecksums(),
-            data_path_in_backup,
-            backup_entries_from_part,
-            make_temporary_hard_links,
-            &temp_dirs);
+            checksums_, files_without_checksums, data_path_in_backup, backup_entries_from_part, make_temporary_hard_links, &temp_dirs);
 
         auto projection_parts = part->getProjectionParts();
         for (const auto & [projection_name, projection_part] : projection_parts)
@@ -5334,6 +5386,8 @@ void MergeTreeData::restorePartFromBackup(std::shared_ptr<RestoredPartsHolder> r
     builder.withPartFormatFromDisk();
     auto part = std::move(builder).build();
     part->version.setCreationTID(Tx::PrehistoricTID, nullptr);
+    /// convert decouple owner parts name
+    part->convertIndexFileForRestore();
     part->loadColumnsChecksumsIndexes(false, true);
 
     restored_parts_holder->addPart(part);
@@ -8401,47 +8455,57 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::createEmptyPart(
     return new_data_part;
 }
 
-MergeTreeData::MergeTreeVectorIndexStatus MergeTreeData::getVectorIndexBuildStatus() const
+
+MergeTreeData::MergeTreeVectorIndexStatus MergeTreeData::getVectorIndexBuildStatus(const String & index_name) const
 {
     std::lock_guard lock(currently_vector_index_status_mutex);
-    return vector_index_status;
+    if (auto it = vector_indices_status.find(index_name); it != vector_indices_status.end())
+        return it->second;
+
+    LOG_DEBUG(log, "Not found vector index build status for {}", index_name);
+
+    MergeTreeVectorIndexStatus index_status;
+    return index_status;
 }
 
-void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message)
+void MergeTreeData::updateVectorIndexBuildStatus(const String & part_name, const String & index_name, bool is_successful, const String & exception_message)
 {
     /// Update the information about failed parts in the system.vector_indices table.
 
     auto part_info = MergeTreePartInfo::fromPartName(part_name, format_version);
 
     std::lock_guard lock(currently_vector_index_status_mutex);
-    if (is_successful)
+    if (auto it = vector_indices_status.find(index_name); it != vector_indices_status.end())
     {
-        /// If last failed part has been successfully built (in the part_info), clear the fail info.
-        if (!vector_index_status.latest_failed_part.empty() && part_info.contains(vector_index_status.latest_failed_part_info))
+        auto & vector_index_status = it->second;
+        if (is_successful)
         {
-            vector_index_status.clear();
+            /// If last failed part has been successfully built (in the part_info), clear the fail info.
+            if (!vector_index_status.latest_failed_part.empty() && part_info.contains(vector_index_status.latest_failed_part_info))
+            {
+                vector_index_status.clear();
+            }
         }
-    }
-    else
-    {
-        vector_index_status.latest_failed_part = part_name;
-        vector_index_status.latest_failed_part_info = part_info;
-        vector_index_status.latest_fail_reason = exception_message;
+        else
+        {
+            vector_index_status.latest_failed_part = part_name;
+            vector_index_status.latest_failed_part_info = part_info;
+            vector_index_status.latest_fail_reason = exception_message;
+        }
     }
 }
 
-void MergeTreeData::resetVectorIndexBuildStatus()
+void MergeTreeData::removeVectorIndexBuildStatus(const String & index_name)
 {
     std::lock_guard lock(currently_vector_index_status_mutex);
-    vector_index_status.clear();
+    vector_indices_status.erase(index_name);
+}
 
-    /// Reset vector_index_build_error after add vector index
-    /// In cases when a new vector index is added after an old vector index was dropped.
-    for (const auto & part : getDataPartsForInternalUsage())
-    {
-        if (part->vector_index_build_error)
-            part->resetBuildError();
-    }
+void MergeTreeData::addVectorIndexBuildStatus(const String & index_name)
+{
+    std::lock_guard lock(currently_vector_index_status_mutex);
+    MergeTreeVectorIndexStatus index_status;
+    vector_indices_status.insert_or_assign(index_name, index_status);
 }
 
 void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices)
@@ -8526,7 +8590,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
             index_params.erase("metric_type");
 
             /// load vector index into cache
-            for (const auto & segment_id : VectorIndex::getAllSegmentIds(data_part->getDataPartStorage().getFullPath(), data_part, v_index.name, v_index.column))
+            for (const auto & segment_id : VectorIndex::getAllSegmentIds(data_part, v_index.name, v_index.column))
             {
                 auto vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
                     segment_id,

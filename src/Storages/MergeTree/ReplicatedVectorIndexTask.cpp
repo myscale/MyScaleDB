@@ -30,36 +30,42 @@ bool ReplicatedVectorIndexTask::executeStep()
             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
             LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", entry.source_parts.at(0));
 
-            String status_str;
-            if (build_status == BuildVectorIndexStatus::SUCCESS)
-                status_str = "success";
-            else if (build_status == BuildVectorIndexStatus::BUILD_FAIL)
-                status_str = "build_fail";
-            else if (build_status == BuildVectorIndexStatus::NO_DATA_PART)
+            /// Create vector index build status only when index node feature is enabled.
+            if (storage.getSettings()->build_vector_index_on_random_single_replica)
             {
-                need_create_status = false;
-                status_str = "no_data_part";
-            }
-            else if (build_status == BuildVectorIndexStatus::BUILD_SKIPPED)
-            {
-                need_create_status = false;
-                status_str = "skipped";
-            }
-            else
-                status_str = "meta_error";
+                String status_str;
+                if (build_status == BuildVectorIndexStatus::SUCCESS)
+                    status_str = "success";
+                else if (build_status == BuildVectorIndexStatus::BUILD_FAIL)
+                    status_str = "build_fail";
+                else if (build_status == BuildVectorIndexStatus::NO_DATA_PART)
+                {
+                    need_create_status = false;
+                    status_str = "no_data_part";
+                }
+                else if (build_status == BuildVectorIndexStatus::BUILD_SKIPPED)
+                {
+                    need_create_status = false;
+                    status_str = "skipped";
+                }
+                else
+                    status_str = "meta_error";
 
-            /// Some cases like build vector index for part is skipped, no need to create status in zookeeper.
-            if (need_create_status)
-                storage.createVectorIndexBuildStatusForPart(entry.source_parts.at(0), entry.index_name, status_str);
-            else
-                LOG_DEBUG(log, "No need to create build status '{}' in zookeeper for part {}", status_str, entry.source_parts.at(0));
+                /// Some cases like build vector index for part is skipped, no need to create status in zookeeper.
+                if (need_create_status)
+                    storage.createVectorIndexBuildStatusForPart(entry.source_parts.at(0), entry.index_name, status_str);
+                else
+                    LOG_DEBUG(log, "No need to create build status '{}' in zookeeper for vector index {} in part {}", status_str, entry.index_name, entry.source_parts.at(0));
+
+            }
 
             /// write latest cached vector index info to zookeeper
             storage.vidx_info_updating_task->schedule();
         }
-        catch (...)
+        catch (zkutil::KeeperException & e)
         {
-            tryLogCurrentException(__PRETTY_FUNCTION__);
+            LOG_WARNING(log, "Remove build vector log entry for index {} in part {} failed: code={}, message={}",
+                        entry.index_name, entry.source_parts.at(0), e.code, e.message());
         }
 
         return false;
@@ -101,12 +107,8 @@ bool ReplicatedVectorIndexTask::executeStep()
         {
             try
             {
-                build_status = builder.buildVectorIndex(metadata_snapshot, source_part->name, entry.slow_mode);
-                storage.updateVectorIndexBuildStatus(entry.source_parts[0], true, "");
-
-                /// For memory limit failure, try to run build 3 times.
-                if (build_status == BuildVectorIndexStatus::BUILD_FAIL && !source_part->vector_index_build_error)
-                    return true;
+                build_status = builder.buildVectorIndex(metadata_snapshot, source_part->name, entry.index_name, entry.slow_mode);
+                storage.updateVectorIndexBuildStatus(entry.source_parts[0], entry.index_name, true, "");
 
                 /// Try to build again when unable to move vector index files due to concurrent mutation
                 if (build_status == BuildVectorIndexStatus::BUILD_RETRY)
@@ -114,19 +116,34 @@ bool ReplicatedVectorIndexTask::executeStep()
             }
             catch (...)
             {
-                String exception_message = getCurrentExceptionMessage(false);
-                storage.updateVectorIndexBuildStatus(entry.source_parts[0], false, exception_message);
+                /// No need to record the build status to zookeeper
+                /// when ector index is dropped or updated (the same name is added after dropped).
+                bool need_create_status = false;
 
-                /// Set build error for part, avoid to build it again.
-                auto part = storage.getActiveContainingPart(entry.source_parts[0]);
-                if (part)
-                    part->setBuildError();
+                /// Record the failed build status to vector_indices, only when the index exists.
+                for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+                {
+                    /// Find the vector index description from metadata snapshot when build starts.
+                    if (vec_index_desc.name == entry.index_name)
+                    {
+                        /// Check vector index exists in table's latest metadata
+                        auto & latest_vec_indices = storage.getInMemoryMetadataPtr()->getVectorIndices();
+                        if (latest_vec_indices.has(vec_index_desc))
+                        {
+                            String exception_message = getCurrentExceptionMessage(false);
+                            storage.updateVectorIndexBuildStatus(entry.source_parts[0], entry.index_name, false, exception_message);
 
-                /// Mark build status as fail
-                build_status = BuildVectorIndexStatus::BUILD_FAIL;
+                            /// Mark build status as fail
+                            build_status = BuildVectorIndexStatus::BUILD_FAIL;
+                            need_create_status = true;
+                        }
+
+                        break;
+                    }
+                }
 
                 /// Remove build index log entry to let other tables continue to create entry and build vector index.
-                remove_processed_entry();
+                remove_processed_entry(need_create_status);
 
                 throw;
             }
@@ -163,7 +180,7 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
 {
     const String & source_part_name = entry.source_parts.at(0);
 
-    if (metadata_snapshot->vec_indices.empty())
+    if (!metadata_snapshot->hasVectorIndices())
     {
         LOG_DEBUG(log, "Metadata of source part {} doesn't have vector index, will skip to build it", source_part_name);
         return {false, false};
@@ -185,17 +202,12 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
     }
 
     /// If we already have this vector index in this part, we do not need to do anything.
-
-    /// TODO - Now we support only ONE vector index for a table.
-    /// If multiples are supported, the log entry should contain the name and column of the vector index.
-    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    /// Support multiple vector indices
+    if (source_part->containVectorIndex(entry.index_name))
     {
-        if (source_part->containVectorIndex(vec_index.name, vec_index.column))
-        {
-            LOG_DEBUG(log, "No need to build vector index for part {} because the covered part {} already has it built",
-                      source_part_name, source_part->name);
-            return {false, false};
-        }
+        LOG_DEBUG(log, "No need to build vector index {} for part {} because the covered part {} already has it built",
+                    entry.index_name, source_part_name, source_part->name);
+        return {false, false};
     }
 
     /// TODO - add estimation on needed space for vector index build
@@ -208,8 +220,8 @@ std::pair<bool, bool> ReplicatedVectorIndexTask::prepare()
         if (replica_to_execute_build)
         {
             LOG_DEBUG(log,
-                "Prefer fetching vector index in part {} from replica {} due to build_vector_index_on_random_single_replica",
-                source_part_name, replica_to_execute_build.value());
+                "Prefer fetching vector index {} in part {} from replica {} due to build_vector_index_on_random_single_replica",
+                entry.index_name, source_part_name, replica_to_execute_build.value());
 
             replica_to_fetch = replica_to_execute_build.value();
 

@@ -13,9 +13,9 @@ ORDER BY id;
 
 INSERT INTO test_vector_event_log SELECT number, [number,number,number] FROM numbers(1000);
 
-ALTER TABLE test_vector_event_log ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
+ALTER TABLE test_vector_event_log ADD VECTOR INDEX vec_ind vector TYPE IVFFLAT;
 
-SELECT sleep(2);
+SELECT sleep(3);
 
 DETACH TABLE test_vector_event_log SYNC;
 
@@ -27,9 +27,9 @@ SELECT sleep(2);
 
 ALTER TABLE test_vector_event_log DROP VECTOR INDEX vec_ind;
 
-ALTER TABLE test_vector_event_log ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
+ALTER TABLE test_vector_event_log ADD VECTOR INDEX vec_ind vector TYPE IVFFLAT;
 
-SELECT sleep(2);
+SELECT sleep(3);
 
 TRUNCATE TABLE test_vector_event_log SYNC;
 
@@ -37,7 +37,8 @@ SELECT sleep(2);
 
 INSERT INTO test_vector_event_log SELECT number, [number,number,number] FROM numbers(1000);
 
-SELECT sleep(2);
+SELECT sleep(3);
+SELECT sleep(3);
 
 DROP TABLE test_vector_event_log SYNC;
 

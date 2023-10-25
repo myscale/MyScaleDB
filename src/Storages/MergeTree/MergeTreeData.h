@@ -1079,14 +1079,18 @@ public:
     };
 
     /// Return introspection information about currently processing or recently processed vector index build jobs.
-    MergeTreeVectorIndexStatus getVectorIndexBuildStatus() const;
+    MergeTreeVectorIndexStatus getVectorIndexBuildStatus(const String & index_name) const;
 
     /// Update vector index status after buildVectorIndexForOnePart() is called for this part. May reset old
     /// error if built was successful. Otherwise update latested failed status.
-    void updateVectorIndexBuildStatus(const String & part_name, bool is_successful, const String & exception_message);
+    void updateVectorIndexBuildStatus(const String & part_name, const String & index_name, bool is_successful, const String & exception_message);
 
-    /// Reset vector index status when new vector index is added
-    void resetVectorIndexBuildStatus();
+    /// Reset vector index status when a vector index is dropped
+    /// Also reset vector index build error flag in parts
+    void removeVectorIndexBuildStatus(const String & index_name);
+
+    /// Support multiple vector indices. Add status for each vector index that exists.
+    void addVectorIndexBuildStatus(const String & index_name);
 
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
@@ -1591,7 +1595,8 @@ private:
     mutable TemporaryParts temporary_parts;
 
     mutable std::mutex currently_vector_index_status_mutex;
-    MergeTreeVectorIndexStatus vector_index_status;
+    /// Support multiple vector indices
+    mutable std::unordered_map<String, MergeTreeVectorIndexStatus> vector_indices_status;
 };
 
 /// RAII struct to record big parts that are submerging or emerging.

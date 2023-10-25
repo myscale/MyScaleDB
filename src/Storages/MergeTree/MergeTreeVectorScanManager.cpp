@@ -7,6 +7,7 @@
 
 #include <Columns/ColumnArray.h>
 
+#include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 
@@ -20,6 +21,7 @@
 #include <VectorIndex/Status.h>
 #include <VectorIndex/VectorIndexCommon.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/SearchThreadLimiter.h>
 
 #include <memory>
 
@@ -175,14 +177,13 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
     }
 }
 
-void MergeTreeVectorScanManager::executeBeforeRead(const String& data_path, const MergeTreeData::DataPartPtr & data_part)
+void MergeTreeVectorScanManager::executeBeforeRead(const MergeTreeData::DataPartPtr & data_part)
 {
     DB::OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::executeBeforeRead");
-    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_path, data_part);
+    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part);
 }
 
 void MergeTreeVectorScanManager::executeAfterRead(
-    const String& data_path,
     const MergeTreeData::DataPartPtr & data_part,
     Columns & pre_result,
     size_t & read_rows,
@@ -194,7 +195,7 @@ void MergeTreeVectorScanManager::executeAfterRead(
     {
         if (has_prewhere)
         {
-            VectorScanResultPtr tmp_result = vectorScan(true, data_path, data_part, read_ranges, filter);
+            VectorScanResultPtr tmp_result = vectorScan(true, data_part, read_ranges, filter);
             mergeBatchVectorScanResult(pre_result, read_rows, read_ranges, tmp_result, filter);
         }
         else
@@ -207,7 +208,7 @@ void MergeTreeVectorScanManager::executeAfterRead(
     {
         if (has_prewhere)
         {
-            VectorScanResultPtr tmp_result = vectorScan(false, data_path, data_part, read_ranges, filter);
+            VectorScanResultPtr tmp_result = vectorScan(false, data_part, read_ranges, filter);
             mergeVectorScanResult(pre_result, read_rows, read_ranges, tmp_result, filter);
         }
         else
@@ -219,17 +220,15 @@ void MergeTreeVectorScanManager::executeAfterRead(
 }
 
 void MergeTreeVectorScanManager::executeVectorScanWithFilter(
-    const String& data_path,
     const MergeTreeData::DataPartPtr & data_part,
     const ReadRanges & read_ranges,
     const Search::DenseBitmapPtr filter)
 {
-    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_path, data_part, read_ranges, filter);
+    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part, read_ranges, filter);
 }
 
 VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     bool is_batch,
-    const String & data_path,
     const MergeTreeData::DataPartPtr & data_part,
     const ReadRanges & read_ranges,
     const Search::DenseBitmapPtr filter)
@@ -260,7 +259,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
 
     String metric_str;
-    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_path, data_part);
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_part);
 
     find_index = vec_executors.size() > 0;
 
@@ -383,10 +382,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
         k = static_cast<int>(num_reorder);
 
     /// Get segment ids for vector index
-    const String data_path = data_part->getDataPartStorage().getFullPath();
 
     [[maybe_unused]] String metric_str;
-    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_path, data_part);
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_part);
 
     bool brute_force = vec_executors.size() == 0;
     if (brute_force)
@@ -476,14 +474,13 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
 
 std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::prepareForVectorScan(
     String & metric_str,
-    const String & data_path,
     const MergeTreeData::DataPartPtr & data_part)
 {
     std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
 
     VectorIndexDescription index;
     bool find_index = false;
-    const VectorIndicesDescription & vector_indices = metadata->vec_indices;
+    const VectorIndicesDescription & vector_indices = metadata->getVectorIndices();
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
     const VectorScanDescription & desc = descs[0];
@@ -492,13 +489,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
     UInt64 dim = desc.search_column_dim;
 
     metric_str = data_part->storage.getSettings()->vector_search_metric_type;
-
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(data_part->getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
 
     std::vector<VectorIndex::SegmentId> segment_ids;
     for (auto & v_index : vector_indices)
@@ -510,7 +500,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
                 metric_str = v_index.parameters->getValue<String>("metric_type");
             }
 
-            segment_ids = VectorIndex::getAllSegmentIds(data_path, data_part, v_index.name, v_index.column);
+            segment_ids = VectorIndex::getAllSegmentIds(data_part, v_index.name, v_index.column);
             if (segment_ids.size() >= 1)
             {
                 find_index = true;
@@ -560,13 +550,13 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         if (!is_shutdown)
         {
             VectorIndex::Status status = vec_executor->load(data_part->getState() == MergeTreeDataPartState::Active);
-            LOG_DEBUG(log, "Vector number in index: {}", vec_executor->getRawDataSize());
-            LOG_DEBUG(log, "Load vector index: {}", status.getCode());
+            LOG_DEBUG(log, "Vector number in index {}: {}", index.name, vec_executor->getRawDataSize());
+            LOG_DEBUG(log, "Load vector index {}: {}", index.name, status.getCode());
 
             if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
             {
                 /// inactive part reload vector index cache, behavior is prohibited
-                LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                LOG_WARNING(log, "Query using vector index {} was canceled due to a concurrent inactive part reload vector index", index.name);
                 context->getQueryContext()->killCurrentQuery();
                 throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
             }
@@ -599,9 +589,9 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
     {
         vec_executors.clear();
         segment_ids.clear();
-        if (data_part->containVectorIndex(index.name, index.column))
+        if (data_part->containVectorIndex(index.name))
         {
-            VectorIndex::SegmentId segment_id(part_storage->volume, data_path, data_part->name, index.name, index.column);
+            VectorIndex::SegmentId segment_id(data_part->getDataPartStoragePtr(), data_part->name, index.name, index.column);
             segment_ids.emplace_back(std::move(segment_id));
         }
 
@@ -628,7 +618,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
                 if (status.getCode() == ErrorCodes::INVALID_VECTOR_INDEX)
                 {
                     /// inactive part reload vector index cache, behavior is prohibited
-                    LOG_WARNING(log, "Query using vector index was canceled due to a concurrent inactive part reload vector index");
+                    LOG_WARNING(log, "Query using vector index {} was canceled due to a concurrent inactive part reload vector index", index.name);
                     context->getQueryContext()->killCurrentQuery();
                     throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
                 }
@@ -651,7 +641,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         {
             VectorIndex::VectorSegmentExecutor::removeFromCache(segment_ids[0].getCacheKey());
         }
-        LOG_WARNING(log, "Query using vector index was canceled due to a concurrent detach or drop table or database query.");
+        LOG_WARNING(log, "Query using vector index {} was canceled due to a concurrent detach or drop table or database query.", index.name);
         context->getQueryContext()->killCurrentQuery();
         throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
     }
@@ -1044,9 +1034,15 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const Search::Metric & metric)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScanWithoutIndex()");
+    /// Limit the number of vector index search threads to 2 * number of physical cores
+    static VectorIndex::LimiterSharedContext vector_index_context(getNumberOfPhysicalCPUCores() * 2);
+    VectorIndex::SearchThreadLimiter limiter(vector_index_context, log);
+
+
     NamesAndTypesList cols;
-    /// get search vector column info
-    auto col_and_type = this->metadata->getColumns().getAllPhysical().tryGetByName(search_column);
+    /// get search vector column info from part's metadata instead of table's
+    /// Avoid issues when a new vector column has been added and existing old parts don't have it.
+    auto col_and_type = part->tryGetColumn(search_column);
     if (col_and_type)
     {
         cols.emplace_back(*col_and_type);
@@ -1054,7 +1050,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     else
     {
         /// wrong column
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "not valid column");
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "vector column {} doesn't exists in part {}", search_column, part->name);
     }
 
     /// only consider no prewhere case
@@ -1184,7 +1180,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 if (src_vec.empty())
                     continue;
 
-                std::vector<float> vector_raw_data;
+                std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data;
                 vector_raw_data.reserve(dim * offsets.size());
 
                 std::vector<size_t> actual_id_in_range;
@@ -1349,7 +1345,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 continue;
             }
 
-            std::vector<float> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
+            std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
 
             for (size_t row = 0; row < offsets.size(); ++row)
             {
@@ -1513,7 +1509,7 @@ void MergeTreeVectorScanManager::searchWrapper(
     std::vector<int64_t> tmp_per_id;
     float * distance_data;
     int64_t * id_data;
-    
+
     if (delete_id_num > 0)
     {
         tmp_per_id = std::vector<int64_t>((k + delete_id_num) * nq);

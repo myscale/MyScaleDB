@@ -153,8 +153,6 @@ bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
 {
     Chunk chunk;
 
-    auto pull_start_time = std::chrono::system_clock::now();
-
     if (!pull(chunk, milliseconds))
         return false;
 
@@ -175,9 +173,6 @@ bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
             block.info.is_overflows = agg_info->is_overflows;
         }
     }
-    auto pull_end_time = std::chrono::system_clock::now();
-    LOG_DEBUG(log, "[pull] pull time: {}", std::chrono::duration_cast<std::chrono::milliseconds>(pull_end_time - pull_start_time).count());
-
 
     return true;
 }

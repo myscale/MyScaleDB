@@ -791,17 +791,31 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         auto metadata_snapshot = storage() ? storage()->getInMemoryMetadataPtr() : nullptr;
         String index_type = "";
-        // Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
+        /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
         std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(getContext()->getMergeTreeSettings());
         bool use_parameter_check = storage_settings->vector_index_parameter_check;
         LOG_TRACE(log, "[makeVectorScanDescriptions] vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
-        // Obtain the type of the vector index recorded in the meta_data.
-        if (metadata_snapshot && metadata_snapshot->getVectorIndices().size() == 1)
+
+        /// Obtain the type of the vector index recorded in the meta_data.
+        if (metadata_snapshot)
         {
-            index_type = metadata_snapshot->getVectorIndices()[0].type;
-            LOG_TRACE(log, "[makeVectorScanDescriptions] The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+            /// Support multiple vector indices
+            /// Find vector index description in metadata based on search column name.
+            for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+            {
+                if (vec_index_desc.column == vector_scan_desc.search_column_name)
+                {
+                    index_type = vec_index_desc.type;
+                    LOG_TRACE(log, "[makeVectorScanDescriptions] The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+
+                    break;
+                }
+            }
+
+            /// If not found, brute force search will be used.
         }
-        // Use the user-defined `vector_index_parameter_check`.
+
+        /// Use the user-defined `vector_index_parameter_check`.
         if (metadata_snapshot && metadata_snapshot->hasSettingsChanges())
         {
             const auto current_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
@@ -818,7 +832,8 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 }
             }
         }
-        //parse vector scan's params, such as: top_k, n_probe ...
+
+        /// parse vector scan's params, such as: top_k, n_probe ...
         String param_str = parseVectorScanParameters(node, getContext(), Poco::toUpper(index_type), use_parameter_check);
         if (!param_str.empty())
         {

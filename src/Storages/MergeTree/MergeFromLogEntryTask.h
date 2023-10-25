@@ -47,6 +47,8 @@ private:
     UInt64 priority{0};
 
     MergeTaskPtr merge_task;
+
+    StorageMetadataPtr metadata_snapshot; /// Used for vector index
 };
 
 

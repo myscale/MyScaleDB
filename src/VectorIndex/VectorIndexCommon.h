@@ -23,12 +23,13 @@
 #include <SearchIndex/SearchIndexCommon.h>
 #include <SearchIndex/VectorIndex.h>
 
-#define VECTOR_INDEX_FILE_SUFFIX ".vidx2"
+#define VECTOR_INDEX_FILE_SUFFIX ".vidx3"
 #define MAX_BRUTE_FORCE_SEARCH_SIZE 50000
 #define MIN_SEGMENT_SIZE 1000000
 #define VECTOR_INDEX_DESCRIPTION "vector_index_description"
-#define VECTOR_INDEX_READY "vector_index_ready_v2"
-#define VECTOR_INDEX_BITMAP "vector_bitmap"
+#define VECTOR_INDEX_CHECKSUMS "vector_index_checksums"
+#define DECOUPLE_OWNER_PARTS_RESTORE_PREFIX "restore"
+#define DISK_MODE_PARAM "disk_mode"
 
 namespace DB
 {
@@ -72,6 +73,21 @@ static inline Search::Parameters convertPocoJsonToMap(Poco::JSON::Object::Ptr js
     }
 
     return params;
+}
+
+static inline std::string getVectorIndexChecksumsFileName(const std::string & index_name)
+{
+    return index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX;
+}
+
+static inline std::string getVectorIndexDescriptionFileName(const std::string & index_name)
+{
+    return index_name + "-" + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX;
+}
+
+static inline std::string getDecoupledVectorIndexDescriptionFileName(const std::string & index_name, const int & old_part_id, const std::string & old_part_name)
+{
+    return "merged-" + std::to_string(old_part_id) + "-" + old_part_name + "-" + getVectorIndexDescriptionFileName(index_name);
 }
 
 inline Search::IndexType getIndexType(const std::string & type)

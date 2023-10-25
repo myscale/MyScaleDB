@@ -26,6 +26,7 @@
 #include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/Metadata.h>
 #include <VectorIndex/VectorIndexIO.h>
+#include <VectorIndex/SearchThreadLimiter.h>
 #include <SearchIndex/Common/Utils.h>
 #include <SearchIndex/IndexDataFileIO.h>
 #include <Storages/IStorage.h>
@@ -39,6 +40,8 @@ namespace DB
         extern const int LOGICAL_ERROR;
         extern const int CANNOT_OPEN_FILE;
         extern const int INVALID_VECTOR_INDEX;
+        extern const int VECTOR_INDEX_BUILD_MEMORY_TOO_LARGE;
+        extern const int VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT;
     }
     using StoragePtr = std::shared_ptr<IStorage>;
 }
@@ -47,6 +50,12 @@ namespace fs = std::filesystem;
 
 namespace VectorIndex
 {
+std::once_flag VectorSegmentExecutor::once;
+int VectorSegmentExecutor::max_threads = getNumberOfPhysicalCPUCores() * 2;
+
+std::mutex VectorSegmentExecutor::build_memory_mutex;
+size_t VectorSegmentExecutor::build_memory_size_limit = 0;
+size_t VectorSegmentExecutor::current_build_memory_size = 0;
 
 void printMemoryInfo(const Poco::Logger * log, std::string msg)
 {
@@ -65,32 +74,6 @@ void printMemoryInfo(const Poco::Logger * log, std::string msg)
 #endif
 }
 
-class SearchThreadLimiter
-{
-public:
-    SearchThreadLimiter(const Poco::Logger * log, int max_threads)
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex);
-        cv.wait(lock, [&] { return count.load() < max_threads; });
-        count.fetch_add(1);
-        LOG_DEBUG(log, "Index search uses {}/{} threads", count.load(), max_threads);
-    }
-
-    ~SearchThreadLimiter()
-    {
-        count.fetch_sub(1);
-        cv.notify_one();
-    }
-private:
-    static std::shared_mutex mutex;
-    static std::condition_variable_any cv;
-    static std::atomic_int count;
-};
-
-std::shared_mutex SearchThreadLimiter::mutex;
-std::condition_variable_any SearchThreadLimiter::cv;
-std::atomic_int SearchThreadLimiter::count(0);
-
 String cutMutVer(const String & part_name)
 {
     std::vector<String> tokens;
@@ -103,8 +86,6 @@ String cutMutVer(const String & part_name)
         return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
 }
 
-std::once_flag VectorSegmentExecutor::once;
-int VectorSegmentExecutor::max_threads = 0;
 String cutPartitionID(const String & part_name)
 {
     std::vector<String> tokens;
@@ -128,13 +109,12 @@ String cutPartNameFromCacheKey(const String & cache_key)
 
 void VectorSegmentExecutor::init()
 {
-    std::call_once(
-        once,
+    std::call_once(once,
         [&]
         {
-            max_threads = getNumberOfPhysicalCPUCores() * 2;
-            LOG_INFO(log, "Max threads for vector index: {}", max_threads);
-        });
+            LOG_INFO(log, "The number of threads for vector index build and DiskIOManager: {}", max_threads);
+        }
+    );
 }
 
 VectorSegmentExecutor::VectorSegmentExecutor(
@@ -191,7 +171,7 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
         configureDiskMode();
         index = Search::
             createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                segment_id.getIndexNameWithColumn(),
+                segment_id.getIndexName(),
                 type,
                 metric,
                 dimension,
@@ -206,6 +186,9 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
                 true /* manage_cache_folder */);
         index->setTrainDataChunkSize(train_block_size);
         index->setAddDataChunkSize(add_block_size);
+
+        checkBuildMemory(index->getResourceUsage().build_memory_usage_bytes);
+
         printMemoryInfo(log, "Before build");
         index->build(reader, num_threads, check_build_canceled_callbak);
         printMemoryInfo(log, "After build");
@@ -311,7 +294,7 @@ Status VectorSegmentExecutor::serialize()
         auto file_writer = Search::IndexDataFileWriter<Search::AbstractOStream>(
             segment_id.getFullPath(),
             [this](const std::string & name, std::ios::openmode /*mode*/)
-            { return std::make_shared<VectorIndexWriter>(segment_id.volume->getDisk(), name); });
+            { return std::make_shared<VectorIndexWriter>(segment_id.getDisk(), name); });
 
         index->serialize(&file_writer);
         index->saveDataID(&file_writer);
@@ -324,7 +307,7 @@ Status VectorSegmentExecutor::serialize()
         infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
         infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
         Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
-        auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
+        auto buf = segment_id.getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
         metadata.writeText(*buf);
 
         return Status(0);
@@ -352,11 +335,11 @@ void VectorSegmentExecutor::handleMergedMaps()
     try
     {
         auto row_ids_map_buf
-            = std::make_unique<DB::CompressedReadBufferFromFile>(segment_id.volume->getDisk()->readFile(segment_id.getRowIdsMapFilePath()));
+            = std::make_unique<DB::CompressedReadBufferFromFile>(segment_id.getDisk()->readFile(segment_id.getRowIdsMapFilePath()));
         auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowIdsMapFilePath()));
+            segment_id.getDisk()->readFile(segment_id.getInvertedRowIdsMapFilePath()));
         auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowSourcesMapFilePath()));
+            segment_id.getDisk()->readFile(segment_id.getInvertedRowSourcesMapFilePath()));
 
         while (!inverted_row_sources_map_buf->eof())
         {
@@ -410,7 +393,6 @@ Status VectorSegmentExecutor::load(bool isActivePart)
     const String cache_key_str = cache_key.toString();
 
     LOG_DEBUG(log, "segment_id.getPathPrefix() = {}", segment_id.getPathPrefix());
-    LOG_DEBUG(log, "segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
     LOG_DEBUG(log, "cache_key_str = {}", cache_key_str);
 
     IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
@@ -426,6 +408,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_START,
@@ -435,10 +418,10 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         {
             try
             {
-                if (!segment_id.volume->getDisk()->exists(segment_id.getVectorReadyFilePath()))
+                if (!segment_id.getDisk()->exists(segment_id.getVectorDescriptionFilePath()))
                     throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Index is not in the ready state and cannot be loaded");
                 Metadata metadata(segment_id);
-                auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
+                auto buf = segment_id.getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
                 metadata.readText(*buf);
                 fallback_to_flat = metadata.fallback_to_flat;
                 if (fallback_to_flat)
@@ -457,7 +440,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 configureDiskMode();
                 index = Search::
                     createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                        segment_id.getIndexNameWithColumn(),
+                        segment_id.getIndexName(),
                         type,
                         metric,
                         dimension,
@@ -475,7 +458,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
                     segment_id.getFullPath(),
                     [this](const std::string & name, std::ios::openmode /*mode*/)
-                    { return std::make_shared<VectorIndexReader>(segment_id.volume->getDisk(), name); });
+                    { return std::make_shared<VectorIndexReader>(segment_id.getDisk(), name); });
                 printMemoryInfo(log, "Before load");
                 index->load(&file_reader);
                 index->loadDataID(&file_reader);
@@ -534,7 +517,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 // multiple threads performing load at the same time, only one
                 // thread will actually execute load_func to update its own row ids map,
                 // and other threads need to update their own row ids map according to the results of load_func
-                
+
                 {
                     std::shared_lock<std::shared_mutex> lock(new_index.rwLock_of_row_id_maps);
                     if (!new_index.row_ids_map->empty())
@@ -544,7 +527,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                         inverted_row_sources_map = new_index.inverted_row_sources_map;
                     }
                 }
-                
+
                 if (row_ids_map->empty())
                     updateCacheValueWithRowIdsMaps(std::move(index_holder));
 
@@ -552,6 +535,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_SUCCEED,
@@ -564,6 +548,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -576,6 +561,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -588,6 +574,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -598,6 +585,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_FAILED,
@@ -641,6 +629,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -654,6 +643,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -675,7 +665,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     bool first_stage_only)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
-    
+
     // Check if the index is initialized and ready for searching
     if (index == nullptr)
     {
@@ -694,7 +684,9 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
 
-    SearchThreadLimiter limiter(log, max_threads);
+    /// Limit the number of bruteforce search threads to 2 * number of physical cores
+    static LimiterSharedContext brute_force_context(getNumberOfPhysicalCPUCores() * 2);
+    SearchThreadLimiter limiter(brute_force_context, log);
 
     auto merged_filter = filter;
     // Merge filter and delete_bitmap
@@ -744,11 +736,11 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::computeTopDistanceS
 }
 
 Status VectorSegmentExecutor::searchWithoutIndex(
-    VectorDatasetPtr query_data, 
-    VectorDatasetPtr base_data, 
-    int32_t k, 
-    float *& distances, 
-    int64_t *& labels, 
+    VectorDatasetPtr query_data,
+    VectorDatasetPtr base_data,
+    int32_t k,
+    float *& distances,
+    int64_t *& labels,
     const Search::Metric & metric)
 {
     omp_set_num_threads(1);
@@ -760,6 +752,7 @@ Status VectorSegmentExecutor::searchWithoutIndex(
         query_data->normalize();
         base_data->normalize();
     }
+
     auto status = tryBruteForceSearch(
         query_data->getData(),
         base_data->getData(),
@@ -831,66 +824,33 @@ Status VectorSegmentExecutor::removeByIds(size_t n, const size_t * ids)
     return Status();
 }
 
-bool VectorSegmentExecutor::writeBitMap()
-{
-    String bitmap_path = segment_id.getBitMapFilePath();
-    auto writer = segment_id.volume->getDisk()->writeFile(bitmap_path);
-
-    if (delete_bitmap == nullptr)
-        delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
-    size_t size = delete_bitmap->get_size();
-    writer->write(reinterpret_cast<const char *>(&size), sizeof(size_t));
-
-    writer->write(reinterpret_cast<const char *>(delete_bitmap->get_bitmap()), delete_bitmap->byte_size());
-    writer->finalize();
-
-    return true;
-}
-
-bool VectorSegmentExecutor::readBitMap()
-{
-    String read_file_path = segment_id.getBitMapFilePath();
-    auto reader = segment_id.volume->getDisk()->readFile(read_file_path);
-
-    if (!reader)
-        return false;
-
-    size_t size;
-    try
-    {
-        reader->readStrict(reinterpret_cast<char *>(&size), sizeof(size_t));
-    }
-    catch (...)
-    {
-        LOG_ERROR(log, "Bitmap file read error.");
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
-    }
-
-    if (delete_bitmap == nullptr)
-        delete_bitmap = std::make_shared<Search::DenseBitmap>(size);
-
-    size_t bit_map_size = delete_bitmap->byte_size();
-
-    if (total_vec != 0 && size != total_vec)
-    {
-        LOG_ERROR(log, "Bitmap file {} is corrupted: size {}, total_vec {}", read_file_path, size, total_vec);
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
-    }
-
-    reader->readStrict(reinterpret_cast<char *>(delete_bitmap->get_bitmap()), bit_map_size);
-
-    return true;
-}
-
 void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
 {
     CacheManager::setCacheSize(size);
+}
+
+void VectorSegmentExecutor::setBuildMemorySizeInBytes(size_t size)
+{
+    build_memory_size_limit = size;
 }
 
 std::list<std::pair<CacheKey, Search::Parameters>> VectorSegmentExecutor::getAllCacheNames()
 {
     ///from this list, we get <segment_id, vectorindex description> pair
     return CacheManager::getInstance()->getAllItems();
+}
+
+bool VectorSegmentExecutor::storedInCache()
+{
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+
+    if (index_holder)
+        return true;
+    else
+        return false;
 }
 
 void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64> & deleted_row_ids)
@@ -1099,4 +1059,93 @@ void VectorSegmentExecutor::convertBitmap(const std::vector<UInt64> & deleted_ro
     }
 }
 
+Search::IndexResourceUsage VectorSegmentExecutor::getIndexResourceUsage()
+{
+    if (index)
+        return index->getResourceUsage();
+
+    try
+    {
+        if (total_vec * dimension * sizeof(float) < min_bytes_to_build_vector_index)
+            type = Search::IndexType::FLAT;
+
+        /// avoid overwriting vector_index_cache_prefix
+        if (vector_index_cache_prefix.empty())
+            configureDiskMode();
+
+        index = Search::
+            createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                segment_id.getIndexName(),
+                type,
+                metric,
+                dimension,
+                total_vec,
+                des,
+                false /* load_diskann_after_build */,
+                vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                getDiskIOManager(),
+#endif
+                true /* use_file_checksum */,
+                true /* manage_cache_folder */);
+
+        return index->getResourceUsage();
+    }
+    catch (...)
+    {
+        LOG_INFO(
+            &Poco::Logger::get("VectorSegmentExecutor"),
+            "Failed to build dummy index while getting resource usage: {}",
+            DB::getCurrentExceptionMessage(false));
+        return Search::IndexResourceUsage{};
+    }
+}
+
+BuildMemoryCheckResult VectorSegmentExecutor::checkBuildMemorySize(size_t size)
+{
+    std::lock_guard lock(build_memory_mutex);
+
+    if (build_memory_size_limit == 0)
+        return BuildMemoryCheckResult::OK;
+    else if (size > build_memory_size_limit)
+        return BuildMemoryCheckResult::NEVER;
+    else if (current_build_memory_size + size > build_memory_size_limit)
+        return BuildMemoryCheckResult::LATER;
+
+    current_build_memory_size += size;
+    LOG_DEBUG(
+        &Poco::Logger::get("VectorSegmentExecutor"), "allow building: size = {}, current_total = {}", size, current_build_memory_size);
+    return BuildMemoryCheckResult::OK;
+}
+
+void VectorSegmentExecutor::checkBuildMemory(size_t size)
+{
+    Stopwatch stopwatch;
+    while (true)
+    {
+        auto res = checkBuildMemorySize(size);
+        switch (res)
+        {
+            case BuildMemoryCheckResult::OK:
+                /// record reserved build memory size. will be decreased in deconstructor
+                {
+                    std::lock_guard lock(build_memory_mutex);
+                    build_memory_size_recorded += size;
+                }
+                return;
+
+            case BuildMemoryCheckResult::NEVER:
+                throw IndexException(
+                    DB::ErrorCodes::VECTOR_INDEX_BUILD_MEMORY_TOO_LARGE, "cannot build vector index, build memory required is too large");
+
+            case BuildMemoryCheckResult::LATER:
+                if (stopwatch.elapsedSeconds() > 5 * 60) /// 5 miniutes
+                    throw IndexException(
+                        DB::ErrorCodes::VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT,
+                        "cannot build vector index for now due to build memory limitation");
+                else /// currently unable to build index, sleep and retry
+                    std::this_thread::sleep_for(std::chrono::seconds(10));
+        }
+    }
+}
 }
