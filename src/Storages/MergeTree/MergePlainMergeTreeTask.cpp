@@ -138,27 +138,12 @@ void MergePlainMergeTreeTask::finish()
 
     MergeTreeData::Transaction transaction(storage, txn.get());
     storage.merger_mutator.renameMergedTemporaryPart(new_part, future_part->parts, txn, transaction);
-    /// Check latest metadata if vector index has been dropped.
-    if (new_part->storage.getInMemoryMetadataPtr()->vec_indices.empty())
-    {
-        if (new_part->containAnyVectorIndex())
-        {
-            /// Pass empty string for index_name and column name, all vector index will be removed from this part.
-            String dummy_name;
-            new_part->removeVectorIndex(dummy_name, dummy_name);
-            new_part->removeAllVectorIndexInfo();
-
-            LOG_DEBUG(storage.log, "Remove vector index from part {} due to dropped in metadata", new_part->name);
-        }
-        else if (new_part->containRowIdsMaps())
-        {
-            new_part->removeAllRowIdsMaps(true);
-            LOG_DEBUG(storage.log, "Remove old parts' vector index from decouple part {} due to dropped in metadata", new_part->name);
-        }
-
-        /// Unable to get vector index name so wait to be removed by backgound removeDroppedVectorIndices()
-    }
     transaction.commit();
+
+    /// Support multiple vector indices
+    /// It's safe to put here, we only handle cases for dropped vector index during merge.
+    if (metadata_snapshot->hasVectorIndices())
+        storage.merger_mutator.handleVectorIndicesForMergedPart(new_part, future_part->parts, metadata_snapshot);
 
     write_part_log({});
     storage.incrementMergedPartsProfileEvent(new_part->getType());

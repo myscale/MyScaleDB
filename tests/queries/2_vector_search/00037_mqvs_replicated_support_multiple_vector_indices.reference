@@ -1,0 +1,38 @@
+-- Test table with multiple vector indices
+0
+0
+0
+-- Check build status for multiple vector indices
+v1	MSTG	v1 v1 TYPE MSTG	Built
+v2	MSTG	v2 v2 TYPE MSTG	Built
+-- Drop a vector index v1
+v2	MSTG	v2 v2 TYPE MSTG	Built
+-- Check system table vector_index_segments
+all_0_0_0	v2	LOADED
+0
+0
+0
+-- After add a second index on VPart, check build status for multiple vector indices
+v2	MSTG	v2 v2 TYPE MSTG	Built
+v1	MSTG	v1 v1 TYPE MSTG	Built
+-- Insert a new part for the test of VParts -> DPart
+0
+0
+0
+Before decouple, two VParts with multiple vector indices
+v2	MSTG	v2 v2 TYPE MSTG	2	2	Built
+v1	MSTG	v1 v1 TYPE MSTG	2	2	Built
+-- After decouple, check system table vector_index_segments
+v1	all_0_1_1	all_0_0_0	0	LOADED
+v1	all_0_1_1	all_1_1_0	1	LOADED
+v2	all_0_1_1	all_0_0_0	0	LOADED
+v2	all_0_1_1	all_1_1_0	1	LOADED
+-- After decouple, check system table vector_indices
+v2	MSTG	v2 v2 TYPE MSTG	1	0	InProgress
+v1	MSTG	v1 v1 TYPE MSTG	1	0	InProgress
+0
+0
+0
+-- DPart->VPart, check system table vector_indices
+v2	MSTG	v2 v2 TYPE MSTG	1	1	Built
+v1	MSTG	v1 v1 TYPE MSTG	1	1	Built

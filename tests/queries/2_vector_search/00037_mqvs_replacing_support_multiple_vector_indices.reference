@@ -1,0 +1,27 @@
+0
+0
+Vector index build status
+vector_mstg	MSTG	vector_mstg vector TYPE MSTG	Built
+v2_mstg	MSTG	v2_mstg v2 TYPE MSTG	Built
+Select on vector column in replacing merge tree with decouple part
+0	2023-03-01	5
+1	2023-03-01	14
+2	2023-03-01	29
+3	2023-03-01	50
+4	2023-03-01	77
+5	2023-03-01	110
+6	2023-03-01	149
+7	2023-03-01	194
+8	2023-03-01	245
+9	2023-03-01	302
+Select on v2 column in replacing merge tree with decouple part
+3	2023-03-01	0
+2	2023-03-01	4
+4	2023-03-01	4
+1	2023-03-01	16
+5	2023-03-01	16
+0	2023-03-01	36
+6	2023-03-01	36
+7	2023-03-01	64
+8	2023-03-01	100
+9	2023-03-01	144

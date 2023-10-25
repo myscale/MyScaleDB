@@ -805,32 +805,31 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
     else if (type == ADD_VECTOR_INDEX)
     {
         if (std::any_of(
-            metadata.vec_indices.cbegin(),
-            metadata.vec_indices.cend(),
-            [this](const auto & vec_index)
-            {
-                return vec_index.name == vec_index_name;
-            }))
+                metadata.vec_indices.cbegin(),
+                metadata.vec_indices.cend(),
+                [this](const auto & vec_index)
+                {
+                    return vec_index.name == vec_index_name;
+                }))
         {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot add vector index {}: this name is used", vec_index_name);
+            if (if_not_exists)
+                return;
+            else
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot add vector index {}: this name is used", vec_index_name);
         }
-        if(metadata.vec_indices.size() > 0)
-        {
-            if (std::any_of(
+
+        if (std::any_of(
                 metadata.vec_indices.cbegin(),
                 metadata.vec_indices.cend(),
                 [this](const auto & vec_index)
                 {
                     return vec_index.column == column_name;
                 }))
-            {
-                if (if_not_exists)
-                    return;
-                else
-                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: this column already has a vector index definition", vec_index_name);
-            }
+        {
+            if (if_not_exists)
+                return;
             else
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: one of the other columns already has a vector index definition", vec_index_name);
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: this column already has a vector index definition", vec_index_name);
         }
 
         if (!metadata.columns.has(column_name))

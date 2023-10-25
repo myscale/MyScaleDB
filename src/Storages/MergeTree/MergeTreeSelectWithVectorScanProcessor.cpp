@@ -626,7 +626,7 @@ try
     /// perform vector scan, then filter mark ranges of read task
     if (!prewhere_info)
     {
-        vector_scan_manager->executeBeforeRead(data_part->getDataPartStorage().getFullPath(), data_part);
+        vector_scan_manager->executeBeforeRead(data_part);
         filterMarkRangesByVectorScanResult(data_part, vector_scan_manager, mark_ranges_for_task);
     }
     else
@@ -639,7 +639,7 @@ try
         ReadRanges read_ranges;
         ReadRange read_range{0, data_part->rows_count, 0, data_part->index_granularity.getMarksCount()};
         read_ranges.emplace_back(read_range);
-        vector_scan_manager->executeVectorScanWithFilter(data_part->getDataPartStorage().getFullPath(), data_part, read_ranges, filter);
+        vector_scan_manager->executeVectorScanWithFilter(data_part, read_ranges, filter);
         filterMarkRangesByVectorScanResult(data_part, vector_scan_manager, mark_ranges_for_task);
     }
 

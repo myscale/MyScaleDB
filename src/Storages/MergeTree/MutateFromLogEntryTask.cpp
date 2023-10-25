@@ -255,7 +255,9 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     {
         if (new_part->containAnyVectorIndex())
             new_part->onLightweightDelete();
-        else if (new_part->containRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
+
+        /// Support multiple vector indices
+        if (new_part->containAnyRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
             new_part->onDecoupledLightWeightDelete();
     }
 

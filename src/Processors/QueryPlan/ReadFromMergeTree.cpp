@@ -1712,7 +1712,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
             if (!prewhere_info)
             {
                 /// TODO: we can use vector scan result to further decrease mark range size
-                part.vector_scan_manager->executeBeforeRead(part.data_part->getDataPartStorage().getFullPath(), part.data_part);
+                part.vector_scan_manager->executeBeforeRead(part.data_part);
             }
         }
 

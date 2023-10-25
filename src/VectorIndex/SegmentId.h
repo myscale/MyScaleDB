@@ -1,5 +1,8 @@
 #pragma once
 #include <filesystem>
+#include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+#include <Storages/MergeTree/IDataPartStorage.h>
+#include <Disks/IDisk.h>
 #include <VectorIndex/VectorIndexCommon.h>
 #include <Common/logger_useful.h>
 #include <base/types.h>
@@ -8,8 +11,19 @@ namespace fs = std::filesystem;
 
 namespace DB
 {
-class IVolume;
-using VolumePtr = std::shared_ptr<IVolume>;
+class IDataPartStorage;
+using DataPartStoragePtr = std::shared_ptr<const IDataPartStorage>;
+
+class IDisk;
+using DiskPtr = std::shared_ptr<IDisk>;
+
+class DataPartStorageOnDiskBase;
+
+namespace ErrorCodes
+{
+    extern const int BAD_ARGUMENTS;
+}
+
 }
 
 namespace VectorIndex
@@ -63,51 +77,81 @@ struct CacheKey
     {
         return cutPartitionID(part_name_no_mutation);
     }
+
+    String getIndexName() const { return vector_index_name; }
 };
 
 struct SegmentId
 {
-    DB::VolumePtr volume;
     String data_part_path;
     String current_part_name;
     String owner_part_name;
     String vector_index_name;
     String column_name;
     UInt8 owner_part_id;
+    DB::DiskPtr disk;   /// Use disk from data part storage
 
     SegmentId(
-        DB::VolumePtr volume_,
+        DB::DataPartStoragePtr data_part_storage_,
         const String & data_part_path_,
         const String & current_part_name_,
         const String & owner_part_name_,
         const String & vector_index_name_,
         const String & column_name_,
         UInt8 owner_part_id_)
-        : volume(volume_)
-        , data_part_path(data_part_path_)
+        : data_part_path(data_part_path_)
         , current_part_name(current_part_name_)
         , owner_part_name(owner_part_name_)
         , vector_index_name(vector_index_name_)
         , column_name(column_name_)
         , owner_part_id(owner_part_id_)
     {
+        initDisk(data_part_storage_);
     }
 
-
+    /// Used for vector index in decouple part
     SegmentId(
-        DB::VolumePtr volume_,
+        DB::DataPartStoragePtr data_part_storage_,
+        const String & current_part_name_,
+        const String & owner_part_name_,
+        const String & vector_index_name_,
+        const String & column_name_,
+        UInt8 owner_part_id_)
+        : SegmentId(data_part_storage_, data_part_storage_->getFullPath(), current_part_name_, owner_part_name_, vector_index_name_, column_name_, owner_part_id_)
+    {
+    }
+
+    /// Used for vector index in VPart
+    SegmentId(
+        DB::DataPartStoragePtr data_part_storage_,
+        const String & current_part_name_,
+        const String & vector_index_name_,
+        const String & column_name_)
+        : SegmentId(data_part_storage_, data_part_storage_->getFullPath(), current_part_name_, current_part_name_, vector_index_name_, column_name_, 0)
+    {
+    }
+
+    /// Used for vector index build, where data_part_path is different from data_part_storage
+    SegmentId(
+        DB::DataPartStoragePtr data_part_storage_,
         const String & data_part_path_,
         const String & current_part_name_,
         const String & vector_index_name_,
         const String & column_name_)
-        : volume(volume_)
-        , data_part_path(data_part_path_)
-        , current_part_name(current_part_name_)
-        , owner_part_name(current_part_name_)
-        , vector_index_name(vector_index_name_)
-        , column_name(column_name_)
-        , owner_part_id(0)
+        : SegmentId(data_part_storage_, data_part_path_, current_part_name_, current_part_name_, vector_index_name_, column_name_, 0)
     {
+    }
+
+    /// Get the disk from data part storage to read/write vector index files.
+    void initDisk(DB::DataPartStoragePtr data_part_storage)
+    {
+        const DB::DataPartStorageOnDiskBase * part_storage = dynamic_cast<const DB::DataPartStorageOnDiskBase *>(data_part_storage.get());
+        if (part_storage == nullptr)
+        {
+            throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+
+        disk = getVolumeFromPartStorage(*part_storage)->getDisk();
     }
 
     String getPathPrefix() const
@@ -123,23 +167,17 @@ struct SegmentId
         }
     }
 
-    String getIndexNameWithColumn() const { return vector_index_name + "-" + column_name; }
+    String getIndexName() const { return vector_index_name; }
 
-    String getFullPath() const { return getPathPrefix() + getIndexNameWithColumn() + "-"; }
+    String getFullPath() const { return getPathPrefix() + getIndexName() + "-"; }
 
     CacheKey getCacheKey() const
     {
-        fs::path full_path(data_part_path);
-        /// use parent data path, need to call parent_path() twice,
-        /// according to https://en.cppreference.com/w/cpp/filesystem/path/parent_path
-        return CacheKey{full_path.parent_path().parent_path().string(), cutMutVer(owner_part_name), vector_index_name, column_name};
+        return CacheKey{
+            getPartRelativePath(fs::path(data_part_path).parent_path()), cutMutVer(owner_part_name), vector_index_name, column_name};
     }
 
-    String getVectorReadyFilePath() const { return getPathPrefix() + VECTOR_INDEX_READY + VECTOR_INDEX_FILE_SUFFIX; }
-
-    String getVectorDescriptionFilePath() const { return getPathPrefix() + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX; }
-
-    String getBitMapFilePath() const { return getPathPrefix() + VECTOR_INDEX_BITMAP + VECTOR_INDEX_FILE_SUFFIX; }
+    String getVectorDescriptionFilePath() const { return getPathPrefix() + getVectorIndexDescriptionFileName(vector_index_name); }
 
     bool fromMergedParts() { return current_part_name != owner_part_name; }
 
@@ -164,5 +202,7 @@ struct SegmentId
     }
 
     UInt8 getOwnPartId() const { return owner_part_id; }
+
+    DB::DiskPtr getDisk() { return disk; }
 };
 }

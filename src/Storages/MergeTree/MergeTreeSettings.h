@@ -186,6 +186,7 @@ struct Settings;
     M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
     M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
     M(UInt64, build_vector_index_on_random_single_replica, 0, "Control single replica build vector index options. 0 - disable. 1 - choose one random replica to build vector index, others wait to download the result. 2 - always choose the last active replica.", 0) \
+    M(Seconds, vector_index_cache_recheck_interval_seconds, 600, "The period of executing remove dropped vector index caches operation in background.", 0) \
     \
     /** Obsolete settings. Kept for backward compatibility only. */ \
     M(UInt64, min_relative_delay_to_yield_leadership, 120, "Obsolete setting, does nothing.", 0) \

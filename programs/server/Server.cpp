@@ -1632,27 +1632,29 @@ try
     /// system logs may copy global context.
     global_context->setCurrentDatabaseNameInGlobalContext(default_database);
 
-    const double vector_index_cache_size_ratio_of_memory
-        = global_context->getConfigRef().getDouble("vector_index_cache_size_ratio_of_memory", 0.9);
-    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_size_ratio_of_memory);
-    //max_server_memory_usage
-    double vector_index_ratio = 0.0;
-    if (vector_index_cache_size_ratio_of_memory < 0.3)
-    {
-        vector_index_ratio = 0.3;
-    }
-    else if (vector_index_cache_size_ratio_of_memory > 0.9)
-    {
-        vector_index_ratio = 0.9;
-    }
-    else
-    {
-        vector_index_ratio = vector_index_cache_size_ratio_of_memory;
-    }
-    const size_t vector_index_cache_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_ratio);
-    LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", vector_index_cache_max_size_in_bytes);
-    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size_in_bytes);
+    /// Set vector index cache memory limit
+    float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
+    if (vector_index_cache_ratio < 0.1f)
+        vector_index_cache_ratio = 0.1f;
+    else if (vector_index_cache_ratio > 0.9f)
+        vector_index_cache_ratio = 0.9f;
+    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
 
+    const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
+    LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
+
+    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+
+    /// Set vector index build memory limit
+    float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
+    if (vector_index_build_ratio < 0.1f)
+        vector_index_build_ratio = 0.1f;
+    else if (vector_index_build_ratio > 0.9f)
+        vector_index_build_ratio = 0.9f;
+    LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
+
+    const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
+    LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
     LOG_INFO(log, "Loading metadata from {}", path_str);
 
     try

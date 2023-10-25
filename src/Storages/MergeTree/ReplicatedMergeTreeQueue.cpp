@@ -1292,6 +1292,7 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
     const LogEntry & entry,
     String & out_postpone_reason,
     MergeTreeDataMergerMutator & merger_mutator,
+    ActionBlocker & builds_blocker, /// Used for build vector index
     MergeTreeData & data,
     std::unique_lock<std::mutex> & state_lock) const
 {
@@ -1574,18 +1575,19 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
             }
         }
     }
+
     if (entry.type == LogEntry::BUILD_VECTOR_INDEX)
     {
         String part_name = entry.source_parts.at(0);
-        LOG_TRACE(log, "Get vector index build log entry {} of type {} for part {} slow_mode {}",
-                  entry.znode_name, entry.typeToString(), part_name, entry.slow_mode);
+        LOG_TRACE(log, "Get vector index build log entry {} of type {} with index name {} for part {} slow_mode {}",
+                  entry.znode_name, entry.typeToString(), entry.index_name, part_name, entry.slow_mode);
 
         if (future_parts.count(part_name))
         {
             out_postpone_reason = fmt::format(
-                "Not executing log entry {} of type {} for part {} "
+                "Not executing log entry {} of type {} with index name {} for part {} "
                 "because the part is not ready yet (log entry for that part is being processed).",
-                entry.znode_name, entry.typeToString(), part_name);
+                entry.znode_name, entry.typeToString(), entry.index_name, part_name);
             LOG_TRACE(log, fmt::runtime(out_postpone_reason));
             return false;
         }
@@ -1594,8 +1596,17 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
         auto source_part = data.getActiveContainingPart(part_name);
         if (!source_part)
         {
-            LOG_DEBUG(log, "Not executing log entry {} of type {} for part {} because the part is not ready yet", entry.znode_name, entry.typeToString(), part_name);
+            LOG_DEBUG(log, "Not executing log entry {} of type {} with index name {} for part {} because the part is not ready yet",
+                      entry.znode_name, entry.typeToString(), entry.index_name, part_name);
             return false;
+        }
+
+        /// If part already have this vector index, let it execute and record status in zookeeper.
+        if (source_part->containVectorIndex(entry.index_name))
+        {
+            LOG_DEBUG(log, "Part {}'s active covered part {} already has vector index {}, will execute to remove the log entry",
+                        part_name, source_part->name, entry.index_name);
+            return true;
         }
 
         /// If part is already been merged, let it execute and remove the log entry there.
@@ -1606,17 +1617,19 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
             /// Check part name without mutation version is same.
             if (!source_part->info.isFromSamePart(part_info))
             {
-                LOG_DEBUG(log, "Part {} is covered by merged part {}, will execute to remove the log entry.", part_name, source_part->name);
-                return true;
-            }
-
-            /// If part already have vector index, let it execute and record status in zookeeper.
-            if (source_part->containAnyVectorIndex())
-            {
-                LOG_DEBUG(log, "Part {}'s covered part {} already has vector index, will execute to remove the log entry.", part_name, source_part->name);
+                LOG_DEBUG(log, "Part {} is covered by merged part {}, will execute to remove the log entry {}.", part_name, source_part->name, entry.znode_name);
                 return true;
             }
         }
+
+        if (builds_blocker.isCancelled())
+        {
+            constexpr auto fmt_string = "Not executing log entry {} of type {} with index name {} for part {} because build vector index is cancelled now.";
+            LOG_DEBUG(LogToStr(out_postpone_reason, log), fmt_string, entry.znode_name, entry.typeToString(), entry.index_name, part_name);
+            return false;
+        }
+
+        bool will_fetch_vector_index = false;
 
         if (build_vindex_strategy_picker.shouldBuildVIndexOnSingleReplica(entry))
         {
@@ -1626,7 +1639,7 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
             {
                 if (!build_vindex_strategy_picker.isBuildVectorIndexFinishedByReplica(replica_to_execute_build_vindex.value(), entry))
                 {
-                    String reason = "Not executing build vector index for the part " + part_name
+                    String reason = "Not executing build vector index " + entry.index_name + " for the part " + part_name
                         +  ", waiting for " + replica_to_execute_build_vindex.value() + " to execute build.";
                     out_postpone_reason = reason;
 
@@ -1634,26 +1647,35 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
                     return false;
                 }
                 else /// fetch vector index
+                    will_fetch_vector_index = true;
+            }
+        }
+
+        /// Two replicas may be inconsistent.
+        /// 1. Avoid to build vector index on part which is currently being merged. Mutations are allowed.
+        /// 2. Fetch vector index and mutate are conflict. Hence avoid to fetch when part is currently being merged or mutated.
+        /// Reference from isCoveredByFuturePartsImpl()
+        auto result_part = MergeTreePartInfo::fromPartName(part_name, format_version);
+
+        /// It can slow down when the size of `future_parts` is large. But it can not be large, since background pool is limited.
+        for (const auto & future_part_elem : future_parts)
+        {
+            auto future_part = MergeTreePartInfo::fromPartName(future_part_elem.first, format_version);
+
+            if (future_part.contains(result_part))
+            {
+                /// future part maybe from mutate or merge
+                if (!will_fetch_vector_index && future_part.isFromSamePart(result_part))
                 {
-                    /// Check if part for fetching vector index is currently being merged or mutated.
-                    /// Reference from isCoveredByFuturePartsImpl()
-                    auto result_part = MergeTreePartInfo::fromPartName(part_name, format_version);
-
-                    /// It can slow down when the size of `future_parts` is large. But it can not be large, since background pool is limited.
-                    for (const auto & future_part_elem : future_parts)
-                    {
-                        auto future_part = MergeTreePartInfo::fromPartName(future_part_elem.first, format_version);
-
-                        if (future_part.contains(result_part))
-                        {
-                            constexpr auto fmt_string = "Not executing log entry {} of type {} for part {} "
-                                "because this part is currently being processed by mutate or merge with future part {}.";
-                            LOG_TRACE(LogToStr(out_postpone_reason, log), fmt_string, entry.znode_name, entry.typeToString(),
-                                      part_name, future_part_elem.first);
-                            return false;
-                        }
-                    }
+                    /// Build vector index is not conflict with mutations.
+                    continue;
                 }
+
+                constexpr auto fmt_string = "Not executing log entry {} of type {} with index name {} for part {} "
+                    "because this part is currently being processed by mutate or merge with future part {}.";
+                LOG_TRACE(LogToStr(out_postpone_reason, log), fmt_string, entry.znode_name, entry.typeToString(),
+                            entry.index_name, part_name, future_part_elem.first);
+                return false;
             }
         }
     }
@@ -1776,7 +1798,7 @@ ReplicatedMergeTreeQueue::CurrentlyExecuting::~CurrentlyExecuting()
 }
 
 
-ReplicatedMergeTreeQueue::SelectedEntryPtr ReplicatedMergeTreeQueue::selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, MergeTreeData & data)
+ReplicatedMergeTreeQueue::SelectedEntryPtr ReplicatedMergeTreeQueue::selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, ActionBlocker & builds_blocker, MergeTreeData & data)
 {
     LogEntryPtr entry;
 
@@ -1787,7 +1809,7 @@ ReplicatedMergeTreeQueue::SelectedEntryPtr ReplicatedMergeTreeQueue::selectEntry
         if ((*it)->currently_executing)
             continue;
 
-        if (shouldExecuteLogEntry(**it, (*it)->postpone_reason, merger_mutator, data, lock))
+        if (shouldExecuteLogEntry(**it, (*it)->postpone_reason, merger_mutator, builds_blocker, data, lock))
         {
             entry = *it;
             /// We gave a chance for the entry, move it to the tail of the queue, after that
@@ -2542,7 +2564,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
         return true;
 
     /// Check if part contains merged vector index
-    if (left->containRowIdsMaps() || right->containRowIdsMaps())
+    if (left->containAnyRowIdsMaps() || right->containAnyRowIdsMaps())
     {
         if (out_reason)
             *out_reason = "source part " + left->name + " or " + right->name + " is a decouple part";
@@ -2566,25 +2588,17 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
 
     /// Check if two parts contain vector index files.
     /// Two parts can be merged when both have built vector index or both not.
-    bool can_merge = true;
-    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    for (const auto & vec_index : metadata_snapshot->getVectorIndices())
     {
-        if ((left->containVectorIndex(vec_index.name, vec_index.column) && right->containVectorIndex(vec_index.name, vec_index.column))
-            || (!left->containVectorIndex(vec_index.name, vec_index.column) && !right->containVectorIndex(vec_index.name, vec_index.column)))
-        {
-            /// can merge case
-            continue;
-        }
-        else
+        if (left->containVectorIndex(vec_index.name) != right->containVectorIndex(vec_index.name))
         {
             if (out_reason)
                 *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
-            can_merge = false;
-            break;
+            return false;
         }
     }
 
-    return can_merge;
+    return true;
 }
 
 

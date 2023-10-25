@@ -82,6 +82,9 @@ protected:
     /// On first run we will only collect the values to subtract later.
     bool first_run = true;
     TimePoint previous_update_time;
+#if defined(OS_LINUX)
+    Int64 base_shared = 0;
+#endif
 
     Poco::Logger * log;
 private:

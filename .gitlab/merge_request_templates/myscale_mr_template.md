@@ -23,33 +23,28 @@ Issue Number: close #xxx, ref #xxx
 
 ### 描述你的修改和工作原理
 
+### 需重点关注列表
+
 ### 检查列表
 
 请负责人检查自己是否
 
-1. 完成了必要的测试
-2. 记录了 MR 引发的副作用
-3. 更新了相关的用户手册
-
-Tests <!-- 至少应该完成一项 -->
-
-- [ ] Unit test
-- [ ] Integration test
-- [ ] Manual test (add detailed scripts or steps below)
-- [ ] No code is changed
-
-Side effects
-
-- [ ] Performance regression: Consumes more CPU
-- [ ] Performance regression: Consumes more Memory
-- [ ] Breaking backward compatibility
-
-Documentation
-
-- [ ] Affects user behaviors
-- [ ] Contains syntax changes
-- [ ] Contains variable changes
-- [ ] Contains experimental features
+- [ ] 完成了必要的测试 <!-- 至少应该完成一项 -->
+    - [ ] Unit test
+    - [ ] Integration test
+    - [ ] Manual test (add detailed scripts or steps below)
+    - [ ] No code is changed
+- [ ] 记录了 MR 的重要改动或副作用
+    - [ ] Performance regression: Consumes more CPU
+    - [ ] Performance regression: Consumes more Memory
+    - [ ] Breaking backward compatibility
+        - [ ] 是否需要修改现有系统的数据文件，索引文件的文件格式或者文件后缀
+        - [ ] 是否需要对现有系统的数据文件或索引文件进行迁移
+- [ ] 更新了相关的用户手册
+    - [ ] Affects user behaviors
+    - [ ] Contains syntax changes
+    - [ ] Contains variable changes
+    - [ ] Contains experimental features
 
 ### 发行说明
 
