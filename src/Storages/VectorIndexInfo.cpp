@@ -14,8 +14,12 @@ VectorIndexInfo::VectorIndexInfo(
     : database(database_), table(table_), status(status_), err_msg(err_msg_)
 {
     part = metadata.segment_id.current_part_name;
-    owner_part = metadata.segment_id.owner_part_name;
-    owner_part_id = metadata.segment_id.owner_part_id;
+    /// Restore could change the part name, which is different from the owner part name.
+    if (part != metadata.segment_id.owner_part_name)
+    {
+        owner_part = metadata.segment_id.owner_part_name;
+        owner_part_id = metadata.segment_id.owner_part_id;
+    }
     name = metadata.segment_id.vector_index_name;
     type = Search::enumToString(metadata.type);
     total_vec = metadata.total_vec;

@@ -3911,7 +3911,8 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
             if (!endsWith(it->name(), VECTOR_INDEX_FILE_SUFFIX))
                 continue;
 
-            future_part_disk->moveFile(tmp_fetch_vector_index_path + it->name(), dest_relative_path + it->name());
+            /// Need to replace, since for decouple, checksums file already exists.
+            future_part_disk->replaceFile(tmp_fetch_vector_index_path + it->name(), dest_relative_path + it->name());
 
             if (!found_vector_file)
                 found_vector_file = true;
@@ -3935,6 +3936,11 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
             {
                 if (vec_index.name == vec_index_name)
                 {
+                    /// for decouple, skip remove checksums itself, since the checksums file is new.
+                    if (future_part->containRowIdsMaps())
+                        VectorIndex::removeRowIdsMaps(future_part, vec_index_name, true, log);
+
+                    const_pointer_cast<IMergeTreeDataPart>(future_part)->loadVectorIndexChecksums();
                     future_part->addVectorIndex(vec_index.name + "_" + vec_index.column);
                     break;
                 }
@@ -3946,11 +3952,6 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
             {
                 LOG_DEBUG(log, "Apply lightweight delete to vector index in part {}", future_part_name);
                 future_part->onLightweightDelete();
-            }
-
-            if (future_part->containRowIdsMaps())
-            {
-                VectorIndex::removeRowIdsMaps(future_part, log);
             }
 
             write_part_log({});

@@ -5132,14 +5132,22 @@ BackupEntries MergeTreeData::backupParts(const DataPartsVector & data_parts, con
         if (hold_table_lock && !table_lock)
             table_lock = lockForShare(local_context->getCurrentQueryId(), local_context->getSettingsRef().lock_acquire_timeout);
 
+        /// combine checksums and vector index checksums
+        auto files_without_checksums = part->getFileNamesWithoutChecksums(false);
+        auto checksums_ = part->checksums;
+        {
+            std::lock_guard lock(part->vector_index_checksums_mutex);
+            for (const auto & [index_name, vector_index_checksums] : part->vector_index_checksums_map)
+            {
+                auto vector_index_checksums_tmp = vector_index_checksums;
+                checksums_.add(std::move(vector_index_checksums_tmp));
+                files_without_checksums.insert(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
+            }
+        }
+
         BackupEntries backup_entries_from_part;
         part->getDataPartStorage().backup(
-            part->checksums,
-            part->getFileNamesWithoutChecksums(),
-            data_path_in_backup,
-            backup_entries_from_part,
-            make_temporary_hard_links,
-            &temp_dirs);
+            checksums_, files_without_checksums, data_path_in_backup, backup_entries_from_part, make_temporary_hard_links, &temp_dirs);
 
         auto projection_parts = part->getProjectionParts();
         for (const auto & [projection_name, projection_part] : projection_parts)
@@ -5334,6 +5342,8 @@ void MergeTreeData::restorePartFromBackup(std::shared_ptr<RestoredPartsHolder> r
     builder.withPartFormatFromDisk();
     auto part = std::move(builder).build();
     part->version.setCreationTID(Tx::PrehistoricTID, nullptr);
+    /// convert decouple owner parts name
+    part->convertIndexFileForRestore();
     part->loadColumnsChecksumsIndexes(false, true);
 
     restored_parts_holder->addPart(part);

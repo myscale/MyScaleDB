@@ -309,6 +309,8 @@ public:
     MinMaxIndexPtr minmax_idx;
 
     Checksums checksums;
+    mutable std::unordered_map<String, Checksums> vector_index_checksums_map;
+    mutable std::mutex vector_index_checksums_mutex;
 
     /// TODO: move vector index related structures out of data part class
     mutable std::mutex vector_indexed_mutex;
@@ -411,7 +413,7 @@ public:
         vector_indexed.insert(index_name);
     }
 
-    void addDecoupledVectorIndices(const std::vector<MergedPartNameAndId> & old_parts) const;
+    void addDecoupledVectorIndex(const std::vector<MergedPartNameAndId> & old_parts, const VectorIndexDescription & vec_index_desc) const;
 
     /// Force decoupled vector index owned by current part expired
     void forceAllDecoupledVectorIndexExpire() const;
@@ -420,8 +422,10 @@ public:
     void CancelLoadingVIOfInactivePart() const;
 
     /// Remove specified vector index from part, both disk and metadata.
-    /// If skip_decouple, skip the vector index of old part in decouple part.
-    void removeVectorIndex(const String & index_name, const String & col_name, bool skip_decouple = false) const;
+    void removeVectorIndex(const String & index_name, const String & col_name) const;
+
+    /// Remove all vector index recorded in the vector_index_checksums_map, both disk and metadata.
+    void removeAllVectorIndex() const;
 
     void setBuildError() const { vector_index_build_error = true; }
 
@@ -467,11 +471,14 @@ public:
         return lock;
     }
 
-    void convertIndexFileForUpgrade(const String & full_relative_path) const;
+    /// Convert .vidx2 to .vidx3, remove ready file.
+    /// Write vector index checksums file, if old version vector is ready.
+    void convertIndexFileForUpgrade(const String & full_relative_path);
+    /// Convert decouple part owner part name,
+    /// to avoid the owner part name being the same as the new part name after restore.
+    void convertIndexFileForRestore();
 
-    /// Read vector_index_ready file to initialize vector_indxed if exists.
-    /// Otherwise, try to read merged vector_index_ready file if exists.
-    void loadVectorIndexMetadata(bool need_convert_index_file = false) const;
+    void loadVectorIndexMetadata() const;
 
     bool containRowIdsMaps() const
     {
@@ -479,7 +486,12 @@ public:
         return !merged_source_parts.empty();
     }
 
-    void removeAllRowIdsMaps(const bool force = false) const;
+    /// force to remove all row ids maps when incompleted files found.
+    void removeAllRowIdsMaps() const;
+
+    /// remove all row ids map of a vector index according to its checksums.
+    /// skip remove vector index checksums file itself, if skip_checksum is true.
+    void removeAllRowIdsMaps(const String & index_name, bool skip_checksum) const;
 
     const std::vector<MergedPartNameAndId> getMergedSourceParts() const
     {
@@ -568,7 +580,11 @@ public:
 
     static inline constexpr auto TXN_VERSION_METADATA_FILE_NAME = "txn_version.txt";
 
-    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx2";
+    static inline constexpr auto VECTOR_INDEX_FILE_OLD_EXTENSION = ".vidx2";
+
+    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx3";
+
+    static inline constexpr auto VECTOR_INDEX_FILE_CHECKSUMS_NAME = "vector_index_checksums";
 
     /// One of part files which is used to check how many references (I'd like
     /// to say hardlinks, but it will confuse even more) we have for the part
@@ -627,6 +643,14 @@ public:
 
     /// True if here is lightweight deleted mask file in part.
     bool hasLightweightDelete() const { return columns.contains(LightweightDeleteDescription::FILTER_COLUMN.name); }
+
+    /// convert old version vector index files if need_convert_index_file.
+    /// Remove vector index files if its checksums file does not exist,
+    /// Otherwise, load it into vector_index_checksums_map.
+    void loadVectorIndexChecksums(bool need_convert_index_file = false);
+
+    /// calculate vector index files checksums
+    MergeTreeDataPartChecksums calculateVectorIndexChecksums(const String & vector_index_relative_path) const;
 
     void writeChecksums(const MergeTreeDataPartChecksums & checksums_, const WriteSettings & settings);
 
@@ -772,10 +796,10 @@ private:
     void loadDefaultCompressionCodec();
 
     /// Load simple single vector index metadata
-    void loadSimpleVectorIndexMetadata() const;
+    void loadSimpleVectorIndexMetadata(const VectorIndexDescription & vec_index_desc) const;
 
-    /// Load decoulped part with many old vector indecies
-    void loadDecoupledVectorIndexMetadata() const;
+    /// Load decoupled part with many old vector indices
+    void loadDecoupledVectorIndexMetadata(const VectorIndexDescription & vec_index_desc) const;
 
     void writeColumns(const NamesAndTypesList & columns_, const WriteSettings & settings);
     void writeVersionMetadata(const VersionMetadata & version_, bool fsync_part_dir) const;
