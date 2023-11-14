@@ -608,6 +608,14 @@ void AsynchronousMetrics::update(TimePoint update_time)
             Int64 amount = total_memory_tracker.get();
             Int64 peak = total_memory_tracker.getPeak();
             Int64 rss = data.resident;
+#if defined(OS_LINUX)
+            // To obtain a more precise memory usage, we deduct the shared
+            // memory utilized by MSTG mmap files.
+            if (first_run)
+                base_shared = data.shared;
+            Int64 shared = data.shared - base_shared;
+            rss -= shared;
+#endif
             Int64 free_memory_in_allocator_arenas = 0;
 
 #if USE_JEMALLOC
