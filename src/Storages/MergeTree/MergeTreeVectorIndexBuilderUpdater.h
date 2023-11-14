@@ -75,9 +75,13 @@ private:
     buildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part, bool slow_mode);
 
     /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
-    bool moveVectorIndexFilesToFuturePartAndCache(const StorageMetadataPtr & metadata_snapshot, const  String & vector_tmp_relative_path, const MergeTreeDataPartPtr & dest_part, const VectorIndex::VectorSegmentExecutorPtr vec_executor);
-
-    void undoBuildVectorIndexForOnePart(const StorageMetadataPtr & metadata_snapshot, const MergeTreeDataPartPtr & part);
+    /// And finally write vector index checksums file.
+    bool moveVectorIndexFilesToFuturePartAndCache(
+        const StorageMetadataPtr & metadata_snapshot,
+        const String & vector_tmp_relative_path,
+        const MergeTreeDataPartPtr & dest_part,
+        const VectorIndex::VectorSegmentExecutorPtr vec_executor,
+        const String & vector_index_name);
 
     bool isSlowModePart(const MergeTreeDataPartPtr & part)
     {

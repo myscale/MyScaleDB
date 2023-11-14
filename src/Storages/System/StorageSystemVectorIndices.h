@@ -23,6 +23,7 @@ public:
         size_t num_streams) override;
 
     StorageSystemVectorIndices(const StorageID & table_id_);
+    bool isSystemStorage() const override { return true; }
 };
 
 }

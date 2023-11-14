@@ -435,7 +435,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         {
             try
             {
-                if (!segment_id.volume->getDisk()->exists(segment_id.getVectorReadyFilePath()))
+                if (!segment_id.volume->getDisk()->exists(segment_id.getVectorDescriptionFilePath()))
                     throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Index is not in the ready state and cannot be loaded");
                 Metadata metadata(segment_id);
                 auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());

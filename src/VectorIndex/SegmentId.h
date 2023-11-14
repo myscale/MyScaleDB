@@ -135,8 +135,6 @@ struct SegmentId
         return CacheKey{full_path.parent_path().parent_path().string(), cutMutVer(owner_part_name), vector_index_name, column_name};
     }
 
-    String getVectorReadyFilePath() const { return getPathPrefix() + VECTOR_INDEX_READY + VECTOR_INDEX_FILE_SUFFIX; }
-
     String getVectorDescriptionFilePath() const { return getPathPrefix() + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX; }
 
     String getBitMapFilePath() const { return getPathPrefix() + VECTOR_INDEX_BITMAP + VECTOR_INDEX_FILE_SUFFIX; }

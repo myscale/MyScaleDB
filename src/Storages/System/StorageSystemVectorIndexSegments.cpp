@@ -103,7 +103,7 @@ protected:
 
         try
         {
-            auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorReadyFilePath());
+            auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
             metadata.readText(*buf);
         }
         catch (...)
