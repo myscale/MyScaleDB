@@ -1597,12 +1597,11 @@ void IMergeTreeDataPart::addNewVectorIndex(const VectorIndexDescription & vec_in
 
 void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
 {
-    /// No need to check metadata of table, because for drop index, the metadata has erased it.
-    /// Remove files recorded in the vector index checksums
+    /// Remove files recorded in vector index checksums if exists
     bool with_vector_index_file_remove = false;
     {
         std::lock_guard lock(vector_index_checksums_mutex);
-        if (!vector_index_checksums_map[index_name].empty())
+        if (vector_index_checksums_map.contains(index_name) && !vector_index_checksums_map[index_name].empty())
         {
             IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
             for (const auto & [file_name, _] : vector_index_checksums_map[index_name].files)
@@ -1612,6 +1611,20 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
             part_storage.removeFileIfExists(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
             vector_index_checksums_map.erase(index_name);
             with_vector_index_file_remove = true;
+        }
+        else
+        {
+            for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+            {
+                String file_name = it->name();
+
+                if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                     continue;
+
+                with_vector_index_file_remove = true;
+                IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+                part_storage.removeFileIfExists(file_name);
+            }
         }
     }
 
