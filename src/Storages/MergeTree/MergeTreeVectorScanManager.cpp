@@ -1044,6 +1044,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const Search::Metric & metric)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScanWithoutIndex()");
+    VectorIndex::SearchThreadLimiter limiter(log);
     NamesAndTypesList cols;
     /// get search vector column info
     auto col_and_type = this->metadata->getColumns().getAllPhysical().tryGetByName(search_column);
@@ -1184,7 +1185,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 if (src_vec.empty())
                     continue;
 
-                std::vector<float> vector_raw_data;
+                std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data;
                 vector_raw_data.reserve(dim * offsets.size());
 
                 std::vector<size_t> actual_id_in_range;
@@ -1349,7 +1350,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 continue;
             }
 
-            std::vector<float> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
+            std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
 
             for (size_t row = 0; row < offsets.size(); ++row)
             {
@@ -1513,7 +1514,7 @@ void MergeTreeVectorScanManager::searchWrapper(
     std::vector<int64_t> tmp_per_id;
     float * distance_data;
     int64_t * id_data;
-    
+
     if (delete_id_num > 0)
     {
         tmp_per_id = std::vector<int64_t>((k + delete_id_num) * nq);

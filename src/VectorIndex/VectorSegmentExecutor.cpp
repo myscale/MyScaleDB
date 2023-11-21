@@ -47,6 +47,14 @@ namespace fs = std::filesystem;
 
 namespace VectorIndex
 {
+std::shared_mutex SearchThreadLimiter::mutex;
+std::condition_variable_any SearchThreadLimiter::cv;
+std::atomic_int SearchThreadLimiter::count(0);
+int SearchThreadLimiter::max_threads = getNumberOfPhysicalCPUCores() * 2;
+std::once_flag SearchThreadLimiter::once;
+
+std::once_flag VectorSegmentExecutor::once;
+int VectorSegmentExecutor::max_threads = getNumberOfPhysicalCPUCores() * 2;
 
 void printMemoryInfo(const Poco::Logger * log, std::string msg)
 {
@@ -65,32 +73,6 @@ void printMemoryInfo(const Poco::Logger * log, std::string msg)
 #endif
 }
 
-class SearchThreadLimiter
-{
-public:
-    SearchThreadLimiter(const Poco::Logger * log, int max_threads)
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex);
-        cv.wait(lock, [&] { return count.load() < max_threads; });
-        count.fetch_add(1);
-        LOG_DEBUG(log, "Index search uses {}/{} threads", count.load(), max_threads);
-    }
-
-    ~SearchThreadLimiter()
-    {
-        count.fetch_sub(1);
-        cv.notify_one();
-    }
-private:
-    static std::shared_mutex mutex;
-    static std::condition_variable_any cv;
-    static std::atomic_int count;
-};
-
-std::shared_mutex SearchThreadLimiter::mutex;
-std::condition_variable_any SearchThreadLimiter::cv;
-std::atomic_int SearchThreadLimiter::count(0);
-
 String cutMutVer(const String & part_name)
 {
     std::vector<String> tokens;
@@ -103,8 +85,6 @@ String cutMutVer(const String & part_name)
         return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
 }
 
-std::once_flag VectorSegmentExecutor::once;
-int VectorSegmentExecutor::max_threads = 0;
 String cutPartitionID(const String & part_name)
 {
     std::vector<String> tokens;
@@ -128,13 +108,12 @@ String cutPartNameFromCacheKey(const String & cache_key)
 
 void VectorSegmentExecutor::init()
 {
-    std::call_once(
-        once,
+    std::call_once(once,
         [&]
         {
-            max_threads = getNumberOfPhysicalCPUCores() * 2;
-            LOG_INFO(log, "Max threads for vector index: {}", max_threads);
-        });
+            LOG_INFO(log, "The number of threads for vector index build and DiskIOManager: {}", max_threads);
+        }
+    );
 }
 
 VectorSegmentExecutor::VectorSegmentExecutor(
@@ -534,7 +513,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 // multiple threads performing load at the same time, only one
                 // thread will actually execute load_func to update its own row ids map,
                 // and other threads need to update their own row ids map according to the results of load_func
-                
+
                 {
                     std::shared_lock<std::shared_mutex> lock(new_index.rwLock_of_row_id_maps);
                     if (!new_index.row_ids_map->empty())
@@ -544,7 +523,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                         inverted_row_sources_map = new_index.inverted_row_sources_map;
                     }
                 }
-                
+
                 if (row_ids_map->empty())
                     updateCacheValueWithRowIdsMaps(std::move(index_holder));
 
@@ -675,7 +654,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     bool first_stage_only)
 {
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
-    
+
     // Check if the index is initialized and ready for searching
     if (index == nullptr)
     {
@@ -694,7 +673,7 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
 
-    SearchThreadLimiter limiter(log, max_threads);
+    SearchThreadLimiter limiter(log);
 
     auto merged_filter = filter;
     // Merge filter and delete_bitmap
@@ -744,11 +723,11 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::computeTopDistanceS
 }
 
 Status VectorSegmentExecutor::searchWithoutIndex(
-    VectorDatasetPtr query_data, 
-    VectorDatasetPtr base_data, 
-    int32_t k, 
-    float *& distances, 
-    int64_t *& labels, 
+    VectorDatasetPtr query_data,
+    VectorDatasetPtr base_data,
+    int32_t k,
+    float *& distances,
+    int64_t *& labels,
     const Search::Metric & metric)
 {
     omp_set_num_threads(1);
@@ -760,6 +739,7 @@ Status VectorSegmentExecutor::searchWithoutIndex(
         query_data->normalize();
         base_data->normalize();
     }
+
     auto status = tryBruteForceSearch(
         query_data->getData(),
         base_data->getData(),
