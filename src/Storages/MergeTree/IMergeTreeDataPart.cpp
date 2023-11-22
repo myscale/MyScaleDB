@@ -1181,27 +1181,47 @@ void IMergeTreeDataPart::loadVectorIndexChecksums(bool need_convert_index_file)
         const auto & vector_index_name = vec_index_desc.name;
         String checksums_filename = vector_index_name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION;
         bool exists = getDataPartStorage().exists(checksums_filename);
+        bool need_clean = false;
         if (exists)
         {
             MergeTreeDataPartChecksums vector_index_checksums;
-            auto buf = getDataPartStorage().readFile(checksums_filename, {}, std::nullopt, std::nullopt);
-            if (vector_index_checksums.read(*buf))
-                assertEOF(*buf);
-
-            LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
+            try
             {
-                std::lock_guard lock(vector_index_checksums_mutex);
-                vector_index_checksums_map[vector_index_name] = vector_index_checksums;
+                auto buf = getDataPartStorage().readFile(checksums_filename, {}, std::nullopt, std::nullopt);
+                if (vector_index_checksums.read(*buf))
+                    assertEOF(*buf);
+
+                LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
+                {
+                    std::lock_guard lock(vector_index_checksums_mutex);
+                    vector_index_checksums_map[vector_index_name] = vector_index_checksums;
+                }
+                /// check vector index files consistency
+                vector_index_checksums.checkSizes(getDataPartStorage());
+            }
+            catch (...)
+            {
+                need_clean = true;
+                LOG_WARNING(
+                    storage.log,
+                    "An error occurred while checking vector index {} files consistency for part {}: {}",
+                    vector_index_name,
+                    name,
+                    getCurrentExceptionMessage(false));
             }
         }
         else
         {
-            LOG_INFO(
+            need_clean = true;
+            LOG_DEBUG(
                 storage.log,
                 "The checksums for vector index {} on part {} does not exist, "
                 "will remove vector index files if exist",
                 vector_index_name,
                 name);
+        }
+        if (need_clean)
+        {
             for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
             {
                 String file_name = it->name();
@@ -2711,34 +2731,6 @@ void IMergeTreeDataPart::checkConsistencyBase() const
                 for (const String & col_name : storage.getMinMaxColumnsNames(partition_key))
                     check_file_not_empty("minmax_" + escapeForFileName(col_name) + ".idx");
             }
-        }
-    }
-
-    /// check vector index checksums
-    if (metadata_snapshot->vec_indices.empty())
-        return;
-
-    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
-    {
-        auto const & vector_index_name = vec_index_desc.name;
-        std::lock_guard lock(vector_index_checksums_mutex);
-        /// check whether index is built
-        if (!vector_index_checksums_map.contains(vector_index_name))
-            continue;
-
-        if (!vector_index_checksums_map[vector_index_name].empty())
-        {
-            vector_index_checksums_map[vector_index_name].checkSizes(getDataPartStorage());
-        }
-        else
-        {
-            String checksums_file_name = vector_index_name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION;
-            if (getDataPartStorage().exists(checksums_file_name))
-                throw Exception(
-                    ErrorCodes::CORRUPTED_DATA,
-                    "Part {} has invalid vector index checksums {}",
-                    getDataPartStorage().getFullPath(),
-                    checksums_file_name);
         }
     }
 }
