@@ -811,7 +811,7 @@ bool StorageReplicatedMergeTree::createTableIfNotExists(const StorageMetadataPtr
             zkutil::CreateMode::Persistent));
 
         /// Vector index build status
-        if (getInMemoryMetadataPtr()->hasVectorIndices())
+        if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
             ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
 
         Coordination::Responses responses;
@@ -888,7 +888,7 @@ void StorageReplicatedMergeTree::createReplica(const StorageMetadataPtr & metada
             zkutil::CreateMode::Persistent));
 
         /// Vector index build status
-        if (getInMemoryMetadataPtr()->hasVectorIndices())
+        if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
             ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
 
         /// Check version of /replicas to see if there are any replicas created at the same moment of time.
@@ -5572,16 +5572,22 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
                 /// Clear vector index build status
                 resetVectorIndexBuildStatus();
 
-                /// Check if vidx_build_parts exists in zookeer.
-                String zookeeper_build_status_path = fs::path(replica_path) / "vidx_build_parts";
-                auto code = zookeeper->tryCreate(zookeeper_build_status_path, "", zkutil::CreateMode::Persistent);
-                if (code == Coordination::Error::ZNODEEXISTS)
-                { /// The table has been dropped vector index early.
-                    LOG_DEBUG(log, "Build vector index status for parts on path {} has already been created", zookeeper_build_status_path);
-                }
-                else if (code != Coordination::Error::ZOK)
+                if (getSettings()->build_vector_index_on_random_single_replica)
                 {
-                    throw zkutil::KeeperException(code, zookeeper_build_status_path);
+                    /// Check if vidx_build_parts exists in zookeeper.
+                    String zookeeper_build_status_path = fs::path(replica_path) / "vidx_build_parts";
+                    if (!zookeeper->exists(zookeeper_build_status_path))
+                    {
+                        auto code = zookeeper->tryCreate(zookeeper_build_status_path, "", zkutil::CreateMode::Persistent);
+                        if (code == Coordination::Error::ZNODEEXISTS)
+                        { /// The table has been dropped vector index early.
+                            LOG_DEBUG(log, "Build vector index status for parts on path {} has already been created", zookeeper_build_status_path);
+                        }
+                        else if (code != Coordination::Error::ZOK)
+                        {
+                            LOG_WARNING(log, "Failed to create path {} for build vector index status", zookeeper_build_status_path);
+                        }
+                    }
                 }
 
                 LOG_INFO(log, "Get add vector index, start background job immediately");
@@ -5612,8 +5618,11 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
                 /// update vector index info on zookeeper
                 writeVectorIndexInfoToZookeeper(true);
 
-                /// Remove vector index build status for parts from zookeeper
-                cleanupVectorIndexBuildStatusFromZK();
+                if (getSettings()->build_vector_index_on_random_single_replica)
+                {
+                    /// Remove vector index build status for parts from zookeeper
+                    cleanupVectorIndexBuildStatusFromZK();
+                }
             }
         }
     }
@@ -7178,7 +7187,7 @@ void StorageReplicatedMergeTree::clearOldPartsAndRemoveFromZK()
         LOG_DEBUG(log, "Removing {} old parts from ZooKeeper", parts_to_delete_completely.size());
         removePartsFromZooKeeper(zookeeper, part_names_to_delete_completely, &part_names_to_retry_deletion);
 
-        if (getInMemoryMetadataPtr()->hasVectorIndices())
+        if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
         {
             LOG_DEBUG(log, "Removing {} vector index build status for old parts from ZooKeeper", parts_to_delete_completely.size());
             removeVecIndexBuildStatusForPartsFromZK(zookeeper, part_names_to_delete_completely);

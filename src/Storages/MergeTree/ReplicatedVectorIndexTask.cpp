@@ -30,36 +30,42 @@ bool ReplicatedVectorIndexTask::executeStep()
             storage.currently_vector_indexing_parts.erase(entry.source_parts.at(0));
             LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", entry.source_parts.at(0));
 
-            String status_str;
-            if (build_status == BuildVectorIndexStatus::SUCCESS)
-                status_str = "success";
-            else if (build_status == BuildVectorIndexStatus::BUILD_FAIL)
-                status_str = "build_fail";
-            else if (build_status == BuildVectorIndexStatus::NO_DATA_PART)
+            /// Create vector index build status only when index node feature is enabled.
+            if (storage.getSettings()->build_vector_index_on_random_single_replica)
             {
-                need_create_status = false;
-                status_str = "no_data_part";
-            }
-            else if (build_status == BuildVectorIndexStatus::BUILD_SKIPPED)
-            {
-                need_create_status = false;
-                status_str = "skipped";
-            }
-            else
-                status_str = "meta_error";
+                String status_str;
+                if (build_status == BuildVectorIndexStatus::SUCCESS)
+                    status_str = "success";
+                else if (build_status == BuildVectorIndexStatus::BUILD_FAIL)
+                    status_str = "build_fail";
+                else if (build_status == BuildVectorIndexStatus::NO_DATA_PART)
+                {
+                    need_create_status = false;
+                    status_str = "no_data_part";
+                }
+                else if (build_status == BuildVectorIndexStatus::BUILD_SKIPPED)
+                {
+                    need_create_status = false;
+                    status_str = "skipped";
+                }
+                else
+                    status_str = "meta_error";
 
-            /// Some cases like build vector index for part is skipped, no need to create status in zookeeper.
-            if (need_create_status)
-                storage.createVectorIndexBuildStatusForPart(entry.source_parts.at(0), entry.index_name, status_str);
-            else
-                LOG_DEBUG(log, "No need to create build status '{}' in zookeeper for part {}", status_str, entry.source_parts.at(0));
+                /// Some cases like build vector index for part is skipped, no need to create status in zookeeper.
+                if (need_create_status)
+                    storage.createVectorIndexBuildStatusForPart(entry.source_parts.at(0), entry.index_name, status_str);
+                else
+                    LOG_DEBUG(log, "No need to create build status '{}' in zookeeper for part {}", status_str, entry.source_parts.at(0));
+
+            }
 
             /// write latest cached vector index info to zookeeper
             storage.vidx_info_updating_task->schedule();
         }
-        catch (...)
+        catch (zkutil::KeeperException & e)
         {
-            tryLogCurrentException(__PRETTY_FUNCTION__);
+            LOG_WARNING(log, "Remove build vector log entry for index {} in part {} failed: code={}, message={}",
+                        entry.index_name, entry.source_parts.at(0), e.code, e.message());
         }
 
         return false;
