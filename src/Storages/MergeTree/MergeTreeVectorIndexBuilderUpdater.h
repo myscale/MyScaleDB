@@ -87,7 +87,8 @@ private:
         DiskPtr disk,
         const String & vector_tmp_relative_path,
         const UInt64 & dim,
-        VectorIndex::VectorSegmentExecutorPtr vec_index_builder = nullptr);
+        VectorIndex::VectorSegmentExecutorPtr vec_index_builder = nullptr,
+        const std::shared_ptr<MergeTreeDataPartChecksums> & checksums = nullptr);
 
     /// Move build vector index files from temporary directory to data part directory, and apply lightweight delete if needed.
     /// And finally write vector index checksums file.
@@ -96,7 +97,8 @@ private:
         const String & vector_tmp_relative_path,
         const MergeTreeDataPartPtr & dest_part,
         const VectorIndexDescription & vec_index_desc,
-        const VectorIndex::VectorSegmentExecutorPtr vec_executor);
+        const VectorIndex::VectorSegmentExecutorPtr vec_executor,
+        const std::shared_ptr<MergeTreeDataPartChecksums> & checksums);
 
     bool isSlowModePart(const MergeTreeDataPartPtr & part, const String & index_name)
     {

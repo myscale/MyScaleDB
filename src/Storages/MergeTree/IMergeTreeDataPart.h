@@ -823,7 +823,8 @@ public:
     void checkConsistencyForAllVectorIndices() const;
 
     /// calculate vector index files checksums
-    MergeTreeDataPartChecksums calculateVectorIndexChecksums(const String & vector_index_relative_path) const;
+    MergeTreeDataPartChecksums calculateVectorIndexChecksums(
+        const String & vector_index_relative_path, const std::shared_ptr<MergeTreeDataPartChecksums> & existing_checksums = nullptr) const;
 
     void writeChecksums(const MergeTreeDataPartChecksums & checksums_, const WriteSettings & settings);
 

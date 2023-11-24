@@ -1123,7 +1123,8 @@ void IMergeTreeDataPart::writeMetadata(const String & filename, const WriteSetti
     data_part_storage.commitTransaction();
 }
 
-MergeTreeDataPartChecksums IMergeTreeDataPart::calculateVectorIndexChecksums(const String & vector_index_relative_path) const
+MergeTreeDataPartChecksums IMergeTreeDataPart::calculateVectorIndexChecksums(
+    const String & vector_index_relative_path, const std::shared_ptr<MergeTreeDataPartChecksums> & existing_checksums) const
 {
     const DataPartStorageOnDiskBase * data_part_storage = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
     if (data_part_storage == nullptr)
@@ -1138,10 +1139,20 @@ MergeTreeDataPartChecksums IMergeTreeDataPart::calculateVectorIndexChecksums(con
         if (!endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
             continue;
 
-        auto file_buf = disk->readFile(it->path());
-        HashingReadBuffer hashing_buf(*file_buf);
-        hashing_buf.ignoreAll();
-        vector_index_checksums.addFile(it->name(), hashing_buf.count(), hashing_buf.getHash());
+        if (existing_checksums && existing_checksums->has(it->name()))
+        {
+            LOG_DEBUG(storage.log, "checksum exists: {}", it->name());
+            auto checksum = existing_checksums->files.at(it->name());
+            vector_index_checksums.addFile(it->name(), checksum.file_size, checksum.file_hash);
+        }
+        else
+        {
+            LOG_DEBUG(storage.log, "checksum not found: {}", it->name());
+            auto file_buf = disk->readFile(it->path());
+            HashingReadBuffer hashing_buf(*file_buf);
+            hashing_buf.ignoreAll();
+            vector_index_checksums.addFile(it->name(), hashing_buf.count(), hashing_buf.getHash());
+        }
     }
 
     return vector_index_checksums;

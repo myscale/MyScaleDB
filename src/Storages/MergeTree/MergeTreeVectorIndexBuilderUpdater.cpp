@@ -591,7 +591,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         {
             /// remove empty vectors
             LOG_DEBUG(log, "Serialize vector index");
-            VectorIndex::Status seri_status = vec_index_builder->serialize();
+            auto checksums = std::make_shared<MergeTreeDataPartChecksums>();
+            VectorIndex::Status seri_status = vec_index_builder->serialize(checksums);
             LOG_DEBUG(log, "Serialization status: {}", seri_status.getCode());
 
             if (!seri_status.fine())
@@ -610,7 +611,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
             /// Done with writing vector index files to temporary directory.
             /// Decide to move index files to which part direcory.
-            auto status = TryMoveVectorIndexFiles(part, vec_index_desc, disk, vector_tmp_relative_path, dim, vec_index_builder);
+            auto status = TryMoveVectorIndexFiles(part, vec_index_desc, disk, vector_tmp_relative_path, dim, vec_index_builder, checksums);
             if (status != BuildVectorIndexStatus::SUCCESS)
                 return status;
         }
@@ -632,7 +633,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::TryMoveVectorIndexFil
     DiskPtr disk,
     const String & vector_tmp_relative_path,
     const UInt64 & dim,
-    VectorIndex::VectorSegmentExecutorPtr vec_index_builder)
+    VectorIndex::VectorSegmentExecutorPtr vec_index_builder,
+    const std::shared_ptr<MergeTreeDataPartChecksums> & checksums)
 {
     if (!vec_index_builder)
         LOG_DEBUG(log, "Vector index is built for part: {} and stored in temporary directory {}", build_part->name, vector_tmp_relative_path);
@@ -748,17 +750,18 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::TryMoveVectorIndexFil
     }
 
     /// Finally, move index files to part and apply lightweight delete.
-    moveVectorIndexFilesToFuturePartAndCache(disk, vector_tmp_relative_path, future_part, vec_index_desc, vec_index_builder);
+    moveVectorIndexFilesToFuturePartAndCache(disk, vector_tmp_relative_path, future_part, vec_index_desc, vec_index_builder, checksums);
 
     return BuildVectorIndexStatus::SUCCESS;
 }
 
 bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCache(
     DiskPtr disk,
-    const String & vector_tmp_relative_path, 
+    const String & vector_tmp_relative_path,
     const MergeTreeDataPartPtr & dest_part,
     const VectorIndexDescription & vec_index_desc,
-    const VectorIndex::VectorSegmentExecutorPtr vec_executor)
+    const VectorIndex::VectorSegmentExecutorPtr vec_executor,
+    const std::shared_ptr<MergeTreeDataPartChecksums> & checksums)
 {
     if (!dest_part)
         return false;
@@ -769,7 +772,7 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
     String dest_relative_path = dest_part->getDataPartStorage().getRelativePath();
 
     /// Calculate vector index checksums
-    auto vector_index_checksums = dest_part->calculateVectorIndexChecksums(vector_tmp_relative_path);
+    auto vector_index_checksums = dest_part->calculateVectorIndexChecksums(vector_tmp_relative_path, checksums);
     MergeTreeDataPartChecksums decouple_checksums;
 
     /// Move to current part which is active.
