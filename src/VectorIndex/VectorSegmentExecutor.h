@@ -1,7 +1,8 @@
 #pragma once
 #include <string>
-#include <Common/logger_useful.h>
 #include <Compression/CompressionInfo.h>
+#include <SearchIndex/VectorSearch.h>
+#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Storages/VectorIndicesDescription.h>
 #include <VectorIndex/CacheManager.h>
 #include <VectorIndex/Dataset.h>
@@ -9,7 +10,7 @@
 #include <VectorIndex/PartReader.h>
 #include <VectorIndex/SegmentId.h>
 #include <VectorIndex/Status.h>
-#include <SearchIndex/VectorSearch.h>
+#include <Common/logger_useful.h>
 
 namespace VectorIndex
 {
@@ -122,7 +123,7 @@ public:
     }
 
     /// Serialize and store index at segment_id
-    Status serialize();
+    Status serialize(std::shared_ptr<DB::MergeTreeDataPartChecksums> & checksums);
 
     /// Load index from segment_id,
     /// If hit in cache then simply redirect pointer.
@@ -336,6 +337,8 @@ private:
     std::shared_ptr<std::vector<UInt64>> row_ids_map = std::make_shared<std::vector<UInt64>>();
     std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map = std::make_shared<std::vector<UInt64>>();
     std::shared_ptr<std::vector<uint8_t>> inverted_row_sources_map = std::make_shared<std::vector<uint8_t>>();
+
+    std::shared_ptr<DB::MergeTreeDataPartChecksums> vector_index_checksums;
 
     bool fallback_to_flat = false;
     int disk_mode = false;

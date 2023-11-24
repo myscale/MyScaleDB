@@ -1,8 +1,10 @@
 #pragma once
 
 #include <Disks/IDisk.h>
+#include <IO/HashingWriteBuffer.h>
 #include <IO/ReadBufferFromFileBase.h>
 #include <IO/WriteBufferFromFileBase.h>
+#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Common/logger_useful.h>
 
 #include <SearchIndex/Common/IndexDataIO.h>
@@ -88,11 +90,16 @@ private:
 class VectorIndexWriter : public Search::AbstractOStream
 {
 public:
-    explicit VectorIndexWriter(DB::DiskPtr _disk, DB::String _file)
+    explicit VectorIndexWriter(DB::DiskPtr _disk, DB::String _file, std::shared_ptr<DB::MergeTreeDataPartChecksums> & _checksums)
+        : checksums(_checksums)
     {
+        fs::path file_path(_file);
+        file_name = file_path.filename();
+
         try
         {
             out = _disk->writeFile(_file);
+            hashing_out = std::make_unique<DB::HashingWriteBuffer>(*out);
         }
         catch (DB::Exception & e)
         {
@@ -100,26 +107,32 @@ public:
         }
     }
 
+    ~VectorIndexWriter() override
+    {
+        if (checksums && !file_name.empty())
+            checksums->addFile(file_name, hashing_out->count(), hashing_out->getHash());
+    }
+
     Search::AbstractOStream & write(const char * s, std::streamsize count) override
     {
-        if (out)
-            out->write(s, count);
+        if (hashing_out)
+            hashing_out->write(s, count);
 
         return *this;
     }
 
     bool good() override
     {
-        if (out)
-            return out->hasPendingData();
+        if (hashing_out)
+            return hashing_out->hasPendingData();
         else
             return false;
     }
 
     void close() override
     {
-        if (out)
-            out->finalize();
+        if (hashing_out)
+            hashing_out->finalize();
     }
 
     Search::AbstractOStream & seekp(std::streampos /*offset*/, std::ios_base::seekdir /*dir*/) override
@@ -129,7 +142,10 @@ public:
     }
 
 private:
+    String file_name;
     std::unique_ptr<DB::WriteBufferFromFileBase> out;
+    std::unique_ptr<DB::HashingWriteBuffer> hashing_out;
+    std::shared_ptr<DB::MergeTreeDataPartChecksums> checksums;
 };
 
 }
