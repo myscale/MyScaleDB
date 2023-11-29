@@ -37,6 +37,7 @@ namespace ErrorCodes
     extern const int ABORTED;
     extern const int BAD_ARGUMENTS;
     extern const int INCORRECT_DATA;
+    extern const int VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT;
 }
 
 /// minimum interval (seconds) between check if need to remove dropped vector index cache.
@@ -260,8 +261,6 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
         {
             if (!part->containVectorIndex(vec_index.name, vec_index.column) && !part->isSmallPart(min_rows_to_build_vector_index))
             {
-                part->addNewVectorIndex(vec_index);
-
                 if (select_slow_mode_part)
                 {
                     if (!isSlowModePart(part))
@@ -278,10 +277,6 @@ VectorIndexEntryPtr MergeTreeVectorIndexBuilderUpdater::selectPartToBuildVectorI
                     LOG_DEBUG(log, "Select part name: {}", part->name);
                     return std::make_shared<VectorIndexEntry>(part->name, vec_index.name, data, is_replicated);
                 }
-            }
-            else if (part->isSmallPart(min_rows_to_build_vector_index))
-            {
-                part->addNewVectorIndex(vec_index, true);
             }
         }
     }
@@ -343,19 +338,42 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
         /// Currently only one vector index is supported, store the build vector index description.
         auto vector_index_desc = metadata_snapshot->getVectorIndices()[0];
 
-        try
+        part->onVectorIndexBuildStart(vector_index_desc.name);
+
+        constexpr int maxBuildRetryCount = 3;
+        int failed_count = 0;
+        while (true)
         {
-            if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
+            try
             {
-                LOG_INFO(log, "Build vector index for one part {}", part->name);
-                status = buildVectorIndexForOnePart(metadata_snapshot, part, slow_mode);
+                if (BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
+                {
+                    LOG_INFO(log, "Build vector index for one part {}", part->name);
+                    status = buildVectorIndexForOnePart(metadata_snapshot, part, slow_mode);
+                }
+                break;
             }
-        }
-        catch (Exception & e)
-        {
-            LOG_WARNING(log,"Vector Index build task for part {} failed: {}", part->name, e.message());
-            VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
-            throw;
+            catch (Exception & e)
+            {
+                /// retry build for MEMORY_LIMIT_EXCEEDED case
+                if (e.code() == ErrorCodes::MEMORY_LIMIT_EXCEEDED && ++failed_count < maxBuildRetryCount)
+                    continue;
+
+                if (e.code() == ErrorCodes::VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT)
+                {
+                    LOG_WARNING(log, "Cannot build vector index for part {} for now due to build memory limitation.", part->name);
+                    part->onVectorIndexBuildError(
+                        vector_index_desc.name, "Cannot build vector index for now due to build memory limitation");
+                    return BuildVectorIndexStatus::BUILD_RETRY;
+                }
+
+                LOG_WARNING(log, "Vector Index build task for part {} failed: {}", part->name, e.message());
+                VectorIndexEventLog::addEventLog(
+                    data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus::fromCurrentException());
+                part->onVectorIndexBuildError(vector_index_desc.name, e.message());
+
+                throw;
+            }
         }
 
         if (status != BuildVectorIndexStatus::SUCCESS)
@@ -365,10 +383,12 @@ MergeTreeVectorIndexBuilderUpdater::buildVectorIndex(const StorageMetadataPtr & 
                 BuildIndexHelpers::setPartVectorIndexBuildStatus(part, vector_index_desc);
                 ProfileEvents::increment(ProfileEvents::VectorIndexBuildFailEvents);
             }
+            part->onVectorIndexBuildError(vector_index_desc.name, Search::enumToString(status));
         }
         else
         {
             LOG_INFO(log, "Vector index build task finished for part {}", part->name);
+            part->onVectorIndexBuildFinish(vector_index_desc.name);
         }
     }
 
@@ -411,11 +431,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                         if (dim == 0)
                         {
                             LOG_ERROR(log, "Wrong dimension: 0, please check length constraint on the column.");
-
-                            String err = "Wrong dimension: 0, please check length constraint on the column.";
-                            part->onVectorIndexBuildError(vec_index_desc.name, err);
-
-                            throw Exception(ErrorCodes::BAD_ARGUMENTS, err.data());
+                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
                         }
                     }
                     ///only reading one column
@@ -424,11 +440,13 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 else
                 {
                     LOG_WARNING(log, "Found column {} in part and VectorIndexDescription, but not in metadata snapshot.", col);
-
-                    part->onVectorIndexBuildError(
-                        vec_index_desc.name, "found column in part and VectorIndexDescription, but not in metadata snapshot.");
-                    VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_ERROR, ExecutionStatus(ErrorCodes::ABORTED, "Found column " + col + " in part and VectorIndexDescription, but not in metadata snapshot"));
-
+                    VectorIndexEventLog::addEventLog(
+                        data.getContext(),
+                        part,
+                        VectorIndexEventLogElement::BUILD_ERROR,
+                        ExecutionStatus(
+                            ErrorCodes::ABORTED,
+                            "Found column " + col + " in part and VectorIndexDescription, but not in metadata snapshot"));
                     return BuildVectorIndexStatus::META_ERROR;
                 }
             }
@@ -441,7 +459,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 vec_index_desc.name,
                 part->name);
             part->addVectorIndex(vec_index_desc.name + "_" + vec_index_desc.column);
-            part->onVectorIndexBuildFinish(vec_index_desc.name);
             VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
             return BuildVectorIndexStatus::SUCCESS;
         }
@@ -576,7 +593,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 /// else future part will pick up later at the next time when index built for it.
             }
 
-            part->onVectorIndexBuildFinish(vec_index_desc.name);
             // VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_SUCCEED);
 
             return BuildVectorIndexStatus::SUCCESS;
@@ -591,8 +607,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         }
 
         disk->createDirectories(vector_tmp_relative_path);
-
-        part->onVectorIndexBuildStart(vec_index_desc.name);
 
         /// Used for cancel build vector index
         auto check_build_canceled = [this, &part, &vec_index_desc]() -> bool
@@ -651,16 +665,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 else
                     LOG_DEBUG(log, "seri_status is not fine, vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
-                part->onVectorIndexBuildError(vec_index_desc.name, seri_status.getMessage());
-
                 throw Exception(seri_status.getCode(), seri_status.getMessage().data());
             }
-
-            VectorIndex::Metadata metadata(segment_id);
-            auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
-            metadata.readText(*buf);
-
-            part->onVectorIndexBuildFinish(vec_index_desc.name, &metadata);
 
             /// Done with writing vector index files to temporary directory.
             /// Decide to move index files to which part direcory.
@@ -676,10 +682,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 if (!future_part)
                 {
                     LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", part->name);
-
-                    part->onVectorIndexBuildError(vec_index_desc.name, "failed to find future part");
                     VectorIndexEventLog::addEventLog(data.getContext(), part, VectorIndexEventLogElement::BUILD_CANCELD);
-
                     return BuildVectorIndexStatus::BUILD_SKIPPED;
                 }
             }
@@ -756,7 +759,6 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         }
         else
         {
-            part->onVectorIndexBuildError(vec_index_desc.name, "build has been cancelled.");
             return BuildVectorIndexStatus::BUILD_SKIPPED;
         }
     }
@@ -821,6 +823,15 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
         {
             auto lock_part = data.lockParts();
             VectorIndex::removeRowIdsMaps(dest_part, vector_index_name, false, log);
+        }
+
+        for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+        {
+            if (vec_index_desc.name == vector_index_name)
+            {
+                dest_part->addBuiltVectorIndex(vec_index_desc);
+                break;
+            }
         }
 
         std::lock_guard lock(dest_part->vector_index_checksums_mutex);

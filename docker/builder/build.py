@@ -388,7 +388,7 @@ def package(name: str, arch: str, package: bool, with_sanitizer: str, build_type
         if build_type == "Debug":
             version += "+debug"
 
-        packages = ["deb", "rpm", "apk"]
+        packages = ["deb"] # currently we don't need rpm and apk packages
         for pkg in packages:
             cmd = f'for conf in `find . -iname "*.yaml"`;do nfpm package --config $conf --packager {pkg}; done'
             command(cmd, shell=True, cwd=output, env={"OS": target_os, "ARCH": target_arch, "VERSION_STRING": version})

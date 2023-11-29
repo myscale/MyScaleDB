@@ -1,4 +1,3 @@
-all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
 0
 0
 0
@@ -24,7 +23,6 @@ all_1_1_0	all_1_1_0	0	vec_ind	BUILT
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- drop vector index
 --- add vector index
-all_1_1_0	all_1_1_0	0	vec_ind	BUILDING
 0
 0
 0
@@ -35,7 +33,6 @@ all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- truncate
 0
 --- insert
-all_2_2_0	all_2_2_0	0	vec_ind	BUILDING
 0
 0
 0
@@ -46,8 +43,6 @@ all_2_2_0	all_2_2_0	0	vec_ind	LOADED
 --- lightweight delete
 all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
 --- insert
-all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
-all_4_4_0	all_4_4_0	0	vec_ind	BUILDING
 0
 0
 0
@@ -85,14 +80,14 @@ all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- insert part 2
+0
+0
+0
+0
+0
+0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
-all_2_2_0	all_2_2_0	0	vec_ind	BUILDING
-0
-0
-0
-0
-0
-0
+all_2_2_0	all_2_2_0	0	vec_ind	LOADED
 --- merge
 0
 0

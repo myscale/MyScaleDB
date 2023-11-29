@@ -543,6 +543,11 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
         /// Clear vector index build status
         resetVectorIndexBuildStatus();
 
+        /// Create vector index info
+        for (const auto & part : getDataPartsForInternalUsage())
+            for (auto & vec_index_desc : getInMemoryMetadata().vec_indices)
+                part->addNewVectorIndex(vec_index_desc);
+
         /// handle add vector index command
         background_operations_assignee.trigger();
     }

@@ -39,6 +39,8 @@ namespace DB
         extern const int LOGICAL_ERROR;
         extern const int CANNOT_OPEN_FILE;
         extern const int INVALID_VECTOR_INDEX;
+        extern const int VECTOR_INDEX_BUILD_MEMORY_TOO_LARGE;
+        extern const int VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT;
     }
     using StoragePtr = std::shared_ptr<IStorage>;
 }
@@ -55,6 +57,10 @@ std::once_flag SearchThreadLimiter::once;
 
 std::once_flag VectorSegmentExecutor::once;
 int VectorSegmentExecutor::max_threads = getNumberOfPhysicalCPUCores() * 2;
+
+std::mutex VectorSegmentExecutor::build_memory_mutex;
+size_t VectorSegmentExecutor::build_memory_size_limit = 0;
+size_t VectorSegmentExecutor::current_build_memory_size = 0;
 
 void printMemoryInfo(const Poco::Logger * log, std::string msg)
 {
@@ -185,6 +191,9 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
                 true /* manage_cache_folder */);
         index->setTrainDataChunkSize(train_block_size);
         index->setAddDataChunkSize(add_block_size);
+
+        checkBuildMemory(index->getResourceUsage().build_memory_usage_bytes);
+
         printMemoryInfo(log, "Before build");
         index->build(reader, num_threads, check_build_canceled_callbak);
         printMemoryInfo(log, "After build");
@@ -867,6 +876,11 @@ void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
     CacheManager::setCacheSize(size);
 }
 
+void VectorSegmentExecutor::setBuildMemorySizeInBytes(size_t size)
+{
+    build_memory_size_limit = size;
+}
+
 std::list<std::pair<CacheKey, Search::Parameters>> VectorSegmentExecutor::getAllCacheNames()
 {
     ///from this list, we get <segment_id, vectorindex description> pair
@@ -1079,4 +1093,93 @@ void VectorSegmentExecutor::convertBitmap(const std::vector<UInt64> & deleted_ro
     }
 }
 
+Search::IndexResourceUsage VectorSegmentExecutor::getIndexResourceUsage()
+{
+    if (index)
+        return index->getResourceUsage();
+
+    try
+    {
+        if (total_vec * dimension * sizeof(float) < min_bytes_to_build_vector_index)
+            type = Search::IndexType::FLAT;
+
+        /// avoid overwriting vector_index_cache_prefix
+        if (vector_index_cache_prefix.empty())
+            configureDiskMode();
+
+        index = Search::
+            createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                segment_id.getIndexNameWithColumn(),
+                type,
+                metric,
+                dimension,
+                total_vec,
+                des,
+                false /* load_diskann_after_build */,
+                vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                getDiskIOManager(),
+#endif
+                true /* use_file_checksum */,
+                true /* manage_cache_folder */);
+
+        return index->getResourceUsage();
+    }
+    catch (...)
+    {
+        LOG_INFO(
+            &Poco::Logger::get("VectorSegmentExecutor"),
+            "Failed to build dummy index while getting resource usage: {}",
+            DB::getCurrentExceptionMessage(false));
+        return Search::IndexResourceUsage{};
+    }
+}
+
+BuildMemoryCheckResult VectorSegmentExecutor::checkBuildMemorySize(size_t size)
+{
+    std::lock_guard lock(build_memory_mutex);
+
+    if (build_memory_size_limit == 0)
+        return BuildMemoryCheckResult::OK;
+    else if (size > build_memory_size_limit)
+        return BuildMemoryCheckResult::NEVER;
+    else if (current_build_memory_size + size > build_memory_size_limit)
+        return BuildMemoryCheckResult::LATER;
+
+    current_build_memory_size += size;
+    LOG_DEBUG(
+        &Poco::Logger::get("VectorSegmentExecutor"), "allow building: size = {}, current_total = {}", size, current_build_memory_size);
+    return BuildMemoryCheckResult::OK;
+}
+
+void VectorSegmentExecutor::checkBuildMemory(size_t size)
+{
+    Stopwatch stopwatch;
+    while (true)
+    {
+        auto res = checkBuildMemorySize(size);
+        switch (res)
+        {
+            case BuildMemoryCheckResult::OK:
+                /// record reserved build memory size. will be decreased in deconstructor
+                {
+                    std::lock_guard lock(build_memory_mutex);
+                    build_memory_size_recorded += size;
+                }
+                return;
+
+            case BuildMemoryCheckResult::NEVER:
+                throw IndexException(
+                    DB::ErrorCodes::VECTOR_INDEX_BUILD_MEMORY_TOO_LARGE, "cannot build vector index, build memory required is too large");
+
+            case BuildMemoryCheckResult::LATER:
+                if (stopwatch.elapsedSeconds() > 5 * 60) /// 5 miniutes
+                    throw IndexException(
+                        DB::ErrorCodes::VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT,
+                        "cannot build vector index for now due to build memory limitation");
+                else /// currently unable to build index, sleep and retry
+                    std::this_thread::sleep_for(std::chrono::seconds(10));
+        }
+    }
+}
 }
