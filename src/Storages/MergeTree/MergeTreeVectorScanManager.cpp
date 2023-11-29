@@ -7,6 +7,7 @@
 
 #include <Columns/ColumnArray.h>
 
+#include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 
@@ -20,6 +21,7 @@
 #include <VectorIndex/Status.h>
 #include <VectorIndex/VectorIndexCommon.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/SearchThreadLimiter.h>
 
 #include <memory>
 
@@ -1044,7 +1046,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const Search::Metric & metric)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScanWithoutIndex()");
-    VectorIndex::SearchThreadLimiter limiter(log);
+    /// Limit the number of vector index search threads to 2 * number of physical cores
+    static VectorIndex::LimiterSharedContext vector_index_context(getNumberOfPhysicalCPUCores() * 2);
+    VectorIndex::SearchThreadLimiter limiter(vector_index_context, log);
     NamesAndTypesList cols;
     /// get search vector column info
     auto col_and_type = this->metadata->getColumns().getAllPhysical().tryGetByName(search_column);

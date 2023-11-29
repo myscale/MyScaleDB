@@ -86,36 +86,6 @@ public:
 using IndexWithMetaPtr = std::shared_ptr<IndexWithMeta>;
 
 
-class SearchThreadLimiter
-{
-public:
-    SearchThreadLimiter(const Poco::Logger * log)
-    {
-        std::call_once(once,
-            [&]
-            {
-                LOG_INFO(log, "The number of threads for vector search (bruteforce and vector index): {}", max_threads);
-            }
-        );
-        std::shared_lock<std::shared_mutex> lock(mutex);
-        cv.wait(lock, [&] { return count.load() < max_threads; });
-        count.fetch_add(1);
-        LOG_DEBUG(log, "Index search uses {}/{} threads", count.load(), max_threads);
-    }
-
-    ~SearchThreadLimiter()
-    {
-        count.fetch_sub(1);
-        cv.notify_one();
-    }
-private:
-    static std::shared_mutex mutex;
-    static std::condition_variable_any cv;
-    static std::atomic_int count;
-    static int max_threads;
-    static std::once_flag once;
-};
-
 
 class VectorSegmentExecutor
 {
