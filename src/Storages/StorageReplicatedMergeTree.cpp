@@ -3942,6 +3942,7 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
 
                     const_pointer_cast<IMergeTreeDataPart>(future_part)->loadVectorIndexChecksums();
                     future_part->addVectorIndex(vec_index.name + "_" + vec_index.column);
+                    future_part->addBuiltVectorIndex(vec_index);
                     break;
                 }
             }
@@ -5589,6 +5590,11 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
                         }
                     }
                 }
+
+                /// Create vector index info
+                for (const auto & part : getDataPartsForInternalUsage())
+                    for (auto & vec_index_desc : new_vec_indices)
+                        part->addNewVectorIndex(vec_index_desc);
 
                 LOG_INFO(log, "Get add vector index, start background job immediately");
                 background_operations_assignee.trigger();

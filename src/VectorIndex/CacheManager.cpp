@@ -1,13 +1,20 @@
 #include <memory>
 #include <VectorIndex/CacheManager.h>
 
+#include <Interpreters/VectorIndexEventLog.h>
 #include <VectorIndex/IndexException.h>
 #include <VectorIndex/VectorSegmentExecutor.h>
-#include <Interpreters/VectorIndexEventLog.h>
+#include <Common/CurrentMetrics.h>
 
 namespace DB::ErrorCodes
 {
 extern const int LOGICAL_ERROR;
+}
+
+namespace CurrentMetrics
+{
+extern const Metric VectorIndexCacheManagerSize;
+extern const Metric LoadedVectorIndexMemorySize;
 }
 
 namespace VectorIndex
@@ -48,7 +55,11 @@ IndexWithMetaHolderPtr CacheManager::get(const CacheKey & cache_key)
         throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "cache not allocated");
     }
 
-    return cache->get(cache_key);
+    auto value = cache->get(cache_key);
+
+    CurrentMetrics::set(CurrentMetrics::LoadedVectorIndexMemorySize, cache->weight());
+
+    return value;
 }
 
 void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
@@ -86,6 +97,8 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_SUCCEED);
     }
+
+    CurrentMetrics::set(CurrentMetrics::LoadedVectorIndexMemorySize, cache->weight());
 }
 
 void CacheManager::flushWillUnloadLog()
@@ -122,7 +135,9 @@ void CacheManager::forceExpire(const CacheKey & cache_key)
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::CACHE_EXPIRE);
-    return cache->tryRemove(cache_key);
+    cache->tryRemove(cache_key);
+
+    CurrentMetrics::set(CurrentMetrics::LoadedVectorIndexMemorySize, cache->weight());
 }
 
 IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key, 
@@ -134,13 +149,19 @@ IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key,
     }
     LOG_INFO(log, "Start loading cache: cache_key = {}", cache_key.toString());
 
-    return cache->getOrSet(cache_key, load_func);
+    auto value = cache->getOrSet(cache_key, load_func);
+
+    CurrentMetrics::set(CurrentMetrics::LoadedVectorIndexMemorySize, cache->weight());
+
+    return value;
 }
 
 void CacheManager::setCacheSize(size_t size_in_bytes)
 {
     cache_size_in_bytes = size_in_bytes;
     m = true;
+
+    CurrentMetrics::set(CurrentMetrics::VectorIndexCacheManagerSize, size_in_bytes);
 }
 
 std::list<std::pair<CacheKey, Search::Parameters>> CacheManager::getAllItems()

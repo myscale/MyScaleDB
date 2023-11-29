@@ -1191,13 +1191,14 @@ void IMergeTreeDataPart::loadVectorIndexChecksums(bool need_convert_index_file)
                 if (vector_index_checksums.read(*buf))
                     assertEOF(*buf);
 
+                /// check vector index files consistency
+                vector_index_checksums.checkSizes(getDataPartStorage());
+
                 LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
                 {
                     std::lock_guard lock(vector_index_checksums_mutex);
                     vector_index_checksums_map[vector_index_name] = vector_index_checksums;
                 }
-                /// check vector index files consistency
-                vector_index_checksums.checkSizes(getDataPartStorage());
             }
             catch (...)
             {
@@ -1471,25 +1472,25 @@ void IMergeTreeDataPart::loadColumns(bool require)
     setColumns(loaded_columns, infos);
 }
 
-void IMergeTreeDataPart::addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const
+void IMergeTreeDataPart::addVectorIndexInfo(const VectorIndexDescription & vec_index_desc, bool built) const
 {
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
-
     std::lock_guard lock(vector_indices_mutex);
 
-    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
+    if (vector_indices.contains(vec_index_desc.name))
+        return;
 
-    VectorIndex::Metadata metadata(segment_id);
-    auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
-    metadata.readText(*buf);
+    VectorIndex::SegmentId segment_id(nullptr, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
+    auto status = built ? BUILT : PENDING;
 
-    auto vector_index_info
-        = std::make_shared<VectorIndexInfo>(storage.getStorageID().getDatabaseName(), storage.getStorageID().getTableName(), metadata);
+    auto vector_index_info = std::make_shared<VectorIndexInfo>(
+        storage.getStorageID().getDatabaseName(),
+        storage.getStorageID().getTableName(),
+        rows_count,
+        vec_index_desc,
+        segment_id,
+        storage.getSettings(),
+        storage.getInMemoryMetadata(),
+        isSmallPart(storage.getSettings()->min_rows_to_build_vector_index) ? SMALL_PART : status);
 
     vector_indices.insert_or_assign(vec_index_desc.name, std::move(vector_index_info));
 }
@@ -1497,18 +1498,11 @@ void IMergeTreeDataPart::addBuiltVectorIndex(const VectorIndexDescription & vec_
 void IMergeTreeDataPart::addDecoupledVectorIndex(
     const std::vector<MergedPartNameAndId> & old_parts, const VectorIndexDescription & vec_index_desc) const
 {
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
-
     std::lock_guard lock(vector_indices_mutex);
     for (const auto & old_part : old_parts)
     {
         VectorIndex::SegmentId segment_id(
-            part_storage->volume,
+            nullptr,
             getDataPartStorage().getFullPath(),
             name,
             old_part.name,
@@ -1517,11 +1511,17 @@ void IMergeTreeDataPart::addDecoupledVectorIndex(
             old_part.id);
 
         VectorIndex::Metadata metadata(segment_id);
-        auto buf = part_storage->volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
+        auto buf = getDataPartStorage().readFile(segment_id.getVectorDescriptionFilePath(), {}, std::nullopt, std::nullopt);
         metadata.readText(*buf);
 
-        auto vector_index_info
-            = std::make_shared<VectorIndexInfo>(storage.getStorageID().getDatabaseName(), storage.getStorageID().getTableName(), metadata);
+        auto vector_index_info = std::make_shared<VectorIndexInfo>(
+            storage.getStorageID().getDatabaseName(),
+            storage.getStorageID().getTableName(),
+            metadata.total_vec,
+            vec_index_desc,
+            segment_id,
+            storage.getSettings(),
+            storage.getInMemoryMetadata());
 
         if (vector_indices_decoupled.contains(vec_index_desc.name))
             vector_indices_decoupled[vec_index_desc.name].emplace_back(std::move(vector_index_info));
@@ -1594,26 +1594,6 @@ void IMergeTreeDataPart::CancelLoadingVIOfInactivePart() const
         }
     }
 }
-
-void IMergeTreeDataPart::addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part) const
-{
-    std::lock_guard lock(vector_indices_mutex);
-
-    if (vector_indices.contains(vec_index_desc.name))
-        return;
-
-    auto vector_index_info = std::make_shared<VectorIndexInfo>(
-        storage.getStorageID().getDatabaseName(),
-        storage.getStorageID().getTableName(),
-        name,
-        vec_index_desc.name,
-        vec_index_desc.type,
-        rows_count,
-        is_small_part ? SMALL_PART : PENDING);
-
-    vector_indices.insert_or_assign(vec_index_desc.name, std::move(vector_index_info));
-}
-
 
 void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
 {
@@ -2000,7 +1980,7 @@ void IMergeTreeDataPart::removeAllRowIdsMaps(const String & index_name, bool ski
     merged_source_parts.clear();
 
     std::lock_guard info_lock(vector_indices_mutex);
-    vector_indices_decoupled.clear();
+    vector_indices_decoupled.erase(index_name);
 }
 
 void IMergeTreeDataPart::removeAllRowIdsMaps() const

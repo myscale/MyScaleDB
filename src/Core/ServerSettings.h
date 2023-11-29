@@ -72,7 +72,8 @@ namespace DB
     M(UInt64, background_vector_pool_size, 1, "Number of threads for vector index building", 0)      \
     M(UInt64, background_slow_mode_vector_pool_size, 3, "Number of threads for slow mode vector index building", 0)      \
     M(UInt64, vector_index_cache_size, 100, "number of vector index to cache", 0)      \
-    M(Float, vector_index_cache_size_ratio_of_memory, 1.0, "vector_index_cache_size_ratio_of_memory", 0) \
+    M(Float, vector_index_cache_size_ratio_of_memory, 0.3f, "Memory limit (ratio of total memory) for vector index search cache", 0) \
+    M(Float, vector_index_build_size_ratio_of_memory, 0.6f, "Memory limit (ratio of total memory) for vector index building", 0) \
     M(UInt64, primary_key_cache_size, 1024 * 1024 * 64, "primary key cache size limit", 0) \
 
 

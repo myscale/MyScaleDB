@@ -320,9 +320,11 @@ public:
     mutable std::unordered_map<String, VectorIndexInfoPtr> vector_indices;
     mutable std::unordered_map<String, VectorIndexInfoPtrList> vector_indices_decoupled;
 
-    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const;
+    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const { addVectorIndexInfo(vec_index_desc, true); }
 
-    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc, bool is_small_part = false) const;
+    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc) const { addVectorIndexInfo(vec_index_desc, false); }
+
+    void addVectorIndexInfo(const VectorIndexDescription & vec_index_desc, bool built) const;
 
     void onVectorIndexBuildStart(const String & index_name) const
     {
@@ -331,15 +333,11 @@ public:
             it->second->onBuildStart();
     }
 
-    void onVectorIndexBuildFinish(const String & index_name, const VectorIndex::Metadata * metadata = nullptr) const
+    void onVectorIndexBuildFinish(const String & index_name) const
     {
         std::lock_guard lock(vector_indices_mutex);
         if (auto it = vector_indices.find(index_name); it != vector_indices.end())
-        {
             it->second->onBuildFinish(true);
-            if (metadata)
-                it->second->setIndexSize(*metadata);
-        }
     }
 
     void onVectorIndexBuildError(const String & index_name, const String & err_msg) const

@@ -183,6 +183,9 @@
     M(FilesystemCacheSize, "Filesystem cache size in bytes") \
     M(FilesystemCacheElements, "Filesystem cache elements (file segments)") \
     M(AsyncInsertCacheSize, "Number of async insert hash id in cache") \
+    M(VectorIndexCacheManagerSize, "Vector index cache manager size limit in bytes.") \
+    M(AllVectorIndexMemorySize, "Total search memory in bytes of all vector indices.") \
+    M(LoadedVectorIndexMemorySize, "Current total search memory in bytes of loaded vector indices.") \
     M(S3Requests, "S3 requests") \
     M(KeeperAliveConnections, "Number of alive connections") \
     M(KeeperOutstandingRequets, "Number of outstanding requests") \

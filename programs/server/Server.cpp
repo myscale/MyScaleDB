@@ -2120,24 +2120,36 @@ try
 
     const double vector_index_cache_size_ratio_of_memory
         = global_context->getConfigRef().getDouble("vector_index_cache_size_ratio_of_memory", 0.9);
-    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_size_ratio_of_memory);
     //max_server_memory_usage
     double vector_index_ratio = 0.0;
-    if (vector_index_cache_size_ratio_of_memory < 0.3)
-    {
-        vector_index_ratio = 0.3;
-    }
+    if (vector_index_cache_size_ratio_of_memory < 0.1)
+        vector_index_ratio = 0.1;
     else if (vector_index_cache_size_ratio_of_memory > 0.9)
-    {
         vector_index_ratio = 0.9;
-    }
     else
-    {
         vector_index_ratio = vector_index_cache_size_ratio_of_memory;
-    }
+    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_ratio);
     const size_t vector_index_cache_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_ratio);
-    LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", vector_index_cache_max_size_in_bytes);
+    LOG_INFO(log, "vector_index_cache_max_size_in_bytes = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size_in_bytes));
     VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size_in_bytes);
+
+    const double vector_index_build_size_ratio_of_memory
+        = global_context->getConfigRef().getDouble("vector_index_build_size_ratio_of_memory", 0.9);
+    //max_server_memory_usage
+    double vector_index_build_ratio = 0.0;
+    if (vector_index_build_size_ratio_of_memory < 0.1)
+        vector_index_build_ratio = 0.1;
+    else if (vector_index_build_size_ratio_of_memory > 0.9)
+        vector_index_build_ratio = 0.9;
+    else
+        vector_index_build_ratio = vector_index_build_size_ratio_of_memory;
+    LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
+    const size_t vector_index_build_max_size_in_bytes = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
+    LOG_INFO(log, "vector_index_build_max_size_in_bytes = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size_in_bytes));
+    VectorIndex::VectorSegmentExecutor::setBuildMemorySizeInBytes(vector_index_build_max_size_in_bytes);
+
+    if (vector_index_build_ratio + vector_index_ratio > 0.9)
+        LOG_WARNING(log, "Total memory ratio of vector index cache & build is greater than 0.9, server might crash due to OOM");
 
     LOG_INFO(log, "Loading metadata from {}", path_str);
 
