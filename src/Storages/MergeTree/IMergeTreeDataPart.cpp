@@ -370,6 +370,10 @@ void IMergeTreeDataPart::setState(MergeTreeDataPartState new_state) const
     decrementStateMetric(state);
     state = new_state;
     incrementStateMetric(state);
+
+    /// Remove vector index info for inactive parts
+    if (state != MergeTreeDataPartState::PreActive && state != MergeTreeDataPartState::Active)
+        removeAllVectorIndexInfo();
 }
 
 MergeTreeDataPartState IMergeTreeDataPart::getState() const

@@ -759,6 +759,7 @@ void finalizeMutatedPart(
     {
         new_data_part->loadVectorIndexChecksums();
         new_data_part->loadVectorIndexMetadata();
+        source_part->removeAllVectorIndexInfo();
     }
 
     /// Avoid build vector index for part with error

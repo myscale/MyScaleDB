@@ -26,6 +26,7 @@
 #include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/Metadata.h>
 #include <VectorIndex/VectorIndexIO.h>
+#include <VectorIndex/SearchThreadLimiter.h>
 #include <SearchIndex/Common/Utils.h>
 #include <SearchIndex/IndexDataFileIO.h>
 #include <Storages/IStorage.h>
@@ -49,12 +50,6 @@ namespace fs = std::filesystem;
 
 namespace VectorIndex
 {
-std::shared_mutex SearchThreadLimiter::mutex;
-std::condition_variable_any SearchThreadLimiter::cv;
-std::atomic_int SearchThreadLimiter::count(0);
-int SearchThreadLimiter::max_threads = getNumberOfPhysicalCPUCores() * 2;
-std::once_flag SearchThreadLimiter::once;
-
 std::once_flag VectorSegmentExecutor::once;
 int VectorSegmentExecutor::max_threads = getNumberOfPhysicalCPUCores() * 2;
 
@@ -682,7 +677,9 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
 
-    SearchThreadLimiter limiter(log);
+    /// Limit the number of bruteforce search threads to 2 * number of physical cores
+    static LimiterSharedContext brute_force_context(getNumberOfPhysicalCPUCores() * 2);
+    SearchThreadLimiter limiter(brute_force_context, log);
 
     auto merged_filter = filter;
     // Merge filter and delete_bitmap

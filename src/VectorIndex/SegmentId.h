@@ -129,10 +129,8 @@ struct SegmentId
 
     CacheKey getCacheKey() const
     {
-        fs::path full_path(data_part_path);
-        /// use parent data path, need to call parent_path() twice,
-        /// according to https://en.cppreference.com/w/cpp/filesystem/path/parent_path
-        return CacheKey{full_path.parent_path().parent_path().string(), cutMutVer(owner_part_name), vector_index_name, column_name};
+        return CacheKey{
+            getPartRelativePath(fs::path(data_part_path).parent_path()), cutMutVer(owner_part_name), vector_index_name, column_name};
     }
 
     String getVectorDescriptionFilePath() const { return getPathPrefix() + VECTOR_INDEX_DESCRIPTION + VECTOR_INDEX_FILE_SUFFIX; }
