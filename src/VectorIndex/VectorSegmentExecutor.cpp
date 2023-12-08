@@ -817,57 +817,6 @@ Status VectorSegmentExecutor::removeByIds(size_t n, const size_t * ids)
     return Status();
 }
 
-bool VectorSegmentExecutor::writeBitMap()
-{
-    String bitmap_path = segment_id.getBitMapFilePath();
-    auto writer = segment_id.volume->getDisk()->writeFile(bitmap_path);
-
-    if (delete_bitmap == nullptr)
-        delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
-    size_t size = delete_bitmap->get_size();
-    writer->write(reinterpret_cast<const char *>(&size), sizeof(size_t));
-
-    writer->write(reinterpret_cast<const char *>(delete_bitmap->get_bitmap()), delete_bitmap->byte_size());
-    writer->finalize();
-
-    return true;
-}
-
-bool VectorSegmentExecutor::readBitMap()
-{
-    String read_file_path = segment_id.getBitMapFilePath();
-    auto reader = segment_id.volume->getDisk()->readFile(read_file_path);
-
-    if (!reader)
-        return false;
-
-    size_t size;
-    try
-    {
-        reader->readStrict(reinterpret_cast<char *>(&size), sizeof(size_t));
-    }
-    catch (...)
-    {
-        LOG_ERROR(log, "Bitmap file read error.");
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
-    }
-
-    if (delete_bitmap == nullptr)
-        delete_bitmap = std::make_shared<Search::DenseBitmap>(size);
-
-    size_t bit_map_size = delete_bitmap->byte_size();
-
-    if (total_vec != 0 && size != total_vec)
-    {
-        LOG_ERROR(log, "Bitmap file {} is corrupted: size {}, total_vec {}", read_file_path, size, total_vec);
-        throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Vector index bitmap on disk is corrupted");
-    }
-
-    reader->readStrict(reinterpret_cast<char *>(delete_bitmap->get_bitmap()), bit_map_size);
-
-    return true;
-}
-
 void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
 {
     CacheManager::setCacheSize(size);
