@@ -263,9 +263,6 @@ public:
     /// Update SegmentId
     void updateSegmentId(const SegmentId & new_segment_id) { segment_id = new_segment_id; }
 
-    /// Reload delete bitmap from disk.
-    bool reloadDeleteBitMap() { return readBitMap(); }
-
     /// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
     void updateBitMap(const std::vector<UInt64> & deleted_row_ids);
 
@@ -286,10 +283,6 @@ private:
     void init();
 
     String getUniqueVectorIndexCachePrefix() const;
-
-    bool writeBitMap();
-
-    bool readBitMap();
 
     void handleMergedMaps();
 
