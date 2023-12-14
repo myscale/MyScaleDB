@@ -69,13 +69,12 @@ VectorIndexDescription & VectorIndexDescription::operator=(const VectorIndexDesc
 
 bool VectorIndexDescription::operator==(const VectorIndexDescription & other) const
 {
-    return name == other.name &&
-        type == other.type &&
-        arguments == other.arguments &&
-        data_type == other.data_type &&
-        sample_block.equal(other.sample_block) &&
-        parameters == other.parameters &&
-        dim == other.dim;
+    /// Compare the definition_ast string. In replicated cases, the new metadata is newly construted from log entry,
+    /// hence the data_type, parameters, and definition_ast are different.
+    /// TODO: May optimize when parameters can be compared.
+    String ast_string = serializeAST(*definition_ast, true);
+    String other_ast_string = serializeAST(*(other.definition_ast), true);
+    return ast_string == other_ast_string;
 }
 
 VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(const ASTPtr & definition_ast, const ColumnsDescription & columns)

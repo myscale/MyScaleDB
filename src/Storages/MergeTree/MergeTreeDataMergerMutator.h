@@ -192,6 +192,12 @@ public:
         MergeTreeData::Transaction & out_transaction);
 
 
+    /// Handles for vector index cases
+    void handleVectorIndicesForMergedPart(
+        MergeTreeData::DataPartPtr new_part,
+        MergeTreeData::DataPartsVector old_parts,
+        StorageMetadataPtr metadata_snapshot);
+
     /// The approximate amount of disk space needed for merge or mutation. With a surplus.
     static size_t estimateNeededDiskSpace(const MergeTreeData::DataPartsVector & source_parts, const bool & account_for_deleted = false);
 

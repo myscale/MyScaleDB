@@ -1,0 +1,49 @@
+Brute force on v1
+1	0
+0	3
+2	3
+3	12
+4	27
+5	48
+6	75
+7	108
+8	147
+9	192
+Brute force on v2
+11	0
+10	3
+12	3
+9	12
+13	12
+8	27
+14	27
+7	48
+15	48
+6	75
+0
+0
+Vector Index Status
+v1	MSTG	Built
+v2	FLAT	Built
+Vector Index Scan Search on v1 with MSTG
+1	0
+0	3
+2	3
+3	12
+4	27
+5	48
+6	75
+7	108
+8	147
+9	192
+Vector Index Scan Search on v2 with FLAT
+11	0
+10	3
+12	3
+9	12
+13	12
+8	27
+14	27
+7	48
+15	48
+6	75

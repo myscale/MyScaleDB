@@ -50,6 +50,8 @@ private:
 
     MergeTaskPtr merge_task;
     pcg64 rng;
+
+    StorageMetadataPtr metadata_snapshot; /// Used for vector index
 };
 
 

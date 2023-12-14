@@ -117,6 +117,7 @@ namespace ActionLocks
     extern const StorageActionBlockType PullReplicationLog;
     extern const StorageActionBlockType Cleanup;
     extern const StorageActionBlockType ViewRefresh;
+    extern const StorageActionBlockType PartsBuildIndex;
 }
 
 
@@ -176,6 +177,8 @@ AccessType getRequiredAccessType(StorageActionBlockType action_type)
         return AccessType::SYSTEM_CLEANUP;
     else if (action_type == ActionLocks::ViewRefresh)
         return AccessType::SYSTEM_VIEWS;
+    else if (action_type == ActionLocks::PartsBuildIndex)
+        return AccessType::SYSTEM_BUILD_VECTOR_INDICES;
     else
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown action type: {}", std::to_string(action_type));
 }
@@ -673,6 +676,11 @@ BlockIO InterpreterSystemQuery::execute()
             break;
         case Type::TEST_VIEW:
             getRefreshTask()->setFakeTime(query.fake_time_for_view);
+        case Type::STOP_BUILD_VECTOR_INDICES:
+            startStopAction(ActionLocks::PartsBuildIndex, false);
+            break;
+        case Type::START_BUILD_VECTOR_INDICES:
+            startStopAction(ActionLocks::PartsBuildIndex, true);
             break;
         case Type::DROP_REPLICA:
             dropReplica(query);
@@ -1397,6 +1405,15 @@ AccessRightsElements InterpreterSystemQuery::getRequiredAccessForDDLOnCluster() 
                 required_access.emplace_back(AccessType::SYSTEM_REPLICATED_SENDS);
             else
                 required_access.emplace_back(AccessType::SYSTEM_REPLICATED_SENDS, query.getDatabase(), query.getTable());
+            break;
+        }
+        case Type::STOP_BUILD_VECTOR_INDICES:
+        case Type::START_BUILD_VECTOR_INDICES:
+        {
+            if (!query.table)
+                required_access.emplace_back(AccessType::SYSTEM_BUILD_VECTOR_INDICES);
+            else
+                required_access.emplace_back(AccessType::SYSTEM_BUILD_VECTOR_INDICES, query.getDatabase(), query.getTable());
             break;
         }
         case Type::STOP_REPLICATION_QUEUES:

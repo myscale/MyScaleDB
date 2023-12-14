@@ -43,10 +43,9 @@ public:
         , context(context_)
         , support_two_stage_search(support_two_stage_search_) {}
 
-    void executeBeforeRead(const String& data_path, const MergeTreeData::DataPartPtr & data_part);
+    void executeBeforeRead(const MergeTreeData::DataPartPtr & data_part);
 
     void executeAfterRead(
-        const String& data_path,
         const MergeTreeData::DataPartPtr & data_part,
         Columns & pre_result,
         size_t & read_rows,
@@ -55,7 +54,6 @@ public:
         const Search::DenseBitmapPtr filter = nullptr);
 
     void executeVectorScanWithFilter(
-        const String& data_path,
         const MergeTreeData::DataPartPtr & data_part,
         const ReadRanges & read_ranges,
         const Search::DenseBitmapPtr filter);
@@ -100,7 +98,6 @@ private:
 
     VectorScanResultPtr vectorScan(
         bool is_batch,
-        const String & data_path,
         const MergeTreeData::DataPartPtr & data_part = nullptr,
         const ReadRanges & read_ranges = ReadRanges(),
         const Search::DenseBitmapPtr filter = nullptr);
@@ -108,7 +105,6 @@ private:
     /// Do preparition of finding index for vectorScan() and executeSecondStageVectorScan()
     std::vector<VectorIndex::VectorSegmentExecutorPtr> prepareForVectorScan(
         String & metric_str,
-        const String & data_path,
         const MergeTreeData::DataPartPtr & data_part = nullptr
     );
 

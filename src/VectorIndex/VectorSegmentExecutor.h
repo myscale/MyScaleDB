@@ -146,8 +146,6 @@ public:
 
     Status removeByIds(size_t n, const size_t * ids);
 
-    Search::DenseBitmapPtr getDeleteBitMap() { return this->delete_bitmap; }
-
     /// Return total number of vectors.
     int64_t getRawDataSize();
 
@@ -278,6 +276,9 @@ public:
     Search::IndexResourceUsage getIndexResourceUsage();
 
     Search::IndexType getIndexType() { return type; }
+
+    /// True if the vector index is stored in cache. Used for lightweight delete.
+    bool storedInCache();
 
 private:
     void init();

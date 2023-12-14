@@ -215,7 +215,7 @@ private:
       */
     bool shouldExecuteLogEntry(
         const LogEntry & entry, String & out_postpone_reason,
-        MergeTreeDataMergerMutator & merger_mutator, MergeTreeData & data,
+        MergeTreeDataMergerMutator & merger_mutator, ActionBlocker & builds_blocker, MergeTreeData & data,
         std::unique_lock<std::mutex> & state_lock) const;
 
     /// Return the version (block number) of the last mutation that we don't need to apply to the part
@@ -389,7 +389,7 @@ public:
     };
 
     using SelectedEntryPtr = std::shared_ptr<SelectedEntry>;
-    SelectedEntryPtr selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, MergeTreeData & data);
+    SelectedEntryPtr selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, ActionBlocker & builds_blocker, MergeTreeData & data);
 
     /** Execute `func` function to handle the action.
       * In this case, at runtime, mark the queue element as running

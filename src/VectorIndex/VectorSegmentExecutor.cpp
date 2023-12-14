@@ -171,7 +171,7 @@ void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<
         configureDiskMode();
         index = Search::
             createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                segment_id.getIndexNameWithColumn(),
+                segment_id.getIndexName(),
                 type,
                 metric,
                 dimension,
@@ -294,7 +294,7 @@ Status VectorSegmentExecutor::serialize()
         auto file_writer = Search::IndexDataFileWriter<Search::AbstractOStream>(
             segment_id.getFullPath(),
             [this](const std::string & name, std::ios::openmode /*mode*/)
-            { return std::make_shared<VectorIndexWriter>(segment_id.volume->getDisk(), name); });
+            { return std::make_shared<VectorIndexWriter>(segment_id.getDisk(), name); });
 
         index->serialize(&file_writer);
         index->saveDataID(&file_writer);
@@ -307,7 +307,7 @@ Status VectorSegmentExecutor::serialize()
         infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
         infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
         Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
-        auto buf = segment_id.volume->getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
+        auto buf = segment_id.getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
         metadata.writeText(*buf);
 
         return Status(0);
@@ -335,11 +335,11 @@ void VectorSegmentExecutor::handleMergedMaps()
     try
     {
         auto row_ids_map_buf
-            = std::make_unique<DB::CompressedReadBufferFromFile>(segment_id.volume->getDisk()->readFile(segment_id.getRowIdsMapFilePath()));
+            = std::make_unique<DB::CompressedReadBufferFromFile>(segment_id.getDisk()->readFile(segment_id.getRowIdsMapFilePath()));
         auto inverted_row_ids_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowIdsMapFilePath()));
+            segment_id.getDisk()->readFile(segment_id.getInvertedRowIdsMapFilePath()));
         auto inverted_row_sources_map_buf = std::make_unique<DB::CompressedReadBufferFromFile>(
-            segment_id.volume->getDisk()->readFile(segment_id.getInvertedRowSourcesMapFilePath()));
+            segment_id.getDisk()->readFile(segment_id.getInvertedRowSourcesMapFilePath()));
 
         while (!inverted_row_sources_map_buf->eof())
         {
@@ -393,7 +393,6 @@ Status VectorSegmentExecutor::load(bool isActivePart)
     const String cache_key_str = cache_key.toString();
 
     LOG_DEBUG(log, "segment_id.getPathPrefix() = {}", segment_id.getPathPrefix());
-    LOG_DEBUG(log, "segment_id.getBitMapFilePath() = {}", segment_id.getBitMapFilePath());
     LOG_DEBUG(log, "cache_key_str = {}", cache_key_str);
 
     IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
@@ -409,6 +408,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_START,
@@ -418,10 +418,10 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         {
             try
             {
-                if (!segment_id.volume->getDisk()->exists(segment_id.getVectorDescriptionFilePath()))
+                if (!segment_id.getDisk()->exists(segment_id.getVectorDescriptionFilePath()))
                     throw IndexException(DB::ErrorCodes::CORRUPTED_DATA, "Index is not in the ready state and cannot be loaded");
                 Metadata metadata(segment_id);
-                auto buf = segment_id.volume->getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
+                auto buf = segment_id.getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
                 metadata.readText(*buf);
                 fallback_to_flat = metadata.fallback_to_flat;
                 if (fallback_to_flat)
@@ -440,7 +440,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 configureDiskMode();
                 index = Search::
                     createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                        segment_id.getIndexNameWithColumn(),
+                        segment_id.getIndexName(),
                         type,
                         metric,
                         dimension,
@@ -458,7 +458,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
                     segment_id.getFullPath(),
                     [this](const std::string & name, std::ios::openmode /*mode*/)
-                    { return std::make_shared<VectorIndexReader>(segment_id.volume->getDisk(), name); });
+                    { return std::make_shared<VectorIndexReader>(segment_id.getDisk(), name); });
                 printMemoryInfo(log, "Before load");
                 index->load(&file_reader);
                 index->loadDataID(&file_reader);
@@ -535,6 +535,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_SUCCEED,
@@ -547,6 +548,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -559,6 +561,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -571,6 +574,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -581,6 +585,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_FAILED,
@@ -624,6 +629,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -637,6 +643,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::VectorIndexEventLog::addEventLog(
                     DB::Context::getGlobalContextInstance(),
                     cache_key.getTableUUID(),
+                    cache_key.getIndexName(),
                     cache_key.getPartName(),
                     cache_key.getPartitionID(),
                     DB::VectorIndexEventLogElement::LOAD_ERROR,
@@ -831,6 +838,19 @@ std::list<std::pair<CacheKey, Search::Parameters>> VectorSegmentExecutor::getAll
 {
     ///from this list, we get <segment_id, vectorindex description> pair
     return CacheManager::getInstance()->getAllItems();
+}
+
+bool VectorSegmentExecutor::storedInCache()
+{
+    CacheManager * mgr = CacheManager::getInstance();
+    CacheKey cache_key = segment_id.getCacheKey();
+
+    IndexWithMetaHolderPtr index_holder = mgr->get(cache_key);
+
+    if (index_holder)
+        return true;
+    else
+        return false;
 }
 
 void VectorSegmentExecutor::updateBitMap(const std::vector<UInt64> & deleted_row_ids)
@@ -1055,7 +1075,7 @@ Search::IndexResourceUsage VectorSegmentExecutor::getIndexResourceUsage()
 
         index = Search::
             createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                segment_id.getIndexNameWithColumn(),
+                segment_id.getIndexName(),
                 type,
                 metric,
                 dimension,

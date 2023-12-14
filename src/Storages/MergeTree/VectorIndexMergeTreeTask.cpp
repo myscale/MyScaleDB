@@ -24,17 +24,28 @@ bool VectorIndexMergeTreeTask::executeStep()
         LOG_DEBUG(log, "Execute vector index build for {}, slow_mode: {}", vector_index_entry->part_name, slow_mode);
         try
         {
-            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, slow_mode);
-            storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, true, "");
+            builder.buildVectorIndex(metadata_snapshot, vector_index_entry->part_name, vector_index_entry->vector_index_name, slow_mode);
+            storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, vector_index_entry->vector_index_name, true, "");
         }
         catch (...)
         {
-            String exception_message = getCurrentExceptionMessage(false);
-            storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, false, exception_message);
+            /// Record the failed build status to vector_indices, only when the index exists.
+            for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+            {
+                /// Find the vector index description from metadata snapshot when build starts.
+                if (vec_index_desc.name == vector_index_entry->vector_index_name)
+                {
+                    /// Check vector index exists in table's latest metadata
+                    auto & latest_vec_indices = storage.getInMemoryMetadataPtr()->getVectorIndices();
+                    if (latest_vec_indices.has(vec_index_desc))
+                    {
+                        String exception_message = getCurrentExceptionMessage(false);
+                        storage.updateVectorIndexBuildStatus(vector_index_entry->part_name, vector_index_entry->vector_index_name, false, exception_message);
+                    }
 
-            auto part = storage.getActiveContainingPart(vector_index_entry->part_name);
-            if (part)
-                part->setBuildError();
+                    break;
+                }
+            }
         }
     }
     return false;

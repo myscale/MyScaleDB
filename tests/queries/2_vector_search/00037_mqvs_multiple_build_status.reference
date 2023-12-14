@@ -1,0 +1,16 @@
+-- Test build vector index status
+0
+0
+test_multi_status	idx	idx data TYPE MSTG(\'unknown=1\')	Error	all_1_1_0	 VectorIndex: Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+test_multi_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error	all_1_1_0	 VectorIndex: Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+After drop the first vector index idx
+test_multi_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error	all_1_1_0	 VectorIndex: Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+After newly add again the first vector index idx
+InProgress for index idx when build vector indices are stopped
+test_multi_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error
+test_multi_status	idx	idx data TYPE MSTG	InProgress
+0
+0
+Built when for index idx build vector indices are started
+test_multi_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error
+test_multi_status	idx	idx data TYPE MSTG	Built

@@ -5,6 +5,7 @@
 #include <exception>
 #include <optional>
 #include <string_view>
+#include <regex>
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/getCompressionCodecForFile.h>
 #include <Core/Defines.h>
@@ -1006,35 +1007,30 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums(bool include_vector_fil
         result.emplace(METADATA_VERSION_FILE_NAME);
 
     /// Get vector index files
-    if (include_vector_files && (containAnyVectorIndex() || containRowIdsMaps()))
+    if (include_vector_files && (containAnyVectorIndex() || containAnyRowIdsMaps()))
     {
-        for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
-        {
-            if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
-                result.emplace(it->name());
-        }
+        for (auto file_name : getAllVectorIndexFileNamesInChecksums())
+            result.emplace(file_name);
     }
 
     return result;
 }
 
-NameSet IMergeTreeDataPart::getFileNamesForVectorIndex(const String &) const
+NameSet IMergeTreeDataPart::getFileNamesForVectorIndex(const String & vec_index_name) const
 {
     if (!isStoredOnDisk())
         return {};
 
     /// In fetch vector index cases, the vector index should be built for VPart.
-    if (!containAnyVectorIndex())
+    if (!containVectorIndex(vec_index_name))
         return {};
 
     NameSet result;
 
-    for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
-    {
-        /// TODO: get index files for specified vector index
-        if (endsWith(it->name(), VECTOR_INDEX_FILE_EXTENSION))
-            result.emplace(it->name());
-    }
+    for (const auto & [file_name, _] : getVectorIndexChecksums(vec_index_name).files)
+        result.emplace(file_name);
+
+    result.emplace(VectorIndex::getVectorIndexChecksumsFileName(vec_index_name));
 
    return result;
 }
@@ -1366,56 +1362,124 @@ void IMergeTreeDataPart::loadChecksums(bool require)
     }
 }
 
+bool IMergeTreeDataPart::checkConsistencyForVectorIndex(const String & index_name, const Checksums & index_checksums) const
+{
+    /// Check consistency for vector index based on its checksums.
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (!metadata_snapshot->hasVectorIndices() || !metadata_snapshot->getVectorIndices().has(index_name))
+        return false;
+
+    if (index_checksums.empty())
+    {
+        String checksums_file_name = VectorIndex::getVectorIndexChecksumsFileName(index_name);
+        if (getDataPartStorage().exists(checksums_file_name))
+            /// Throw exception here will cause broken part. Just remove incomplete vector index files and rebuild later.
+            LOG_WARNING(storage.log,
+                "Part {} has invalid checksums {} for vector index {}: loaded checksums is empty",
+                getDataPartStorage().getFullPath(),
+                checksums_file_name, index_name);
+
+        return false;
+    }
+
+    /// Base consistency check: existence of files recorded in checksums
+    /// check vector index files consistency
+    const auto & data_part_storage = getDataPartStorage();
+    for (const auto & [filename, vector_index_checksum] : index_checksums.files)
+    {
+        try
+        {
+            vector_index_checksum.checkSize(data_part_storage, filename);
+        }
+        catch (const Exception &)
+        {
+            throw;
+        }
+    }
+
+    /// Additional checks on contents of checksums for vector index
+    /// The vector index files should belong to a simple vector index OR merged vector indices
+    bool is_simple = false, is_decouple = false;
+
+    if (index_checksums.has(VectorIndex::getVectorIndexDescriptionFileName(index_name)))
+        is_simple = true;
+
+    if (index_checksums.has(toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_EXTENSION))
+        is_decouple = true;
+
+    if ((is_simple && is_decouple) || (!is_simple && !is_decouple))
+    {
+        LOG_WARNING(storage.log,
+            "Part {} has invalid checksums {} for vector index {}: checksums should contain description file OR merged row ids maps file",
+            name, VectorIndex::getVectorIndexChecksumsFileName(index_name), index_name);
+
+        return false;
+    }
+
+    return true;
+}
+
+void IMergeTreeDataPart::checkConsistencyForAllVectorIndices() const
+{
+    /// We need to check consistency for all vector indices
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (!metadata_snapshot->hasVectorIndices())
+        return;
+
+    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+    {
+        const String & vec_index_name = vec_index_desc.name;
+        if (hasVectorIndexChecksums(vec_index_name))
+            checkConsistencyForVectorIndex(vec_index_name, getVectorIndexChecksums(vec_index_name));
+    }
+
+    /// Try to remove incomplete vector index files if exists
+    removeIncompleteVectorIndexFiles();
+}
+
 void IMergeTreeDataPart::loadVectorIndexChecksums(bool need_convert_index_file)
 {
     if (!isStoredOnDisk())
         return;
 
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-    if (metadata_snapshot->vec_indices.empty())
+    if (!metadata_snapshot->hasVectorIndices())
         return;
 
     if (need_convert_index_file)
-        convertIndexFileForUpgrade(getDataPartStorage().getRelativePath());
+        convertIndexFileForUpgrade();
 
-    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
         const auto & vector_index_name = vec_index_desc.name;
-        String checksums_filename = vector_index_name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION;
-        bool exists = getDataPartStorage().exists(checksums_filename);
-        bool need_clean = false;
-        if (exists)
+        String checksums_filename = VectorIndex::getVectorIndexChecksumsFileName(vector_index_name);
+
+        if (getDataPartStorage().exists(checksums_filename))
         {
             MergeTreeDataPartChecksums vector_index_checksums;
+
+            /// Avoid to detach part due to failure on vector index check consistency.
             try
             {
                 auto buf = getDataPartStorage().readFile(checksums_filename, {}, std::nullopt, std::nullopt);
                 if (vector_index_checksums.read(*buf))
                     assertEOF(*buf);
 
-                /// check vector index files consistency
-                const auto & data_part_storage = getDataPartStorage();
-                for (const auto & [filename, vector_index_checksum] : vector_index_checksums.files)
+                /// Check consistency for this vector index
+                if (checkConsistencyForVectorIndex(vector_index_name, vector_index_checksums))
                 {
-                    try
-                    {
-                        vector_index_checksum.checkSize(data_part_storage, filename);
-                    }
-                    catch (const Exception &)
-                    {
-                        throw;
-                    }
-                }
+                    LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
 
-                LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
+                    /// Update part metadata
+                    addVectorIndexChecksums(vector_index_name, vector_index_checksums);
+                }
+                else
                 {
-                    std::lock_guard lock(vector_index_checksums_mutex);
-                    vector_index_checksums_map[vector_index_name] = vector_index_checksums;
+                    LOG_WARNING(storage.log, "check constistency for vector index {} in part {} returns false", vector_index_name, name);
                 }
             }
-            catch (...)
+            catch(...)
             {
-                need_clean = true;
                 LOG_WARNING(
                     storage.log,
                     "An error occurred while checking vector index {} files consistency for part {}: {}",
@@ -1424,35 +1488,65 @@ void IMergeTreeDataPart::loadVectorIndexChecksums(bool need_convert_index_file)
                     getCurrentExceptionMessage(false));
             }
         }
-        else
+    }
+
+    /// Try to remove incomplete vector index files if exists
+    removeIncompleteVectorIndexFiles();
+}
+
+bool IMergeTreeDataPart::loadBuiltVectorIndexChecksums(const String & index_name) const
+{
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (!metadata_snapshot->hasVectorIndices() || !metadata_snapshot->getVectorIndices().has(index_name))
+        return false;
+
+    String checksums_filename = VectorIndex::getVectorIndexChecksumsFileName(index_name);
+
+    MergeTreeDataPartChecksums vector_index_checksums;
+    if (getDataPartStorage().exists(checksums_filename))
+    {
+        try
         {
-            need_clean = true;
-            LOG_DEBUG(
-                storage.log,
-                "The checksums for vector index {} on part {} does not exist, "
-                "will remove vector index files if exist",
-                vector_index_name,
-                name);
-        }
-        if (need_clean)
-        {
-            for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+            auto buf = getDataPartStorage().readFile(checksums_filename, {}, std::nullopt, std::nullopt);
+            if (vector_index_checksums.read(*buf))
+                assertEOF(*buf);
+
+            if (checkConsistencyForVectorIndex(index_name, vector_index_checksums))
             {
-                String file_name = it->name();
-                /// remove old version vector index files if exist.
-                /// remove new version vector index files that belong to the specific vector index.
-                /// TODO: temporary solution for clear decouple files, need to be changed when multi vector index supported.
-                if (endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION)
-                    || (endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION)
-                        && (startsWith(file_name, vector_index_name) || startsWith(file_name, VECTOR_INDEX_DESCRIPTION)
-                            || startsWith(file_name, "merged"))))
-                {
-                    LOG_DEBUG(storage.log, "Remove vector index file {}", file_name);
-                    getDataPartStorage().removeFile(file_name);
-                }
+                LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", index_name, name);
+
+                /// Update part metadata
+                addVectorIndexChecksums(index_name, vector_index_checksums);
+
+                return true;
+            }
+            else
+            {
+                LOG_WARNING(storage.log, "check constistency for built vector index {} in part {} returns false", index_name, name);
             }
         }
+        catch(...)
+        {
+            LOG_WARNING(
+                storage.log,
+                "An error occurred while checking vector index {} files consistency for part {}: {}",
+                index_name,
+                name,
+                getCurrentExceptionMessage(false));
+        }
     }
+    else
+    {
+        LOG_DEBUG(storage.log,
+                "The checksums for vector index {} on part {} does not exist, "
+                "will remove vector index files if exist",
+                index_name, name);
+    }
+
+    /// Simple vector index case
+    /// Cases that consistency check failed, or exception happens, or checksums not exists.
+    removeVectorIndex(index_name);
+    return false;
 }
 
 void IMergeTreeDataPart::appendFilesOfChecksums(Strings & files)
@@ -1817,7 +1911,7 @@ void IMergeTreeDataPart::addVectorIndexInfo(const VectorIndexDescription & vec_i
     if (vector_indices.contains(vec_index_desc.name))
         return;
 
-    VectorIndex::SegmentId segment_id(nullptr, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
+    VectorIndex::SegmentId segment_id(getDataPartStoragePtr(), name, vec_index_desc.name, vec_index_desc.column);
     auto status = built ? BUILT : PENDING;
 
     auto vector_index_info = std::make_shared<VectorIndexInfo>(
@@ -1840,8 +1934,7 @@ void IMergeTreeDataPart::addDecoupledVectorIndex(
     for (const auto & old_part : old_parts)
     {
         VectorIndex::SegmentId segment_id(
-            nullptr,
-            getDataPartStorage().getFullPath(),
+            getDataPartStoragePtr(),
             name,
             old_part.name,
             vec_index_desc.name,
@@ -1849,7 +1942,7 @@ void IMergeTreeDataPart::addDecoupledVectorIndex(
             old_part.id);
 
         VectorIndex::Metadata metadata(segment_id);
-        auto buf = getDataPartStorage().readFile(segment_id.getVectorDescriptionFilePath(), {}, std::nullopt, std::nullopt);
+        auto buf = segment_id.getDisk()->readFile(segment_id.getVectorDescriptionFilePath());
         metadata.readText(*buf);
 
         auto vector_index_info = std::make_shared<VectorIndexInfo>(
@@ -1868,99 +1961,97 @@ void IMergeTreeDataPart::addDecoupledVectorIndex(
     }
 }
 
-void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire() const
+void IMergeTreeDataPart::forceAllDecoupledVectorIndexExpire(const String & index_name, const String & column_name) const
 {
-    if (!containRowIdsMaps())
+    if (!containRowIdsMaps(index_name))
     {
-        LOG_INFO(storage.log, "No vector index to be set expiration satus.");
+        LOG_INFO(storage.log, "No vector index {} to be set expiration status.", index_name);
         return;
     }
         
     {
         std::lock_guard lock(decouple_mutex);
-        auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
 
-        auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
         IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
         for (const auto & old_part : merged_source_parts)
         {
-            for (const auto & vec_index_desc : vec_indices)
-            {
-                VectorIndex::SegmentId segment_id(
-                    volume,
-                    getDataPartStorage().getFullPath(),
-                    name,
-                    old_part.name,
-                    vec_index_desc.name,
-                    vec_index_desc.column,
-                    old_part.id);
+            VectorIndex::SegmentId segment_id(
+                getDataPartStoragePtr(),
+                name,
+                old_part.name,
+                index_name,
+                column_name,
+                old_part.id);
 
-                part_storage.removeFileIfExists(segment_id.getVectorDescriptionFilePath());
-            }
+            LOG_DEBUG(storage.log, "old_part's name {}, description file {}", old_part.name, segment_id.getVectorDescriptionFilePath());
+            part_storage.removeFileIfExists(segment_id.getVectorDescriptionFilePath());
         }
     }
 }
 
-void IMergeTreeDataPart::CancelLoadingVIOfInactivePart() const
+void IMergeTreeDataPart::CancelLoadingVIOfInactivePart(const String & index_name, const String & column_name) const
 {
-    if (!containRowIdsMaps())
+    if (!containRowIdsMaps(index_name))
     {
-        LOG_INFO(storage.log, "No vector index to be canceled from loading.");
+        LOG_INFO(storage.log, "No vector index {} to be canceled from loading.", index_name);
         return;
     }
-        
+
     {
         std::lock_guard lock(decouple_mutex);
-        auto vec_indices = storage.getInMemoryMetadataPtr()->vec_indices;
 
-        auto volume = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get())->volume;
         for (const auto & old_part : merged_source_parts)
         {
-            for (const auto & vec_index_desc : vec_indices)
-            {
-                VectorIndex::SegmentId segment_id(
-                    volume,
-                    getDataPartStorage().getFullPath(),
-                    name,
-                    old_part.name,
-                    vec_index_desc.name,
-                    vec_index_desc.column,
-                    old_part.id);
+            VectorIndex::SegmentId segment_id(
+                getDataPartStoragePtr(),
+                name,
+                old_part.name,
+                index_name,
+                column_name,
+                old_part.id);
 
-                VectorIndex::VectorSegmentExecutor::cancelVectorIndexLoading(segment_id.getCacheKey());
-            }
+            VectorIndex::VectorSegmentExecutor::cancelVectorIndexLoading(segment_id.getCacheKey());
         }
     }
 }
 
-void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const String & col_name) const
+void IMergeTreeDataPart::removeVectorIndex(const String & index_name) const
 {
-    /// Remove files recorded in vector index checksums if exists
+    /// No need to check metadata of table, because for drop index, the metadata has erased it.
+
+    /// Used for vector index event log
     bool with_vector_index_file_remove = false;
+
+    IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+
+    /// Remove files recorded in the vector index checksums if exists.
+    if (hasVectorIndexChecksums(index_name))
     {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        if (vector_index_checksums_map.contains(index_name) && !vector_index_checksums_map[index_name].empty())
-        {
-            IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
-            for (const auto & [file_name, _] : vector_index_checksums_map[index_name].files)
-                part_storage.removeFileIfExists(file_name);
+        Checksums index_checksums = getVectorIndexChecksums(index_name);
+        for (const auto & [file_name, _] : index_checksums.files)
+            part_storage.removeFileIfExists(file_name);
 
-            /// remove checksums file
-            part_storage.removeFileIfExists(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
-            vector_index_checksums_map.erase(index_name);
-            with_vector_index_file_remove = true;
-        }
-        else
+        /// remove checksums file
+        part_storage.removeFileIfExists(VectorIndex::getVectorIndexChecksumsFileName(index_name));
+        with_vector_index_file_remove = true;
+
+        /// remove checksums from part metadata
+        removeVectorIndexChecksums(index_name);
+    }
+    else /// Loop through directory and remove vector index files start with index_name
+    {
+        for (auto it = part_storage.iterate(); it->isValid(); it->next())
         {
-            for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+            String file_name = it->name();
+
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION))
+                continue;
+
+            /// Support multiple vector indices
+            /// VPart only needs to remove files starts with index_name.
+            if (startsWith(file_name, index_name + "-"))
             {
-                String file_name = it->name();
-
-                if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
-                     continue;
-
                 with_vector_index_file_remove = true;
-                IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
                 part_storage.removeFileIfExists(file_name);
             }
         }
@@ -1974,171 +2065,218 @@ void IMergeTreeDataPart::removeVectorIndex(const String & index_name, const Stri
             storage.getContext(),
             table_id.database_name,
             table_id.table_name,
+            index_name,
             name,
             info.partition_id,
             VectorIndexEventLogElement::CLEARED);
     }
 
     /// Clear from metadata
-    if (containVectorIndex(index_name, col_name))
+    if (containVectorIndex(index_name))
     {
         std::lock_guard lock(vector_indexed_mutex);
-        vector_indexed.erase(index_name + "_" + col_name);
-    }
-    else if (index_name.empty()) /// Empty index name will clear all vector indices.
-    {
-        std::lock_guard lock(vector_indexed_mutex);
-        vector_indexed.clear();
+        vector_indexed.erase(index_name);
     }
 
     /// Clear vector index build flags
-    vector_index_build_error = false;
-    vector_index_build_cancelled = false;
+    resetCancelBuild();
 
     removeVectorIndexInfo(index_name);
 }
 
-void IMergeTreeDataPart::removeAllVectorIndex() const
+/// Used for upgrade
+void IMergeTreeDataPart::convertIndexFileForUpgrade()
 {
-    /// remove all the vector index files
-    bool with_vector_index_file_remove = false;
+    IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
 
-    {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
-        for (const auto & [index_name, checksums_] : vector_index_checksums_map)
-        {
-            for (const auto & [file_name, _] : checksums_.files)
-                part_storage.removeFileIfExists(file_name);
-
-            /// remove checksums file
-            part_storage.removeFileIfExists(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
-            with_vector_index_file_remove = true;
-        }
-        vector_index_checksums_map.clear();
-    }
-
-    if (with_vector_index_file_remove)
-    {
-        /// add vector index cleared event
-        auto table_id = storage.getStorageID();
-        VectorIndexEventLog::addEventLog(
-            storage.getContext(),
-            table_id.database_name,
-            table_id.table_name,
-            name,
-            info.partition_id,
-            VectorIndexEventLogElement::CLEARED);
-    }
-
-    std::lock_guard lock(vector_indexed_mutex);
-    vector_indexed.clear();
-
-    /// Clear vector index build flags
-    vector_index_build_error = false;
-    vector_index_build_cancelled = false;
-
-    removeAllVectorIndexInfo();
-}
-
-// [TODO] Temporary solution, will be deleted in the next version
-void IMergeTreeDataPart::convertIndexFileForUpgrade(const String & full_relative_path)
-{
-    const DataPartStorageOnDiskBase * part_storage
-            = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
-    auto disk = part_storage->volume->getDisk();
+    /// If checksums file needs to be generated.
     bool has_intact_old_version_vector_index = false;
+
     /// Only supports either all index versions are in V1, or all versions are in V2
     String old_vector_index_ready_v1 = toString("vector_index_ready") + VECTOR_INDEX_FILE_OLD_EXTENSION;
-    String old_vector_index_ready_v2 = toString(VECTOR_INDEX_READY) + VECTOR_INDEX_FILE_OLD_EXTENSION;
-    String current_index_description_v2 = toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_EXTENSION;
-    String vector_index_file_checksums_suffix = toString(VECTOR_INDEX_FILE_CHECKSUMS_NAME) + VECTOR_INDEX_FILE_EXTENSION;
+    String old_vector_index_ready_v2 = toString("vector_index_ready_v2") + VECTOR_INDEX_FILE_OLD_EXTENSION;
+    String old_index_description_v2 = toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_OLD_EXTENSION;
 
-    for (auto it = disk->iterateDirectory(full_relative_path); it->isValid(); it->next())
+    /// Support multiple vector indices
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    auto vec_indices = metadata_snapshot->getVectorIndices();
+
+    /// Only one vector index is supported before upgrade to support multiple.
+    /// Use the first vector index description.
+    auto vector_index_desc = vec_indices[0];
+    String current_index_description_name = toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_EXTENSION;
+    String current_checksums_file_name = VectorIndex::getVectorIndexChecksumsFileName(vector_index_desc.name);
+    String new_description_file_name = VectorIndex::getVectorIndexDescriptionFileName(vector_index_desc.name);
+
+    /// Quick check the existence of new description file with index name.
+    bool from_checksums = false;
+    if (part_storage.exists(current_checksums_file_name))
     {
-        String file_name = it->name();
-
-        if (endsWith(file_name, vector_index_file_checksums_suffix))
+        from_checksums = true;
+        if (part_storage.exists(new_description_file_name))
         {
             /// The current version file already exists locally, no need to convert
             LOG_DEBUG(storage.log, "The current version file already exists locally, does not need to convert");
             return;
         }
+    }
 
-        if (endsWith(file_name, old_vector_index_ready_v2))
+    /// Used for upgrade from checksums version, need update checksums with new file names.
+    std::unordered_map<String, String> converted_files_map;
+    for (auto it = part_storage.iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        /// v1, v2 or checksums
+        if (from_checksums)
         {
-            /// remove vector index ready files
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION))
+                continue;
+        }
+        else if (!(endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION)))
+            continue;
+
+        /// vector index description file need to update name.
+        bool is_description = false;
+
+        /// Check for checksums first
+        if (from_checksums)
+        {
+            if (endsWith(file_name, current_index_description_name))
+            {
+                /// Lastest desciption file name with index name
+                if (endsWith(file_name, new_description_file_name))
+                {
+                    LOG_DEBUG(storage.log, "The current version file already exists locally, does not need to convert");
+                    return;
+                }
+
+                has_intact_old_version_vector_index = true;
+                is_description = true;
+            }
+            else if (file_name == current_checksums_file_name)
+                continue;
+        }
+        else if (endsWith(file_name, old_vector_index_ready_v2)) /// v2 ready file
+        {
             has_intact_old_version_vector_index = true;
-            disk->removeFile(full_relative_path + file_name);
+
+            LOG_DEBUG(storage.log, "Delete ready file {}", file_name);
+            part_storage.removeFile(file_name);
+
             continue;
         }
-
-        /// convert vector index v1 to v2
-        if (endsWith(file_name, old_vector_index_ready_v1))
+        else if (endsWith(file_name, old_index_description_v2))
         {
-            /// v1 to v2
-            String v2_vector_index_description_file = "";
-            Strings tokens;
-            boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
-            if (tokens.size() == 1)
-            {
-                v2_vector_index_description_file = current_index_description_v2;
-            }
-            else if (tokens.size() == 4)
-            {
-                /// for decouple part with vector index
-                String decouple_vector_prefix = tokens[0] + '-' + tokens[1] + '-' + tokens[2];
-                v2_vector_index_description_file = decouple_vector_prefix + '-' + current_index_description_v2;
-            }
-            else
-            {
-                LOG_ERROR(storage.log, "File name parsing failed, this is not normal");
-                return;
-            }
-            LOG_DEBUG(storage.log, "Convert file {} to {}", file_name, v2_vector_index_description_file);
-            disk->moveFile(full_relative_path + file_name, full_relative_path + v2_vector_index_description_file);
+            is_description = true;
+        }
+        else if (endsWith(file_name, old_vector_index_ready_v1)) /// v1 ready file
+        {
             has_intact_old_version_vector_index = true;
+            is_description = true; /// ready will be updated to description file.
+        }
+
+        /// There are some common codes to get new description file name.
+        if (is_description)
+        {
+            String new_file_name = file_name;
+            if (endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
+                new_file_name = fs::path(file_name).replace_extension(VECTOR_INDEX_FILE_EXTENSION).string();
+
+            /// Replace vector_index_description to <index_name>-vector_index_description
+            /// Replace merged-<part_id>-<part_name>-vector_index_description to merged-<part_id>-<part_name>-<index_name>-vector_index_description
+            new_file_name = std::regex_replace(new_file_name, std::regex("vector"), vector_index_desc.name + "-vector");
+            converted_files_map[file_name] = new_file_name;
+        }
+        else
+        {
+            /// For other vector index files (exclude ready, checksum, or description files), update vector index file extension to latest.
+            /// Support multiple vector indices feature changes the vector index file name by removing column name.
+            /// e.g. <index_name>-<column_name>-id_list will be updated to <index_name>-id_list
+
+            /// old vector index name
+            String old_vector_index_column_name = vector_index_desc.name + "-" + vector_index_desc.column;
+            if (file_name.find(old_vector_index_column_name) == std::string::npos)
+            {
+                /// Just check suffix
+                if (!from_checksums && endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
+                {
+                    String new_file_name = fs::path(file_name).replace_extension(VECTOR_INDEX_FILE_EXTENSION).string();
+                    converted_files_map[file_name] = new_file_name;
+                }
+                continue;
+            }
+
+            /// Replace "<index_name>-<column_name>" to "<index_name>"
+            String new_file_name = std::regex_replace(file_name, std::regex(old_vector_index_column_name), vector_index_desc.name);
+
+            if (!from_checksums && endsWith(new_file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
+                new_file_name = fs::path(new_file_name).replace_extension(VECTOR_INDEX_FILE_EXTENSION).string();
+
+            converted_files_map[file_name] = new_file_name;
         }
     }
 
-    if (has_intact_old_version_vector_index)
+    /// Support multiple vector indices
+    /// No vector index files in part or incomplete vector index files
+    if (!has_intact_old_version_vector_index)
+        return;
+
+    /// Here we collect converted files and upgrade is needed.
+    for (auto const & [old_name_, new_name_] : converted_files_map)
     {
-        auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-        if (metadata_snapshot->vec_indices.size() != 1)
+        part_storage.moveFile(old_name_, new_name_);
+        LOG_DEBUG(storage.log, "Convert vector index file {} to {}", old_name_, new_name_);
+    }
+
+    /// Old version vector index files have ready file, will generate checksums file.
+    Checksums vector_index_checksums;
+    if (!from_checksums)
+        vector_index_checksums = calculateVectorIndexChecksums(part_storage.getRelativePath());
+    else if (!converted_files_map.empty())
+    {
+        if (!part_storage.exists(current_checksums_file_name))
         {
-            LOG_ERROR(
-                storage.log,
-                "Have {} vector indices for the old version vector index, that's not normal.",
-                metadata_snapshot->vec_indices.size());
+            LOG_WARNING(storage.log, "checksums file '{}' doesn't exist in part {}, will not update it", current_checksums_file_name, name);
             return;
         }
 
-        auto & vector_index_name = metadata_snapshot->vec_indices[0].name;
+        /// Multiple vector indices feature changes vector file names
+        MergeTreeDataPartChecksums old_checksums;
+        auto buf = part_storage.readFile(current_checksums_file_name, {}, std::nullopt, std::nullopt);
+        if (old_checksums.read(*buf))
+            assertEOF(*buf);
 
-        for (auto it = disk->iterateDirectory(full_relative_path); it->isValid(); it->next())
+        for (auto const & [name_, checksum_] : old_checksums.files)
         {
-            String file_name = it->name();
-            if (!endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
-                continue;
-
-            String new_file_name = fs::path(file_name).replace_extension(VECTOR_INDEX_FILE_EXTENSION).string();
-            disk->moveFile(full_relative_path + file_name, full_relative_path + new_file_name);
-            LOG_DEBUG(storage.log, "Convert vector index file {} to {}", file_name, new_file_name);
+            String new_name_;
+            if (converted_files_map.contains(name_))
+            {
+                new_name_ = converted_files_map[name_];
+            }
+            else
+            {
+                new_name_ = name_;
+            }
+            vector_index_checksums.addFile(new_name_, checksum_.file_size, checksum_.file_hash);
         }
 
-        auto vector_index_checksums = calculateVectorIndexChecksums(full_relative_path);
-        LOG_DEBUG(storage.log, "write vector index {} checksums file for part {}", vector_index_name, name);
-        writeMetadata(
-            vector_index_name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION,
-            {},
-            [&vector_index_checksums](auto & buffer) { vector_index_checksums.write(buffer); });
+        part_storage.removeFile(current_checksums_file_name);
     }
+
+    LOG_DEBUG(storage.log, "write vector index {} checksums file for part {}", vector_index_desc.name, name);
+    writeMetadata(
+        current_checksums_file_name,
+        {},
+        [&vector_index_checksums](auto & buffer) { vector_index_checksums.write(buffer); });
+
+    /// Incomplete vector index files will be removed when loading checksums file.
 }
 
 void IMergeTreeDataPart::convertIndexFileForRestore()
 {
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-    if (metadata_snapshot->vec_indices.empty())
+    if (!metadata_snapshot->hasVectorIndices())
         return;
 
     if (!getDataPartStorage().exists(toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_EXTENSION))
@@ -2173,9 +2311,9 @@ void IMergeTreeDataPart::convertIndexFileForRestore()
     if (converted_map.empty())
         return;
 
-    for (auto const & vec_index_desc : metadata_snapshot->vec_indices)
+    for (auto const & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
-        String checksums_filename = vec_index_desc.name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION;
+        String checksums_filename = VectorIndex::getVectorIndexChecksumsFileName(vec_index_desc.name);
         if (!getDataPartStorage().exists(checksums_filename))
             continue;
 
@@ -2210,137 +2348,255 @@ void IMergeTreeDataPart::loadVectorIndexMetadata() const
         return;
 
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-    if (metadata_snapshot->vec_indices.empty())
+    if (!metadata_snapshot->hasVectorIndices())
         return;
 
+    /// Will remove invalid vector index files.
+    bool has_invalid_vector_index = false;
+
     /// Check if vector index checksums exists
-    for (const auto & vec_index_desc : metadata_snapshot->vec_indices)
+    /// Assume that function loadVectorIndexChecksums() is called.
+    /// Load vector index based on files recorded in the vector index checksums.
+    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
         const auto & vector_index_name = vec_index_desc.name;
-        String checksums_filename = vector_index_name + "-" + VECTOR_INDEX_FILE_CHECKSUMS_NAME + VECTOR_INDEX_FILE_EXTENSION;
-        if (!getDataPartStorage().exists(checksums_filename))
+
+        /// No checksums
+        if (!hasVectorIndexChecksums(vector_index_name))
             continue;
 
-        if (!getDataPartStorage().exists(toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_EXTENSION))
+        Checksums index_checksums = getVectorIndexChecksums(vector_index_name);
+
+        /// Vpart and DPart are different from the file names.
+        if (index_checksums.has(VectorIndex::getVectorIndexDescriptionFileName(vector_index_name)))
             loadSimpleVectorIndexMetadata(vec_index_desc);
         else
-            loadDecoupledVectorIndexMetadata(vec_index_desc);
+        {
+            /// Try to load decoupled vector index if exists
+            loadDecoupledVectorIndexMetadata(vec_index_desc, index_checksums);
+        }
+
+        /// Index checksum exists, but not a VPart or DPart, will remove incomplete vector index files.
+        if (!containRowIdsMaps(vector_index_name) && !containVectorIndex(vector_index_name))
+        {
+            LOG_WARNING(storage.log, "Will remove incomplete vector index files for {} in part {}", vector_index_name, name);
+            has_invalid_vector_index = true;
+
+            /// Remove vector index's checksums from part metadata
+            removeVectorIndexChecksums(vector_index_name);
+        }
     }
+
+    /// Remove invalid vector index files.
+    if (has_invalid_vector_index)
+        removeIncompleteVectorIndexFiles();
 }
 
 void IMergeTreeDataPart::loadSimpleVectorIndexMetadata(const VectorIndexDescription & vec_index_desc) const
 {
-    if (!getDataPartStorage().exists(toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_SUFFIX))
-        return;
-
-    String index_name = vec_index_desc.name + "_" + vec_index_desc.column;
-    LOG_DEBUG(storage.log, "Index {} is built for part {}", index_name, name);
-    addVectorIndex(index_name);
+    LOG_DEBUG(storage.log, "Vector index {} on column {} is built for part {}", vec_index_desc.name, vec_index_desc.column, name);
+    addVectorIndex(vec_index_desc.name);
     addBuiltVectorIndex(vec_index_desc);
 }
 
-void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata(const VectorIndexDescription & vec_index_desc) const
+void IMergeTreeDataPart::loadDecoupledVectorIndexMetadata(const VectorIndexDescription & vec_index_desc, Checksums & index_checksums) const
 {
     /// Check if decoupled data part is enabled.
     /// No need to initialize merged_source_parts when decouple is disabled.
     if (!storage.getSettings()->enable_decouple_vector_index)
         return;
 
+    if (!index_checksums.has(toString("merged-inverted_row_ids_map") + VECTOR_INDEX_FILE_EXTENSION))
+        return;
+
     /// Find source part names based on vector_index_description.
-    std::vector<MergedPartNameAndId> old_part_names;
-    String description_file_name = toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_SUFFIX;
+    /// Support multiple vector indices. Reuse shared merged_source_parts if not empty.
+    std::lock_guard lock(decouple_mutex);
 
+    String description_file_name = VectorIndex::getVectorIndexDescriptionFileName(vec_index_desc.name);
+
+    if (merged_source_parts.empty())
     {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        if (!vector_index_checksums_map.contains(vec_index_desc.name))
-        {
-            LOG_ERROR(
-                storage.log,
-                "Failed to find checksums for vector index {} on part {}, will remove all merged files",
-                vec_index_desc.name,
-                name);
-            removeAllRowIdsMaps();
-            vector_index_checksums_map.clear();
-            return;
-        }
-
-        for (auto const & [file_name, _] : vector_index_checksums_map[vec_index_desc.name].files)
+        std::vector<MergedPartNameAndId> old_part_names;
+        for (auto const & [file_name, _] : index_checksums.files)
         {
             if (!endsWith(file_name, description_file_name))
                 continue;
 
-            /// Found merged files, merged-0-<part name>-vector_index_description.vidx3
+            /// Found merged files, merged-<id>-<part name>-<vector_index_name>-vector_index_ready
             Strings tokens;
             boost::algorithm::split(tokens, file_name, boost::is_any_of("-"));
-            if (tokens.size() != 4)
+            if (tokens.size() != 5)
             {
-                LOG_INFO(
-                    storage.log, "Merged file name {} is invalid for decoupled part {}, will remove all merged files", file_name, name);
-                removeAllRowIdsMaps();
-                vector_index_checksums_map.clear();
+                LOG_INFO(storage.log, "Merged file name {} is invalid for vector index {} in decoupled part {}, will remove all merged files",
+                        file_name, vec_index_desc.name, name);
                 return;
             }
 
             old_part_names.emplace_back(tokens[2], std::stoi(tokens[1]));
         }
-    }
 
-    /// Initialize the decoupled metadata
-    if (!old_part_names.empty())
-    {
-        std::lock_guard lock(decouple_mutex);
-        merged_source_parts = old_part_names;
-
-        addDecoupledVectorIndex(old_part_names, vec_index_desc);
-    }
-}
-
-void IMergeTreeDataPart::removeAllRowIdsMaps(const String & index_name, bool skip_checksum) const
-{
-    if (!containRowIdsMaps())
-        return;
-
-    {
-        std::lock_guard lock_checksums(vector_index_checksums_mutex);
-        if (!vector_index_checksums_map[index_name].empty())
+        /// Initialize the decoupled metadata
+        if (!old_part_names.empty())
         {
-            IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
-            for (const auto & [file_name, _] : vector_index_checksums_map[index_name].files)
-                part_storage.removeFileIfExists(file_name);
+            merged_source_parts = old_part_names;
+            decoupled_vector_indexed.insert(vec_index_desc.name);
 
-            if (!skip_checksum)
-                part_storage.removeFileIfExists(index_name + "-" + VECTOR_INDEX_CHECKSUMS + VECTOR_INDEX_FILE_SUFFIX);
-            vector_index_checksums_map.erase(index_name);
+            addDecoupledVectorIndex(merged_source_parts, vec_index_desc);
         }
     }
+    else
+    {
+        /// Check if source parts's vector index description file exists.
+        for (const auto & old_part : merged_source_parts)
+        {
+            String old_part_description_file_name = "merged-" + toString(old_part.id) + "-" + old_part.name + "-" + VectorIndex::getVectorIndexDescriptionFileName(vec_index_desc.name);
 
-    std::lock_guard lock(decouple_mutex);
-    merged_source_parts.clear();
+            if (!index_checksums.has(old_part_description_file_name))
+            {
+                /// No decoupled vector index for MPart, quick return.
+                return;
+            }
+        }
 
-    std::lock_guard info_lock(vector_indices_mutex);
-    vector_indices_decoupled.erase(index_name);
+        /// Add vector index name to decoupled_vector_indexed
+        decoupled_vector_indexed.insert(vec_index_desc.name);
+
+        addDecoupledVectorIndex(merged_source_parts, vec_index_desc);
+    }
 }
 
-void IMergeTreeDataPart::removeAllRowIdsMaps() const
+void IMergeTreeDataPart::removeIncompleteVectorIndexFiles() const
 {
-    /// We force to remove all row ids maps when incompleted files found.
+    /// Assume that all vector indices' checksums are loaded.
+    /// First collect all vector index files name recorded in checksums.
+    NameSet files_in_vector_checksums = getAllVectorIndexFileNamesInChecksums();
+
+    IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+
+    /// Loop through data part directory and remove incomplete vector index files
     for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
     {
         String file_name = it->name();
 
-        if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX)
-            || (!startsWith(file_name, "merged-") && !endsWith(file_name, toString(VECTOR_INDEX_CHECKSUMS) + VECTOR_INDEX_FILE_SUFFIX)))
-            continue;
+        if (endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION))
+        {
+            if (files_in_vector_checksums.count(file_name) == 0)
+            {
+                LOG_DEBUG(storage.log, "Remove vector index file '{}' in part {}", file_name, name);
+                part_storage.removeFileIfExists(file_name);
+            }
+        }
+        else if (endsWith(file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
+        {
+            LOG_DEBUG(storage.log, "Remove old vector index file '{}' in part {}", file_name, name);
+            part_storage.removeFileIfExists(file_name);
+        }
+    }
+}
 
-        IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+void IMergeTreeDataPart::removeIncompleteMovedVectorIndexFiles(const Names & index_files_list) const
+{
+    LOG_INFO(storage.log, "Try to remove incomplete built vector index files from part {}", name);
+
+    /// Successfully moved files can be get when building vector index. Just remove vector index files.
+    IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+    for (const auto & file_name : index_files_list)
         part_storage.removeFileIfExists(file_name);
+}
+
+void IMergeTreeDataPart::removeRowIdsMaps(const String & index_name, bool skip_checksum) const
+{
+    /// No need to check part's flag or table's metadata.
+    IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(getDataPartStorage());
+
+    /// Support multiple vector indices
+    /// Row ids maps are shared by multiple merged vector indices.
+    /// 1. File starts with merged-<part_id>-<part_name>-row_ids_map, is shared by merged vector indices from the same old part.
+    /// 2. Files starts with merged-inverted_row_ids_map or merged-inverted_row_sources_map are shared by all merged vector indices.
+    /// The common row ids maps files will be removed for last merge vector index.
+    String common_row_ids_map_suffix = toString("row_ids_map") + VECTOR_INDEX_FILE_EXTENSION;
+    String common_row_sources_map = toString("merged-inverted_row_sources_map") + VECTOR_INDEX_FILE_EXTENSION;
+
+    /// Remove files related to index_name recorded in the vector index checksums if exists.
+    if (hasVectorIndexChecksums(index_name))
+    {
+        Checksums index_checksums = getVectorIndexChecksums(index_name);
+        for (const auto & [file_name, _] : index_checksums.files)
+        {
+            /// Delay to remove common files
+            if (file_name.find(common_row_ids_map_suffix) != std::string::npos
+                || file_name == common_row_sources_map)
+                continue;
+
+            part_storage.removeFileIfExists(file_name);
+        }
+
+        if (!skip_checksum)
+            part_storage.removeFileIfExists(VectorIndex::getVectorIndexChecksumsFileName(index_name));
+
+        /// Remove from part metadata
+        /// When skip_checksum is true, built vector index's checksum will be added after remove.
+        removeVectorIndexChecksums(index_name);
+    }
+    else
+    {
+        /// Remove merged vector index files related to index_name.
+        /// Files start with 'merged-<part_id>-<part_name>-<index_name>-' will be removed
+        String file_prefix = "merged-";
+        String index_name_substr = "-" + index_name + "-";
+
+        for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+        {
+            String file_name = it->name();
+
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION) ||
+                !startsWith(file_name, file_prefix) ||
+                file_name.find(index_name_substr) == std::string::npos)
+                continue;
+
+            part_storage.removeFileIfExists(file_name);
+        }
     }
 
     std::lock_guard lock(decouple_mutex);
-    merged_source_parts.clear();
+    decoupled_vector_indexed.erase(index_name);
 
     std::lock_guard info_lock(vector_indices_mutex);
-    vector_indices_decoupled.clear();
+    vector_indices_decoupled.erase(index_name);
+
+    /// Remove common vector index files for the last index
+    if (decoupled_vector_indexed.empty())
+    {
+        for (auto it = getDataPartStorage().iterate(); it->isValid(); it->next())
+        {
+            String file_name = it->name();
+
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_EXTENSION) || !startsWith(file_name, "merged-"))
+                continue;
+
+            part_storage.removeFileIfExists(file_name);
+        }
+
+        merged_source_parts.clear();
+    }
+}
+
+NameSet IMergeTreeDataPart::getAllVectorIndexFileNamesInChecksums() const
+{
+    NameSet res;
+
+    std::lock_guard lock(vector_index_checksums_mutex);
+    for (const auto & [index_name, vector_index_checksums] : vector_index_checksums_map)
+    {
+        for (const auto & [file_name, _] : vector_index_checksums.files)
+            res.emplace(file_name);
+
+        /// Add checksums file name for this vector index
+        res.emplace(VectorIndex::getVectorIndexChecksumsFileName(index_name));
+    }
+
+    return res;
 }
 
 /// Project part / part with project parts / compact part doesn't support LWD.
@@ -2439,30 +2695,23 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
     return std::optional<ColumnPtr>(ret[0]);
 }
 
-void IMergeTreeDataPart::onLightweightDelete() const
+std::vector<UInt64> IMergeTreeDataPart::getDeleteBitmapFromRowExists() const
 {
-    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
-        return;
-
-    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-    if (metadata_snapshot->vec_indices.empty() || !containAnyVectorIndex())
-        return;
+    std::vector<UInt64> del_row_ids; /// Store deleted row ids
 
     std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
     if (!row_exists_column_opt.has_value())
     {
         LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
-        return;
+        return del_row_ids;
     }
 
     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
     if (row_exists_col == nullptr)
     {
         LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
-        return;
+        return del_row_ids;
     }
-
-    std::vector<UInt64> del_row_ids; /// Store deleted row ids
 
     const ColumnUInt8::Container & vec_res = row_exists_col->getData();
     for (size_t pos = 0; pos < vec_res.size(); pos++)
@@ -2471,25 +2720,53 @@ void IMergeTreeDataPart::onLightweightDelete() const
             del_row_ids.push_back(static_cast<UInt64>(pos));
     }
 
-    if (del_row_ids.empty())
-    {
-        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+    return del_row_ids;
+}
+
+void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
+{
+    if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
         return;
-    }
-    /// currently only consider one vector index
-    auto vec_index_desc = metadata_snapshot->vec_indices[0];
 
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
+    auto metadata_snapshot = storage.getInMemoryMetadataPtr();
+    if (!metadata_snapshot->hasVectorIndices())
+        return;
+
+    /// Support multiple vector indices. We may need to update specified vector index after build finished.
+    bool update_all_indices = index_name.empty() ? true : false;
+    if ((update_all_indices && !containAnyVectorIndex()) || (!update_all_indices && !containVectorIndex(index_name)))
+        return;
+
+    /// Store deleted row ids
+    std::vector<UInt64> del_row_ids;
+
+    /// Support multiple vector indices
+    for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
-    VectorIndex::SegmentId segment_id(part_storage->volume, getDataPartStorage().getFullPath(), name, vec_index_desc.name, vec_index_desc.column);
-    VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+        /// Only update the specified vector index
+        if (!update_all_indices && vec_index_desc.name != index_name)
+            continue;
 
-    /// Update vector index deleted bitmap for the part on disk and cache if exists.
-    vec_executor.updateBitMap(del_row_ids);
+        VectorIndex::SegmentId segment_id(getDataPartStoragePtr(), name, vec_index_desc.name, vec_index_desc.column);
+        VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+
+        /// Update vector index deleted bitmap in cache if exists.
+        if (vec_executor.storedInCache())
+        {
+            /// Only read row_exists when vector index is cached.
+            if (del_row_ids.empty())
+            {
+                del_row_ids = getDeleteBitmapFromRowExists();
+                if (del_row_ids.empty())
+                {
+                    LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+                    return;
+                }
+            }
+
+            vec_executor.updateBitMap(del_row_ids);
+        }
+    }
 }
 
 void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
@@ -2499,59 +2776,48 @@ void IMergeTreeDataPart::onDecoupledLightWeightDelete() const
 
     /// Quick return if no vector index defined or no merged old parts' index files
     auto metadata_snapshot = storage.getInMemoryMetadataPtr();
-    if (metadata_snapshot->vec_indices.empty() || !containRowIdsMaps())
+    if (!metadata_snapshot->hasVectorIndices() || !containAnyRowIdsMaps())
         return;
-
-    /// Load _row_exists column
-    std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
-    if (!row_exists_column_opt.has_value())
-    {
-        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
-        return;
-    }
-
-    const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
-    if (row_exists_col == nullptr)
-    {
-        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
-        return;
-    }
 
     /// Collect deleted ids. Loop through _row_exists column to find row ids (position) with value 0.
     std::vector<UInt64> new_del_ids;
 
-    const ColumnUInt8::Container & vec_res = row_exists_col->getData();
-    for (size_t pos = 0; pos < vec_res.size(); pos++)
-    {
-        if (!vec_res[pos])
-            new_del_ids.push_back(static_cast<UInt64>(pos));
-    }
-
-    if (new_del_ids.empty())
-    {
-        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
-        return;
-    }
-
-    /// currently only consider one vector index
-    auto vec_index_desc = metadata_snapshot->vec_indices[0];
-
     /// In decoupled part, need to map new delete row ids to old parts' row ids and update their delete bitmaps.
-    String data_path = getDataPartStorage().getFullPath();
+    /// Support multiple vector indices
+    for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+    {
+        if (!containRowIdsMaps(vec_index_desc.name))
+            continue;
 
-    const auto old_parts = getMergedSourceParts();
-    const DataPartStorageOnDiskBase * part_storage
-        = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
-    if (part_storage == nullptr)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-    }
-    for (const auto & old_part : old_parts)
-    {
-        VectorIndex::SegmentId segment_id(part_storage->volume, data_path, name, old_part.name, vec_index_desc.name, vec_index_desc.column, old_part.id);
-        VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
-        /// Update merged deleted bitmap for the old part on disk and cache if exists.
-        vec_executor.updateMergedBitMap(new_del_ids);
+        const auto old_parts = getMergedSourceParts(vec_index_desc.name);
+        const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(getDataPartStoragePtr().get());
+        if (part_storage == nullptr)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+        for (const auto & old_part : old_parts)
+        {
+            VectorIndex::SegmentId segment_id(getDataPartStoragePtr(), name, old_part.name, vec_index_desc.name, vec_index_desc.column, old_part.id);
+            VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+
+            /// Update merged deleted bitmap for the old part in cache if exists.
+            if (vec_executor.storedInCache())
+            {
+                /// Only read row_exists when vector index is cached.
+                if (new_del_ids.empty())
+                {
+                    new_del_ids = getDeleteBitmapFromRowExists();
+                    if (new_del_ids.empty())
+                    {
+                        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+                        return;
+                    }
+                }
+
+                vec_executor.updateMergedBitMap(new_del_ids);
+            }
+        }
     }
 }
 

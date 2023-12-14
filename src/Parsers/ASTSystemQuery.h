@@ -102,6 +102,8 @@ public:
         CANCEL_VIEW,
         TEST_VIEW,
         UNLOAD_PRIMARY_KEY,
+        START_BUILD_VECTOR_INDICES,
+        STOP_BUILD_VECTOR_INDICES,
         END
     };
 
