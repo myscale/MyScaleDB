@@ -208,7 +208,7 @@ private:
       */
     bool shouldExecuteLogEntry(
         const LogEntry & entry, String & out_postpone_reason,
-        MergeTreeDataMergerMutator & merger_mutator, MergeTreeData & data,
+        MergeTreeDataMergerMutator & merger_mutator, ActionBlocker & builds_blocker, MergeTreeData & data,
         std::unique_lock<std::mutex> & state_lock) const;
 
     Int64 getCurrentMutationVersionImpl(const String & partition_id, Int64 data_version, std::lock_guard<std::mutex> & /* state_lock */) const;
@@ -371,7 +371,7 @@ public:
     };
 
     using SelectedEntryPtr = std::shared_ptr<SelectedEntry>;
-    SelectedEntryPtr selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, MergeTreeData & data);
+    SelectedEntryPtr selectEntryToProcess(MergeTreeDataMergerMutator & merger_mutator, ActionBlocker & builds_blocker, MergeTreeData & data);
 
     /** Execute `func` function to handle the action.
       * In this case, at runtime, mark the queue element as running

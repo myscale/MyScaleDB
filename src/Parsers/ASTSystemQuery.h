@@ -76,6 +76,8 @@ public:
         START_THREAD_FUZZER,
         STOP_THREAD_FUZZER,
         UNFREEZE,
+        START_BUILD_VECTOR_INDICES,
+        STOP_BUILD_VECTOR_INDICES,
         END
     };
 

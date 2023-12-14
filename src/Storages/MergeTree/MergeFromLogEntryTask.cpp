@@ -31,6 +31,7 @@ MergeFromLogEntryTask::MergeFromLogEntryTask(
         selected_entry_,
         task_result_callback_)
 {
+    metadata_snapshot = storage.getInMemoryMetadataPtr();
 }
 
 
@@ -171,8 +172,6 @@ ReplicatedMergeMutateTaskBase::PrepareResult MergeFromLogEntryTask::prepare()
 
     /// It will live until the whole task is being destroyed
     table_lock_holder = storage.lockForShare(RWLockImpl::NO_QUERY, storage_settings_ptr->lock_acquire_timeout_for_background_operations);
-
-    StorageMetadataPtr metadata_snapshot = storage.getInMemoryMetadataPtr();
 
     auto future_merged_part = std::make_shared<FutureMergedMutatedPart>(parts, entry.new_part_format);
     if (future_merged_part->name != entry.new_part_name)
@@ -360,6 +359,10 @@ bool MergeFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrite
 
     /** Removing old parts from ZK and from the disk is delayed - see ReplicatedMergeTreeCleanupThread, clearOldParts.
      */
+
+    /// Support multiple vector indices
+    if (metadata_snapshot->hasVectorIndices())
+        storage.merger_mutator.handleVectorIndicesForMergedPart(part, parts, metadata_snapshot);
 
     /** With `ZSESSIONEXPIRED` or `ZOPERATIONTIMEOUT`, we can inadvertently roll back local changes to the parts.
      * This is not a problem, because in this case the merge will remain in the queue, and we will try again.

@@ -363,12 +363,8 @@ bool ParserTablePropertiesDeclarationList::parseImpl(Pos & pos, ASTPtr & node, E
             columns->children.push_back(elem);
         else if (elem->as<ASTIndexDeclaration>())
             indices->children.push_back(elem);
-        else if (elem->as<ASTVectorIndexDeclaration>()) {
-            if(vec_indices->children.size() == 0)
-                vec_indices->children.push_back(elem);
-            else
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot create vector index {}: only one vector index can be created for this table", elem->as<ASTVectorIndexDeclaration>()->name);
-        }
+        else if (elem->as<ASTVectorIndexDeclaration>())
+            vec_indices->children.push_back(elem);
         else if (elem->as<ASTConstraintDeclaration>())
             constraints->children.push_back(elem);
         else if (elem->as<ASTProjectionDeclaration>())

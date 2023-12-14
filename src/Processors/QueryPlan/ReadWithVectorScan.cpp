@@ -90,31 +90,38 @@ ReadWithVectorScan::ReadWithVectorScan(
     if (enable_parallel_reading)
         read_task_callback = context->getMergeTreeReadTaskCallback();
 
+    /// Support multiple vector indices
+    auto vector_scan_info_ptr = query_info.vector_scan_info;
+
     /// Determine if we can use two stage search
-    if (context->getSettingsRef().two_stage_search_option > 0 && !metadata_for_reading->vec_indices.empty())
+    /// Currently two stage search doesn't support batch distance
+    if (context->getSettingsRef().two_stage_search_option > 0 && vector_scan_info_ptr && !vector_scan_info_ptr->is_batch &&
+        metadata_for_reading->hasVectorIndexOnColumn(vector_scan_info_ptr->vector_scan_descs[0].search_column_name))
     {
-        /// Currently support one vector index
-        auto vector_index = metadata_for_reading->vec_indices[0];
+        /// TODO: Currently support one distance function
+        auto vector_scan_desc = vector_scan_info_ptr->vector_scan_descs[0];
 
-        /// Check vector index type
-        Search::IndexType type;
-        Search::findEnumByName(vector_index.type, type);
-
+        /// Get index type and disk_mode from vector index defined on the search column
+        Search::IndexType type = Search::IndexType::IVFFLAT;
         int disk_mode = data.getSettings()->default_mstg_disk_mode;
 
-        const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index.parameters);
-        if (index_parameter.contains("disk_mode"))
-            disk_mode = index_parameter.getParam<int>("disk_mode", disk_mode);
+        for (auto & vec_index_desc : metadata_for_reading->getVectorIndices())
+        {
+            if (vec_index_desc.column == vector_scan_desc.search_column_name)
+            {
+                Search::findEnumByName(vec_index_desc.type, type);
 
-        auto vector_scan_info_ptr = query_info.vector_scan_info;
+                const auto index_parameter = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
+                if (index_parameter.contains(DISK_MODE_PARAM))
+                    disk_mode = index_parameter.getParam<int>(DISK_MODE_PARAM, disk_mode);
 
-        bool adaptive_two_stage = context->getSettingsRef().two_stage_search_option == 1;
+                break;
+            }
+        }
 
-        /// Currently two stage search doesn't support batch distance
-        if (disk_mode && (type == Search::IndexType::MSTG) && vector_scan_info_ptr && !vector_scan_info_ptr->is_batch)
+        if (disk_mode && (type == Search::IndexType::MSTG))
         {
             /// Prepare for number of cadidates (num_reorder) for first stage search
-            auto vector_scan_desc = vector_scan_info_ptr->vector_scan_descs[0];
             Search::Parameters search_params = VectorIndex::convertPocoJsonToMap(vector_scan_desc.vector_parameters);
 
             UInt64 total_rows = 0;
@@ -125,6 +132,8 @@ ReadWithVectorScan::ReadWithVectorScan(
             num_reorder = VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
 
             LOG_DEBUG(log, "num_reorder for first stage = {}", num_reorder);
+
+            bool adaptive_two_stage = context->getSettingsRef().two_stage_search_option == 1;
 
             /// In adaptive two stage search option, enable only when disk_mode > 0 and saved IO count is larger than 1000
             if (adaptive_two_stage)

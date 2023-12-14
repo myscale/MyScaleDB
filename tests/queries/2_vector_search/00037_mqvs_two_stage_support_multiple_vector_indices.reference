@@ -1,0 +1,28 @@
+Test two stage search with MSTG and IVFFLAT types
+0
+0
+Vector index build status
+vec_ind	MSTG	vec_ind vector TYPE MSTG	Built
+vec_ind_v2	IVFFLAT	vec_ind_v2 v2 TYPE IVFFLAT	Built
+two stage search enabled on MSTG type
+0	16
+2	16
+3	64
+4	144
+5	256
+6	400
+7	576
+8	784
+9	1024
+10	1296
+two stage search enabled on IVFFLAT type
+0	0
+2	0
+3	0
+4	0
+5	0
+6	0
+7	0
+8	0
+9	0
+10	0
