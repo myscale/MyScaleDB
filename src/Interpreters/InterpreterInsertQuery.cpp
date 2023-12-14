@@ -341,7 +341,7 @@ BlockIO InterpreterInsertQuery::execute()
     auto table_lock = table->lockForShare(getContext()->getInitialQueryId(), settings.lock_acquire_timeout);
     auto metadata_snapshot = table->getInMemoryMetadataPtr();
 
-    for (const auto & vec_index : metadata_snapshot->vec_indices)
+    for (const auto & vec_index : metadata_snapshot->getVectorIndices())
     {
         auto col_name = vec_index.column;
         if (metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)

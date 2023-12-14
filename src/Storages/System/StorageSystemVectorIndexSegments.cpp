@@ -83,16 +83,8 @@ protected:
             owner_part_id = vec_info->owner_part_id;
         }
 
-        const DataPartStorageOnDiskBase * part_storage
-            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
-        if (part_storage == nullptr)
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-        }
-
         VectorIndex::SegmentId segment_id(
-            getVolumeFromPartStorage(*part_storage),
-            part->getDataPartStorage().getFullPath(),
+            part->getDataPartStoragePtr(),
             part->name,
             owner_part,
             index.name,
@@ -268,7 +260,7 @@ protected:
                                 = static_cast<int>(metadata_snapshot->getConstraints().getArrayLengthByColumnName(index.column).first);
 
                         bool found = false;
-                        if (part->containRowIdsMaps())
+                        if (part->containRowIdsMaps(index.name))
                         {
                             if (auto it = part->vector_indices_decoupled.find(index.name); it != part->vector_indices_decoupled.end())
                             {

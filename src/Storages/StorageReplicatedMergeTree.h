@@ -337,6 +337,9 @@ public:
     /// Check if part is being merged right now via future_parts in queue.
     bool canSendVectorIndexForPart(const String & part_name) const;
 
+    /// Send decouple part ane background build vector
+    std::unique_lock<std::mutex> lockDecouplePartForSendPart(const MergeTreeDataPartPtr & part) const;
+
     /// Required only to avoid races between merge and sendVectorIndex
     std::unordered_set<String> currently_sending_vector_index_parts;
     std::mutex currently_sending_vector_index_parts_mutex;
@@ -942,10 +945,13 @@ private:
     bool checkReplicaHaveVIndexInPart(const String & replica, const String & part_name, const String & vec_index_name);
 
     /// Remove parts with vector index build status from ZooKeeper
-    void removeVecIndexBuildStatusForPartsFromZK(zkutil::ZooKeeperPtr & zookeeper, const Strings & part_names);
+    void removeVecIndexBuildStatusForPartsFromZK(zkutil::ZooKeeperPtr & zookeeper, const DataPartsVector & parts_to_delete);
 
     /// Cleanups vidx_build_parts/part_names for vector index build status
-    void cleanupVectorIndexBuildStatusFromZK();
+    void cleanupVectorIndexBuildStatusFromZK(const String & index_name);
+
+    /// In create and drop vector index cases, do some operations.
+    void startVectorIndexJob(const VectorIndicesDescription & old_vec_indices, const VectorIndicesDescription & new_vec_indices);
 
     /// Get cached vector index info from zookeeper and load into cache.
     void loadVectorIndexFromZookeeper();

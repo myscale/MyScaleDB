@@ -1,0 +1,5 @@
+-- Test drop a vector index and add a new index with the same name
+0
+-- status is InProgress for new added v1 after drop index v1
+test_multi_replica_drop_index	v2	MSTG	v2 v2 TYPE MSTG	InProgress
+test_multi_replica_drop_index	v1	FLAT	v1 v1 TYPE FLAT	InProgress

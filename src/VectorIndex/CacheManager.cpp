@@ -73,6 +73,7 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
     DB::VectorIndexEventLog::addEventLog(
         DB::Context::getGlobalContextInstance(),
         cache_key.getTableUUID(),
+        cache_key.getIndexName(),
         cache_key.getPartName(),
         cache_key.getPartitionID(),
         DB::VectorIndexEventLogElement::LOAD_START);
@@ -84,6 +85,7 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_FAILED);
@@ -93,6 +95,7 @@ void CacheManager::put(const CacheKey & cache_key, IndexWithMetaPtr index)
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::LOAD_SUCCEED);
@@ -113,6 +116,7 @@ void CacheManager::flushWillUnloadLog()
             DB::VectorIndexEventLog::addEventLog(
                 context_,
                 cache_key.getTableUUID(),
+                cache_key.getIndexName(),
                 cache_key.getPartName(),
                 cache_key.getPartitionID(),
                 DB::VectorIndexEventLogElement::WILLUNLOAD);
@@ -132,6 +136,7 @@ void CacheManager::forceExpire(const CacheKey & cache_key)
         DB::VectorIndexEventLog::addEventLog(
             global_context,
             cache_key.getTableUUID(),
+            cache_key.getIndexName(),
             cache_key.getPartName(),
             cache_key.getPartitionID(),
             DB::VectorIndexEventLogElement::CACHE_EXPIRE);

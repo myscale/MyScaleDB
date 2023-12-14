@@ -189,12 +189,12 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             }
 
             /// Get vector files from part.
-            if (part->vector_index_build_cancelled || part->vector_index_build_error)
+            if (part->isBuildCancelled() || part->hasBuildError(vec_index_name))
             {
                 LOG_DEBUG(log, "The vector index {} build in part {} was cancelled or failed with error, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "fail"});
             }
-            else if (!part->containAnyVectorIndex())
+            else if (!part->containVectorIndex(vec_index_name))
             {
                 LOG_WARNING(log, "The vector index {} in part {} was not ready, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "not_ready"});
@@ -202,6 +202,7 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             else
             {
                 /// Handle cases when sending vector index and merge has conflicts.
+                /// When merge on VParts, vector index files will be moved from old parts to new decouple part.
                 {
                     std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
                     if (!data.currently_sending_vector_index_parts.insert(part->name).second)
@@ -222,7 +223,7 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
                 if (!data.canSendVectorIndexForPart(part->name))
                 {
                     response.addCookie({"vector_index_build_status", "retry"});
-                    LOG_DEBUG(log, "Part {} is currenlty being merged, hence unable to send vector index", part->name);
+                    LOG_DEBUG(log, "Part {} is currently being merged, hence unable to send vector index", part->name);
                     return;
                 }
 
@@ -386,8 +387,44 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
     bool from_remote_disk,
     bool send_projections)
 {
+    bool include_vector_indices = true;
+
+    /// Handle cases when sending part with vector index and merge has conflicts.
+    /// When merge on VParts, vector index files will be moved from old parts to new decouple part.
+    if (part->containAnyVectorIndex() && !part->containAnyRowIdsMaps())
+    {
+        /// Check if this part is currently being merged. Decouple part cannot be merged.
+        if (!data.canSendVectorIndexForPart(part->name))
+        {
+            LOG_DEBUG(log, "Part {} is currently being merged, hence unable to send vector index", part->name);
+            include_vector_indices = false;
+        }
+    }
+
+    /// Add the part name to currently_sending_vector_index_parts
+    if (part->containAnyVectorIndex() || part->containAnyRowIdsMaps())
+    {
+        std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
+        if (!data.currently_sending_vector_index_parts.insert(part->name).second)
+        {
+            LOG_DEBUG(log, "Part {} with vector index is already sending right now", part->name);
+        }
+    }
+
+    SCOPE_EXIT_MEMORY
+    ({
+        if (part->containAnyVectorIndex() || part->containAnyRowIdsMaps())
+        {
+            std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
+            data.currently_sending_vector_index_parts.erase(part->name);
+        }
+    });
+
+    /// Background build vector index will remove merged old parts' vector index files after finished.
+    std::unique_lock<std::mutex> move_index_and_send_dpart_lock = data.lockDecouplePartForSendPart(part);
+
     NameSet files_to_replicate;
-    auto file_names_without_checksums = part->getFileNamesWithoutChecksums();
+    auto file_names_without_checksums = part->getFileNamesWithoutChecksums(include_vector_indices);
 
     for (const auto & [name, _] : part->checksums.files)
     {
@@ -397,45 +434,10 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
         files_to_replicate.insert(name);
     }
 
-    /// Check if can send vector index files.
-    bool skip_send_vector_index_files = true;
-    std::unique_lock<std::mutex> move_index_and_fetch_lock;
-
-    if (part->storage.getInMemoryMetadataPtr()->hasVectorIndices())
-    {
-        skip_send_vector_index_files = false;
-
-        std::lock_guard lock(part->storage.currently_vector_indexing_parts_mutex);
-        for (const auto & part_name : part->storage.currently_vector_indexing_parts)
-        {
-            auto info = MergeTreePartInfo::fromPartName(part_name, part->storage.format_version);
-
-            /// If part is currently building vector index, skip to send.
-            if (part->info.contains(info) && (part->info.isFromSamePart(info)))
-            {
-                if (part->containRowIdsMaps())
-                {
-                    /// Only need to lock for decouple part which contains vector index from old parts.
-                    move_index_and_fetch_lock = part->lockPartForIndexMoveAndMutate(/* is_mutating */ false, /* from_fetch_part */ true);
-                }
-                else
-                {
-                    LOG_DEBUG(log, "Skip to send vector index files for part {} which is currently building vector index", part_name);
-                    skip_send_vector_index_files = true;
-                }
-
-                break;
-            }
-        }
-    }
-
     for (const auto & name : file_names_without_checksums)
     {
         if (client_protocol_version < REPLICATION_PROTOCOL_VERSION_WITH_PARTS_DEFAULT_COMPRESSION
             && name == IMergeTreeDataPart::DEFAULT_COMPRESSION_CODEC_FILE_NAME)
-            continue;
-
-        if (skip_send_vector_index_files && endsWith(name, IMergeTreeDataPart::VECTOR_INDEX_FILE_EXTENSION))
             continue;
 
         files_to_replicate.insert(name);
@@ -1000,7 +1002,7 @@ String Fetcher::fetchVectorIndex(
     if (build_status == "fail")
     {
         LOG_DEBUG(log, "Unable to fetch vector index {} in part {} due to build status is fail", vec_index_name, future_part_name);
-        future_part->setBuildError();
+        future_part->setBuildError(vec_index_name);
         return {};
     }
     else if (build_status == "no_need")

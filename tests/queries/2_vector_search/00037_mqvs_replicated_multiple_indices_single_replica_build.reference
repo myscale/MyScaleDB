@@ -1,0 +1,16 @@
+0
+0
+test_rep_multi	v1	MSTG	Built
+test_rep_multi_2	v1	MSTG	Built
+Add a second vector index
+0
+0
+test_rep_multi	v1	MSTG	Built
+test_rep_multi	v2	MSTG	Built
+test_rep_multi_2	v1	MSTG	Built
+test_rep_multi_2	v2	MSTG	Built
+Test drop one of two replicas, vector index should build sucessfully
+0
+0
+test_rep_multi	v1	MSTG	2	2	Built
+test_rep_multi	v2	MSTG	2	2	Built

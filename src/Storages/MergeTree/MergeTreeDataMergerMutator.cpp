@@ -376,7 +376,7 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectPartsToMerge(
         if (!data_settings->min_age_to_force_merge_on_partition_only)
             merge_settings.min_age_to_force_merge = data_settings->min_age_to_force_merge_seconds;
 
-        if (!metadata_snapshot->vec_indices.empty())
+        if (metadata_snapshot->hasVectorIndices())
             merge_settings.base = data_settings->simple_merge_selector_base;
 
         if (aggressive)
@@ -660,6 +660,60 @@ MergeTreeData::DataPartPtr MergeTreeDataMergerMutator::renameMergedTemporaryPart
 
     LOG_TRACE(log, "Merged {} parts: [{}, {}] -> {}", parts.size(), parts.front()->name, parts.back()->name, new_data_part->name);
     return new_data_part;
+}
+
+
+void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
+    MergeTreeData::DataPartPtr new_part,
+    MergeTreeData::DataPartsVector old_parts,
+    StorageMetadataPtr metadata_snapshot)
+{
+    /// Check latest metadata if vector index has been dropped.
+    const auto new_vector_indices = new_part->storage.getInMemoryMetadataPtr()->getVectorIndices();
+
+    /// The new part is decouple or not depending on the number of source parts
+    bool can_be_decouple = old_parts.size() == 1 ? false : true;
+
+    /// Since new part will not load dropped vector index, in cases when drop vector index happens after move vector index,
+    /// we need to remove left vector index files from new part.
+    for (const auto & old_vec_index : metadata_snapshot->getVectorIndices())
+    {
+        if (new_vector_indices.has(old_vec_index))
+            continue;
+
+        /// This old vector index has been dropped during merge. Check decouple part or vpart cases.
+        String vec_index_name = old_vec_index.name;
+        if (can_be_decouple)
+        {
+            LOG_DEBUG(log, "Try to remove old parts' vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
+            new_part->removeRowIdsMaps(vec_index_name);
+        }
+        else
+        {
+            LOG_DEBUG(log, "Try to remove vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
+            new_part->removeVectorIndex(vec_index_name);
+        }
+    }
+
+    /// Special handling for merge one single VPart. If new part has vector index, expire the index cache for old part.
+    /// TODO: Can use old part's index cache, just update cache key to avoid load it for new part?
+    if (new_part->containAnyVectorIndex() && old_parts.size() == 1)
+    {
+        auto old_part = old_parts[0];
+        for (const auto & vec_index : new_vector_indices)
+        {
+            if (new_part->containVectorIndex(vec_index.name))
+            {
+                /// Expire cache for old part
+                auto segment_ids = VectorIndex::getAllSegmentIds(old_part, vec_index.name, vec_index.column);
+                for (auto & segment_id : segment_ids)
+                {
+                    LOG_DEBUG(log, "Remove vector index {} for old part {} from cache", vec_index.name, old_part->name);
+                    VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+                }
+            }
+        }
+    }
 }
 
 

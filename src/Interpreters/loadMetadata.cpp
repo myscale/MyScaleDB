@@ -53,6 +53,7 @@ namespace ActionLocks
     extern StorageActionBlockType PartsFetch;
     extern StorageActionBlockType PartsSend;
     extern StorageActionBlockType DistributedSend;
+    extern StorageActionBlockType PartsBuildIndex;
 }
 
 static bool is_create_for_replicated_db = false;
@@ -412,7 +413,7 @@ static void maybeConvertOrdinaryDatabaseToAtomic(ContextMutablePtr context, cons
         /// so there are no user queries, only background operations
         LOG_INFO(log, "Will stop background operations to be able to rename tables in Ordinary database {}", database_name);
         static const auto actions_to_stop = {
-            ActionLocks::PartsMerge, ActionLocks::PartsFetch, ActionLocks::PartsSend, ActionLocks::DistributedSend
+            ActionLocks::PartsMerge, ActionLocks::PartsFetch, ActionLocks::PartsSend, ActionLocks::DistributedSend, ActionLocks::PartsBuildIndex
         };
         for (const auto & action : actions_to_stop)
             InterpreterSystemQuery::startStopActionInDatabase(action, /* start */ false, database_name, database, context, log);

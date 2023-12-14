@@ -162,6 +162,18 @@ bool StorageInMemoryMetadata::hasVectorIndices() const
     return !vec_indices.empty();
 }
 
+bool StorageInMemoryMetadata::hasVectorIndexOnColumn(const String & column_name) const
+{
+    /// Support multiple vector indices
+    for (auto & vec_index : vec_indices)
+    {
+        if (vec_index.column == column_name)
+            return true;
+    }
+
+    return false;
+}
+
 const ConstraintsDescription & StorageInMemoryMetadata::getConstraints() const
 {
     return constraints;

@@ -1,0 +1,15 @@
+-- Test newly added vector column with multiple vector indices
+0
+-- Build status for old part without newly added column
+test_multi_249_new_column	v2	v2 v2 TYPE FLAT	Built
+-- Vector Search on old part without newly added column currently throws exception
+-- Materialize new column on on old part
+0
+-- Build status for new part with newly added column
+test_multi_249_new_column	v2	v2 v2 TYPE FLAT	Built
+-- Vector Search on new part with newly added column
+1	0
+0	3
+2	3
+3	12
+4	27

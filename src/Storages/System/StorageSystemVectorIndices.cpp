@@ -63,7 +63,7 @@ protected:
         size_t built_parts = 0;
         for (auto & data_part : data_parts)
         {
-            if (data_part->containVectorIndex(index.name, index.column))
+            if (data_part->containVectorIndex(index.name))
                 ++built_parts;
         }
         return built_parts;
@@ -76,7 +76,7 @@ protected:
         for (auto & data_part : data_parts)
         {
             /// if we enlarge small part size, there may exists some parts with indices built earlier.
-            if (data_part->isSmallPart(min_rows_to_build_vector_index) && !data_part->containVectorIndex(index.name, index.column))
+            if (data_part->isSmallPart(min_rows_to_build_vector_index) && !data_part->containVectorIndex(index.name))
                 ++small_parts;
         }
         return small_parts;
@@ -142,7 +142,7 @@ protected:
                 {
                     ++rows_count;
 
-                    const auto fail_status = data->getVectorIndexBuildStatus();
+                    const auto fail_status = data->getVectorIndexBuildStatus(index.name);
                     size_t src_index = 0;
                     size_t res_index = 0;
 

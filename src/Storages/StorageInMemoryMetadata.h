@@ -114,6 +114,8 @@ struct StorageInMemoryMetadata
     /// Has at least one vector index
     bool hasVectorIndices() const;
 
+    /// Has vector index defined on column
+    bool hasVectorIndexOnColumn(const String & column_name) const;
 
     /// Return table constraints
     const ConstraintsDescription & getConstraints() const;

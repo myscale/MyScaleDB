@@ -40,7 +40,6 @@ namespace ErrorCodes
 namespace ActionLocks
 {
     extern const StorageActionBlockType PartsMerge;
-    extern const StorageActionBlockType PartsBuildIndex;
 }
 
 static DatabasePtr tryGetDatabase(const String & database_name, bool if_exists)
@@ -234,11 +233,6 @@ BlockIO InterpreterDropQuery::executeToTableImpl(ContextPtr context_, ASTDropQue
             /// For the rest of tables types exclusive lock is needed
             if (!std::dynamic_pointer_cast<MergeTreeData>(table))
                 table_excl_lock = table->lockExclusively(context_->getCurrentQueryId(), context_->getSettingsRef().lock_acquire_timeout);
-            
-            if (!table->supportsReplication())
-            {
-                auto builds_blocker = table->getActionLock(ActionLocks::PartsBuildIndex);
-            }
 
             auto metadata_snapshot = table->getInMemoryMetadataPtr();
             /// Drop table data, don't touch metadata
