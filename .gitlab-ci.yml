@@ -78,14 +78,15 @@ check_pipeline_already_running:
 
 check_keeper_changed:
   stage: pre-check
-  only:
-    changes:
-      - src/Common/ZooKeeper/*
-      - src/Common/ZooKeeper/**/*
-      - src/Coordination/*
-      - src/Coordination/**/*
   script:
     - exit 1
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - src/Common/ZooKeeper/*
+        - src/Common/ZooKeeper/**/*
+        - src/Coordination/*
+        - src/Coordination/**/*
 
 # style_check:
 #   stage: build
