@@ -263,6 +263,10 @@ static IMergeTreeDataPart::Checksums checkDataPart(
         if (isGinFile(file_name))
             continue;
 
+        /// Exclude vector index files to prevent conflicts with newly built vector indexes
+        if (file_name.ends_with(VECTOR_INDEX_FILE_SUFFIX))
+            continue;
+
         auto checksum_it = checksums_data.files.find(file_name);
         /// Skip files that we already calculated. Also skip metadata files that are not checksummed.
         if (checksum_it == checksums_data.files.end() && !files_without_checksums.contains(file_name))
