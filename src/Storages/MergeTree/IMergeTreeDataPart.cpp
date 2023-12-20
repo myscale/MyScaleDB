@@ -2363,7 +2363,11 @@ void IMergeTreeDataPart::loadVectorIndexMetadata() const
 
         /// No checksums
         if (!hasVectorIndexChecksums(vector_index_name))
+        {
+            /// Vector index hasn't been built yet
+            addNewVectorIndex(vec_index_desc);
             continue;
+        }
 
         Checksums index_checksums = getVectorIndexChecksums(vector_index_name);
 
