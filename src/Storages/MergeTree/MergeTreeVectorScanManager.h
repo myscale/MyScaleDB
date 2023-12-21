@@ -34,14 +34,14 @@ public:
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     MergeTreeVectorScanManager(
-        StorageMetadataPtr metadata_,
-        VectorScanInfoPtr vector_scan_info_,
-        ContextPtr context_,
-        bool support_two_stage_search_ = false)
+        StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, bool support_two_stage_search_ = false)
         : metadata(metadata_)
         , vector_scan_info(vector_scan_info_)
         , context(context_)
-        , support_two_stage_search(support_two_stage_search_) {}
+        , support_two_stage_search(support_two_stage_search_)
+        , enable_brute_force_search(context_->getSettingsRef().enable_brute_force_vector_search)
+    {
+    }
 
     void executeBeforeRead(const MergeTreeData::DataPartPtr & data_part);
 
@@ -87,6 +87,9 @@ private:
     ContextPtr context;
     bool support_two_stage_search;  /// True if vector index in metadata support two stage search
 
+    /// Whether brute force search is enabled based on query setting
+    bool enable_brute_force_search;
+
     /// lock vector scan result
     std::mutex mutex;
 
@@ -102,11 +105,9 @@ private:
         const ReadRanges & read_ranges = ReadRanges(),
         const Search::DenseBitmapPtr filter = nullptr);
 
-    /// Do preparition of finding index for vectorScan() and executeSecondStageVectorScan()
+    /// Do preparation of finding index for vectorScan() and executeSecondStageVectorScan()
     std::vector<VectorIndex::VectorSegmentExecutorPtr> prepareForVectorScan(
-        String & metric_str,
-        const MergeTreeData::DataPartPtr & data_part = nullptr
-    );
+        String & metric_str, const MergeTreeData::DataPartPtr & data_part = nullptr, const bool & ignore_index_load_error = false);
 
     /// brute force vector search
     VectorScanResultPtr vectorScanWithoutIndex(
@@ -150,6 +151,8 @@ private:
         const Search::Metric & metric,
         Search::DenseBitmapPtr & row_exists,
         int delete_id_nums);
+
+    bool bruteForceSearchEnabled(const MergeTreeData::DataPartPtr & data_part);
 };
 
 using MergeTreeVectorScanManagerPtr = std::shared_ptr<MergeTreeVectorScanManager>;

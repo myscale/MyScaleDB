@@ -1,5 +1,7 @@
 -- Tags: no-parallel
 
+SET enable_brute_force_vector_search=1;
+
 DROP TABLE IF EXISTS test_select_multi;
 CREATE TABLE test_select_multi (id UInt32, v1 Array(Float32), v2 Array(Float32),
 CONSTRAINT v1_len CHECK length(v1)=3, CONSTRAINT v2_len CHECK length(v2)=3) ENGINE = MergeTree ORDER BY id

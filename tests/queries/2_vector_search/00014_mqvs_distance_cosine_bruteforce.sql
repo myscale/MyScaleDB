@@ -1,5 +1,7 @@
 -- Tags: no-parallel
 
+SET enable_brute_force_vector_search=1;
+
 DROP TABLE IF EXISTS test_vector SYNC;
 
 CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine=MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, vector_search_metric_type='Cosine';

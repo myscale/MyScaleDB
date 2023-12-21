@@ -140,7 +140,7 @@ clickhouse-client -q "SELECT id, distance('alpha=4.2')(vector, [1.,2.,3.,4.,5.,6
 clickhouse-client -q "ALTER TABLE table_no_check DROP VECTOR INDEX mstg_name"
 clickhouse-client -q "ALTER TABLE table_no_check ADD VECTOR INDEX mstg_name vector TYPE hnswflat('metric_type=Cosine')" 
 clickhouse-client -q "SELECT table, name, expr FROM system.vector_indices WHERE database = currentDatabase() and table = 'table_no_check';"
-clickhouse-client -q "SELECT count(*) from (SELECT id, distance('ef_s=15')(vector, [1.,2.,3.,4.,5.,6.,7.,8.,9.,10.,11.,12.,13.,14.,15.,16.]) as dis from table_no_check order by dis asc limit 1) as temp;"
+clickhouse-client -q "SELECT count(*) from (SELECT id, distance('ef_s=15')(vector, [1.,2.,3.,4.,5.,6.,7.,8.,9.,10.,11.,12.,13.,14.,15.,16.]) as dis from table_no_check order by dis asc limit 1) as temp SETTINGS enable_brute_force_vector_search=1;"
 clickhouse-client -q "DROP TABLE IF EXISTS table_no_check"
 
 

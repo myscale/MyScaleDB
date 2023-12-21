@@ -10,6 +10,13 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
 {
     OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
     MarkRanges res;
+
+    if (!vector_scan_mgr->getVectorScanResult()->computed)
+    {
+        mark_ranges = res;
+        return;
+    }
+
     // bool has_final_mark = part->index_granularity.hasFinalMark();
     size_t marks_count = part->index_granularity.getMarksCount();
     /// const auto & index = part->index;
