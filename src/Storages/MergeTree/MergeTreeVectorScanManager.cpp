@@ -234,7 +234,6 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     const Search::DenseBitmapPtr filter)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVectorScanManager::vectorScan()");
-    bool find_index = false;
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
     const VectorScanDescription & desc = descs[0];
@@ -259,13 +258,13 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
 
     String metric_str;
-    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_part);
-
-    find_index = vec_executors.size() > 0;
+    bool enable_brute_force_for_part = bruteForceSearchEnabled(data_part);
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors
+        = prepareForVectorScan(metric_str, data_part, enable_brute_force_for_part);
 
     Search::Metric metric = VectorIndex::getMetric(metric_str);
 
-    if (find_index)
+    if (!vec_executors.empty())
     {
         /// find index
         for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
@@ -350,9 +349,15 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
 
         return tmp_vector_scan_result;
     }
-    else
+    else if (enable_brute_force_for_part)
     {
         return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
+    }
+    else
+    {
+        /// No vector index available and brute force search disabled
+        tmp_vector_scan_result->computed = false;
+        return tmp_vector_scan_result;
     }
 }
 
@@ -384,10 +389,9 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
     /// Get segment ids for vector index
 
     [[maybe_unused]] String metric_str;
-    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_part);
+    std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors = prepareForVectorScan(metric_str, data_part, true);
 
-    bool brute_force = vec_executors.size() == 0;
-    if (brute_force)
+    if (vec_executors.empty())
     {
         /// Data part has no vector index, no need to do two stage search.
         for (int64_t label = 0; label < k; label++)
@@ -473,8 +477,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
 }
 
 std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::prepareForVectorScan(
-    String & metric_str,
-    const MergeTreeData::DataPartPtr & data_part)
+    String & metric_str, const MergeTreeData::DataPartPtr & data_part, const bool & ignore_index_load_error)
 {
     std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors;
 
@@ -513,7 +516,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         }
     }
 
-    /// Will use brute force search.
+    /// Will use brute force search if enabled
     if (!find_index)
         return vec_executors;
 
@@ -527,7 +530,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
     span2.addAttribute("vectorScan.segment_ids", segment_ids.size());
 
     bool retry = false;
-    bool brute_force = false;
     bool is_shutdown = false;
 
     size_t min_bytes_to_build_vector_index = data_part->storage.getSettings()->min_bytes_to_build_vector_index;
@@ -565,7 +567,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
                 /// case of merged vector indices had been removed, we need to use new vector index files
                 LOG_ERROR(log, "Fail to load vector index: {}", segment_id.getFullPath());
                 retry = true;
-                brute_force = true;
                 break;
             }
         }
@@ -625,11 +626,15 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
                 else if (!status.fine())
                 {
                     LOG_ERROR(log, "Fail to load vector index: {}", segment_ids[0].getFullPath());
+                    if (!ignore_index_load_error)
+                    {
+                        context->getQueryContext()->killCurrentQuery();
+                        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
+                    }
                 }
                 else
                 {
                     vec_executors.emplace_back(std::move(vec_executor));
-                    brute_force = false;
                 }
             }
         }
@@ -645,9 +650,6 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         context->getQueryContext()->killCurrentQuery();
         throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled.");
     }
-
-    if (brute_force)
-        vec_executors.clear();
 
     return vec_executors;
 }
@@ -1597,5 +1599,14 @@ void MergeTreeVectorScanManager::searchWrapper(
     intermediate_ids.resize(k * nq);
     final_distance = std::move(intermediate_distance);
     final_id = std::move(intermediate_ids);
+}
+
+bool MergeTreeVectorScanManager::bruteForceSearchEnabled(const MergeTreeData::DataPartPtr & data_part)
+{
+    /// Always enable for small part
+    if (data_part->isSmallPart(data_part->storage.getSettings()->min_rows_to_build_vector_index))
+        return true;
+    else
+        return enable_brute_force_search;
 }
 }

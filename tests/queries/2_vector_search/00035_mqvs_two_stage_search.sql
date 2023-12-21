@@ -1,6 +1,5 @@
 -- Tags: no-parallel
-
-set two_stage_search_option=2;
+set two_stage_search_option=2, enable_brute_force_vector_search=1;
 DROP TABLE IF EXISTS test_vector_two_stage SYNC;
 CREATE TABLE test_vector_two_stage
 (
