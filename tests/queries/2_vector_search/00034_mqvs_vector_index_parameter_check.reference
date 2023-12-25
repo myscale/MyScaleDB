@@ -51,3 +51,8 @@ table_no_check	mstg_name	mstg_name vector TYPE mstg(\'metric_type=Cosine\')
 OK
 table_no_check	mstg_name	mstg_name vector TYPE hnswflat(\'metric_type=Cosine\')
 1
+TEST Binary Vector Search
+OK
+OK
+0
+table_with_binary_vector_check	vec_ind_flat	vec_ind_flat vector TYPE BinaryFLAT(\'metric_type=Hamming\')

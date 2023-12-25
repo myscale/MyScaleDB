@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Compression/CompressionFactory.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeDate.h>
@@ -24,7 +20,6 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTSetQuery.h>
@@ -37,6 +32,8 @@
 #include <Common/typeid_cast.h>
 #include <Common/randomSeed.h>
 #include <Common/logger_useful.h>
+
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 namespace DB
 {
@@ -107,31 +104,23 @@ String getColumnNameFromLengthCheck(const ASTPtr & constraint_decl)
 
 bool getParameterCheckStatus(StorageInMemoryMetadata & metadata, ContextPtr context)
 {
-std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
-bool use_parameter_check = storage_settings->vector_index_parameter_check;
-LOG_TRACE(
-    &Poco::Logger::get("AlterCommand"),
-    "[getParameterCheckStatus] vector_index_parameter_check value in MergeTreeSetting: {}",
-    use_parameter_check);
-if (metadata.hasSettingsChanges())
-{
-    const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
-    for (const auto & changed_setting : current_changes)
+    std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
+    bool use_parameter_check = storage_settings->vector_index_parameter_check;
+    if (metadata.hasSettingsChanges())
     {
-        const auto & setting_name = changed_setting.name;
-        const auto & new_value = changed_setting.value;
-        if (setting_name == "vector_index_parameter_check")
+        const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
+        for (const auto & changed_setting : current_changes)
         {
-            use_parameter_check = new_value.get<bool>();
-            LOG_TRACE(
-                &Poco::Logger::get("AlterCommand"),
-                "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
-                use_parameter_check);
-            break;
+            const auto & setting_name = changed_setting.name;
+            const auto & new_value = changed_setting.value;
+            if (setting_name == "vector_index_parameter_check")
+            {
+                use_parameter_check = new_value.get<bool>();
+                break;
+            }
         }
     }
-}
-return use_parameter_check;
+    return use_parameter_check;
 }
 
 std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_ast)
@@ -836,21 +825,11 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column {} does not exist", vec_index_name, column_name);
 
         auto column_desc = metadata.columns.get(column_name);
-
-        auto col_data_type = column_desc.type;
-
-        if (col_data_type->getTypeId() != TypeIndex::Array)
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not array", vec_index_name);
-        else
+        Search::DataType search_type = getSearchIndexDataType(column_desc.type);
+        if (search_type == Search::DataType::FloatVector && metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
         {
-            const auto * array_type = typeid_cast<const DataTypeArray *>(col_data_type.get());
-            auto nested_type = array_type->getNestedType()->getTypeId();
-            if (nested_type != TypeIndex::Float32 && nested_type != TypeIndex::Float64)
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not float array", vec_index_name);
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add FloatVector index {}: column has no length constraint", vec_index_name);
         }
-
-        if (metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column has no length constraint", vec_index_name);
 
         auto insert_it = metadata.vec_indices.end();
 

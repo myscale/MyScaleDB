@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/IMergeTreeDataPartInfoForReader.h>
@@ -34,7 +30,7 @@ namespace
 bool injectRequiredColumnsRecursively(
     const String & column_name,
     const StorageSnapshotPtr & storage_snapshot,
-    const AlterConversions & alter_conversions,
+    const AlterConversionsPtr & alter_conversions,
     const IMergeTreeDataPartInfoForReader & data_part_info_for_reader,
     const GetColumnsOptions & options,
     Names & columns,
@@ -50,8 +46,8 @@ bool injectRequiredColumnsRecursively(
     if (column_in_storage)
     {
         auto column_name_in_part = column_in_storage->getNameInStorage();
-        if (alter_conversions.isColumnRenamed(column_name_in_part))
-            column_name_in_part = alter_conversions.getColumnOldName(column_name_in_part);
+        if (alter_conversions && alter_conversions->isColumnRenamed(column_name_in_part))
+            column_name_in_part = alter_conversions->getColumnOldName(column_name_in_part);
 
         auto column_in_part = data_part_info_for_reader.getColumns().tryGetByName(column_name_in_part);
 
@@ -102,13 +98,14 @@ NameSet injectRequiredColumns(
     NameSet injected_columns;
 
     bool have_at_least_one_physical_column = false;
-    AlterConversions alter_conversions;
+    AlterConversionsPtr alter_conversions;
     if (!data_part_info_for_reader.isProjectionPart())
         alter_conversions = data_part_info_for_reader.getAlterConversions();
 
     auto options = GetColumnsOptions(GetColumnsOptions::AllPhysical)
         .withExtendedObjects()
         .withSystemColumns();
+
     if (with_subcolumns)
         options.withSubcolumns();
 
@@ -144,6 +141,7 @@ NameSet injectRequiredColumns(
 
 MergeTreeReadTask::MergeTreeReadTask(
     const DataPartPtr & data_part_,
+    const AlterConversionsPtr & alter_conversions_,
     const MarkRanges & mark_ranges_,
     size_t part_index_in_query_,
     const NameSet & column_name_set_,
@@ -154,6 +152,7 @@ MergeTreeReadTask::MergeTreeReadTask(
     std::vector<std::future<MergeTreeReaderPtr>> && pre_reader_for_step_,
     const MergeTreeVectorScanManagerPtr & vector_scan_manager_)
     : data_part{data_part_}
+    , alter_conversions{alter_conversions_}
     , mark_ranges{mark_ranges_}
     , part_index_in_query{part_index_in_query_}
     , column_name_set{column_name_set_}

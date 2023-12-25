@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -26,7 +22,6 @@
 #include <Interpreters/QueryNormalizer.h>
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Interpreters/RewriteOrderByVisitor.hpp>
-#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
@@ -62,6 +57,7 @@
 #include <IO/WriteHelpers.h>
 #include <Storages/IStorage.h>
 #include <Storages/StorageJoin.h>
+#include "Common/Allocator.h"
 #include <Common/checkStackSize.h>
 #include <Storages/StorageView.h>
 
@@ -75,8 +71,9 @@
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
-#include <Interpreters/parseVectorScanParameters.h>
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Interpreters/GetVectorScanVisitor.h>
+#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
 
 #include <Parsers/formatAST.h>
 
@@ -1341,7 +1338,6 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         {
             /// distance func column name should add to left table's source_columns
             /// Will be added inside collectUsedColumns() after erase unrequired columns.
-            /// addDistanceFuncColName(distance_col_name, source_columns);
             metadata_snapshot = storage_snapshot->metadata;
             table_is_remote = is_remote_storage;
 
@@ -1398,24 +1394,9 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         }
 
         /// Check vector column data type
-        if (search_column_type)
-        {
-            const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
-            if (!array_type)
-            {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Search column {} should be Array type", vec_col_name);
-            }
-            else
-            {
-                WhichDataType which(array_type->getNestedType());
-                if (!which.isFloat32())
-                    throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "The element type inside the array must be `Float32`.");
-            }
-        }
-        else
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", vec_col_name);
-        }
+        if (!search_column_type)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", vec_col_name);
+        auto vector_search_type = getSearchIndexDataType(search_column_type->type);
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.
         /// Skip the check when table is distributed.
@@ -1458,8 +1439,9 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                     }
                 }
             }
-            /// The default value is vector_search_metric_type in MergeTree, but we cannot get it here.
-            String metric_type = "L2";
+
+            /// The default value is float_vector_search_metric_type or binary_vector_search_metric_type in MergeTree, but we cannot get it here.
+            String metric_type;
             for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
             {
                 if (vector_index_desc.column == vec_col_name)
@@ -1471,6 +1453,28 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                         metric_type = index_parameter.at("metric_type");
                         break;
                     }
+                }
+            }
+            if (metric_type.empty() && metadata_snapshot->hasSettingsChanges())
+            {
+                const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+                Field change_metric;
+                if ((vector_search_type == Search::DataType::FloatVector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
+                    (vector_search_type == Search::DataType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
+                {
+                    metric_type = change_metric.safeGet<String>();
+                }
+            }
+            if (metric_type.empty())
+            {
+                const auto settings = context->getMergeTreeSettings();
+                if (vector_search_type == Search::DataType::FloatVector)
+                {
+                    metric_type = settings.float_vector_search_metric_type.toString();
+                }
+                else if (vector_search_type == Search::DataType::BinaryVector)
+                {
+                    metric_type = settings.binary_vector_search_metric_type.toString();
                 }
             }
 

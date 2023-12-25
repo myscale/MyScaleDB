@@ -3,6 +3,7 @@
 0
 Test decouple data part enabled
 test_decouple_vector	v1	2	Built
+test_decouple_vector	all_1_2_1	all_1_2_1	0
 test_decouple_vector	all_1_2_1	all_1_1_0	0
 test_decouple_vector	all_1_2_1	all_2_2_0	1
 0

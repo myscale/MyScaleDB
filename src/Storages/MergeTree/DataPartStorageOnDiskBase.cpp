@@ -9,7 +9,7 @@
 #include <Backups/BackupEntryFromSmallFile.h>
 #include <Backups/BackupEntryFromImmutableFile.h>
 #include <Disks/SingleDiskVolume.h>
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
 
 namespace DB
 {

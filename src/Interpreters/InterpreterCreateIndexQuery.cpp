@@ -1,8 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
-
 #include <Interpreters/InterpreterCreateIndexQuery.h>
 
 #include <Access/ContextAccess.h>
@@ -12,9 +7,10 @@
 #include <Parsers/ASTCreateIndexQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Storages/AlterCommands.h>
 #include <Storages/StorageDistributed.h>
+
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 namespace DB
 {

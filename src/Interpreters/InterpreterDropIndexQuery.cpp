@@ -1,8 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
-
 #include <Access/ContextAccess.h>
 #include <Databases/DatabaseReplicated.h>
 #include <Interpreters/Context.h>

@@ -1,6 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
 #include "Server.h"
 
 #include <memory>
@@ -98,7 +95,8 @@
 #include <filesystem>
 #include <unordered_set>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/IndexBuildMemoryUsageHelper.h>
 
 #include "config.h"
 #include "config_version.h"
@@ -1245,6 +1243,32 @@ try
             auto * global_overcommit_tracker = global_context->getGlobalOvercommitTracker();
             total_memory_tracker.setOvercommitTracker(global_overcommit_tracker);
 
+            /// Set vector index cache memory limit
+            float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
+            if (vector_index_cache_ratio < 0.1f)
+                vector_index_cache_ratio = 0.1f;
+            else if (vector_index_cache_ratio > 0.9f)
+                vector_index_cache_ratio = 0.9f;
+            LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
+
+            const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
+            LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
+
+            VectorIndex::IndexBuildMemoryUsageHelper::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+
+            /// Set vector index build memory limit
+            float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
+            if (vector_index_build_ratio < 0.1f)
+                vector_index_build_ratio = 0.1f;
+            else if (vector_index_build_ratio > 0.9f)
+                vector_index_build_ratio = 0.9f;
+            LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
+
+            const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
+            LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
+
+            VectorIndex::IndexBuildMemoryUsageHelper::setBuildMemorySizeInBytes(vector_index_build_max_size);
+
             // FIXME logging-related things need synchronization -- see the 'Logger * log' saved
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
@@ -1549,14 +1573,6 @@ try
     CompressionCodecEncrypted::Configuration::instance().load(config(), "encryption_codecs");
 
     SCOPE_EXIT({
-<<<<<<< HEAD
-=======
-        if (license_task)
-            (*license_task)->deactivate();
-
-        offlineInstanceInZookeeper(config(), global_context, log);
-
->>>>>>> 64548b319cf (Revert "add error message, close offline instance when checking license is disabled")
         async_metrics.stop();
 
         /** Ask to cancel background jobs all table engines,
@@ -1632,29 +1648,6 @@ try
     /// system logs may copy global context.
     global_context->setCurrentDatabaseNameInGlobalContext(default_database);
 
-    /// Set vector index cache memory limit
-    float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
-    if (vector_index_cache_ratio < 0.1f)
-        vector_index_cache_ratio = 0.1f;
-    else if (vector_index_cache_ratio > 0.9f)
-        vector_index_cache_ratio = 0.9f;
-    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
-
-    const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
-    LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
-
-    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
-
-    /// Set vector index build memory limit
-    float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
-    if (vector_index_build_ratio < 0.1f)
-        vector_index_build_ratio = 0.1f;
-    else if (vector_index_build_ratio > 0.9f)
-        vector_index_build_ratio = 0.9f;
-    LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
-
-    const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
-    LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
     LOG_INFO(log, "Loading metadata from {}", path_str);
 
     try

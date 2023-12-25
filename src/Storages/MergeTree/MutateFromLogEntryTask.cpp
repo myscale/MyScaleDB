@@ -48,7 +48,7 @@ ReplicatedMergeMutateTaskBase::PrepareResult MutateFromLogEntryTask::prepare()
     }
 
     /// TODO - some better heuristic?
-    size_t estimated_space_for_result = MergeTreeDataMergerMutator::estimateNeededDiskSpace({source_part});
+    size_t estimated_space_for_result = MergeTreeDataMergerMutator::estimateNeededDiskSpace({source_part}, false);
 
     if (entry.create_time + storage_settings_ptr->prefer_fetch_merged_part_time_threshold.totalSeconds() <= time(nullptr)
         && estimated_space_for_result >= storage_settings_ptr->prefer_fetch_merged_part_size_threshold)
@@ -201,9 +201,6 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     if (data_part_storage.hasActiveTransaction())
         data_part_storage.precommitTransaction();
 
-    /// Used for vector index move and mutating conflict
-    auto move_mutate_lock = future_mutated_part->parts[0]->lockPartForIndexMoveAndMutate();
-
     storage.renameTempPartAndReplace(new_part, *transaction_ptr);
 
     try
@@ -253,12 +250,8 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     /// Update vector index bitmap after mutations with lightweight delete.
     if (new_part->lightweight_delete_mask_updated)
     {
-        if (new_part->containAnyVectorIndex())
+        if (new_part->vector_index.containAnyVectorIndexInReady())
             new_part->onLightweightDelete();
-
-        /// Support multiple vector indices
-        if (new_part->containAnyRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
-            new_part->onDecoupledLightWeightDelete();
     }
 
     storage.vidx_info_updating_task->schedule();

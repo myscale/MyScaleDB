@@ -11,11 +11,11 @@
 #include <Storages/MergeTree/PinnedPartUUIDs.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeQuorumAddedParts.h>
 #include <Storages/MergeTree/ReplicatedMergeTreeAltersSequence.h>
-#include <Storages/MergeTree/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
 #include <Storages/MergeTree/DropPartsRanges.h>
 
 #include <Common/ZooKeeper/ZooKeeper.h>
 
+#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
 
 namespace DB
 {

@@ -1,0 +1,37 @@
+Create table and insert data
+Stop merges on test table to avoid redundant values are deleted when merged
+Insert same values into the table again
+Select without final there are redundant values
+0	0
+0	0
+24743	0.5045327
+24743	0.5045327
+59079	0.53525984
+59079	0.53525984
+60333	0.5933032
+60333	0.5933032
+63290	0.6079911
+63290	0.6079911
+Select with final = 1 there are no redundant values
+0	0
+24743	0.5045327
+59079	0.53525984
+60333	0.5933032
+63290	0.6079911
+68962	0.60966945
+57963	0.61671436
+65021	0.6863475
+14225	0.69492817
+9387	0.71474576
+Insert same values into the table again
+Select with final and two_stage search enabled
+0	0
+24743	0.5045327
+59079	0.53525984
+60333	0.5933032
+63290	0.6079911
+68962	0.60966945
+57963	0.61671436
+65021	0.6863475
+14225	0.69492817
+9387	0.71474576

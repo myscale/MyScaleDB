@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <IO/WriteSettings.h>
@@ -10,6 +6,7 @@
 #include <Core/NamesAndTypes.h>
 #include <Storages/IStorage.h>
 #include <Storages/LightweightDeleteDescription.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/IDataPartStorage.h>
 #include <Storages/MergeTree/MergeTreeDataPartState.h>
 #include <Storages/MergeTree/MergeTreeIndexGranularity.h>
@@ -22,8 +19,9 @@
 #include <Storages/MergeTree/MergeTreeIOSettings.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeDataPartBuilder.h>
+#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
 #include <Storages/ColumnsDescription.h>
-#include <Storages/VectorIndexInfo.h>
+#include <VectorIndex/Storages/VectorIndexInfo.h>
 #include <Interpreters/TransactionVersionMetadata.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <Storages/MergeTree/IPartMetadataManager.h>
@@ -83,6 +81,8 @@ public:
 
     using uint128 = IPartMetadataManager::uint128;
 
+    friend class MergetreeDataPartVectorIndex;
+
     IMergeTreeDataPart(
         const MergeTreeData & storage_,
         const String & name_,
@@ -97,6 +97,7 @@ public:
         const MarkRanges & mark_ranges,
         UncompressedCache * uncompressed_cache,
         MarkCache * mark_cache,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReaderSettings & reader_settings_,
         const ValueSizeMap & avg_value_size_hints_,
         const ReadBufferFromFileBase::ProfileCallback & profile_callback_) const = 0;
@@ -211,6 +212,12 @@ public:
 
     size_t rows_count = 0;
 
+    /// Existing rows count (excluding lightweight deleted rows)
+    /// UINT64_MAX -> uninitialized
+    /// 0 -> all rows were deleted
+    /// if reading failed, it will be set to rows_count
+    size_t existing_rows_count = UINT64_MAX;
+
     time_t modification_time = 0;
     /// When the part is removed from the working set. Changes once.
     mutable std::atomic<time_t> remove_time { std::numeric_limits<time_t>::max() };
@@ -310,187 +317,13 @@ public:
 
     Checksums checksums;
 
-    /// vector index name with checksums
-    mutable std::unordered_map<String, Checksums> vector_index_checksums_map;
-    mutable std::mutex vector_index_checksums_mutex;
-
-    /// TODO: move vector index related structures out of data part class
-    /// column name is removed from vector index file name
-    mutable std::mutex vector_indexed_mutex;
-    mutable std::set<String> vector_indexed;
-
-    /// vector index name with build error, used to avoid select to build again.
-    mutable std::mutex vector_indices_build_error_mutex;
-    mutable std::unordered_map<String, bool> vector_indices_with_build_error;
-
-    mutable std::mutex vector_indices_mutex;
-    mutable std::unordered_map<String, VectorIndexInfoPtr> vector_indices;
-    mutable std::unordered_map<String, VectorIndexInfoPtrList> vector_indices_decoupled;
-
-    void addBuiltVectorIndex(const VectorIndexDescription & vec_index_desc) const { addVectorIndexInfo(vec_index_desc, true); }
-
-    void addNewVectorIndex(const VectorIndexDescription & vec_index_desc) const { addVectorIndexInfo(vec_index_desc, false); }
-
-    void addVectorIndexInfo(const VectorIndexDescription & vec_index_desc, bool built) const;
-
-    void onVectorIndexBuildStart(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_mutex);
-        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
-            it->second->onBuildStart();
-    }
-
-    void onVectorIndexBuildFinish(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_mutex);
-        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
-            it->second->onBuildFinish(true);
-    }
-
-    void onVectorIndexBuildError(const String & index_name, const String & err_msg) const
-    {
-        std::lock_guard lock(vector_indices_mutex);
-        if (auto it = vector_indices.find(index_name); it != vector_indices.end())
-            it->second->onError(err_msg);
-    }
-
-    void removeVectorIndexInfo(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_mutex);
-        vector_indices.erase(index_name);
-        vector_indices_decoupled.erase(index_name);
-    }
-
-    void removeAllVectorIndexInfo() const
-    {
-        std::lock_guard lock(vector_indices_mutex);
-        vector_indices.clear();
-        vector_indices_decoupled.clear();
-    }
-
-    /// Used for decouple part
-    mutable std::mutex decouple_mutex;
-
-    struct MergedPartNameAndId
-    {
-        String name;
-        int id;
-
-        MergedPartNameAndId(const String & name_, const int & id_) : name(name_), id(id_) {}
-    };
-
-    /// Source part names which were merged to this decouple part, used to locate their vector index files.
-    mutable std::vector<MergedPartNameAndId> merged_source_parts;
-    /// Support multiple vector indices. Decoupled vector index names.
-    mutable std::set<String> decoupled_vector_indexed;
-
-    mutable bool vector_index_build_cancelled = false;
-
     mutable bool small_part = false;
 
-    /// Avoid conflict between move build vector index and mutate
-    /// Used when vector index built is finished but the active part is under mutating.
-    /// Or mutate happens when vector index files are moving.
-    mutable std::mutex vector_index_move_and_mutate_mutex;
-
-    /// This variable works with vector_index_move_and_mutate_mutex due to mutate is executed in multiple threads via excutable tasks.
-    mutable bool part_is_currently_mutating = false;
+    bool isSmallPart() const;
 
     mutable bool lightweight_delete_mask_updated = false;
 
-    bool containAnyVectorIndex() const
-    {
-        std::lock_guard lock(vector_indexed_mutex);
-        return !vector_indexed.empty();
-    }
-
-    bool containVectorIndex(String index_name) const
-    {
-        std::lock_guard lock(vector_indexed_mutex);
-        return vector_indexed.contains(index_name);
-    }
-
-    void addVectorIndex(String index_name) const
-    {
-        std::lock_guard lock(vector_indexed_mutex);
-        vector_indexed.insert(index_name);
-    }
-
-    void addDecoupledVectorIndex(const std::vector<MergedPartNameAndId> & old_parts, const VectorIndexDescription & vec_index_desc) const;
-
-    /// Force decoupled vector index owned by current part expired
-    void forceAllDecoupledVectorIndexExpire(const String & index_name, const String & column_name) const;
-
-    /// Cancel loading of all decoupled vector index owned by current part
-    void CancelLoadingVIOfInactivePart(const String & index_name, const String & column_name) const;
-
-    /// Remove specified simple vector index from VPart, both disk and metadata.
-    void removeVectorIndex(const String & index_name) const;
-
-    void setBuildError(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_build_error_mutex);
-        /// Add vector index with build error
-        if (vector_indices_with_build_error.find(index_name) == vector_indices_with_build_error.end())
-            vector_indices_with_build_error.emplace(index_name, true);
-    }
-
-    void removeBuildError(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_build_error_mutex);
-        vector_indices_with_build_error.erase(index_name);
-    }
-
-    bool hasBuildError(const String & index_name) const
-    {
-        std::lock_guard lock(vector_indices_build_error_mutex);
-        if (vector_indices_with_build_error.find(index_name) != vector_indices_with_build_error.end())
-            return true;
-
-        return false;
-    }
-
-    void cancelBuild() const { vector_index_build_cancelled = true; }
-
-    void resetCancelBuild() const { vector_index_build_cancelled = false; }
-
-    bool isBuildCancelled() const { return vector_index_build_cancelled; }
-
-    bool isSmallPart(size_t min_rows_to_build_vector_index) const
-    {
-        return this->rows_count == 0 || this->rows_count < min_rows_to_build_vector_index;
-    }
-
-    /// Get file names with VECTOR_INDEX_FILE_EXTENSION for the specified vector index.
-    NameSet getFileNamesForVectorIndex(const String & vec_index_name) const;
-
     void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
-
-   /// lock part for move build vector index, avoid concurrently mutation
-   /// new_value is true when called in mutate task, false when called in MutatePlainMergeTreeTask and MutateFromLogEntryTask.
-   /// This is used to avoid move happens during mutate task and renameTempPartAndReplace when source part is active.
-    std::unique_lock<std::mutex> lockPartForIndexMoveAndMutate(const bool & new_value = false, const bool from_fetch_part = false) const
-    {
-        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex);
-
-        /// Fetch part can get lock during mutate.
-        if (!from_fetch_part)
-            part_is_currently_mutating = new_value;
-
-        return lock;
-    }
-
-    std::unique_lock<std::mutex> tryLockPartForIndexMoveAndMutate() const
-    {
-        auto lock = std::unique_lock<std::mutex>(vector_index_move_and_mutate_mutex, std::try_to_lock);
-
-        /// Mutate is executed in mutiple threads, lock is required in mutate task and before renameTempPartAndReplace
-        /// Build index files cannot be moved during mutate. 
-        if (lock.owns_lock() && part_is_currently_mutating)
-            lock.unlock();
-
-        return lock;
-    }
 
     /// Convert .vidx2 to .vidx3, remove ready file.
     /// Write vector index checksums file, if old version vector is ready.
@@ -500,79 +333,14 @@ public:
     /// to avoid the owner part name being the same as the new part name after restore.
     void convertIndexFileForRestore();
 
-    void loadVectorIndexMetadata() const;
-
-    bool containAnyRowIdsMaps() const
-    {
-        std::lock_guard lock(decouple_mutex);
-        return !decoupled_vector_indexed.empty();
-    }
-
-    bool containRowIdsMaps(const String & index_name) const
-    {
-        std::lock_guard lock(decouple_mutex);
-        return decoupled_vector_indexed.count(index_name) > 0;
-    }
-
-    /// Force to remove all simple vector index OR row ids maps files when incomplete files found.
-    void removeIncompleteVectorIndexFiles() const;
-
-    /// Remove incomplete moved vector index files based on provided files_list after failure
-    void removeIncompleteMovedVectorIndexFiles(const Names & index_files_list) const;
-
-    /// Remove old parts' vector indexes with the index name
-    /// skip remove vector index checksums file itself, if skip_checksum is true.
-    void removeRowIdsMaps(const String & index_name, bool skip_checksum = false) const;
-
-    const std::vector<MergedPartNameAndId> getMergedSourceParts(const String & index_name) const
-    {
-        if (!containRowIdsMaps(index_name))
-            return {};
-
-        std::lock_guard lock(decouple_mutex);
-        return merged_source_parts;
-    }
-
-    /// Functions for vector index checkums
-    /// get vector index file names stored in checksums for specified index
-    Checksums getVectorIndexChecksums(const String & index_name) const
-    {
-        Checksums res;
-
-        std::lock_guard lock(vector_index_checksums_mutex);
-        if (vector_index_checksums_map.contains(index_name))
-            res = vector_index_checksums_map[index_name];
-
-        return res;
-    }
-
-    /// get vector index file names for all vector indices, include checksums file name itself
-    NameSet getAllVectorIndexFileNamesInChecksums() const;
-
-    bool hasVectorIndexChecksums(const String & index_name) const
-    {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        return vector_index_checksums_map.contains(index_name);
-    }
-
-    void addVectorIndexChecksums(const String & index_name, Checksums & index_checksums) const
-    {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        vector_index_checksums_map[index_name] = index_checksums;
-    }
-
-    void removeVectorIndexChecksums(const String & index_name) const
-    {
-        std::lock_guard lock(vector_index_checksums_mutex);
-        vector_index_checksums_map.erase(index_name);
-    }
-
     /// Columns with values, that all have been zeroed by expired ttl
     NameSet expired_columns;
 
     CompressionCodecPtr default_codec;
 
     mutable VersionMetadata version;
+
+    mutable MergetreeDataPartVectorIndex vector_index;
 
     /// For data in RAM ('index')
     UInt64 getIndexSizeInBytes() const;
@@ -581,6 +349,10 @@ public:
 
     UInt64 getBytesOnDisk() const { return bytes_on_disk; }
     void setBytesOnDisk(UInt64 bytes_on_disk_) { bytes_on_disk = bytes_on_disk_; }
+
+    /// Returns estimated size of existing rows if setting exclude_deleted_rows_for_part_size_in_merge is true
+    /// Otherwise returns bytes_on_disk
+    UInt64 getExistingBytesOnDisk() const;
 
     size_t getFileSizeOrZero(const String & file_name) const;
 
@@ -648,12 +420,6 @@ public:
 
     static inline constexpr auto TXN_VERSION_METADATA_FILE_NAME = "txn_version.txt";
 
-    static inline constexpr auto VECTOR_INDEX_FILE_OLD_EXTENSION = ".vidx2";
-
-    static inline constexpr auto VECTOR_INDEX_FILE_EXTENSION = ".vidx3";
-
-    static inline constexpr auto VECTOR_INDEX_FILE_CHECKSUMS_NAME = "vector_index_checksums";
-
     /// One of part files which is used to check how many references (I'd like
     /// to say hardlinks, but it will confuse even more) we have for the part
     /// for zero copy replication. Sadly it's very complex.
@@ -712,23 +478,8 @@ public:
     /// True if here is lightweight deleted mask file in part.
     bool hasLightweightDelete() const { return columns.contains(LightweightDeleteDescription::FILTER_COLUMN.name); }
 
-    /// convert old version vector index files if need_convert_index_file.
-    /// Remove vector index files if its checksums file does not exist,
-    /// Otherwise, load it into vector_index_checksums_map.
-    void loadVectorIndexChecksums(bool need_convert_index_file = false);
-
-    /// Support multiple vector indices, allow to load built simple vector index's checksums after built or fetch vector index.
-    bool loadBuiltVectorIndexChecksums(const String & index_name) const;
-
-    /// Check consistence for the specified vector index.
-    /// Return false if index_name has been dropped.
-    bool checkConsistencyForVectorIndex(const String & index_name, const Checksums & index_checksums) const;
-
-    /// Check consistency for all vector indices with checksums.
-    void checkConsistencyForAllVectorIndices() const;
-
-    /// calculate vector index files checksums
-    MergeTreeDataPartChecksums calculateVectorIndexChecksums(const String & vector_index_relative_path) const;
+    /// Read existing rows count from _row_exists column
+    UInt64 readExistingRowsCount();
 
     void writeChecksums(const MergeTreeDataPartChecksums & checksums_, const WriteSettings & settings);
 
@@ -748,11 +499,7 @@ public:
     /// If index_name is empty, apply LWD for all vector indices. Otherwise, only apply LWD for the specified vector index.
     void onLightweightDelete(const String index_name = "") const;
 
-    /// Decoupled part support lightweight delete
-    void onDecoupledLightWeightDelete() const;
-
 protected:
-
     /// Total size of all columns, calculated once in calcuateColumnSizesOnDisk
     ColumnSize total_columns_size;
 
@@ -856,6 +603,9 @@ private:
     /// For the older format version calculates rows count from the size of a column with a fixed size.
     void loadRowsCount();
 
+    /// Load existing rows count from _row_exists column if load_existing_rows_count_for_old_parts is true.
+    void loadExistingRowsCount();
+
     static void appendFilesOfRowsCount(Strings & files);
 
     /// Loads ttl infos in json format from file ttl.txt. If file doesn't exists assigns ttl infos with all zeros
@@ -876,11 +626,7 @@ private:
     /// any specifial compression.
     void loadDefaultCompressionCodec();
 
-    /// Load simple single vector index metadata
-    void loadSimpleVectorIndexMetadata(const VectorIndexDescription & vec_index_desc) const;
-
-    /// Load decoupled part with many old vector indices
-    void loadDecoupledVectorIndexMetadata(const VectorIndexDescription & vec_index_desc, Checksums & index_checksums) const;
+    void loadVectorIndexFromLocalFile();
 
     void writeColumns(const NamesAndTypesList & columns_, const WriteSettings & settings);
     void writeVersionMetadata(const VersionMetadata & version_, bool fsync_part_dir) const;

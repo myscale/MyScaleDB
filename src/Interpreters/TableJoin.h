@@ -9,7 +9,7 @@
 #include <QueryPipeline/SizeLimits.h>
 #include <DataTypes/getLeastSupertype.h>
 #include <Interpreters/IKeyValueEntity.h>
-#include <Interpreters/VectorScanDescription.h>
+#include <VectorIndex/Storages/VectorScanDescription.h>
 
 #include <Common/Exception.h>
 #include <Parsers/IAST_fwd.h>
@@ -360,7 +360,6 @@ public:
 
     std::shared_ptr<const IKeyValueEntity> getStorageKeyValue() { return right_kv_storage; }
 
-    /// Used for vector scan functions
     std::optional<VectorScanDescription> getVecScanDescription() const;
     void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
 };

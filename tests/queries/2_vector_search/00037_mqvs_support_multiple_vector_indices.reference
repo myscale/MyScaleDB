@@ -19,8 +19,10 @@ Before decouple, two VParts with multiple vector indices
 v2	MSTG	v2 v2 TYPE MSTG	2	2	Built
 v1	MSTG	v1 v1 TYPE MSTG	2	2	Built
 -- After decouple, check system table vector_index_segments
+v1	all_1_2_1	all_1_2_1	0	PENDING
 v1	all_1_2_1	all_1_1_0	0	LOADED
 v1	all_1_2_1	all_2_2_0	1	LOADED
+v2	all_1_2_1	all_1_2_1	0	PENDING
 v2	all_1_2_1	all_1_1_0	0	LOADED
 v2	all_1_2_1	all_2_2_0	1	LOADED
 -- After decouple, check system table vector_indices

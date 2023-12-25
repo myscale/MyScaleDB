@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Storages/MergeTree/MergeTreeInOrderSelectProcessor.h>
 #include "Storages/MergeTree/RangesInDataPart.h"
 #include <Storages/MergeTree/IntersectionsIndexes.h>
@@ -60,6 +56,7 @@ try
 
     task = std::make_unique<MergeTreeReadTask>(
         data_part,
+        alter_conversions,
         mark_ranges_for_task,
         part_index_in_query,
         column_name_set,

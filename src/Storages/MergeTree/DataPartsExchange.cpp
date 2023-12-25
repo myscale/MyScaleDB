@@ -189,12 +189,21 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             }
 
             /// Get vector files from part.
-            if (part->isBuildCancelled() || part->hasBuildError(vec_index_name))
+            auto column_index_opt = part->vector_index.getColumnIndex(vec_index_name);
+            if (!column_index_opt.has_value()
+                || column_index_opt.value()->isShutdown())
+            {
+                LOG_DEBUG(log, "Vector index {} not found on {}.", vec_index_name, part->name);
+                response.addCookie({"vector_index_build_status", "fail"});
+            }
+
+            auto column_index = column_index_opt.value();
+            if (column_index->isBuildCancelled() || column_index->getVectorIndexState() == VectorIndexState::ERROR)
             {
                 LOG_DEBUG(log, "The vector index {} build in part {} was cancelled or failed with error, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "fail"});
             }
-            else if (!part->containVectorIndex(vec_index_name))
+            else if (column_index->getVectorIndexState() <= VectorIndexState::BUILDING)
             {
                 LOG_WARNING(log, "The vector index {} in part {} was not ready, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "not_ready"});
@@ -389,20 +398,8 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
 {
     bool include_vector_indices = true;
 
-    /// Handle cases when sending part with vector index and merge has conflicts.
-    /// When merge on VParts, vector index files will be moved from old parts to new decouple part.
-    if (part->containAnyVectorIndex() && !part->containAnyRowIdsMaps())
-    {
-        /// Check if this part is currently being merged. Decouple part cannot be merged.
-        if (!data.canSendVectorIndexForPart(part->name))
-        {
-            LOG_DEBUG(log, "Part {} is currently being merged, hence unable to send vector index", part->name);
-            include_vector_indices = false;
-        }
-    }
-
     /// Add the part name to currently_sending_vector_index_parts
-    if (part->containAnyVectorIndex() || part->containAnyRowIdsMaps())
+    if (part->vector_index.containAnyVectorIndexInReady())
     {
         std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
         if (!data.currently_sending_vector_index_parts.insert(part->name).second)
@@ -413,7 +410,7 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
 
     SCOPE_EXIT_MEMORY
     ({
-        if (part->containAnyVectorIndex() || part->containAnyRowIdsMaps())
+        if (part->vector_index.containAnyVectorIndexInReady())
         {
             std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
             data.currently_sending_vector_index_parts.erase(part->name);
@@ -421,7 +418,7 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
     });
 
     /// Background build vector index will remove merged old parts' vector index files after finished.
-    std::unique_lock<std::mutex> move_index_and_send_dpart_lock = data.lockDecouplePartForSendPart(part);
+    auto vector_index_read_lock = part->vector_index.tryLockTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
 
     NameSet files_to_replicate;
     auto file_names_without_checksums = part->getFileNamesWithoutChecksums(include_vector_indices);
@@ -515,9 +512,9 @@ MergeTreeData::DataPart::Checksums Service::sendVectorIndexFromDisk(
 {
     /// We'll add a list of vector index files with .vidx postfix.
     /// Get file names for specified vector index.
-    auto vector_index_files_to_replicate = part->getFileNamesForVectorIndex(vec_index_name);
-
     auto data_part_storage = part->getDataPartStoragePtr();
+    auto vector_index_files_to_replicate = VectorIndex::getVectorIndexFileNamesInChecksums(data_part_storage, vec_index_name, true);
+
     IDataPartStorage::ReplicatedFilesDescription replicated_description;
 
     if (from_remote_disk)
@@ -921,7 +918,7 @@ String Fetcher::fetchVectorIndex(
 
     /// It should be "tmp-fetch_" and not "tmp_fetch_", because we can fetch part to detached/,
     /// but detached part name prefix should not contain underscore.
-    static const String TMP_PREFIX = "tmp-fetch_vector_index_";
+    static const String TMP_PREFIX = "tmp-fetch_vector_index_" + vec_index_name + "_";
     String tmp_prefix = tmp_prefix_.empty() ? TMP_PREFIX : tmp_prefix_;
     String part_dir = tmp_prefix + future_part_name;
     auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(part_dir);
@@ -1002,7 +999,7 @@ String Fetcher::fetchVectorIndex(
     if (build_status == "fail")
     {
         LOG_DEBUG(log, "Unable to fetch vector index {} in part {} due to build status is fail", vec_index_name, future_part_name);
-        future_part->setBuildError(vec_index_name);
+        future_part->vector_index.onVectorIndexBuildError(vec_index_name, "Another replica failed to build the vector index.");
         return {};
     }
     else if (build_status == "no_need")
@@ -1010,7 +1007,7 @@ String Fetcher::fetchVectorIndex(
         /// The merged part covering this part doesn't exist in this replica.
         LOG_DEBUG(log, "No need to fetch vector index {} in part {} due to it is covered by merged part in replica",
                   vec_index_name, future_part_name);
-        future_part->cancelBuild();
+        future_part->vector_index.cancelIndexBuild(vec_index_name);
         return {};
     }
     else if (build_status == "not_ready")
@@ -1235,7 +1232,7 @@ void Fetcher::downloadBaseOrProjectionPartToDisk(
         if (file_name != "checksums.txt" &&
             file_name != "columns.txt" &&
             file_name != IMergeTreeDataPart::DEFAULT_COMPRESSION_CODEC_FILE_NAME &&
-            !endsWith(file_name, IMergeTreeDataPart::VECTOR_INDEX_FILE_EXTENSION))
+            !endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
             checksums.addFile(file_name, file_size, expected_hash);
     }
 
@@ -1339,15 +1336,14 @@ MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToDisk(
         downloadBaseOrProjectionPartToDisk(
             replica_path, part_storage_for_loading, in, output_buffer_getter, data_checksums, throttler, sync);
     }
-    catch (const Exception & e)
+    catch (...)
     {
         /// Remove the whole part directory if fetch of base
         /// part or fetch of any projection was stopped.
-        if (e.code() == ErrorCodes::ABORTED)
-        {
-            part_storage_for_loading->removeSharedRecursive(true);
-            part_storage_for_loading->commitTransaction();
-        }
+        LOG_INFO(log, "Directory {} will be deleted due to an error during fetch part.", part_storage_for_loading->getRelativePath());
+        part_storage_for_loading->removeSharedRecursive(true);
+        part_storage_for_loading->commitTransaction();
+
         throw;
     }
 

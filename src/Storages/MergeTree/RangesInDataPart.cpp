@@ -6,7 +6,7 @@
 
 #include <IO/ReadHelpers.h>
 #include <IO/WriteHelpers.h>
-#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
 
 
 namespace DB

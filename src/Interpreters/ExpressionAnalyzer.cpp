@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 #include <Core/Block.h>
 
@@ -70,12 +66,10 @@
 
 #include <Interpreters/ActionsVisitor.h>
 #include <Interpreters/GetAggregatesVisitor.h>
-#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/GlobalSubqueriesVisitor.h>
 #include <Interpreters/interpretSubquery.h>
 #include <Interpreters/JoinUtils.h>
 #include <Interpreters/misc.h>
-#include <Interpreters/parseVectorScanParameters.h>
 
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
@@ -85,10 +79,12 @@
 #include <Parsers/formatAST.h>
 #include <Parsers/QueryParameterVisitor.h>
 
-// txh added
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Interpreters/GetVectorScanVisitor.h>
+#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
 
 namespace DB
 {
@@ -442,7 +438,6 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAGPtr & temp_actions)
     {
         aggregated_columns = temp_actions->getNamesAndTypesList();
     }
-    LOG_DEBUG(log, "[analyzeAggregation] aggregated_columns: {}", aggregated_columns.toString());
 
     for (const auto & desc : aggregate_descriptions)
         aggregated_columns.emplace_back(desc.column_name, desc.function->getResultType());
@@ -455,24 +450,23 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
         has_vector_scan = makeVectorScanDescriptions(temp_actions);
     else if (auto vec_scan_desc = getContext()->getVecScanDescription())
     {
-        /// vector search column exists in right joined table
         vector_scan_descriptions.emplace_back(*vec_scan_desc);
         has_vector_scan = true;
     }
-    /// Fill in dim from metadata
+
     if (has_vector_scan)
     {
         if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
         {
             auto & vector_scan_desc = vector_scan_descriptions[0];
-            vector_scan_desc.search_column_dim
-                = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
-            if (vector_scan_desc.search_column_dim == 0)
-            {
-                LOG_ERROR(log, "wrong type dim: 0, please check length constraint on search column.");
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
-            }
-            LOG_DEBUG(log, "type dim: {}", vector_scan_desc.search_column_dim);
+            auto &metadata_snapshot = syntax->storage_snapshot->metadata;
+            std::optional<NameAndTypePair> search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
+            if (!search_column_type)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vector_scan_desc.search_column_name);
+
+            vector_scan_desc.vector_search_type = getSearchIndexDataType(search_column_type->type);
+            vector_scan_desc.search_column_dim = VectorIndex::getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
+            checkVectorDimension(vector_scan_desc.vector_search_type, vector_scan_desc.search_column_dim);
         }
     }
 }
@@ -722,7 +716,6 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         VectorScanDescription vector_scan_desc;
         vector_scan_desc.column_name = node->getColumnName();
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
-        // vector_scan_desc.argument_names.resize(arguments.size());
 
         if (arguments.size() != 2)
         {
@@ -781,33 +774,22 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
 
         vector_scan_desc.query_column_name = arguments[1]->getColumnName();
-        //vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
-
-        LOG_DEBUG(
-            log,
-            "[analyzeVectorScan] search_column: {}, query_column: {}",
-            vector_scan_desc.search_column_name,
-            vector_scan_desc.query_column_name);
 
         auto metadata_snapshot = storage() ? storage()->getInMemoryMetadataPtr() : nullptr;
         String index_type = "";
         /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
         std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(getContext()->getMergeTreeSettings());
         bool use_parameter_check = storage_settings->vector_index_parameter_check;
-        LOG_TRACE(log, "[makeVectorScanDescriptions] vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
 
         /// Obtain the type of the vector index recorded in the meta_data.
         if (metadata_snapshot)
         {
-            /// Support multiple vector indices
             /// Find vector index description in metadata based on search column name.
             for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
             {
                 if (vec_index_desc.column == vector_scan_desc.search_column_name)
                 {
                     index_type = vec_index_desc.type;
-                    LOG_TRACE(log, "[makeVectorScanDescriptions] The vector index type used for the query is `{}`", Poco::toUpper(index_type));
-
                     break;
                 }
             }
@@ -826,8 +808,6 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                 if (setting_name == "vector_index_parameter_check")
                 {
                     use_parameter_check = new_value.get<bool>();
-                    LOG_TRACE(
-                        log, "[makeVectorScanDescriptions] vector_index_parameter_check value in sql definition: {}", use_parameter_check);
                     break;
                 }
             }
@@ -852,8 +832,6 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
         /// top_k is get from limit N
         vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
         vector_scan_desc.direction = syntax->direction;
-
-        LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
         if (syntax->vector_from_right_table)
         {
@@ -1463,16 +1441,12 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         first_action_names = chain.steps.front()->getRequiredColumns().getNames();
 
     auto & step = chain.lastStep(sourceColumns());
-    /// LOG_DEBUG(log, "[appendPrewhere] before getRootActions: step actions: {}", step.actions()->dumpDAG());
     getRootActions(select_query->prewhere(), only_types, step.actions());
     String prewhere_column_name = select_query->prewhere()->getColumnName();
     step.addRequiredOutput(prewhere_column_name);
-    /// LOG_DEBUG(log, "[appendPrewhere] after getRootActions: step actions: {}", step.actions()->dumpDAG());
-    /// LOG_DEBUG(log, "[appendPrewhere] prewhere_column_name: {}, chain: {}", prewhere_column_name, chain.dumpChain());
 
     const auto & node = step.actions()->findInOutputs(prewhere_column_name);
     auto filter_type = node.result_type;
-    LOG_DEBUG(log, "[appendPrewhere] filter_type: {}", filter_type->getName());
     if (!filter_type->canBeUsedInBooleanContext())
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Invalid type for filter in PREWHERE: {}",
                         filter_type->getName());
@@ -1481,10 +1455,7 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
     {
         /// Remove unused source_columns from prewhere actions.
         auto tmp_actions_dag = std::make_shared<ActionsDAG>(sourceColumns());
-        // LOG_DEBUG(log, "[appendPrewhere] before getRootActions: {}", tmp_actions_dag->dumpDAG());
         getRootActions(select_query->prewhere(), only_types, tmp_actions_dag);
-        /// Constants cannot be removed since they can be used in other parts of the query.
-        /// And if they are not used anywhere, except PREWHERE, they will be removed on the next step.
         tmp_actions_dag->removeUnusedActions(
             NameSet{prewhere_column_name},
             /* allow_remove_inputs= */ true,
@@ -1505,7 +1476,6 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         prewhere_actions = chain.getLastActions();
         prewhere_actions->removeUnusedActions(required_output);
     }
-    /// LOG_DEBUG(log, "[appendPrewhere] chain: {}", chain.dumpChain());
 
     {
         /// Add empty action with input = {prewhere actions output} + {unused source columns}
@@ -1538,8 +1508,6 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         chain.getLastActions();
         chain.addStep();
     }
-
-    /// LOG_DEBUG(log, "[appendPrewhere] after prewhere: {}", chain.dumpChain());
 
     return prewhere_actions;
 }
@@ -1759,11 +1727,7 @@ void SelectQueryExpressionAnalyzer::appendSelect(ExpressionActionsChain & chain,
 
     ExpressionActionsChain::Step & step = chain.lastStep(aggregated_columns);
 
-    /// LOG_DEBUG(log, "[appendSelect] before getRootActions: step actions: {}", step.actions()->dumpDAG());
-
     getRootActions(select_query->select(), only_types, step.actions());
-
-    /// LOG_DEBUG(log, "[appendSelect] after getRootActions: step actions: {}", step.actions()->dumpDAG());
 
     for (const auto & child : select_query->select()->children)
         appendSelectSkipWindowExpressions(step, child);
@@ -2186,8 +2150,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
             }
         }
 
-        /// LOG_DEBUG(log, "[constructor] after append prewhere {}", chain.dumpChain());
-
         array_join = query_analyzer.appendArrayJoin(chain, before_array_join, only_types || !first_stage);
 
         if (query_analyzer.hasTableJoin())
@@ -2236,8 +2198,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
             query_analyzer.appendGroupBy(chain, only_types || !first_stage, optimize_aggregation_in_order, group_by_elements_actions);
             query_analyzer.appendAggregateFunctionsArguments(chain, only_types || !first_stage);
             before_aggregation = chain.getLastActions();
-            /// LOG_DEBUG(log, "[constructor] chain: {}, before_aggregation: {}",
-            ///     chain.dumpChain(), before_aggregation->dumpDAG());
 
             if (settings.group_by_use_nulls)
                 query_analyzer.appendGroupByModifiers(before_aggregation, chain, only_types);
@@ -2393,8 +2353,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
         for (const auto & it : chain.getLastStep().required_output)
             selected_columns.emplace_back(it.first);
 
-        /// query_analyzer.appendVectorScan();
-
         has_order_by = query.orderBy() != nullptr;
         before_order_by = query_analyzer.appendOrderBy(
                 chain,
@@ -2409,9 +2367,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
         }
 
         final_projection = query_analyzer.appendProjectResult(chain);
-        /// LOG_DEBUG(log, "[constructor] : chain: \n {}", chain.dumpChain());
-        /// LOG_DEBUG(log, "[constructor] : ast: \n {}", query.dumpTree());
-        /// LOG_DEBUG(log, "[constructor] : expression analysis result: \n {}", this->dump());
 
         finalize_chain(chain);
     }

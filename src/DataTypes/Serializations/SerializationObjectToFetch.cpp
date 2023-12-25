@@ -63,25 +63,19 @@ void SerializationObjectToFetch::serializeBinary(const IColumn & column, size_t 
 template <typename F>
 static void addElementSafe(size_t num_elems, IColumn & column, F && impl)
 {
-    /// We use the assumption that ObjectToFetchs of zero size do not exist.
     size_t old_size = column.size();
 
     try
     {
         impl();
 
-        // Check that all columns now have the same size.
         size_t new_size = column.size();
         for (size_t i = 1; i < num_elems; ++i)
         {
             const auto & element_column = extractElementColumn(column, i);
             if (element_column.size() != new_size)
-            {
-                // This is not a logical error because it may work with
-                // user-supplied data.
                 throw Exception(ErrorCodes::SIZES_OF_COLUMNS_IN_TUPLE_DOESNT_MATCH,
                     "Cannot read a ObjectToFetch because not all elements are present");
-            }
         }
     }
     catch (...)
@@ -137,11 +131,9 @@ void SerializationObjectToFetch::deserializeText(IColumn & column, ReadBuffer & 
         }
     });
 
-    // Special format for one element objecttofetch (1,)
     if (1 == elems.size())
     {
         skipWhitespaceIfAny(istr);
-        // Allow both (1) and (1,)
         checkChar(',', istr);
     }
     skipWhitespaceIfAny(istr);

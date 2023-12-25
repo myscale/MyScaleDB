@@ -103,14 +103,12 @@ static inline IColumn & extractElementColumn(IColumn & column, size_t idx)
 template <typename F>
 static void addElementSafe(const DataTypes & elems, IColumn & column, F && impl)
 {
-    /// We use the assumption that tuples of zero size do not exist.
     size_t old_size = column.size();
 
     try
     {
         impl();
 
-        // Check that all columns now have the same size.
         size_t new_size = column.size();
 
         for (auto i : collections::range(0, elems.size()))
@@ -150,10 +148,6 @@ MutableColumnPtr DataTypeTuple::createColumn() const
 
 MutableColumnPtr DataTypeTuple::createColumn(const ISerialization & serialization) const
 {
-    /// If we read subcolumn of nested Tuple, it may be wrapped to SerializationNamed
-    /// several times to allow to reconstruct the substream path name.
-    /// Here we don't need substream path name, so we drop first several wrapper serializations.
-
     const auto * current_serialization = &serialization;
     while (const auto * serialization_named = typeid_cast<const SerializationNamed *>(current_serialization))
         current_serialization = serialization_named->getNested().get();

@@ -30,8 +30,7 @@ CONFIG_DIR_IN_REPO = "programs/server_tmp"
 INTEGRATION_DIR_IN_REPO = "tests/integration"
 SRC_DIR_IN_REPO = "src"
 
-DIND_INTEGRATION_TESTS_IMAGE_NAME = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration"
-# DIND_INTEGRATION_TESTS_IMAGE_NAME = "clickhouse/integration-tests-runner"
+DIND_INTEGRATION_TESTS_IMAGE_NAME = "clickhouse/integration-tests-runner"
 
 def stringhash(s):
     return zlib.crc32(s.encode("utf-8"))

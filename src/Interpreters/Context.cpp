@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <map>
 #include <set>
 #include <optional>
@@ -76,7 +72,6 @@
 #include <Interpreters/InterserverIOHandler.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/SessionLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -117,9 +112,10 @@
 #include <Storages/StorageView.h>
 #include <Parsers/ASTFunction.h>
 #include <base/find_symbols.h>
-#include <VectorIndex/CacheManager.h>
 
 #include <Interpreters/Cache/FileCache.h>
+
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 #if USE_ROCKSDB
 #include <rocksdb/table.h>
@@ -2086,11 +2082,6 @@ ThreadPool & Context::getPrefetchThreadpool() const
             CurrentMetrics::IOPrefetchThreads, CurrentMetrics::IOPrefetchThreadsActive, pool_size, pool_size, queue_size);
     }
     return *shared->prefetch_threadpool;
-}
-
-void Context::flushAllVectorIndexWillUnload() const
-{
-    VectorIndex::CacheManager::flushWillUnloadLog();
 }
 
 void Context::setIndexUncompressedCache(size_t max_size_in_bytes)

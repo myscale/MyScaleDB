@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Tags: no-parallel
 
-# reference: https://moqi.quip.com/U2xhAJL2YmRI
-
 # Case1. Can't create table with vector index if no constraint
 clickhouse-client -q "DROP TABLE IF EXISTS table_with_vector_index_no_constraint;"
-clickhouse-client -q "CREATE TABLE table_with_vector_index_no_constraint(id UInt32, vector Array(Float32), VECTOR INDEX index_name vector TYPE MSTG('metric_type=Cosine')) ENGINE = MergeTree ORDER BY id;" 2>&1 | grep -q "DB::Exception: When creating table with a vector index, you need to define the Constraint information for the table." && echo 'OK' || echo 'FAIL' || :
+clickhouse-client -q "CREATE TABLE table_with_vector_index_no_constraint(id UInt32, vector Array(Float32), VECTOR INDEX index_name vector TYPE MSTG('metric_type=Cosine')) ENGINE = MergeTree ORDER BY id;" 2>&1 | grep -q "DB::Exception: Cannot create table with column 'vector' which type is 'Array(Float32)' because the constraint information was not defined during the creation of a vector index for the column." && echo 'OK' || echo 'FAIL' || :
 # clickhouse-client -q "SELECT name FROM system.tables WHERE (database = 'default') AND (name = 'table_with_vector_index_no_constraint');"
 clickhouse-client -q "DROP TABLE IF EXISTS table_with_vector_index_no_constraint;"
 
@@ -90,9 +88,9 @@ clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name v
 clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name vector TYPE hnswflat('metric_type=Cosine', 'm=16')"
 clickhouse-client -q "SELECT table, name, expr FROM system.vector_indices WHERE database = currentDatabase() and table = 'table_with_check';"
 clickhouse-client -q "ALTER TABLE table_with_check DROP VECTOR INDEX index_name"
-clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name vector TYPE hnswflat('metric_type=Cosine', 'disk_mode=1')" 2>&1 | grep -q "DB::Exception: HNSWFLAT doesn't support index parameter: \`disk_mode\`, valid parameters is \[ef_c,m,metric_type\]." && echo 'OK' || echo 'FAIL' || :
+clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name vector TYPE hnswflat('metric_type=Cosine', 'disk_mode=1')" 2>&1 | grep -q "DB::Exception: HNSWFLAT doesn't support index parameter: \`disk_mode\`, valid parameters is \[ef_c,ef_s,m,metric_type\]." && echo 'OK' || echo 'FAIL' || :
 ## Case5.5 MSTG doesn't allow any vector index create parameter
-clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name vector TYPE mstg('metric_type=Cosine', 'disk_mode=1')" 2>&1 | grep -q " MSTG doesn't support index parameter: \`disk_mode\`, valid parameters is \[metric_type\]." && echo 'OK' || echo 'FAIL' || :
+clickhouse-client -q "ALTER TABLE table_with_check ADD VECTOR INDEX index_name vector TYPE mstg('metric_type=Cosine', 'disk_mode=1')" 2>&1 | grep -q " MSTG doesn't support index parameter: \`disk_mode\`, valid parameters is \[alpha,metric_type\]." && echo 'OK' || echo 'FAIL' || :
 clickhouse-client -q "DROP TABLE IF EXISTS table_with_check"
 
 
@@ -140,8 +138,21 @@ clickhouse-client -q "SELECT id, distance('alpha=4.2')(vector, [1.,2.,3.,4.,5.,6
 clickhouse-client -q "ALTER TABLE table_no_check DROP VECTOR INDEX mstg_name"
 clickhouse-client -q "ALTER TABLE table_no_check ADD VECTOR INDEX mstg_name vector TYPE hnswflat('metric_type=Cosine')" 
 clickhouse-client -q "SELECT table, name, expr FROM system.vector_indices WHERE database = currentDatabase() and table = 'table_no_check';"
-clickhouse-client -q "SELECT count(*) from (SELECT id, distance('ef_s=15')(vector, [1.,2.,3.,4.,5.,6.,7.,8.,9.,10.,11.,12.,13.,14.,15.,16.]) as dis from table_no_check order by dis asc limit 1) as temp;"
+clickhouse-client -q "SELECT count(*) from (SELECT id, distance('ef_s=15')(vector, [1.,2.,3.,4.,5.,6.,7.,8.,9.,10.,11.,12.,13.,14.,15.,16.]) as dis from table_no_check order by dis asc limit 1) as temp SETTINGS enable_brute_force_vector_search=1;"
 clickhouse-client -q "DROP TABLE IF EXISTS table_no_check"
 
 
+# Case7. Checking Binary vector search Parameter
+clickhouse-client -q "SELECT 'TEST Binary Vector Search'"
+clickhouse-client -q "DROP TABLE IF EXISTS table_with_binary_vector_check"
+clickhouse-client -q "CREATE TABLE table_with_binary_vector_check (id UInt32, vector FixedString(4)) ENGINE = MergeTree ORDER BY id SETTINGS binary_vector_search_metric_type='Hamming', vector_index_parameter_check=1;"
+clickhouse-client -q "INSERT INTO table_with_binary_vector_check SELECT number, char(number, number, number, number) FROM numbers(100);"
+## Case7.1 BinaryFLAT has only one parameter(metric_type)
+clickhouse-client -q "ALTER TABLE table_with_binary_vector_check ADD VECTOR INDEX vec_ind_flat vector TYPE BinaryFLAT('metric_type=Cosine');" 2>&1 | grep -q "DB::Exception: BINARYFLAT parameter \`metric_type\` should be one of " && echo 'OK' || echo 'FAIL' || :
+clickhouse-client -q "ALTER TABLE table_with_binary_vector_check ADD VECTOR INDEX vec_ind_flat vector TYPE BinaryFLAT('metric_type=Hamming', 'ncentroids=hello');" 2>&1 | grep -q "DB::Exception: BINARYFLAT doesn't support index parameter: \`ncentroids\`, valid parameters is \[metric_type\]." && echo 'OK' || echo 'FAIL' || :
+clickhouse-client -q "ALTER TABLE table_with_binary_vector_check ADD VECTOR INDEX vec_ind_flat vector TYPE BinaryFLAT('metric_type=Hamming');"
+clickhouse-client -q "SELECT sleep(1);"
+clickhouse-client -q "SELECT table, name, expr FROM system.vector_indices WHERE database = currentDatabase() and table = 'table_with_binary_vector_check';"
+clickhouse-client -q "ALTER TABLE table_with_binary_vector_check DROP VECTOR INDEX vec_ind_flat;"
 
+clickhouse-client -q "DROP TABLE IF EXISTS table_with_binary_vector_check"

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Common/formatReadable.h>
 #include <Common/PODArray.h>
 #include <Common/typeid_cast.h>
@@ -56,7 +52,6 @@
 #include <Interpreters/ProcessList.h>
 #include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/QueryLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/ReplaceQueryParameterVisitor.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -71,6 +66,8 @@
 #include <Processors/Formats/IOutputFormat.h>
 #include <Processors/Executors/CompletedPipelineExecutor.h>
 #include <Processors/Sources/WaitForAsyncInsertSource.h>
+
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 #include <base/EnumReflection.h>
 #include <base/demangle.h>

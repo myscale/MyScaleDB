@@ -17,7 +17,6 @@
 #include <Interpreters/TextLog.h>
 #include <Interpreters/TraceLog.h>
 #include <Interpreters/TransactionsInfoLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/FilesystemCacheLog.h>
 #include <Interpreters/FilesystemReadPrefetchesLog.h>
 #include <Interpreters/ZooKeeperLog.h>
@@ -37,6 +36,8 @@
 #include <Common/MemoryTrackerBlockerInThread.h>
 #include <Common/logger_useful.h>
 #include <Common/setThreadName.h>
+
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 
 namespace DB

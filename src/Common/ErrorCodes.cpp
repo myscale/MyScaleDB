@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <chrono>
@@ -660,6 +656,7 @@
     M(695, INVALID_VECTOR_INDEX) \
     M(696, VECTOR_INDEX_BUILD_MEMORY_TOO_LARGE) \
     M(697, VECTOR_INDEX_BUILD_MEMORY_INSUFFICIENT) \
+    M(698, VECTOR_INDEX_ALREADY_EXISTS) \
     \
     M(999, KEEPER_EXCEPTION) \
     M(1000, POCO_EXCEPTION) \

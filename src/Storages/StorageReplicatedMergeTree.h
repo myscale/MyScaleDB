@@ -38,8 +38,9 @@
 #include <Core/BackgroundSchedulePool.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
-#include <Storages/MergeTree/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
+
+#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
+#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
 
 
 namespace DB
@@ -337,9 +338,6 @@ public:
     /// Check if part is being merged right now via future_parts in queue.
     bool canSendVectorIndexForPart(const String & part_name) const;
 
-    /// Send decouple part ane background build vector
-    std::unique_lock<std::mutex> lockDecouplePartForSendPart(const MergeTreeDataPartPtr & part) const;
-
     /// Required only to avoid races between merge and sendVectorIndex
     std::unordered_set<String> currently_sending_vector_index_parts;
     std::mutex currently_sending_vector_index_parts_mutex;
@@ -367,7 +365,7 @@ private:
     friend class MergeFromLogEntryTask;
     friend class MutateFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
-    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class VectorIndexBuilderUpdater;
     friend class ReplicatedVectorIndexTask;
     friend class ReplicatedMergeTreeBuildVIndexStrategyPicker;
 
@@ -421,7 +419,7 @@ private:
 
     MergeStrategyPicker merge_strategy_picker;
 
-    MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
+    VectorIndexBuilderUpdater vec_index_builder_updater;
     ReplicatedMergeTreeBuildVIndexStrategyPicker build_vindex_strategy_picker;
 
     /** The queue of what needs to be done on this replica to catch up with everyone. It is taken from ZooKeeper (/replicas/me/queue/).
@@ -924,7 +922,7 @@ private:
     /// Fetch built vector index in part from other replica.
     /// NOTE: First of all tries to find the part on other replica.
     /// After that tries to fetch the vector index.
-    bool executeFetchVectorIndex(LogEntry & entry, String & replica);
+    bool executeFetchVectorIndex(LogEntry & entry, String & replica, String & fetch_vector_index_path);
 
     /// Download the vector index files of the specified part from the specified replica.
     /// Returns false if vector index files are aready fetching right now.

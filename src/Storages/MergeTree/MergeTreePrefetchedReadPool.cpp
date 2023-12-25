@@ -68,6 +68,7 @@ MergeTreePrefetchedReadPool::MergeTreePrefetchedReadPool(
 struct MergeTreePrefetchedReadPool::PartInfo
 {
     MergeTreeData::DataPartPtr data_part;
+    AlterConversionsPtr alter_conversions;
     size_t part_index_in_query;
     size_t sum_marks = 0;
     MarkRanges ranges;
@@ -83,12 +84,13 @@ struct MergeTreePrefetchedReadPool::PartInfo
 std::future<MergeTreeReaderPtr> MergeTreePrefetchedReadPool::createPrefetchedReader(
     const IMergeTreeDataPart & data_part,
     const NamesAndTypesList & columns,
+    const AlterConversionsPtr & alter_conversions,
     const MarkRanges & required_ranges,
     int64_t priority) const
 {
     auto reader = data_part.getReader(
         columns, storage_snapshot->metadata, required_ranges,
-        uncompressed_cache, mark_cache, reader_settings,
+        uncompressed_cache, mark_cache, alter_conversions, reader_settings,
         IMergeTreeReader::ValueSizeMap{}, profile_callback);
 
     /// In order to make a prefetch we need to wait for marks to be loaded. But we just created
@@ -98,13 +100,13 @@ std::future<MergeTreeReaderPtr> MergeTreePrefetchedReadPool::createPrefetchedRea
     /// and we cannot block either, therefore make prefetch inside the pool and put the future
     /// into the read task (MergeTreeReadTask). When a thread calls getTask(), it will wait for
     /// it (if not yet ready) after getting the task.
-    auto task = [=, reader = std::move(reader), context = getContext()]() mutable -> MergeTreeReaderPtr &&
+    auto task = [=, my_reader = std::move(reader), context = getContext()]() mutable -> MergeTreeReaderPtr &&
     {
         /// For async read metrics in system.query_log.
         PrefetchIncrement watch(context->getAsyncReadCounters());
 
-        reader->prefetchBeginOfRange(priority);
-        return std::move(reader);
+        my_reader->prefetchBeginOfRange(priority);
+        return std::move(my_reader);
     };
     return scheduleFromThreadPool<IMergeTreeDataPart::MergeTreeReaderPtr>(std::move(task), prefetch_threadpool, "ReadPrepare", priority);
 }
@@ -114,11 +116,11 @@ void MergeTreePrefetchedReadPool::createPrefetchedReaderForTask(MergeTreeReadTas
     if (task.reader.valid())
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Task already has a reader");
 
-    task.reader = createPrefetchedReader(*task.data_part, task.task_columns.columns, task.mark_ranges, task.priority);
+    task.reader = createPrefetchedReader(*task.data_part, task.task_columns.columns, task.alter_conversions, task.mark_ranges, task.priority);
 
     if (reader_settings.apply_deleted_mask && task.data_part->hasLightweightDelete())
     {
-        auto pre_reader = createPrefetchedReader(*task.data_part, {LightweightDeleteDescription::FILTER_COLUMN}, task.mark_ranges, task.priority);
+        auto pre_reader = createPrefetchedReader(*task.data_part, {LightweightDeleteDescription::FILTER_COLUMN}, task.alter_conversions, task.mark_ranges, task.priority);
         task.pre_reader_for_step.push_back(std::move(pre_reader));
     }
 
@@ -126,7 +128,7 @@ void MergeTreePrefetchedReadPool::createPrefetchedReaderForTask(MergeTreeReadTas
     {
         for (const auto & pre_columns_per_step : task.task_columns.pre_columns)
         {
-            auto pre_reader = createPrefetchedReader(*task.data_part, pre_columns_per_step, task.mark_ranges, task.priority);
+            auto pre_reader = createPrefetchedReader(*task.data_part, pre_columns_per_step, task.alter_conversions, task.mark_ranges, task.priority);
             task.pre_reader_for_step.push_back(std::move(pre_reader));
         }
     }
@@ -305,6 +307,7 @@ MergeTreePrefetchedReadPool::PartsInfos MergeTreePrefetchedReadPool::getPartsInf
         auto part_info = std::make_unique<PartInfo>();
 
         part_info->data_part = part.data_part;
+        part_info->alter_conversions = part.alter_conversions;
         part_info->part_index_in_query = part.part_index_in_query;
         part_info->ranges = part.ranges;
         std::sort(part_info->ranges.begin(), part_info->ranges.end());
@@ -318,7 +321,7 @@ MergeTreePrefetchedReadPool::PartsInfos MergeTreePrefetchedReadPool::getPartsInf
         part_info->approx_size_of_mark = getApproxSizeOfGranule(*part_info->data_part);
 
         const auto task_columns = getReadTaskColumns(
-            LoadedMergeTreeDataPartInfoForReader(part.data_part),
+            LoadedMergeTreeDataPartInfoForReader(part.data_part, part.alter_conversions),
             storage_snapshot,
             column_names,
             virtual_column_names,
@@ -508,8 +511,12 @@ MergeTreePrefetchedReadPool::ThreadsTasks MergeTreePrefetchedReadPool::createThr
                 : std::make_unique<MergeTreeBlockSizePredictor>(*part.size_predictor); /// make a copy
 
             auto read_task = std::make_unique<MergeTreeReadTask>(
-                part.data_part, ranges_to_get_from_part, part.part_index_in_query,
-                part.column_name_set, part.task_columns,
+                part.data_part,
+                part.alter_conversions,
+                ranges_to_get_from_part,
+                part.part_index_in_query,
+                part.column_name_set,
+                part.task_columns,
                 std::move(curr_task_size_predictor));
 
             read_task->priority = priority;

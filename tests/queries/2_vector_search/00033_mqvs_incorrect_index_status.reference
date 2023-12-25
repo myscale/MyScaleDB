@@ -1,5 +1,5 @@
 0
-test_172_status	idx	idx data TYPE MSTG(\'unknown=1\')	Error	all_1_1_0	 VectorIndex: Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+test_172_status	idx	idx data TYPE MSTG(\'unknown=1\')	Error	all_1_1_0	VectorIndex: Error in Build Index, Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1
 test_172_status	idx	idx data TYPE MSTG	InProgress
 0
 test_172_replicated_status	idx	idx data TYPE MSTG(\'unknown=1\')	InProgress		

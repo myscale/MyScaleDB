@@ -65,14 +65,12 @@ void SerializationTuple::serializeBinary(const IColumn & column, size_t row_num,
 template <typename F>
 static void addElementSafe(size_t num_elems, IColumn & column, F && impl)
 {
-    /// We use the assumption that tuples of zero size do not exist.
     size_t old_size = column.size();
 
     try
     {
         impl();
 
-        // Check that all columns now have the same size.
         size_t new_size = column.size();
         for (size_t i = 1; i < num_elems; ++i)
         {

@@ -112,6 +112,12 @@ public:
         return current_weight;
     }
 
+    void updateMaxWeight(size_t new_weight)
+    {
+        std::lock_guard lock(mutex);
+        max_weight = new_weight;
+    }
+
     size_t size()
     {
         std::lock_guard lock(mutex);
@@ -226,7 +232,7 @@ private:
         {
             std::lock_guard lock(mutex);
             auto it = cells.find(key);
-            if (it != cells.end() && !it->second.expired)
+            if (it != cells.end())
             {
                 if (!it->second.expired)
                 {

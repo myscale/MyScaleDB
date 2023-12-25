@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Parsers/IAST_fwd.h>
@@ -9,13 +5,13 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/IndicesDescription.h>
-#include <Storages/VectorIndicesDescription.h>
 #include <Storages/ProjectionsDescription.h>
 #include <Storages/KeyDescription.h>
 #include <Storages/SelectQueryDescription.h>
 #include <Storages/TTLDescription.h>
 #include <Common/MultiVersion.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Storages/VectorIndicesDescription.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 namespace DB
 {

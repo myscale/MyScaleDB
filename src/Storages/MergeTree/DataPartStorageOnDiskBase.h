@@ -10,7 +10,11 @@ namespace DB
 
 class IVolume;
 using VolumePtr = std::shared_ptr<IVolume>;
-class MergeTreeVectorIndexBuilderUpdater;
+class VectorIndexBuilderUpdater;
+class MergetreeDataPartVectorIndex;
+class IMergeTreeDataPart;
+using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
+using MergeTreeMutableDataPartPtr = std::shared_ptr<IMergeTreeDataPart>;
 
 class DataPartStorageOnDiskBase : public IDataPartStorage
 {
@@ -97,10 +101,22 @@ public:
     bool hasActiveTransaction() const override;
 
 protected:
-    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class VectorIndexBuilderUpdater;
     friend class MergeTreeVectorScanManager;
     friend class IMergeTreeDataPart;
+    friend class MergetreeDataPartVectorIndex;
     friend VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage);
+    friend MergeTreeDataPartChecksums moveVectorIndexFiles(
+        const bool decouple,
+        const String & part_id,
+        const String & part_name,
+        const String & vec_index_name,
+        MergeTreeDataPartPtr old_data_part,
+        MergeTreeMutableDataPartPtr new_data_part);
+    friend MergeTreeDataPartChecksums calculateVectorIndexChecksums(
+        const DataPartStoragePtr & part_storage,
+        const String & vector_index_relative_path,
+        std::shared_ptr<MergeTreeDataPartChecksums> existing_checksums);
 
     DiskPtr getDisk() const;
 

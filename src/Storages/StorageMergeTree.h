@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Core/Names.h>
@@ -18,7 +14,7 @@
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
 
 #include <Disks/StoragePolicy.h>
 #include <Common/SimpleIncrement.h>
@@ -131,7 +127,7 @@ private:
     MergeTreeDataSelectExecutor reader;
     MergeTreeDataWriter writer;
     MergeTreeDataMergerMutator merger_mutator;
-    MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
+    VectorIndexBuilderUpdater vec_index_builder_updater;
 
     std::unique_ptr<MergeTreeDeduplicationLog> deduplication_log;
 
@@ -188,6 +184,8 @@ private:
     /// If not force, then take merges selector and check that part is not participating in background operations.
     MergeTreeDataPartPtr outdatePart(MergeTreeTransaction * txn, const String & part_name, bool force, bool clear_without_timeout = true);
     ActionLock stopMergesAndWait();
+
+    ActionLock stopBuildIndexAndWait();
 
     /// Allocate block number for new mutation, write mutation to disk
     /// and into in-memory structures. Wake up merge-mutation task.
@@ -282,7 +280,7 @@ private:
     friend class MergeTreeData;
     friend class MergePlainMergeTreeTask;
     friend class MutatePlainMergeTreeTask;
-    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class VectorIndexBuilderUpdater;
 
 
 protected:
