@@ -1,20 +1,14 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTCreateNamedCollectionQuery.h>
 #include <Parsers/ASTTableOverrides.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSetQuery.h>
@@ -30,6 +24,8 @@
 #include <Parsers/ParserSetQuery.h>
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTColumnDeclaration.h>
+
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 
 namespace DB
@@ -160,12 +156,10 @@ bool ParserIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected & expe
 bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserKeyword s_type("TYPE");
-    // ParserKeyword s_granularity("GRANULARITY");
 
     ParserIdentifier name_p;
     ParserCompoundIdentifier column_p;
     ParserDataType data_type_p;
-    // ParserUnsignedInteger granularity_p;
 
     ASTPtr name;
     ASTPtr column;
@@ -183,16 +177,9 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
     if (!data_type_p.parse(pos, type, expected))
         return false;
 
-    // if (!s_granularity.ignore(pos, expected))
-    //     return false;
-
-    // if (!granularity_p.parse(pos, granularity, expected))
-    //     return false;
-
     auto index = std::make_shared<ASTVectorIndexDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();
-    // index->granularity = granularity->as<ASTLiteral &>().value.safeGet<UInt64>();
     index->set(index->type, type);
     node = index;
 

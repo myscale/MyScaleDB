@@ -1056,6 +1056,8 @@ bool DDLWorker::initializeMainThread()
         {
             auto zookeeper = getAndSetZooKeeper();
             zookeeper->createAncestors(fs::path(queue_dir) / "");
+            if (renew_instance_status)
+                renewInstanceLicenseStatus(zookeeper);
             initialized = true;
             return true;
         }
@@ -1082,11 +1084,23 @@ bool DDLWorker::initializeMainThread()
     return false;
 }
 
+void DDLWorker::renewInstanceLicenseStatus(const ZooKeeperPtr & zookeeper)
+{
+    String status_path = context->getInstanceLicenseKeeperPath();
+    if (!status_path.empty())
+    {
+        LOG_DEBUG(log, "Renew license status of this instance");
+        zookeeper->handleEphemeralNodeExistence(status_path, "");
+        zookeeper->tryCreate(status_path, "", zkutil::CreateMode::Ephemeral);
+    }
+}
+
 void DDLWorker::runMainThread()
 {
     auto reset_state = [&]()
     {
         initialized = false;
+        renew_instance_status = true;
         /// It will wait for all threads in pool to finish and will not rethrow exceptions (if any).
         /// We create new thread pool to forget previous exceptions.
         if (1 < pool_size)
@@ -1121,12 +1135,15 @@ void DDLWorker::runMainThread()
 
             LOG_DEBUG(log, "Waiting for queue updates");
             queue_updated_event->wait();
+
+            renew_instance_status = false;
         }
         catch (const Coordination::Exception & e)
         {
             if (Coordination::isHardwareError(e.code))
             {
                 initialized = false;
+                renew_instance_status = true;
                 /// Wait for pending async tasks
                 if (1 < pool_size)
                     worker_pool = std::make_unique<ThreadPool>(CurrentMetrics::DDLWorkerThreads, CurrentMetrics::DDLWorkerThreadsActive, pool_size);

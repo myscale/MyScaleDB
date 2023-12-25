@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Analyzer/IQueryTreeNode.h>
@@ -15,8 +11,8 @@
 #include <QueryPipeline/StreamLocalLimits.h>
 #include <Storages/ProjectionsDescription.h>
 #include <Storages/MergeTree/ParallelReplicasReadingCoordinator.h>
-#include <Interpreters/VectorScanDescription.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Storages/VectorScanDescription.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 #include <memory>
 

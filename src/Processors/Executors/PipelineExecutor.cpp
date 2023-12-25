@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <IO/WriteBufferFromString.h>
 #include <Common/CurrentThread.h>
 #include <Common/setThreadName.h>
@@ -107,8 +103,6 @@ void PipelineExecutor::execute(size_t num_threads)
 
     try
     {
-        // txh added
-        LOG_DEBUG(log, "[execute] pipeline executor executeImpl {}", num_threads);
         executeImpl(num_threads);
 
         /// Execution can be stopped because of exception. Check and rethrow if any.

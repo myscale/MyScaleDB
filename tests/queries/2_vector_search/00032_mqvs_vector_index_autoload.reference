@@ -45,5 +45,6 @@ all_2_2_0	all_2_2_0	0	vec_ind	LOADED
 all_0_0_0\tvec_ind\nall_2_2_0\tvec_ind\n
 --- merge
 all_0_2_1_1	all_0_0_0_1	0	vec_ind	LOADED
+all_0_2_1_1	all_0_2_1_1	0	vec_ind	PENDING
 all_0_2_1_1	all_2_2_0	1	vec_ind	LOADED
 all_0_2_1\tvec_ind\n

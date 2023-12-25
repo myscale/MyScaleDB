@@ -1,8 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
-
 #include <Parsers/ParserCreateIndexQuery.h>
 
 #include <Parsers/ASTCreateIndexQuery.h>
@@ -15,7 +10,7 @@
 #include <Parsers/ParserDataType.h>
 #include <Parsers/parseDatabaseAndTableName.h>
 #include <Parsers/ParserCreateQuery.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 namespace DB
 {
 

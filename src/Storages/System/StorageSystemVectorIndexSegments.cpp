@@ -11,13 +11,12 @@
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/VectorIndexInfo.h>
 #include <Storages/VirtualColumnUtils.h>
 
 #include <SearchIndex/Common/Utils.h>
-#include <VectorIndex/Metadata.h>
-#include <VectorIndex/SegmentId.h>
-#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/Common/Metadata.h>
+#include <VectorIndex/Common/SegmentId.h>
+#include <VectorIndex/Storages/VectorIndexInfo.h>
 
 namespace DB
 {
@@ -134,11 +133,11 @@ protected:
         if (column_mask[src_index++])
         {
             if (cached_indices.contains(segment_id.getCacheKey().toString()))
-                res_columns[res_index++]->insert(Search::enumToString(VectorIndexStatus::LOADED));
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndexState::LOADED));
             else if (vec_info)
                 res_columns[res_index++]->insert(vec_info->statusString());
             else
-                res_columns[res_index++]->insert(Search::enumToString(VectorIndexStatus::PENDING));
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndexState::PENDING));
         }
         /// 'total_vectors' column
         if (column_mask[src_index++])
@@ -176,7 +175,7 @@ protected:
         if (column_mask[src_index++])
         {
             if (vec_info)
-                res_columns[res_index++]->insert(static_cast<UInt64>(vec_info->elapsed()));
+                res_columns[res_index++]->insert(static_cast<UInt64>(vec_info->elapsed));
             else
                 res_columns[res_index++]->insertDefault();
         }
@@ -225,7 +224,7 @@ protected:
             const bool check_access_for_tables = check_access_for_databases && !access->isGranted(AccessType::SHOW_TABLES, database_name);
 
             std::set<std::string> cached_indices;
-            for (const auto & it : VectorIndex::VectorSegmentExecutor::getAllCacheNames())
+            for (const auto & it : VectorIndex::CacheManager::getAllCacheNames())
                 cached_indices.emplace(it.first.toString());
 
             for (; rows_count < max_block_size && tables_it->isValid(); tables_it->next())
@@ -251,37 +250,18 @@ protected:
 
                 for (const auto & part : data_parts)
                 {
-                    std::lock_guard lock(part->vector_indices_mutex);
-
                     for (auto & index : indices)
                     {
+                        auto column_index_opt = part->vector_index.getColumnIndex(index.name);
+                        if (!column_index_opt.has_value())
+                            continue;
+                        auto column_index = column_index_opt.value();
                         if (!index.dim)
-                            index.dim
-                                = static_cast<int>(metadata_snapshot->getConstraints().getArrayLengthByColumnName(index.column).first);
+                            index.dim = static_cast<int>(getVectorDimension(index.vector_search_type, *metadata_snapshot, index.column));
 
-                        bool found = false;
-                        if (part->containRowIdsMaps(index.name))
-                        {
-                            if (auto it = part->vector_indices_decoupled.find(index.name); it != part->vector_indices_decoupled.end())
-                            {
-                                found = true;
-
-                                for (const auto & info : it->second)
-                                {
-                                    ++rows_count;
-                                    getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
-                                }
-                            }
-                        }
-
-                        if (!found)
+                        for (const auto & info : column_index->getVectorIndexInfos())
                         {
                             ++rows_count;
-
-                            VectorIndexInfoPtr info{nullptr};
-                            if (auto it = part->vector_indices.find(index.name); it != part->vector_indices.end())
-                                info = it->second;
-
                             getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
                         }
                     }

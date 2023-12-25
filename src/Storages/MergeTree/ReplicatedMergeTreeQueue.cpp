@@ -1359,6 +1359,8 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
             {
                 if (auto part_in_memory = asInMemoryPart(part))
                     sum_parts_size_in_bytes += part_in_memory->block.bytes();
+                else if (entry.type == LogEntry::MERGE_PARTS)
+                    sum_parts_size_in_bytes += part->getExistingBytesOnDisk();
                 else
                     sum_parts_size_in_bytes += part->getBytesOnDisk();
             }
@@ -1602,7 +1604,7 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
         }
 
         /// If part already have this vector index, let it execute and record status in zookeeper.
-        if (source_part->containVectorIndex(entry.index_name))
+        if (source_part->vector_index.alreadyWithVIndexSegment(entry.index_name))
         {
             LOG_DEBUG(log, "Part {}'s active covered part {} already has vector index {}, will execute to remove the log entry",
                         part_name, source_part->name, entry.index_name);
@@ -2563,14 +2565,6 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     if (!metadata_snapshot->hasVectorIndices())
         return true;
 
-    /// Check if part contains merged vector index
-    if (left->containAnyRowIdsMaps() || right->containAnyRowIdsMaps())
-    {
-        if (out_reason)
-            *out_reason = "source part " + left->name + " or " + right->name + " is a decouple part";
-        return false;
-    }
-
     /// Check if part is building vector index
     {
         std::lock_guard lock(left->storage.currently_vector_indexing_parts_mutex);
@@ -2588,15 +2582,13 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
 
     /// Check if two parts contain vector index files.
     /// Two parts can be merged when both have built vector index or both not.
-    for (const auto & vec_index : metadata_snapshot->getVectorIndices())
-    {
-        if (left->containVectorIndex(vec_index.name) != right->containVectorIndex(vec_index.name))
+    for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
+        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
         {
             if (out_reason)
                 *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
             return false;
         }
-    }
 
     return true;
 }

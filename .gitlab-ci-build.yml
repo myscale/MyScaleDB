@@ -1,3 +1,9 @@
+.init-ssh: &init-ssh
+  - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
+  - ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+  - cp $BUILDER_PRIVATE_SSH_KEY ~/.ssh/id_rsa
+  - cp $BUILDER_PUBLIC_SSH_KEY ~/.ssh/id_rsa.pub
+
 ######################################## BUILDS #########################################
 # TODO 编译 deb with sanitizer 参数的 aarch64 版本文件
 build_binary:
@@ -8,6 +14,8 @@ build_binary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
     when: always
@@ -18,7 +26,6 @@ build_binary:
       - build/CMakeFiles/CMakeError.log
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --arch linux-x86_64 --package
     - |-
@@ -32,7 +39,7 @@ build_binary:
       if [ "$CI_MERGE_REQUEST_LABELS" = "quick-image" ]; then
         docker/builder/tools/docker-info.sh
         docker/builder/tools/docker-buildx.sh
-        docker/builder/tools/quick-image.sh
+        docker/builder/tools/quick-image.sh "$(echo $HARBOR_USER_B64 | base64 -d)" $HARBOR_PASSWORD $DOCKERHUB_USERNAME $DOCKERHUB_PASSWORD
       fi
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
@@ -51,6 +58,8 @@ build_with_sanitizer_asanbinary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKAsan"
     paths:
@@ -58,7 +67,6 @@ build_with_sanitizer_asanbinary:
       - artifacts/clickhouse
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer address
     - mv build/programs/clickhouse artifacts/.
@@ -80,6 +88,8 @@ build_with_sanitizer_tsanbinary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKTsan"
     paths:
@@ -87,7 +97,6 @@ build_with_sanitizer_tsanbinary:
       - artifacts/clickhouse
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer thread
     - mv build/programs/clickhouse artifacts/.
@@ -109,6 +118,8 @@ build_with_sanitizer_ubsanbinary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKUBsan"
     paths:
@@ -116,7 +127,6 @@ build_with_sanitizer_ubsanbinary:
       - artifacts/clickhouse
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer undefined
     - mv build/programs/clickhouse artifacts/.
@@ -138,7 +148,8 @@ build_with_sanitizer_msanbinary:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
-  # image: harbor.internal.moqi.ai/mqdb/builder:2.9.4
+  before_script:  
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-CKMsan"
     paths:
@@ -146,7 +157,6 @@ build_with_sanitizer_msanbinary:
       - artifacts/clickhouse
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory
     # - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer memory --compiler "clang-16"
@@ -163,13 +173,14 @@ build_for_integration_test:
     KUBERNETES_MEMORY_REQUEST: 16Gi
     KUBERNETES_MEMORY_LIMIT: 32Gi
   dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - *init-ssh
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
     paths:
       - build/programs/*
   retry: 2
   script:
-    - ssh-keyscan -H git.moqi.ai > ~/.ssh/known_hosts
     - docker/builder/tools/submodule-update.sh
     - docker/builder/build.py --output artifacts --arch linux-x86_64
   rules:

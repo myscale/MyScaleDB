@@ -1,6 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
 #include "Server.h"
 
 #include <memory>
@@ -17,6 +14,8 @@
 #include <Common/logger_useful.h>
 #include <Poco/Base64Decoder.h>
 #include <Poco/MemoryStream.h>
+#include <Poco/DOM/Text.h>
+#include <Poco/XML/XMLWriter.h>
 #include <base/phdr_cache.h>
 #include <Common/ErrorHandlers.h>
 #include <base/getMemoryAmount.h>
@@ -100,7 +99,8 @@
 #include <filesystem>
 #include <unordered_set>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/IndexBuildMemoryUsageHelper.h>
 
 #include "config.h"
 #include "config_version.h"
@@ -261,30 +261,44 @@ namespace ErrorCodes
     extern const int NETWORK_ERROR;
     extern const int CORRUPTED_DATA;
     extern const int LICENSE_ERROR;
+    extern const int LIMIT_EXCEEDED;
 }
 
 namespace
 {
-    const size_t RESCHEDULE_INTERVAL_S = 86400;
     const size_t RETRY_TIMES = 3;
     const size_t RETRY_INTERVAL_S = 1200;
+    const size_t MAX_CPU_COMMUNITY_EDITION = 4;
+    const uint64_t MAX_MEMORY_COMMUNITY_EDITION = 8589934592;
 
     const String LICENSE_CLUSTERS_PREFIX = "/license_clusters";
     const String LICENSE_CLUSTER_PREFIX_FMT = "/license_clusters/{}";
-    const String LICENSE_CONTENT_FMT = "/license_clusters/{}/license_content";
     const String ACTIVE_NODES_PREFIX_FMT = "/license_clusters/{}/active_nodes";
     const String ACTIVE_NODE_FMT = "/license_clusters/{}/active_nodes/{}";
     const String ACTIVE_INSTANCE_FMT = "/license_clusters/{}/active_nodes/{}/{}";
 
+    const String LICENSE_PATH_XML = "/license";
+    const String LICENSE_INFO_PATH_XML = "/license/license_info";
+    const String CLUSTER_NAME_PATH_XML = "/license/license_info/cluster_name";
     const String INSTANCE_COUNT_PATH_XML = "/license/license_info/instance_count";
     const String EXPIRATION_PATH_XML = "/license/license_info/expiration";
     const String LICENSE_SIGN_PATH_XML = "/license/license_signature";
     const String CPU_COUNT_PATH_XML = "/license/license_info/instance_cpu_count";
     const String MEMORY_AMOUNT_PATH_XML = "/license/license_info/instance_memory_amount";
+    const String NODES_INFO_PATH_XML = "/license/license_info/nodes_info";
+
+    const String LICENSE_TAG = "license";
     const String LICENSE_INFO_TAG = "license_info";
     const String CLUSTER_NAME_TAG = "cluster_name";
+    const String INSTANCE_COUNT_TAG = "instance_count";
+    const String INSTANCE_CPU_TAG = "instance_cpu_count";
+    const String INSTANCE_MEMORY_TAG = "instance_memory_amount";
+    const String NODES_INFO_TAG = "nodes_info";
+    const String NODE_INFO_TAG = "node_info";
     const String MACHINE_ID_TAG = "given_id";
     const String SYSTEM_UUID_TAG = "machine_info";
+    const String EXPIRED_DATE_TAG = "expiration";
+    const String LICENSE_SIGNATURE_TAG = "license_signature";
 
     const String LICENSE_FILE_NAME = "license.xml";
     const String RSA_PUBLIC_KEY_FILE_NAME = "rsa_public_key.pem";
@@ -731,14 +745,12 @@ std::string getSystemUUIDDigest()
     return getHexDigest(system_uuid);
 }
 
-std::string getLicenseFilePathPrefix(const Poco::Util::AbstractConfiguration & config)
+String getLicenseFilePathPrefix(const Poco::Util::AbstractConfiguration & config)
 {
-    std::string config_file_path = config.getString("config-file", "config.xml");
-    size_t index = config_file_path.size();
-    for (; index > 0; index--)
-        if (config_file_path[index - 1] == '/')
-            break;
-    std::string license_file_path_prefix = index > 0 ? config_file_path.substr(0, index) : "";
+    String license_file_path_prefix = config.getString("license_file_path", "/etc/clickhouse-server");
+    trim(license_file_path_prefix);
+    if (!license_file_path_prefix.ends_with('/'))
+        license_file_path_prefix += "/";
     return license_file_path_prefix;
 }
 
@@ -753,18 +765,252 @@ std::string getLicenseFileContent(const std::string & path)
     return license_file_content;
 }
 
-std::string getLicenseClusterName(const std::string & path, Poco::Logger * log)
+XMLDocumentPtr getFormatLicenseInfoDoc(XMLDocumentPtr license_doc, bool new_format_license, Poco::Logger * log)
 {
-    std::string license_file_content = getLicenseFileContent(path);
-    if (license_file_content.empty())
+    LOG_DEBUG(log, "Get formatted license document");
+
+    using Node = Poco::XML::Node;
+    using Element = Poco::XML::Element;
+    using ElementPtr = Poco::AutoPtr<Poco::XML::Element>;
+    using TextPtr = Poco::AutoPtr<Poco::XML::Text>;
+
+    /// Parse data
+    String cluster_name, instance_count, cpu_count, memory_amount, expiration, license_sign;
+    std::vector<std::pair<String, String>> machines_info;
+    {
+        Node * cluster_name_node = license_doc->getNodeByPath(CLUSTER_NAME_PATH_XML);
+        if (cluster_name_node)
+        {
+            cluster_name = cluster_name_node->innerText();
+            trim(cluster_name);
+        }
+        Node * instance_count_node = license_doc->getNodeByPath(INSTANCE_COUNT_PATH_XML);
+        if (instance_count_node)
+        {
+            instance_count = instance_count_node->innerText();
+            trim(instance_count);
+        }
+        Node * cpu_count_node = license_doc->getNodeByPath(CPU_COUNT_PATH_XML);
+        if (cpu_count_node)
+        {
+            cpu_count = cpu_count_node->innerText();
+            trim(cpu_count);
+        }
+        Node * memory_amount_node = license_doc->getNodeByPath(MEMORY_AMOUNT_PATH_XML);
+        if (memory_amount_node)
+        {
+            memory_amount = memory_amount_node->innerText();
+            trim(memory_amount);
+        }
+        Node * expiration_node = license_doc->getNodeByPath(EXPIRATION_PATH_XML);
+        if (expiration_node)
+        {
+            expiration = expiration_node->innerText();
+            trim(expiration);
+        }
+
+        Node * nodes_info = license_doc->getNodeByPath(NODES_INFO_PATH_XML);
+        if (nodes_info)
+        {
+            Poco::XML::NodeList * nodes = nodes_info->childNodes();
+            Node * next_node_info = nullptr;
+            for (Node * node_info = nodes->item(0); node_info; node_info = next_node_info)
+            {
+                next_node_info = node_info->nextSibling();
+                if (node_info->nodeType() == Node::ELEMENT_NODE)
+                {
+                    Element * elem = dynamic_cast<Element *>(node_info);
+                    if (elem)
+                    {
+                        String machine_id = elem->getAttribute(MACHINE_ID_TAG);
+                        trim(machine_id);
+
+                        String system_uuid;
+                        Element * system_uuid_node = elem->getChildElement(SYSTEM_UUID_TAG);
+                        if (system_uuid_node)
+                        {
+                            system_uuid = system_uuid_node->innerText();
+                            trim(system_uuid);
+                        }
+
+                        machines_info.push_back(std::make_pair(machine_id, system_uuid));
+                    }
+                }
+            }
+        }
+
+        Node * license_sign_node = license_doc->getNodeByPath(LICENSE_SIGN_PATH_XML);
+        if (license_sign_node)
+        {
+            license_sign = license_sign_node->innerText();
+            trim(license_sign);
+        }
+    }
+
+    if (cluster_name.empty() || instance_count.empty() || cpu_count.empty() || memory_amount.empty() || expiration.empty()
+        || license_sign.empty())
+    {
+        LOG_ERROR(log, "Format license failed, please check the XML structure of license.");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Format license failed, the XML structure of license may be incorrect.");
+    }
+
+    /// Format XML document
+    XMLDocumentPtr rebuild_doc = new Poco::XML::Document;
+    ElementPtr license_node(rebuild_doc->createElement(LICENSE_TAG));
+
+    if (new_format_license)
+    {
+        ElementPtr clickhouse_node(rebuild_doc->createElement("clickhouse"));
+        rebuild_doc->appendChild(clickhouse_node);
+        clickhouse_node->appendChild(license_node);
+    }
+    else
+        rebuild_doc->appendChild(license_node);
+
+    ElementPtr license_info_node(rebuild_doc->createElement(LICENSE_INFO_TAG));
+    license_node->appendChild(license_info_node);
+
+    ElementPtr cluster_name_node(rebuild_doc->createElement(CLUSTER_NAME_TAG));
+    license_info_node->appendChild(cluster_name_node);
+    TextPtr cluster_name_text(rebuild_doc->createTextNode(cluster_name));
+    cluster_name_node->appendChild(cluster_name_text);
+
+    ElementPtr instance_count_node(rebuild_doc->createElement(INSTANCE_COUNT_TAG));
+    license_info_node->appendChild(instance_count_node);
+    TextPtr instance_count_text(rebuild_doc->createTextNode(instance_count));
+    instance_count_node->appendChild(instance_count_text);
+
+    ElementPtr cpu_count_node(rebuild_doc->createElement(INSTANCE_CPU_TAG));
+    license_info_node->appendChild(cpu_count_node);
+    TextPtr cpu_count_text(rebuild_doc->createTextNode(cpu_count));
+    cpu_count_node->appendChild(cpu_count_text);
+
+    ElementPtr memory_amount_node(rebuild_doc->createElement(INSTANCE_MEMORY_TAG));
+    license_info_node->appendChild(memory_amount_node);
+    TextPtr memory_amount_text(rebuild_doc->createTextNode(memory_amount));
+    memory_amount_node->appendChild(memory_amount_text);
+
+    if (!machines_info.empty())
+    {
+        ElementPtr nodes_info(rebuild_doc->createElement(NODES_INFO_TAG));
+        license_info_node->appendChild(nodes_info);
+        for (auto & machine_info : machines_info)
+        {
+            ElementPtr node_info(rebuild_doc->createElement(NODE_INFO_TAG));
+            node_info->setAttribute(MACHINE_ID_TAG, machine_info.first);
+            nodes_info->appendChild(node_info);
+
+            ElementPtr system_uuid(rebuild_doc->createElement(SYSTEM_UUID_TAG));
+            node_info->appendChild(system_uuid);
+            TextPtr system_uuid_text(rebuild_doc->createTextNode(machine_info.second));
+            system_uuid->appendChild(system_uuid_text);
+        }
+    }
+
+    ElementPtr expiration_node(rebuild_doc->createElement(EXPIRED_DATE_TAG));
+    license_info_node->appendChild(expiration_node);
+    TextPtr expiration_text(rebuild_doc->createTextNode(expiration));
+    expiration_node->appendChild(expiration_text);
+
+    ElementPtr signature_node(rebuild_doc->createElement(LICENSE_SIGNATURE_TAG));
+    license_node->appendChild(signature_node);
+    TextPtr signature_text(rebuild_doc->createTextNode(license_sign));
+    signature_node->appendChild(signature_text);
+
+    /// Compatible with license of old format
+    std::stringstream s; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
+    Poco::XML::DOMWriter writer;
+    writer.setNewLine("\n");
+    writer.setIndent("    ");
+    writer.setOptions(Poco::XML::XMLWriter::PRETTY_PRINT);
+    writer.writeNode(s, rebuild_doc);
+    String format_license = s.str();
+
+    Poco::XML::DOMParser parser;
+    XMLDocumentPtr format_doc = parser.parseString(format_license);
+
+    if (new_format_license)
+    {
+        auto * format_license = format_doc->getNodeByPath("/clickhouse" + LICENSE_PATH_XML);
+
+        XMLDocumentPtr res = new Poco::XML::Document;
+        auto * copy_node = res->importNode(format_license, true);
+        res->appendChild(copy_node);
+
+        return res;
+    }
+
+    return format_doc;
+}
+
+XMLDocumentPtr
+getLicenseDoc(const Poco::Util::AbstractConfiguration & config, XMLDocumentPtr config_doc, Poco::Logger * log, bool need_format = true)
+{
+    /// License of New format
+    /// Read from configuration in memory
+    if (config_doc)
+    {
+        auto * license_node = config_doc->getNodeByPath("/clickhouse" + LICENSE_PATH_XML);
+        if (license_node)
+        {
+            LOG_DEBUG(log, "License of New format");
+
+            XMLDocumentPtr license_doc = new Poco::XML::Document;
+            auto * copy_node = license_doc->importNode(license_node, true);
+            license_doc->appendChild(copy_node);
+
+            if (need_format)
+                return getFormatLicenseInfoDoc(license_doc, true, log);
+
+            return license_doc;
+        }
+    }
+
+    /// Compatible with license of old format
+    /// Read from license file
+    LOG_DEBUG(log, "License of old format");
+
+    String license_file_path = getLicenseFilePathPrefix(config) + LICENSE_FILE_NAME;
+    String license_content = getLicenseFileContent(license_file_path);
+    if (license_content.empty())
     {
         LOG_ERROR(log, "License is empty, server will be terminated");
         throw Exception(ErrorCodes::LICENSE_ERROR, "Empty license");
     }
-    size_t begin_idx_cluster_tag = license_file_content.find(CLUSTER_NAME_TAG);
-    size_t end_idx_cluster_tag = license_file_content.rfind(CLUSTER_NAME_TAG);
-    std::string cluster_name = license_file_content.substr(
-        begin_idx_cluster_tag + CLUSTER_NAME_TAG.size() + 1, end_idx_cluster_tag - begin_idx_cluster_tag - CLUSTER_NAME_TAG.size() - 3);
+    Poco::XML::DOMParser parser;
+    XMLDocumentPtr license_doc = parser.parseString(license_content);
+    if (need_format)
+        return getFormatLicenseInfoDoc(license_doc, false, log);
+
+    return license_doc;
+}
+
+String getLicenseClusterName(const Poco::Util::AbstractConfiguration & config, XMLDocumentPtr license_doc_, Poco::Logger * log)
+{
+    String cluster_name;
+
+    String key = CLUSTER_NAME_PATH_XML;
+    std::replace(key.begin(), key.end(), '/', '.');
+    trimLeft(key, '.');
+
+    if (config.has(key))
+        cluster_name = config.getString(key);
+    else
+    {
+        XMLDocumentPtr license_doc = license_doc_;
+        if (!license_doc)
+            license_doc = getLicenseDoc(config, nullptr, log, false);
+        auto * cluster_name_node = license_doc->getNodeByPath(CLUSTER_NAME_PATH_XML);
+        if (cluster_name_node)
+            cluster_name = cluster_name_node->innerText();
+    }
+
+    trim(cluster_name);
+    if (cluster_name.empty())
+    {
+        LOG_ERROR(log, "Get license cluster name failed, please check the XML structure of license.");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Get license cluster name failed, the XML structure of license may be incorrect.");
+    }
     return cluster_name;
 }
 
@@ -785,8 +1031,8 @@ bool checkLicenseSign(const std::string & public_key_path, const std::string & c
     BIO_free(bio_public_key);
     if (rsa_public_key == nullptr)
     {
-        LOG_DEBUG(log, "Read license public key failed.");
-        return false;
+        LOG_ERROR(log, "Read license public key failed.");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, read license public key failed.");
     }
     uint8_t digest[33];
     SHA256(reinterpret_cast<const uint8_t *>(content.c_str()), content.size(), digest);
@@ -798,9 +1044,10 @@ bool checkLicenseSign(const std::string & public_key_path, const std::string & c
 void checkLicenseImpl(
     const std::string & machine_id_digest,
     const std::string & system_uuid_digest,
+    bool kubernetes_enabled,
     const unsigned int cpu_count,
     const uint64_t & memory_amount,
-    const std::string & license_content,
+    XMLDocumentPtr license_doc,
     const std::string & public_key_path,
     Poco::Logger * log,
     const zkutil::ZooKeeperPtr & zookeeper = nullptr,
@@ -808,9 +1055,6 @@ void checkLicenseImpl(
     const std::string & active_instance_path = "",
     bool has_zookeeper = false)
 {
-    Poco::XML::DOMParser parser;
-    XMLDocumentPtr license_doc = parser.parseString(license_content);
-
     int max_instance_count = std::stoi(license_doc->getNodeByPath(INSTANCE_COUNT_PATH_XML)->innerText());
     if (!has_zookeeper)
     {
@@ -826,10 +1070,24 @@ void checkLicenseImpl(
         }
     }
 
-    size_t begin_idx_license_info = license_content.find(LICENSE_INFO_TAG);
-    size_t end_idx_license_info = license_content.rfind(LICENSE_INFO_TAG);
-    std::string license_info
-        = license_content.substr(begin_idx_license_info - 1, end_idx_license_info - begin_idx_license_info + LICENSE_INFO_TAG.size() + 2);
+    String license_info;
+    auto * license_info_node = license_doc->getNodeByPath(LICENSE_INFO_PATH_XML);
+    if (license_info_node)
+    {
+        XMLDocumentPtr license_info_doc = new Poco::XML::Document;
+        auto * copy_node = license_info_doc->importNode(license_info_node, true);
+        license_info_doc->appendChild(copy_node);
+
+        std::stringstream s; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
+        Poco::XML::DOMWriter writer;
+        writer.writeNode(s, license_info_doc);
+        license_info = s.str();
+    }
+    else
+    {
+        LOG_ERROR(log, "Get license info failed, please check the XML structure of license.");
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Get license info failed, the XML structure of license is incorrect.");
+    }
 
     std::string license_sign = license_doc->getNodeByPath(LICENSE_SIGN_PATH_XML)->innerText();
     std::string decoded_sign = base64Decode(license_sign);
@@ -850,10 +1108,15 @@ void checkLicenseImpl(
         Strings active_nodes = zookeeper->getChildren(active_node_prefix);
         for (auto node : active_nodes)
         {
-            Strings active_instances = zookeeper->getChildren(active_node_prefix + "/" + node);
-            active_instance_count += active_instances.size();
+            String node_path = active_node_prefix + "/" + node;
+            Strings active_instances = zookeeper->getChildren(node_path);
+            for (const auto & active_instance : active_instances)
+            {
+                if (zookeeper->exists(node_path + "/" + active_instance + "/active"))
+                    ++active_instance_count;
+            }
         }
-        active_instance_count = zookeeper->exists(active_instance_path) ? active_instance_count - 1 : active_instance_count;
+        active_instance_count = zookeeper->exists(active_instance_path + "/active") ? active_instance_count - 1 : active_instance_count;
         if (active_instance_count < max_instance_count)
         {
             LOG_INFO(
@@ -869,48 +1132,51 @@ void checkLicenseImpl(
         }
     }
 
-    Poco::XML::Element * node_info_elem = license_doc->getElementById(machine_id_digest, MACHINE_ID_TAG);
-    if (node_info_elem)
+    if (!kubernetes_enabled)
     {
-        LOG_INFO(log, "Given id is checked, given id: {}.", machine_id_digest);
-
-        std::string system_uuid_xml = node_info_elem->getChildElement(SYSTEM_UUID_TAG)->innerText();
-        if (system_uuid_digest == system_uuid_xml)
+        Poco::XML::Element * node_info_elem = license_doc->getElementById(machine_id_digest, MACHINE_ID_TAG);
+        if (node_info_elem)
         {
-            LOG_INFO(log, "Machine info is matched, machine info: {}.", system_uuid_digest);
+            LOG_INFO(log, "Given id is checked, given id: {}.", machine_id_digest);
+
+            std::string system_uuid_xml = node_info_elem->getChildElement(SYSTEM_UUID_TAG)->innerText();
+            if (system_uuid_digest == system_uuid_xml)
+            {
+                LOG_INFO(log, "Machine info is matched, machine info: {}.", system_uuid_digest);
+            }
+            else
+            {
+                LOG_ERROR(log, "Machine info is not matched, current machine info: {}.", system_uuid_digest);
+                throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, machine info is not matched.");
+            }
         }
         else
         {
-            LOG_ERROR(log, "Machine info is not matched, current machine info: {}.", system_uuid_digest);
-            throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, machine info is not matched.");
+            LOG_ERROR(log, "There is no such machine in license, some info may be modified, current given id: {}.", machine_id_digest);
+            throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, there is no such machine.");
         }
+    }
 
-        std::string cpu_count_xml = license_doc->getNodeByPath(CPU_COUNT_PATH_XML)->innerText();
-        if (cpu_count <= std::stoul(cpu_count_xml))
-        {
-            LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, cpu_count_xml);
-        }
-        else
-        {
-            LOG_ERROR(log, "The number of CPU exceeds the limit: {}, MAX: {}.", cpu_count, cpu_count_xml);
-            throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, the number of CPU exceeds the limit.");
-        }
-
-        std::string memory_amount_xml = license_doc->getNodeByPath(MEMORY_AMOUNT_PATH_XML)->innerText();
-        if (memory_amount <= std::strtoull(memory_amount_xml.c_str(), nullptr, 10))
-        {
-            LOG_INFO(log, "Memory amount is checked: {}, MAX: {}.", memory_amount, memory_amount_xml);
-        }
-        else
-        {
-            LOG_ERROR(log, "Memory amount exceeds the limit: {}, MAX: {}.", memory_amount, memory_amount_xml);
-            throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, memory amount exceeds the limit.");
-        }
+    std::string cpu_count_xml = license_doc->getNodeByPath(CPU_COUNT_PATH_XML)->innerText();
+    if (cpu_count <= std::stoul(cpu_count_xml))
+    {
+        LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, cpu_count_xml);
     }
     else
     {
-        LOG_ERROR(log, "There is no such machine in license, some info may be modified, current given id: {}.", machine_id_digest);
-        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, there is no such machine.");
+        LOG_ERROR(log, "The number of CPU exceeds the limit: {}, MAX: {}.", cpu_count, cpu_count_xml);
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, the number of CPU exceeds the limit.");
+    }
+
+    std::string memory_amount_xml = license_doc->getNodeByPath(MEMORY_AMOUNT_PATH_XML)->innerText();
+    if (memory_amount <= std::strtoull(memory_amount_xml.c_str(), nullptr, 10))
+    {
+        LOG_INFO(log, "Memory amount is checked: {}, MAX: {}.", memory_amount, memory_amount_xml);
+    }
+    else
+    {
+        LOG_ERROR(log, "Memory amount exceeds the limit: {}, MAX: {}.", memory_amount, memory_amount_xml);
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, memory amount exceeds the limit.");
     }
 
     std::string expiration_str = license_doc->getNodeByPath(EXPIRATION_PATH_XML)->innerText();
@@ -940,28 +1206,28 @@ void checkLicenseImpl(
     }
 }
 
-void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr context, Poco::Logger * log)
+void doCheckLicense(
+    const Poco::Util::AbstractConfiguration & config, XMLDocumentPtr config_doc, ContextMutablePtr context, Poco::Logger * log)
 {
     LOG_INFO(log, "Start checking license.");
 
+    bool kubernetes_enabled = config.getBool("kubernetes_enabled", false);
     std::string machine_id_digest = getMachineIDDigest();
-    std::string system_uuid_digest = getSystemUUIDDigest();
+    std::string system_uuid_digest = kubernetes_enabled ? "" : getSystemUUIDDigest();
     unsigned int cpu_count = getNumberOfPhysicalCPUCores();
     uint64_t memory_amount = getMemoryAmount();
 
-    std::string license_file_path_prefix = getLicenseFilePathPrefix(config);
-    std::string license_file_path = license_file_path_prefix + LICENSE_FILE_NAME;
-    std::string public_key_path = license_file_path_prefix + RSA_PUBLIC_KEY_FILE_NAME;
+    std::string public_key_path = getLicenseFilePathPrefix(config) + RSA_PUBLIC_KEY_FILE_NAME;
+    XMLDocumentPtr license_doc = getLicenseDoc(config, config_doc, log);
 
     if (config.has("zookeeper"))
     {
         zkutil::ZooKeeperPtr zookeeper = context->getZooKeeper();
         zookeeper->tryCreate(LICENSE_CLUSTERS_PREFIX, "", zkutil::CreateMode::Persistent);
 
-        std::string cluster_name = getLicenseClusterName(license_file_path, log);
+        std::string cluster_name = getLicenseClusterName(config, license_doc, log);
 
         std::string cluster_prefix = fmt::format(fmt::runtime(LICENSE_CLUSTER_PREFIX_FMT), cluster_name);
-        std::string license_content_path = fmt::format(fmt::runtime(LICENSE_CONTENT_FMT), cluster_name);
         std::string active_node_prefix = fmt::format(fmt::runtime(ACTIVE_NODES_PREFIX_FMT), cluster_name);
 
         if (zookeeper->exists(cluster_prefix))
@@ -973,22 +1239,13 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
             std::string active_instance_path
                 = fmt::format(fmt::runtime(ACTIVE_INSTANCE_FMT), cluster_name, machine_id_digest, server_uuid_digest);
 
-            std::string license_content;
-            try
-            {
-                license_content = zookeeper->get(license_content_path);
-            }
-            catch (...)
-            {
-                throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, Can't get license data from Zookeeper.");
-            }
-
             checkLicenseImpl(
                 machine_id_digest,
                 system_uuid_digest,
+                kubernetes_enabled,
                 cpu_count,
                 memory_amount,
-                license_content,
+                license_doc,
                 public_key_path,
                 log,
                 zookeeper,
@@ -1005,26 +1262,27 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
             }
             code = zookeeper->tryCreate(
                 active_instance_path, toString(cpu_count) + "\n" + toString(memory_amount), zkutil::CreateMode::Persistent);
-            if (code != Coordination::Error::ZOK)
+            if (code != Coordination::Error::ZOK && code != Coordination::Error::ZNODEEXISTS)
             {
-                if (code == Coordination::Error::ZNODEEXISTS)
-                    LOG_DEBUG(log, "Instance {} already exists.", active_instance_path);
-                else
-                {
-                    LOG_ERROR(log, "Can't create instance {} in Zookeeper: {}.", active_instance_path, Coordination::errorMessage(code));
-                    throw Exception(ErrorCodes::LICENSE_ERROR, "Can't create node {} in Zookeeper.", machine_id_digest);
-                }
+                LOG_ERROR(log, "Can't create instance {} in Zookeeper: {}.", active_instance_path, Coordination::errorMessage(code));
+                throw Exception(ErrorCodes::LICENSE_ERROR, "Can't create instance {} in Zookeeper.", server_uuid_digest);
+            }
+
+            String active_path = active_instance_path + "/active";
+            context->setInstanceLicenseKeeperPath(active_path);
+            code = zookeeper->tryCreate(active_path, "", zkutil::CreateMode::Ephemeral);
+            if (code != Coordination::Error::ZOK && code != Coordination::Error::ZNODEEXISTS)
+            {
+                LOG_ERROR(log, "Can't create status of instance {} in Zookeeper: {}.", active_path, Coordination::errorMessage(code));
+                throw Exception(ErrorCodes::LICENSE_ERROR, "Can't create status of instance {} in Zookeeper.", server_uuid_digest);
             }
         }
         else
         {
             LOG_INFO(log, "Init license data in Zookeeper, cluster_prefix is {}", cluster_prefix);
 
-            std::string license_file_content = getLicenseFileContent(license_file_path);
-
             Coordination::Requests ops;
             ops.emplace_back(zkutil::makeCreateRequest(cluster_prefix, "", zkutil::CreateMode::Persistent));
-            ops.emplace_back(zkutil::makeCreateRequest(license_content_path, license_file_content, zkutil::CreateMode::Persistent));
             ops.emplace_back(zkutil::makeCreateRequest(active_node_prefix, "", zkutil::CreateMode::Persistent));
 
             Coordination::Responses responses;
@@ -1035,14 +1293,14 @@ void doCheckLicense(const Poco::Util::AbstractConfiguration & config, ContextPtr
                 throw Exception(ErrorCodes::LICENSE_ERROR, "Can't init license data in Zookeeper.");
             }
 
-            doCheckLicense(config, context, log);
+            doCheckLicense(config, config_doc, context, log);
         }
     }
     else
     {
         LOG_INFO(log, "Checking license in stand-alone mode.");
-        std::string license_content = getLicenseFileContent(license_file_path);
-        checkLicenseImpl(machine_id_digest, system_uuid_digest, cpu_count, memory_amount, license_content, public_key_path, log);
+        checkLicenseImpl(
+            machine_id_digest, system_uuid_digest, kubernetes_enabled, cpu_count, memory_amount, license_doc, public_key_path, log);
     }
 }
 
@@ -1050,8 +1308,10 @@ void Server::checkLicense()
 {
     try
     {
-        doCheckLicense(config(), global_context, &logger());
-        (*license_task)->scheduleAfter(RESCHEDULE_INTERVAL_S * 1000);
+        doCheckLicense(config(), loaded_config.preprocessed_xml, global_context, &logger());
+        size_t check_period = config().getUInt64("license_check_period", 86400);
+        LOG_DEBUG(&logger(), "Schedule to check license again in {} seconds.", check_period);
+        (*license_task)->scheduleAfter(check_period * 1000);
         retry_times = RETRY_TIMES;
     }
     catch (const Exception & e)
@@ -1062,6 +1322,7 @@ void Server::checkLicense()
         }
         else
         {
+            tryLogCurrentException("checkLicense");
             --retry_times;
             (*license_task)->scheduleAfter(RETRY_INTERVAL_S * 1000);
         }
@@ -1069,6 +1330,7 @@ void Server::checkLicense()
     catch (...)
     {
         LOG_ERROR(&logger(), "An error occurred while checking license, please check the relevant configuration.");
+        tryLogCurrentException("checkLicense");
         terminate();
     }
 }
@@ -1086,54 +1348,68 @@ void offlineInstanceInZookeeper(const Poco::Util::AbstractConfiguration & config
 {
     if (config.has("zookeeper"))
     {
-        zkutil::ZooKeeperPtr zookeeper;
         try
         {
-            zookeeper = context->getZooKeeper();
-        }
-        catch (...)
-        {
-            return;
-        }
+            zkutil::ZooKeeperPtr zookeeper = context->getZooKeeper();
 
-        LOG_DEBUG(log, "Offline instance from Zookeeper.");
+            LOG_DEBUG(log, "Offline instance from Zookeeper.");
 
-        std::string license_file_path_prefix = getLicenseFilePathPrefix(config);
-        std::string license_file_path = license_file_path_prefix + LICENSE_FILE_NAME;
-        std::string cluster_name = "";
-        try
-        {
-            cluster_name = getLicenseClusterName(license_file_path, log);
+            std::string cluster_name = getLicenseClusterName(config, nullptr, log);
+            std::string machine_id_digest = getMachineIDDigest();
+            std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
+            std::string active_instance_path
+                = fmt::format(fmt::runtime(ACTIVE_INSTANCE_FMT), cluster_name, machine_id_digest, server_uuid_digest);
+
+            zookeeper->removeRecursive(active_instance_path);
         }
         catch (const Exception & e)
         {
+            /// Ignore, already logged
             if (e.code() == ErrorCodes::LICENSE_ERROR)
-            {
-                zookeeper->tryRemove(LICENSE_CLUSTERS_PREFIX);
-            }
-            return;
+                return;
+            tryLogCurrentException("offlineInstanceInZookeeper");
         }
         catch (...)
         {
-            return;
-        }        
-
-        std::string machine_id_digest = getMachineIDDigest();
-        std::string server_uuid_digest = getHexDigest(toString(DB::ServerUUID::get()));
-        std::string active_instance_path = fmt::format(fmt::runtime(ACTIVE_INSTANCE_FMT), cluster_name, machine_id_digest, server_uuid_digest);
-
-        auto code = zookeeper->tryRemove(active_instance_path);
-        if (code != Coordination::Error::ZOK)
-        {
-            if (code == Coordination::Error::ZNONODE)
-                LOG_DEBUG(log, "Can't remove instance {}: No Node.", active_instance_path);
-            else
-                LOG_DEBUG(
-                    log,
-                    "Can't remove instance {}: {}. This shouldn't happen often.",
-                    active_instance_path,
-                    Coordination::errorMessage(code));
+            tryLogCurrentException("offlineInstanceInZookeeper");
         }
+    }
+}
+
+void Server::checkHardwareResourceLimits()
+{
+    Poco::Logger * log = &logger();
+    LOG_DEBUG(log, "Start checking hardware resource limits of community edition");
+
+    try
+    {
+        /// Check CPU and memory
+        auto cpu_count = getNumberOfPhysicalCPUCores();
+        auto memory_amount = getMemoryAmount();
+
+        if (cpu_count <= MAX_CPU_COMMUNITY_EDITION)
+            LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, MAX_CPU_COMMUNITY_EDITION);
+        else
+        {
+            LOG_ERROR(log, "The number of CPU exceeds the limit: {}, MAX: {}.", cpu_count, MAX_CPU_COMMUNITY_EDITION);
+            throw Exception(
+                ErrorCodes::LIMIT_EXCEEDED,
+                "Check hardware resource limits of community edition failed, the number of CPU exceeds the limit.");
+        }
+
+        if (memory_amount <= MAX_MEMORY_COMMUNITY_EDITION)
+            LOG_INFO(log, "Memory amount is checked: {}, MAX: {}.", memory_amount, MAX_MEMORY_COMMUNITY_EDITION);
+        else
+        {
+            LOG_ERROR(log, "Memory amount exceeds the limit: {}, MAX: {}.", memory_amount, MAX_MEMORY_COMMUNITY_EDITION);
+            throw Exception(
+                ErrorCodes::LIMIT_EXCEEDED, "Check hardware resource limits of community edition failed, memory amount exceeds the limit.");
+        }
+    }
+    catch (...)
+    {
+        tryLogCurrentException("checkHardwareResourceLimits");
+        terminate();
     }
 }
 
@@ -1726,6 +2002,32 @@ try
             auto * global_overcommit_tracker = global_context->getGlobalOvercommitTracker();
             total_memory_tracker.setOvercommitTracker(global_overcommit_tracker);
 
+            /// Set vector index cache memory limit
+            float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
+            if (vector_index_cache_ratio < 0.1f)
+                vector_index_cache_ratio = 0.1f;
+            else if (vector_index_cache_ratio > 0.9f)
+                vector_index_cache_ratio = 0.9f;
+            LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
+
+            const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
+            LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
+
+            VectorIndex::IndexBuildMemoryUsageHelper::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+
+            /// Set vector index build memory limit
+            float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
+            if (vector_index_build_ratio < 0.1f)
+                vector_index_build_ratio = 0.1f;
+            else if (vector_index_build_ratio > 0.9f)
+                vector_index_build_ratio = 0.9f;
+            LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
+
+            const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
+            LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
+
+            VectorIndex::IndexBuildMemoryUsageHelper::setBuildMemorySizeInBytes(vector_index_build_max_size);
+
             // FIXME logging-related things need synchronization -- see the 'Logger * log' saved
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
@@ -2038,8 +2340,6 @@ try
 
         async_metrics.stop();
 
-        global_context->flushAllVectorIndexWillUnload();
-
         /** Ask to cancel background jobs all table engines,
           *  and also query_log.
           * It is important to do early, not in destructor of Context, because
@@ -2088,7 +2388,12 @@ try
         LOG_DEBUG(log, "Destroyed global context.");
     });
 
-#ifdef ENABLE_LICENSE_CHECK
+#ifdef ENABLE_MYSCALE_COMMUNITY_EDITION
+    /// Check hardware resource
+    checkHardwareResourceLimits();
+#endif
+
+#if defined(ENABLE_LICENSE_CHECK)
     /// Check license
     scheduleLicense();
 #endif
@@ -2118,29 +2423,6 @@ try
     /// system logs may copy global context.
     global_context->setCurrentDatabaseNameInGlobalContext(default_database);
 
-    /// Set vector index cache memory limit
-    float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
-    if (vector_index_cache_ratio < 0.1f)
-        vector_index_cache_ratio = 0.1f;
-    else if (vector_index_cache_ratio > 0.9f)
-        vector_index_cache_ratio = 0.9f;
-    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
-
-    const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
-    LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
-
-    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
-
-    /// Set vector index build memory limit
-    float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
-    if (vector_index_build_ratio < 0.1f)
-        vector_index_build_ratio = 0.1f;
-    else if (vector_index_build_ratio > 0.9f)
-        vector_index_build_ratio = 0.9f;
-    LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
-
-    const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
-    LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
     LOG_INFO(log, "Loading metadata from {}", path_str);
 
     try

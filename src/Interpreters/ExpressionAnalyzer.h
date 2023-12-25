@@ -1,14 +1,9 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Core/ColumnNumbers.h>
 #include <Columns/FilterDescription.h>
 #include <Interpreters/ActionsVisitor.h>
 #include <Interpreters/AggregateDescription.h>
-#include <Interpreters/VectorScanDescription.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/TreeRewriter.h>
 #include <Interpreters/WindowDescription.h>
@@ -16,6 +11,8 @@
 #include <Parsers/IAST_fwd.h>
 #include <Storages/IStorage_fwd.h>
 #include <Storages/SelectQueryInfo.h>
+
+#include <VectorIndex/Storages/VectorScanDescription.h>
 
 #include <Common/logger_useful.h>
 
@@ -173,8 +170,6 @@ protected:
         bool is_explain_,
         PreparedSetsPtr prepared_sets_,
         bool is_create_parameterized_view_ = false);
-    // txh added
-    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalyzer");
 
     ASTPtr query;
     const ExtractedSettings settings;

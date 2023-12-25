@@ -47,7 +47,7 @@
 #include <Interpreters/StorageID.h>
 
 #include <Common/logger_useful.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 namespace DB
 {

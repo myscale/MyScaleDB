@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include "StorageMergeTree.h"
 #include "Core/QueryProcessingStage.h"
 #include "Storages/MergeTree/IMergeTreeDataPart.h"
@@ -38,7 +34,6 @@
 #include <Storages/MergeTree/MergeTreeSink.h>
 #include <Storages/MergeTree/MergeTreeDataPartInMemory.h>
 #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
-#include <Storages/MergeTree/VectorIndexMergeTreeTask.h>
 #include <Storages/MergeTree/PartitionPruner.h>
 #include <Storages/MergeTree/MergeList.h>
 #include <Storages/MergeTree/checkDataPart.h>
@@ -46,8 +41,9 @@
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
-#include <VectorIndex/VectorIndexCommon.h>
-#include <VectorIndex/MergeUtils.h>
+#include <VectorIndex/Storages/VectorIndexTask.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexUtils.h>
 
 namespace DB
 {
@@ -141,10 +137,8 @@ void StorageMergeTree::startup()
 
     /// Temporary directories contain incomplete results of merges (after forced restart)
     ///  and don't allow to reinitialize them, so delete each of them immediately
-    clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_"});
-
-    /// Temporary directories contain incomplete results of vector index building.
-    clearTemporaryIndexBuildDirectories();
+    /// expand cleanup folder vector_tmp
+    clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
     /// clear nvme cache
     clearVectorNvmeCache();
@@ -219,9 +213,6 @@ void StorageMergeTree::shutdown()
 
     try
     {
-        /// Temporary directories contain incomplete results of vector index building.
-        clearTemporaryIndexBuildDirectories();
-
         /// Clear cached vector index
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 
@@ -535,7 +526,7 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
             for (const auto & part : getDataPartsForInternalUsage())
             {
                 // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
-                VectorIndex::removeVectorIndexFromPartAndCache(part, vec_index_name, vec_index_command.column_name, log);
+                part->vector_index.removeVectorIndex(vec_index_name);
             }
 
             /// Remove build status for this dropped index
@@ -549,13 +540,13 @@ void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_in
 
             /// Create vector index info
             /// Get vector index desc for the newly added index
-            for (auto & vec_index_desc : getInMemoryMetadata().getVectorIndices())
+            for (auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
             {
                 if (vec_index_desc.name != vec_index_command.index_name)
                     continue;
 
                 for (const auto & part : getDataPartsForInternalUsage())
-                    part->addNewVectorIndex(vec_index_desc);
+                    part->vector_index.addVectorIndex(vec_index_desc);
             }
         }
     }
@@ -897,10 +888,6 @@ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadat
     if (!metadata_snapshot->hasVectorIndices())
         return true;
 
-    /// Check if part contains merged vector index
-    if (left->containAnyRowIdsMaps() || right->containAnyRowIdsMaps())
-        return false;
-
     /// Check if part is building vector index
     {
         std::lock_guard lock(currently_vector_indexing_parts_mutex);
@@ -915,13 +902,10 @@ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadat
         }
     }
 
-    /// Check if two parts contain vector index files.
-    /// Two parts can be merged when both have built vector index or both not.
-    for (const auto & vec_index : metadata_snapshot->getVectorIndices())
-    {
-        if (left->containVectorIndex(vec_index.name) != right->containVectorIndex(vec_index.name))
+    /// Check if part contains merged vector index
+    for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
+        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
             return false;
-    }
 
     return true;
 }
@@ -1095,7 +1079,8 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
     if (isTTLMergeType(future_part->merge_type))
         getContext()->getMergeList().bookMergeWithTTL();
 
-    merging_tagger = std::make_unique<CurrentlyMergingPartsTagger>(future_part, MergeTreeDataMergerMutator::estimateNeededDiskSpace(future_part->parts), *this, metadata_snapshot, false);
+    merging_tagger = std::make_unique<CurrentlyMergingPartsTagger>(
+        future_part, MergeTreeDataMergerMutator::estimateNeededDiskSpace(future_part->parts, true), *this, metadata_snapshot, false);
     return std::make_shared<MergeMutateSelectedEntry>(future_part, std::move(merging_tagger), std::make_shared<MutationCommands>());
 }
 
@@ -1287,7 +1272,8 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMutate(
             future_part->name = part->getNewName(new_part_info);
             future_part->part_format = part->getFormat();
 
-            tagger = std::make_unique<CurrentlyMergingPartsTagger>(future_part, MergeTreeDataMergerMutator::estimateNeededDiskSpace({part}), *this, metadata_snapshot, true);
+            tagger = std::make_unique<CurrentlyMergingPartsTagger>(
+                future_part, MergeTreeDataMergerMutator::estimateNeededDiskSpace({part}, false), *this, metadata_snapshot, true);
             return std::make_shared<MergeMutateSelectedEntry>(future_part, std::move(tagger), commands, txn);
         }
     }
@@ -1345,17 +1331,19 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
     bool has_mutations = false;
     {
-        std::unique_lock lock(currently_processing_in_background_mutex);
-        if (merger_mutator.merges_blocker.isCancelled())
-            return false;
+        {
+            std::unique_lock lock(currently_processing_in_background_mutex);
+            if (merger_mutator.merges_blocker.isCancelled())
+                return false;
 
-        merge_entry = selectPartsToMerge(metadata_snapshot, false, {}, false, nullptr, shared_lock, lock, txn);
+            merge_entry = selectPartsToMerge(metadata_snapshot, false, {}, false, nullptr, shared_lock, lock, txn);
 
-        if (!merge_entry && !current_mutations_by_version.empty())
-            mutate_entry = selectPartsToMutate(metadata_snapshot, nullptr, shared_lock, lock);
+            if (!merge_entry && !current_mutations_by_version.empty())
+                mutate_entry = selectPartsToMutate(metadata_snapshot, nullptr, shared_lock, lock);
 
-        has_mutations = !current_mutations_by_version.empty();
-        vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+            has_mutations = !current_mutations_by_version.empty();
+            vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+        }
 
         /// Consider vector index building when no merge or mutate.
         /// TODO: Add selectPartToBuildVectorIndex to do some checks, including memory limit/pool size.
@@ -1366,9 +1354,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
             /// first for new data parts, then for merged data parts   
             /// only select one part for each build
-            vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false, currently_merging_mutating_parts);
+            vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
             if (!vector_index_entry)
-                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true, currently_merging_mutating_parts);
+                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
         }
     }
 
@@ -1391,14 +1379,14 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     }
     if (vector_index_entry)
     {
-        std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
+        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
             *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
         assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (slow_mode_vector_index_entry)
     {
-        std::shared_ptr<VectorIndexMergeTreeTask> task = std::make_shared<VectorIndexMergeTreeTask>(
+        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
             *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
         assignee.scheduleSlowModeVectorIndexTask(task);
         return true;
@@ -1631,6 +1619,18 @@ ActionLock StorageMergeTree::stopMergesAndWait()
     return merge_blocker;
 }
 
+ActionLock StorageMergeTree::stopBuildIndexAndWait()
+{
+    std::unique_lock lock(currently_vector_indexing_parts_mutex);
+
+    auto build_index_blocker = vec_index_builder_updater.builds_blocker.cancel();
+
+    /// [TODO] Need wait build task complate?
+
+    return build_index_blocker;
+}
+
+
 MergeTreeDataPartPtr StorageMergeTree::outdatePart(MergeTreeTransaction * txn, const String & part_name, bool force, bool clear_without_timeout)
 {
     if (force)
@@ -1776,6 +1776,7 @@ void StorageMergeTree::truncate(const ASTPtr &, const StorageMetadataPtr &, Cont
         /// Asks to complete merges and does not allow them to start.
         /// This protects against "revival" of data for a removed partition after completion of merge.
         auto merge_blocker = stopMergesAndWait();
+        auto build_index_blocker = stopBuildIndexAndWait();
         waitForOutdatedPartsToBeLoaded();
 
         Stopwatch watch;

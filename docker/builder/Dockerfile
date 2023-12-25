@@ -1,7 +1,3 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:2.9.1 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:2.9 bash
-
 FROM ubuntu:20.04
 
 ARG TARGETARCH
@@ -112,7 +108,7 @@ RUN git clone --depth 1 https://github.com/tpoechtrager/apple-libtapi.git \
     && rm -rfv apple-libtapi
 
 # build and install tools for cross-linking to Darwin (x86-64)
-RUN git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git \
+RUN git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git -b 986-ld64-711\
     && cd cctools-port/cctools \
     && ./configure --prefix=${WORK_DIRECTORY}/cctools --with-libtapi=${WORK_DIRECTORY}/cctools \
     --target=x86_64-apple-darwin \
@@ -121,7 +117,7 @@ RUN git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git \
     && rm -rfv cctools-port
 
 # build and install tools for cross-linking to Darwin (aarch64)
-RUN git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git \
+RUN git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git -b 986-ld64-711\
     && cd cctools-port/cctools \
     && ./configure --prefix=${WORK_DIRECTORY}/cctools --with-libtapi=${WORK_DIRECTORY}/cctools \
     --target=aarch64-apple-darwin \
@@ -163,14 +159,14 @@ RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTOR
 RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
     && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
     && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
-    && apt update \
-    && apt install mono-complete --yes \
+    && apt update --yes --fix-missing \
+    && apt install mono-complete --yes --fix-missing \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/*
 
 RUN pip install --upgrade clickhouse_driver
 
-ADD ssh /root/.ssh
+RUN mkdir -p /root/.ssh
 RUN chmod -R 600 /root/.ssh
 
 RUN git config --global --add safe.directory ${WORK_DIRECTORY} \

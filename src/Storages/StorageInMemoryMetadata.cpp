@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <Common/HashTable/HashMap.h>
@@ -17,7 +13,7 @@
 #include <IO/ReadHelpers.h>
 #include <IO/Operators.h>
 
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 
 namespace DB
@@ -164,7 +160,6 @@ bool StorageInMemoryMetadata::hasVectorIndices() const
 
 bool StorageInMemoryMetadata::hasVectorIndexOnColumn(const String & column_name) const
 {
-    /// Support multiple vector indices
     for (auto & vec_index : vec_indices)
     {
         if (vec_index.column == column_name)

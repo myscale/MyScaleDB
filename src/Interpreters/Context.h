@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <base/types.h>
@@ -19,7 +15,6 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/MergeTreeTransactionHolder.h>
-#include <Interpreters/VectorScanDescription.h>
 #include <IO/IResourceManager.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/IAST_fwd.h>
@@ -28,6 +23,8 @@
 #include <Server/HTTP/HTTPContext.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage_fwd.h>
+
+#include <VectorIndex/Storages/VectorScanDescription.h>
 
 #include "config.h"
 
@@ -409,8 +406,6 @@ private:
     /// Temporary data for query execution accounting.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;
 
-    /// TODO: will be enhanced similar as scalars.
-    /// Used when vector scan func exists in right joined table
     mutable std::optional<VectorScanDescription> vector_scan_description;
 
 public:
@@ -893,8 +888,6 @@ public:
     /// and make a prefetch by putting a read task to threadpoolReader.
     size_t getPrefetchThreadpoolSize() const;
 
-    void flushAllVectorIndexWillUnload() const;
-
     /// Create a cache of index uncompressed blocks of specified size. This can be done only once.
     void setIndexUncompressedCache(size_t max_size_in_bytes);
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
@@ -1159,10 +1152,12 @@ public:
 
     ParallelReplicasMode getParallelReplicasMode() const;
 
-    /// Used for vector scan functions
     std::optional<VectorScanDescription> getVecScanDescription() const;
     void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
+
+    String getInstanceLicenseKeeperPath() const;
+    void setInstanceLicenseKeeperPath(const String & path);
 
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;

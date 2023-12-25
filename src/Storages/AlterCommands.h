@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <optional>
@@ -10,9 +6,9 @@
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/ColumnsDescription.h>
-#include <Storages/VectorIndexCommands.h>
 #include <Common/SettingsChanges.h>
 
+#include <VectorIndex/Storages/VectorIndexCommands.h>
 
 namespace DB
 {

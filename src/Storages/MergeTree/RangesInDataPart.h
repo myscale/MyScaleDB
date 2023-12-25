@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <vector>
@@ -9,6 +5,7 @@
 #include <IO/WriteBuffer.h>
 #include <IO/ReadBuffer.h>
 #include <Storages/MergeTree/MarkRange.h>
+#include "Storages/MergeTree/AlterConversions.h"
 #include "Storages/MergeTree/MergeTreePartInfo.h"
 
 
@@ -46,6 +43,7 @@ struct RangesInDataPartsDescription: public std::deque<RangesInDataPartDescripti
 struct RangesInDataPart
 {
     DataPartPtr data_part;
+    AlterConversionsPtr alter_conversions;
     size_t part_index_in_query;
     MarkRanges ranges;
     MergeTreeVectorScanManagerPtr vector_scan_manager;
@@ -54,9 +52,11 @@ struct RangesInDataPart
 
     RangesInDataPart(
         const DataPartPtr & data_part_,
+        const AlterConversionsPtr & alter_conversions_,
         const size_t part_index_in_query_,
         const MarkRanges & ranges_ = MarkRanges{})
         : data_part{data_part_}
+        , alter_conversions{alter_conversions_}
         , part_index_in_query{part_index_in_query_}
         , ranges{ranges_}
     {}

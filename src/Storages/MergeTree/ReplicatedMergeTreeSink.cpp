@@ -269,7 +269,7 @@ ReplicatedMergeTreeSinkImpl<async_insert>::ReplicatedMergeTreeSinkImpl(
     , deduplicate(deduplicate_)
     , log(&Poco::Logger::get(storage.getLogName() + " (Replicated OutputStream)"))
     , context(context_)
-    , storage_snapshot(storage.getStorageSnapshotWithoutParts(metadata_snapshot))
+    , storage_snapshot(storage.getStorageSnapshotWithoutData(metadata_snapshot, context_))
 {
     /// The quorum value `1` has the same meaning as if it is disabled.
     if (required_quorum_size == 1)
@@ -527,6 +527,10 @@ void ReplicatedMergeTreeSinkImpl<false>::finishDelayedChunk(const ZooKeeperWithF
         try
         {
             commitPart(zookeeper, part, partition.block_id, delayed_chunk->replicas_num, false);
+
+            /// init vector index
+            for (auto & vec_desc : metadata_snapshot->getVectorIndices())
+                part->vector_index.addVectorIndex(vec_desc);
 
             last_block_is_duplicate = last_block_is_duplicate || part->is_duplicate;
 

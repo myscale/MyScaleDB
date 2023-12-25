@@ -15,7 +15,7 @@
 #include <Interpreters/ZooKeeperLog.h>
 #include <Interpreters/TransactionsInfoLog.h>
 #include <Interpreters/AsynchronousInsertLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 #include <Common/MemoryTrackerBlockerInThread.h>
 #include <Common/SystemLogBase.h>

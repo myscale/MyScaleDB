@@ -8,7 +8,7 @@ ALTER TABLE test_172_status ADD VECTOR INDEX idx data TYPE MSTG('unknown=1');
 
 SELECT sleep(2);
 
-select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() order by table;
+select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() order by table;
 
 ALTER TABLE test_172_status DROP VECTOR INDEX idx;
 

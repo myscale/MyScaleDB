@@ -63,21 +63,30 @@ protected:
         size_t built_parts = 0;
         for (auto & data_part : data_parts)
         {
-            if (data_part->containVectorIndex(index.name))
-                ++built_parts;
+            auto column_index_opt = data_part->vector_index.getColumnIndex(index);
+            if (column_index_opt.has_value())
+            {
+                auto column_index = column_index_opt.value();
+                if (column_index->getVectorIndexState() == VectorIndexState::BUILT)
+                    ++built_parts;
+            }
         }
         return built_parts;
     }
 
-    size_t getSmallParts(const MergeTreeData* data, const MergeTreeData::DataPartsVector & data_parts, const VectorIndexDescription& index)
+    size_t getSmallParts(const MergeTreeData* /*data*/, const MergeTreeData::DataPartsVector & data_parts, const VectorIndexDescription& index)
     {
         size_t small_parts = 0;
-        size_t min_rows_to_build_vector_index = data->getSettings()->min_rows_to_build_vector_index;
         for (auto & data_part : data_parts)
         {
             /// if we enlarge small part size, there may exists some parts with indices built earlier.
-            if (data_part->isSmallPart(min_rows_to_build_vector_index) && !data_part->containVectorIndex(index.name))
-                ++small_parts;
+            auto column_index_opt = data_part->vector_index.getColumnIndex(index);
+            if (column_index_opt.has_value())
+            {
+                auto column_index = column_index_opt.value();
+                if (column_index->getVectorIndexState() == VectorIndexState::SMALL_PART)
+                    ++small_parts;
+            }
         }
         return small_parts;
     }
@@ -168,18 +177,12 @@ protected:
                     }
                     // total data parts
                     if (column_mask[src_index++])
-                    {
                         res_columns[res_index++]->insert(data_parts.size());
-                    }
                     // vector index built parts
                     if (column_mask[src_index++])
-                    {
                         res_columns[res_index++]->insert(getBuiltParts(data_parts, index));
-                    }
                     if (column_mask[src_index++])
-                    {
                         res_columns[res_index++]->insert(getSmallParts(data, data_parts, index));
-                    }
                     // vector index status
                     if (column_mask[src_index++])
                     {
@@ -206,16 +209,11 @@ protected:
                         res_columns[res_index++]->insert(host);
                     }
 
-                    /// latest failed part
                     if (column_mask[src_index++])
-                    {
                         res_columns[res_index++]->insert(fail_status.latest_failed_part);
-                    }
-                    /// latest fail reason
+
                     if (column_mask[src_index++])
-                    {
                         res_columns[res_index++]->insert(fail_status.latest_fail_reason);
-                    }
                 }
             }
         }

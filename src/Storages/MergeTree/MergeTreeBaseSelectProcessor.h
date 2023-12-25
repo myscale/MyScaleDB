@@ -1,15 +1,12 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Processors/Chunk.h>
+
+#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
 
 
 namespace DB
@@ -133,7 +130,8 @@ protected:
         const ReadBufferFromFileBase::ProfileCallback & profile_callback);
 
     void initializeMergeTreeReadersForPart(
-        MergeTreeData::DataPartPtr & data_part,
+        const MergeTreeData::DataPartPtr & data_part,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReadTaskColumns & task_columns,
         const StorageMetadataPtr & metadata_snapshot,
         const MarkRanges & mark_ranges,
@@ -203,7 +201,8 @@ private:
 
     /// Initialize pre readers.
     void initializeMergeTreePreReadersForPart(
-        MergeTreeData::DataPartPtr & data_part,
+        const MergeTreeData::DataPartPtr & data_part,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReadTaskColumns & task_columns,
         const StorageMetadataPtr & metadata_snapshot,
         const MarkRanges & mark_ranges,
@@ -213,7 +212,7 @@ private:
     static Block applyPrewhereActions(Block block, const PrewhereInfoPtr & prewhere_info);
 
     /// used in vector scan;
-   ColumnPtr tmp_filter;
+    ColumnPtr tmp_filter;
 
     /// True if _part_offset column is added for vector scan, but should not exist in select result.
     bool need_remove_part_offset = false;
@@ -223,5 +222,4 @@ private:
 };
 
 using MergeTreeSelectAlgorithmPtr = std::unique_ptr<IMergeTreeSelectAlgorithm>;
-
 }

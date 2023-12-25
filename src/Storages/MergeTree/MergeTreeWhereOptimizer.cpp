@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
@@ -19,7 +15,7 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/ActionsDAG.h>
 #include <base/map.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 namespace DB
 {

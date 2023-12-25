@@ -1,6 +1,5 @@
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Common/typeid_cast.h>
-#include <Common/VectorScanUtils.h>
 #include <Core/Names.h>
 #include <Parsers/IAST.h>
 #include <Parsers/ASTIdentifier.h>
@@ -9,6 +8,8 @@
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTInterpolateElement.h>
+
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 #include <Common/logger_useful.h>
 

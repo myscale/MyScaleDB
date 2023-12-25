@@ -39,7 +39,7 @@ MergeTreeSink::MergeTreeSink(
     , metadata_snapshot(metadata_snapshot_)
     , max_parts_per_block(max_parts_per_block_)
     , context(context_)
-    , storage_snapshot(storage.getStorageSnapshotWithoutParts(metadata_snapshot))
+    , storage_snapshot(storage.getStorageSnapshotWithoutData(metadata_snapshot, context_))
 {
 }
 
@@ -176,6 +176,10 @@ void MergeTreeSink::finishDelayedChunk()
             added = storage.renameTempPartAndAdd(part, transaction, lock);
             transaction.commit(&lock);
         }
+
+        /// init vector index
+        for (auto & vec_desc : metadata_snapshot->getVectorIndices())
+            part->vector_index.addVectorIndex(vec_desc);
 
         /// Part can be deduplicated, so increment counters and add to part log only if it's really added
         if (added)

@@ -1,15 +1,13 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 #include <Processors/QueryPlan/SourceStepWithFilter.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Storages/SelectQueryInfo.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeReadPool.h>
-#include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
+#include <VectorIndex/Storages/MergeTreeVectorScanUtils.h>
+
 
 namespace DB
 {
@@ -34,7 +32,7 @@ using MergeTreeDataSelectAnalysisResultPtr = std::shared_ptr<MergeTreeDataSelect
 
 /// This step is created to read from MergeTree* table.
 /// For now, it takes a list of parts and creates source from it.
-class ReadFromMergeTree final : public SourceStepWithFilter
+class ReadFromMergeTree : public SourceStepWithFilter
 {
 public:
 
@@ -102,6 +100,7 @@ public:
 
     ReadFromMergeTree(
         MergeTreeData::DataPartsVector parts_,
+        std::vector<AlterConversionsPtr> alter_conversions_,
         Names real_column_names_,
         Names virt_column_names_,
         const MergeTreeData & data_,
@@ -139,6 +138,7 @@ public:
 
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(
         MergeTreeData::DataPartsVector parts,
+        std::vector<AlterConversionsPtr> alter_conversions,
         const PrewhereInfoPtr & prewhere_info,
         const ActionDAGNodes & added_filter_nodes,
         const StorageMetadataPtr & metadata_snapshot_base,
@@ -152,7 +152,8 @@ public:
         bool sample_factor_column_queried,
         Poco::Logger * log);
 
-    MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(MergeTreeData::DataPartsVector parts) const;
+    MergeTreeDataSelectAnalysisResultPtr
+    selectRangesToRead(MergeTreeData::DataPartsVector parts, std::vector<AlterConversionsPtr> alter_conversions) const;
 
     ContextPtr getContext() const { return context; }
     const SelectQueryInfo & getQueryInfo() const { return query_info; }
@@ -174,17 +175,24 @@ public:
 
     bool hasAnalyzedResult() const { return analyzed_result_ptr != nullptr; }
     void setAnalyzedResult(MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_) { analyzed_result_ptr = std::move(analyzed_result_ptr_); }
-    void resetParts(MergeTreeData::DataPartsVector parts) { prepared_parts = std::move(parts); }
+    void resetParts(MergeTreeData::DataPartsVector parts)
+    {
+        prepared_parts = std::move(parts);
+        alter_conversions_for_parts = {};
+    }
 
     const MergeTreeData::DataPartsVector & getParts() const { return prepared_parts; }
     const MergeTreeData & getMergeTreeData() const { return data; }
     size_t getMaxBlockSize() const { return max_block_size; }
     size_t getNumStreams() const { return requested_num_streams; }
     bool isParallelReadingEnabled() const { return read_task_callback != std::nullopt; }
+    static void addMergingFinal(Pipe & pipe,const SortDescription & sort_description,MergeTreeData::MergingParams merging_params,
+        Names partition_key_columns,size_t max_block_size);
 
 private:
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToReadImpl(
         MergeTreeData::DataPartsVector parts,
+        std::vector<AlterConversionsPtr> alter_conversions,
         const StorageMetadataPtr & metadata_snapshot_base,
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
@@ -208,6 +216,8 @@ private:
     MergeTreeReaderSettings reader_settings;
 
     MergeTreeData::DataPartsVector prepared_parts;
+    std::vector<AlterConversionsPtr> alter_conversions_for_parts;
+
     Names real_column_names;
     Names virt_column_names;
 
@@ -269,6 +279,8 @@ private:
     bool is_parallel_reading_from_replicas;
     std::optional<MergeTreeAllRangesCallback> all_ranges_callback;
     std::optional<MergeTreeReadTaskCallback> read_task_callback;
+
+    friend class ReadWithVectorScan;
 };
 
 struct MergeTreeDataSelectAnalysisResult

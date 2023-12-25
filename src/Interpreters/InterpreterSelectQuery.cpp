@@ -1,8 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
-
 #include <Access/AccessControl.h>
 
 #include <DataTypes/DataTypeAggregateFunction.h>
@@ -442,7 +437,10 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (!metadata_snapshot)
             metadata_snapshot = storage->getInMemoryMetadataPtr();
 
-        storage_snapshot = storage->getStorageSnapshotForQuery(metadata_snapshot, query_ptr, context);
+        if (options.only_analyze)
+            storage_snapshot = storage->getStorageSnapshotWithoutData(metadata_snapshot, context);
+        else
+            storage_snapshot = storage->getStorageSnapshotForQuery(metadata_snapshot, query_ptr, context);
     }
 
     if (has_input || !joined_tables.resolveTables())
@@ -631,7 +629,6 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             && query.where() && !query.prewhere()
             && !query.hasJoin()) /// Join may produce rows with nulls or default values, it's difficult to analyze if they affected or not.
         {
-            LOG_DEBUG(log, "[analyze] try to move to prewhere");
             /// PREWHERE optimization: transfer some condition from WHERE to PREWHERE if enabled and viable
             if (const auto & column_sizes = storage->getColumnSizes(); !column_sizes.empty())
             {
@@ -2591,18 +2588,13 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
     auto expression_before_aggregation = std::make_unique<ExpressionStep>(query_plan.getCurrentDataStream(), expression);
     expression_before_aggregation->setStepDescription("Before GROUP BY");
     query_plan.addStep(std::move(expression_before_aggregation));
-    LOG_DEBUG(log, "[executeAggregation] before_aggregation expression: {}", expression->dumpDAG());
 
     if (options.is_projection_query)
         return;
 
-    LOG_DEBUG(log, "[executeAggregation] header_before_aggregation: {}", query_plan.getCurrentDataStream().header.dumpStructure());
-
     AggregateDescriptions aggregates = query_analyzer->aggregates();
 
     const Settings & settings = context->getSettingsRef();
-    // txh added
-    LOG_DEBUG(log, "[executeAggregation] create aggregate params, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
     const auto & keys = query_analyzer->aggregationKeys().getNames();
 
@@ -2642,7 +2634,6 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         : static_cast<size_t>(settings.max_threads);
 
     bool storage_has_evenly_distributed_read = storage && storage->hasEvenlyDistributedRead();
-    LOG_DEBUG(log, "[executeAggregation] before add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
     const bool should_produce_results_in_order_of_bucket_number = options.to_stage == QueryProcessingStage::WithMergeableState
         && (settings.distributed_aggregation_memory_efficient || settings.enable_memory_bound_merging_of_aggregation_results);
@@ -2664,7 +2655,6 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         settings.enable_memory_bound_merging_of_aggregation_results,
         !group_by_info && settings.force_aggregation_in_order);
     query_plan.addStep(std::move(aggregating_step));
-    LOG_DEBUG(log, "[executeAggregation] after add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 }
 
 void InterpreterSelectQuery::executeMergeAggregated(QueryPlan & query_plan, bool overflow_row, bool final, bool has_grouping_sets)

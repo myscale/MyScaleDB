@@ -847,7 +847,7 @@ class ClickHouseCluster:
 
         env_variables["keeper_binary"] = binary_path
         env_variables["keeper_cmd_prefix"] = keeper_cmd_prefix
-        env_variables["image"] = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration:" + self.docker_base_tag
+        env_variables["image"] = "clickhouse/integration-test" + self.docker_base_tag
         env_variables["user"] = str(os.getuid())
         env_variables["keeper_fs"] = "bind"
         for i in range(1, 4):
@@ -1439,7 +1439,7 @@ class ClickHouseCluster:
         with_coredns=False,
         hostname=None,
         env_variables=None,
-        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration",
+        image="clickhouse/integration-test",
         tag=1.4,
         stay_alive=False,
         ipv4_address=None,
@@ -3080,7 +3080,7 @@ class ClickHouseInstance:
         copy_common_configs=True,
         hostname=None,
         env_variables=None,
-        image="harbor.internal.moqi.ai/mqdb/mqdb-test-integration",
+        image="clickhouse/integration-test",
         tag="1.4",
         # tag="latest",
         stay_alive=False,

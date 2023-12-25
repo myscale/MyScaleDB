@@ -1,0 +1,6 @@
+<clickhouse>
+    <merge_tree>
+        <!-- Default is 600 (10 minutes) -->
+        <vector_index_cache_recheck_interval_seconds>1</vector_index_cache_recheck_interval_seconds>
+    </merge_tree>
+</clickhouse>

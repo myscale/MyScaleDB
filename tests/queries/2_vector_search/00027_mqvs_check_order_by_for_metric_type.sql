@@ -1,6 +1,8 @@
 
 -- Tags: no-parallel
 
+SET enable_brute_force_vector_search=1;
+
 DROP TABLE IF EXISTS test_vector_metric_type;
 CREATE TABLE test_vector_metric_type
 (

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 
 #include <filesystem>
@@ -25,7 +21,6 @@
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ParserCreateQuery.h>
@@ -83,6 +78,12 @@
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionVisitor.h>
 
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+
+namespace Search
+{
+enum class DataType;
+}
 
 namespace DB
 {
@@ -760,18 +761,28 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
             for (const auto & vec_index : create.columns_list->vec_indices->children)
             {
                 const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
-                if (properties.constraints.empty())
+                std::optional<NameAndTypePair> vector_column = properties.columns.tryGetPhysical(vec_index_definition->column);
+                if(!vector_column)
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vec_index_definition->column);
+
+                Search::DataType search_type = getSearchIndexDataType(vector_column->type);
+
+                /// Binary Vector is represented as FixedString(N), no need to check constraints
+                if (search_type == Search::DataType::FloatVector)
                 {
-                    throw Exception(
-                        ErrorCodes::INCORRECT_QUERY,
-                        "When creating table with a vector index, you need to define the Constraint information for the table.");
+                    if (properties.constraints.empty())
+                    {
+                        throw Exception(ErrorCodes::INCORRECT_QUERY, "Cannot create table with column '{}' which type is '{}' "
+                                        "because the constraint information was not defined during the creation of a vector index for the column", vector_column->name, vector_column->type->getName());
+                    }
+                    if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
+                    {
+                        throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
+                    }
                 }
-                if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
-                {
-                    throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
-                }
+
                 properties.vec_indices.push_back(
-                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+                        VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
             }
 
         if (create.columns_list->projections)
@@ -1258,7 +1269,6 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     }
     else if (create.attach && !create.attach_short_syntax && getContext()->getClientInfo().query_kind != ClientInfo::QueryKind::SECONDARY_QUERY)
     {
-        // auto * log = &Poco::Logger::get("InterpreterCreateQuery");
         LOG_WARNING(log, "ATTACH TABLE query with full table definition is not recommended: "
                          "use either ATTACH TABLE {}; to attach existing table "
                          "or CREATE TABLE {} <table definition>; to create new table "
@@ -1777,7 +1787,6 @@ BlockIO InterpreterCreateQuery::execute()
 {
     FunctionNameNormalizer().visit(query_ptr.get());
     auto & create = query_ptr->as<ASTCreateQuery &>();
-    // LOG_DEBUG(log, "[create] query: {}", create.dumpTree());
     bool is_create_database = create.database && !create.table;
     if (!create.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {

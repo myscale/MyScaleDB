@@ -325,10 +325,10 @@ MutationsInterpreter::Source::Source(MergeTreeData & storage_, MergeTreeData::Da
 
 StorageSnapshotPtr MutationsInterpreter::Source::getStorageSnapshot(const StorageMetadataPtr & snapshot_, const ContextPtr & context_) const
 {
-    if (data)
-        return data->getStorageSnapshot(snapshot_, context_);
+    if (const auto * merge_tree = getMergeTreeData())
+        return merge_tree->getStorageSnapshotWithoutData(snapshot_, context_);
 
-    return storage->getStorageSnapshot(snapshot_, context_);
+    return storage->getStorageSnapshotWithoutData(snapshot_, context_);
 }
 
 StoragePtr MutationsInterpreter::Source::getStorage() const
@@ -1043,8 +1043,7 @@ struct VirtualColumns
         {
             if (columns_to_read[i] == LightweightDeleteDescription::FILTER_COLUMN.name)
             {
-                LoadedMergeTreeDataPartInfoForReader part_info_reader(part);
-                if (!part_info_reader.getColumns().contains(LightweightDeleteDescription::FILTER_COLUMN.name))
+                if (!part->getColumns().contains(LightweightDeleteDescription::FILTER_COLUMN.name))
                 {
                     ColumnWithTypeAndName mask_column;
                     mask_column.type = LightweightDeleteDescription::FILTER_COLUMN.type;

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 #include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
 #include <Storages/MergeTree/MergeTreeData.h>
@@ -24,7 +20,8 @@ public:
     MergeTreeSelectAlgorithm(
         const MergeTreeData & storage,
         const StorageSnapshotPtr & storage_snapshot_,
-        const MergeTreeData::DataPartPtr & owned_data_part,
+        const MergeTreeData::DataPartPtr & owned_data_part_,
+        const AlterConversionsPtr & alter_conversions_,
         UInt64 max_block_size_rows,
         size_t preferred_block_size_bytes,
         size_t preferred_max_column_in_block_size_bytes,
@@ -58,6 +55,9 @@ protected:
 
     /// Data part will not be removed if the pointer owns it
     MergeTreeData::DataPartPtr data_part;
+
+    /// Alter converversionss that should be applied on-fly for part.
+    AlterConversionsPtr alter_conversions;
 
     /// Cache getSampleBlock call, which might be heavy.
     Block sample_block;

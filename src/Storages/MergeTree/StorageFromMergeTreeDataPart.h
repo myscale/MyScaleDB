@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Storages/IStorage.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <DataTypes/ObjectUtils.h>
@@ -28,6 +29,7 @@ public:
     explicit StorageFromMergeTreeDataPart(const MergeTreeData::DataPartPtr & part_)
         : IStorage(getIDFromPart(part_))
         , parts({part_})
+        , alter_conversions({part_->storage.getAlterConversionsForPart(part_)})
         , storage(part_->storage)
         , partition_id(part_->info.partition_id)
     {
@@ -83,17 +85,17 @@ public:
         size_t max_block_size,
         size_t num_streams) override
     {
-        query_plan.addStep(MergeTreeDataSelectExecutor(storage)
-                                              .readFromParts(
-                                                  parts,
-                                                  column_names,
-                                                  storage_snapshot,
-                                                  query_info,
-                                                  context,
-                                                  max_block_size,
-                                                  num_streams,
-                                                  nullptr,
-                                                  analysis_result_ptr));
+        query_plan.addStep(MergeTreeDataSelectExecutor(storage).readFromParts(
+            parts,
+            alter_conversions,
+            column_names,
+            storage_snapshot,
+            query_info,
+            context,
+            max_block_size,
+            num_streams,
+            nullptr,
+            analysis_result_ptr));
     }
 
     bool supportsPrewhere() const override { return true; }
@@ -144,6 +146,7 @@ public:
 
 private:
     const MergeTreeData::DataPartsVector parts;
+    const std::vector<AlterConversionsPtr> alter_conversions;
     const MergeTreeData & storage;
     const String partition_id;
     const MergeTreeDataSelectAnalysisResultPtr analysis_result_ptr;

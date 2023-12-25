@@ -18,5 +18,5 @@
 6	[6,6,6]	588
 34	[34,34,34]	588
 5	[5,5,5]	675
-test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Vector column data length does not meet constraint in part all_1_3_1. (INCORRECT_DATA) (version 23.3.2.1)
-test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	 Vector column data length does not meet constraint in part all_1_3_1. (INCORRECT_DATA) (version 23.3.2.1)
+test_fail_vector	v1_fail	v1_fail vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	VectorIndex: Error in Build Index, Vector column data length does not meet constraint in part all_1_3_1
+test_fail_vector_2	v1_fail_2	v1_fail_2 vector TYPE IVFFLAT(\'ncentroids = 10\')	Error	all_1_3_1	VectorIndex: Error in Build Index, Vector column data length does not meet constraint in part all_1_3_1

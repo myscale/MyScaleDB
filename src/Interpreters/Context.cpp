@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <map>
 #include <set>
 #include <optional>
@@ -76,7 +72,6 @@
 #include <Interpreters/InterserverIOHandler.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/SessionLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -117,9 +112,10 @@
 #include <Storages/StorageView.h>
 #include <Parsers/ASTFunction.h>
 #include <base/find_symbols.h>
-#include <VectorIndex/CacheManager.h>
 
 #include <Interpreters/Cache/FileCache.h>
+
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 #if USE_ROCKSDB
 #include <rocksdb/table.h>
@@ -232,6 +228,9 @@ struct ContextSharedPart : boost::noncopyable
 
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;          /// Temporary files that occur when processing the request accounted here.
+
+    /// Keeper path to the instance. For license check, renew active status of instance.
+    String instance_license_keeper_path;
 
     mutable std::unique_ptr<EmbeddedDictionaries> embedded_dictionaries;    /// Metrica's dictionaries. Have lazy initialization.
     mutable std::unique_ptr<ExternalDictionariesLoader> external_dictionaries_loader;
@@ -2086,11 +2085,6 @@ ThreadPool & Context::getPrefetchThreadpool() const
             CurrentMetrics::IOPrefetchThreads, CurrentMetrics::IOPrefetchThreadsActive, pool_size, pool_size, queue_size);
     }
     return *shared->prefetch_threadpool;
-}
-
-void Context::flushAllVectorIndexWillUnload() const
-{
-    VectorIndex::CacheManager::flushWillUnloadLog();
 }
 
 void Context::setIndexUncompressedCache(size_t max_size_in_bytes)
@@ -4157,6 +4151,17 @@ void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
 void Context::resetVecScanDescription() const
 {
     vector_scan_description.reset();
+}
+
+String Context::getInstanceLicenseKeeperPath() const
+{
+    return shared->instance_license_keeper_path;
+}
+
+void Context::setInstanceLicenseKeeperPath(const String & path)
+{
+    if (shared->instance_license_keeper_path.empty())
+        shared->instance_license_keeper_path = path;
 }
 
 WriteSettings Context::getWriteSettings() const

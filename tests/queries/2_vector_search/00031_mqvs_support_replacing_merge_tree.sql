@@ -1,5 +1,7 @@
 -- Tags: no-parallel
 
+SET enable_brute_force_vector_search=1;
+
 DROP TABLE IF EXISTS replacing_test SYNC;
 CREATE TABLE replacing_test(
     id Float32, 

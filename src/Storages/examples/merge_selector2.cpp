@@ -26,9 +26,6 @@ int main(int, char **)
     settings.base = 2;
     SimpleMergeSelector selector(settings);
 
-    // LevelMergeSelector::Settings settings;
-    // LevelMergeSelector selector(settings);
-
     ReadBufferFromFileDescriptor in(STDIN_FILENO);
 
     size_t sum_parts_size = 0;

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 #include <optional>
 #include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
@@ -10,13 +6,11 @@
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/RequestResponse.h>
-#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Columns/FilterDescription.h>
 #include <Common/ElapsedTimeProfileEventIncrement.h>
 #include <Columns/ColumnArray.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 #include <Common/typeid_cast.h>
-#include <Common/VectorScanUtils.h>
 #include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeUUID.h>
@@ -24,9 +18,8 @@
 #include <DataTypes/DataTypeTuple.h>
 #include <Processors/Transforms/AggregatingTransform.h>
 #include <Common/logger_useful.h>
-
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/Status.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
 
 #include <city.h>
 
@@ -228,7 +221,7 @@ void IMergeTreeSelectAlgorithm::initializeMergeTreeReadersForCurrentTask(
         reader = task->data_part->getReader(
             task->task_columns.columns, metadata_snapshot, task->mark_ranges,
             owned_uncompressed_cache.get(), owned_mark_cache.get(),
-            reader_settings, value_size_map, profile_callback);
+            task->alter_conversions, reader_settings, value_size_map, profile_callback);
     }
 
     if (!task->pre_reader_for_step.empty())
@@ -241,13 +234,15 @@ void IMergeTreeSelectAlgorithm::initializeMergeTreeReadersForCurrentTask(
     else
     {
         initializeMergeTreePreReadersForPart(
-            task->data_part, task->task_columns, metadata_snapshot,
+            task->data_part, task->alter_conversions,
+            task->task_columns, metadata_snapshot,
             task->mark_ranges, value_size_map, profile_callback);
     }
 }
 
 void IMergeTreeSelectAlgorithm::initializeMergeTreeReadersForPart(
-    MergeTreeData::DataPartPtr & data_part,
+    const MergeTreeData::DataPartPtr & data_part,
+    const AlterConversionsPtr & alter_conversions,
     const MergeTreeReadTaskColumns & task_columns,
     const StorageMetadataPtr & metadata_snapshot,
     const MarkRanges & mark_ranges,
@@ -257,15 +252,16 @@ void IMergeTreeSelectAlgorithm::initializeMergeTreeReadersForPart(
     reader = data_part->getReader(
         task_columns.columns, metadata_snapshot, mark_ranges,
         owned_uncompressed_cache.get(), owned_mark_cache.get(),
-        reader_settings, value_size_map, profile_callback);
+        alter_conversions, reader_settings, value_size_map, profile_callback);
 
     initializeMergeTreePreReadersForPart(
-        data_part, task_columns, metadata_snapshot,
+        data_part, alter_conversions, task_columns, metadata_snapshot,
         mark_ranges, value_size_map, profile_callback);
 }
 
 void IMergeTreeSelectAlgorithm::initializeMergeTreePreReadersForPart(
-    MergeTreeData::DataPartPtr & data_part,
+    const MergeTreeData::DataPartPtr & data_part,
+    const AlterConversionsPtr & alter_conversions,
     const MergeTreeReadTaskColumns & task_columns,
     const StorageMetadataPtr & metadata_snapshot,
     const MarkRanges & mark_ranges,
@@ -281,7 +277,7 @@ void IMergeTreeSelectAlgorithm::initializeMergeTreePreReadersForPart(
             data_part->getReader(
                 {LightweightDeleteDescription::FILTER_COLUMN}, metadata_snapshot,
                 mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(),
-                reader_settings, value_size_map, profile_callback));
+                alter_conversions, reader_settings, value_size_map, profile_callback));
     }
 
     if (prewhere_info)
@@ -292,7 +288,7 @@ void IMergeTreeSelectAlgorithm::initializeMergeTreePreReadersForPart(
                 data_part->getReader(
                     pre_columns_per_step, metadata_snapshot, mark_ranges,
                     owned_uncompressed_cache.get(), owned_mark_cache.get(),
-                    reader_settings, value_size_map, profile_callback));
+                    alter_conversions, reader_settings, value_size_map, profile_callback));
         }
     }
 }
@@ -580,8 +576,6 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     UInt64 num_filtered_rows = read_result.numReadRows() - read_result.num_rows;
 
-    /// LOG_DEBUG(log, "[readFromPartImpl] num_rows: {}, read_rows: {}", read_result.num_rows, read_result.numReadRows());
-
     size_t num_read_rows = read_result.numReadRows();
     size_t num_read_bytes = read_result.numBytesRead();
 
@@ -648,10 +642,10 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
         }
         else
         {
-            Search::DenseBitmapPtr filter = nullptr;
+            VectorIndexBitmapPtr filter = nullptr;
             if (read_result.final_filter.present())
             {
-                filter = std::make_shared<Search::DenseBitmap>(read_result.num_rows);
+                filter = std::make_shared<VectorIndexBitmap>(read_result.num_rows);
                 for (size_t i = 0; i < read_result.final_filter.getData().size(); i++)
                 {
                     if (read_result.final_filter.getData()[i])
@@ -782,6 +776,7 @@ bool IMergeTreeSelectAlgorithm::readPrimaryKeyBin(Columns & out_columns)
         MarkRanges{MarkRange(0, task->data_part->getMarksCount())},
         nullptr,
         storage.getContext()->getMarkCache().get(),
+        task->alter_conversions,
         reader_settings,
         {},
         {});

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Common/typeid_cast.h>
 #include <Parsers/ParserAlterQuery.h>
 #include <Parsers/CommonParsers.h>
@@ -15,8 +11,9 @@
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/parseDatabaseAndTableName.h>
+
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 
 namespace DB
