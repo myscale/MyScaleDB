@@ -493,7 +493,6 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             }
             catch (...)
             {
-                LOG_ERROR(log, "Failed to load vector index, cache key={}", segment_id.getCacheKey().toString());
                 index.reset();
                 throw;
             }
@@ -545,6 +544,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         }
         catch (const IndexException & e)
         {
+            LOG_WARNING(log, "Failed to load vector index cache: {}, error {}: {}.", cache_key.toString(), e.code(), e.message());
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
@@ -558,6 +558,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         }
         catch (const DB::Exception & e)
         {
+            LOG_WARNING(log, "Failed to load vector index cache: {}, error {}: {}.", cache_key.toString(), e.code(), e.message());
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
@@ -571,6 +572,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
         }
         catch (const std::exception & e)
         {
+            LOG_ERROR(log, "Failed to load vector index cache: {}, error STD_EXCEPTION: {}.", cache_key.toString(), e.what());
             DB::VectorIndexEventLog::addEventLog(
                 DB::Context::getGlobalContextInstance(),
                 cache_key.getTableUUID(),
@@ -582,6 +584,9 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 DB::ExecutionStatus(DB::ErrorCodes::STD_EXCEPTION, e.what()));
             return Status(DB::ErrorCodes::STD_EXCEPTION, e.what());
         }
+        /// The LRU cache returned a null pointer during load. 
+        /// One of the reasons may be that the LRU cache memory is not enough to load the cache.
+        LOG_WARNING(log, "Failed to load vector index cache: {}, no exception. This may be a cache problem", cache_key.toString());
         DB::VectorIndexEventLog::addEventLog(
             DB::Context::getGlobalContextInstance(),
             cache_key.getTableUUID(),

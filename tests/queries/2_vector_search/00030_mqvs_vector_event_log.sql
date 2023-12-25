@@ -48,6 +48,8 @@ SELECT sleep(3);
 
 SYSTEM FLUSH LOGS;
 
+SELECT sleep(3);
+
 SELECT table, event_type 
 FROM system.vector_index_event_log 
 WHERE table = 'test_vector_event_log'
