@@ -434,10 +434,32 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         /// Support multiple vector indices
         if (vec_index_desc.name != vector_index_name)
             continue;
+        
+        const DataPartStorageOnDiskBase * part_storage
+            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
+        if (part_storage == nullptr)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+        }
+
+        auto disk = part_storage->getDisk();
+
+        /// Create temporary directory to store built vector index files.
+        /// The director name starts with prefix "vector_tmp_" + vector_index_name + part_name w/o_mutation
+        /// e.g. part all_1_1_0_5 vector index v1: vector_tmp_v1_all_1_1_0
+        String part_name_prefix = part->info.getPartNameWithoutMutation();
+        String tmp_vector_index_dir = "vector_tmp_" + vector_index_name + "_" + part_name_prefix + "/";
+        String vector_tmp_relative_path = data.getRelativeDataPath() + tmp_vector_index_dir + "/";
+        String vector_tmp_full_path = data.getFullPathOnDisk(disk) + tmp_vector_index_dir + "/";
+
+        /// Add lock to avoid wronly remove of temporary directory
+        auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(tmp_vector_index_dir);
 
         if (part->containVectorIndex(vec_index_desc.name))
         {
-            LOG_DEBUG(log, "Part {} already has vector index {} built", part->name, vector_index_name);
+            LOG_DEBUG(log, "Part {} already has vector index {} built, will remove {} if exists", part->name, vector_index_name, tmp_vector_index_dir);
+            if (disk->exists(vector_tmp_relative_path))
+                disk->removeRecursive(vector_tmp_relative_path);
             VectorIndexEventLog::addEventLog(data.getContext(), part, vector_index_name, VectorIndexEventLogElement::BUILD_SUCCEED);
             return BuildVectorIndexStatus::SUCCESS;
         }
@@ -483,27 +505,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             return BuildVectorIndexStatus::META_ERROR;
         }
 
-        /// below is a horror to test whether a moved part need to rebuild its index. basially is reads from vector_index_ready if there is one,
-        /// creates a pesudo vector index using parameters recorded in vector_index_ready and compare with the new index to see if they are the same.
-        const DataPartStorageOnDiskBase * part_storage
-            = dynamic_cast<const DataPartStorageOnDiskBase *>(part->getDataPartStoragePtr().get());
-        if (part_storage == nullptr)
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-        }
-        auto disk = part_storage->getDisk();
+        /// below is a horror to test whether a moved part need to rebuild its index. basially is reads from vector_index_description if there is one.
         String vector_index_description_file_name = VectorIndex::getVectorIndexDescriptionFileName(vector_index_name);
-
-        /// Create temporary directory to store built vector index files.
-        /// The director name starts with prefix "vector_tmp_" + vector_index_name + part_name w/o_mutation
-        /// e.g. part all_1_1_0_5 vector index v1: vector_tmp_v1_all_1_1_0
-        String part_name_prefix = part->info.getPartNameWithoutMutation();
-        String tmp_vector_index_dir = "vector_tmp_" + vector_index_name + "_" + part_name_prefix + "/";
-        String vector_tmp_relative_path = data.getRelativeDataPath() + tmp_vector_index_dir + "/";
-        String vector_tmp_full_path = data.getFullPathOnDisk(disk) + tmp_vector_index_dir + "/";
-
-        /// Add lock to avoid wronly remove of temporary directory
-        auto temporary_directory_lock = data.getTemporaryPartDirectoryHolder(tmp_vector_index_dir);
 
         /// Since the vector index is stored in a temporary directory, add check for it too.
         /// Loop through the relative_data_path to check if any directory with vector_tmp_<vector_index_name>_<part_name_without_mutation> exists
@@ -646,7 +649,9 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::TryMoveVectorIndexFil
         future_part = data.getActiveContainingPart(build_part->name);
         if (!future_part)
         {
-            LOG_WARNING(log, "Failed to find future part for part {}, leave the temporary directory", build_part->name);
+            LOG_WARNING(log, "Failed to find future part for part {}, will remove the temporary directory", build_part->name);
+            if (disk->exists(vector_tmp_relative_path))
+                disk->removeRecursive(vector_tmp_relative_path);
             VectorIndexEventLog::addEventLog(data.getContext(), build_part, vec_index_desc.name, VectorIndexEventLogElement::BUILD_CANCELD);
             return BuildVectorIndexStatus::BUILD_SKIPPED;
         }
@@ -791,12 +796,11 @@ bool MergeTreeVectorIndexBuilderUpdater::moveVectorIndexFilesToFuturePartAndCach
     {
         LOG_WARNING(log,"Failed to move built vector index {} files to part {}, will do some clean-up work: {}", vector_index_name, dest_part->name, e.message());
 
+        if (disk->exists(vector_tmp_relative_path))
+            disk->removeRecursive(vector_tmp_relative_path);
+
         if (!moved_files.empty())
-        {
-            if (disk->exists(vector_tmp_relative_path))
-                disk->removeRecursive(vector_tmp_relative_path);
             dest_part->removeIncompleteMovedVectorIndexFiles(moved_files);
-        }
 
         throw;
     }

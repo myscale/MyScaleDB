@@ -1330,15 +1330,20 @@ MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToDisk(
         downloadBaseOrProjectionPartToDisk(
             replica_path, part_storage_for_loading, in, output_buffer_getter, data_checksums, throttler, sync);
     }
-    catch (const Exception & e)
+    catch (...)
     {
         /// Remove the whole part directory if fetch of base
         /// part or fetch of any projection was stopped.
-        if (e.code() == ErrorCodes::ABORTED)
-        {
-            part_storage_for_loading->removeSharedRecursive(true);
-            part_storage_for_loading->commitTransaction();
-        }
+        // if (e.code() == ErrorCodes::ABORTED)
+        // {
+        //     part_storage_for_loading->removeSharedRecursive(true);
+        //     part_storage_for_loading->commitTransaction();
+        // }
+        /// We will promptly clean the tmp fetch file to address issue: https://git.moqi.ai/mqdb/ClickHouse/-/issues/250
+        LOG_INFO(log, "Directory {} will be deleted due to an error during fetch part.", part_storage_for_loading->getRelativePath());
+        part_storage_for_loading->removeSharedRecursive(true);
+        part_storage_for_loading->commitTransaction();
+
         throw;
     }
 
