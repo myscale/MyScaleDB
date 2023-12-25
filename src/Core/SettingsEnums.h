@@ -5,6 +5,7 @@
 #include <QueryPipeline/SizeLimits.h>
 #include <Formats/FormatSettings.h>
 #include <IO/ReadSettings.h>
+#include <Common/ShellCommandSettings.h>
 
 
 namespace DB
@@ -219,4 +220,7 @@ enum class ParallelReplicasCustomKeyFilterType : uint8_t
 DECLARE_SETTING_ENUM(ParallelReplicasCustomKeyFilterType)
 
 DECLARE_SETTING_ENUM(LocalFSReadMethod)
+
+DECLARE_SETTING_ENUM(ExternalCommandStderrReaction)
+
 }
