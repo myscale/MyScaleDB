@@ -63,6 +63,7 @@ void ReplicatedMergeTreeCleanupThread::iterate()
         auto lock = storage.lockForShare(RWLockImpl::NO_QUERY, storage.getSettings()->lock_acquire_timeout_for_background_operations);
         /// Both use relative_data_path which changes during rename, so we
         /// do it under share lock
+        /// expand cleanup folder vector_tmp
         storage.clearOldWriteAheadLogs();
         storage.clearOldTemporaryDirectories(storage.getSettings()->temporary_directories_lifetime.totalSeconds());
         if (storage.getSettings()->merge_tree_enable_clear_old_broken_detached)

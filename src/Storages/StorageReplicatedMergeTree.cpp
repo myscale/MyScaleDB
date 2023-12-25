@@ -4615,7 +4615,6 @@ bool StorageReplicatedMergeTree::partIsLastQuorumPart(const MergeTreePartInfo & 
     return partition_it->second == part_info.getPartNameAndCheckFormat(format_version);
 }
 
-
 bool StorageReplicatedMergeTree::fetchPart(
     const String & part_name,
     const StorageMetadataPtr & metadata_snapshot,
@@ -4999,7 +4998,8 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         /// Move here to avoid wrongly remove just started background build in restart_thread.
         /// Temporary directories contain incomplete results of build vector index.
-        clearTemporaryIndexBuildDirectories();
+        /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
+        // clearTemporaryIndexBuildDirectories();
 
         /// clear nvme cache
         clearVectorNvmeCache();
@@ -5145,7 +5145,8 @@ void StorageReplicatedMergeTree::shutdown()
     }
 
     /// Temporary directories contain incomplete results of vector index building.
-    clearTemporaryIndexBuildDirectories();
+    /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
+    // clearTemporaryIndexBuildDirectories();
 
     /// Clear cached vector index
     clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
