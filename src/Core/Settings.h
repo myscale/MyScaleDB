@@ -156,7 +156,7 @@ class IColumn;
     M(UInt64, max_build_index_train_block_size, 100 * 1024 * 1024, "Maximum block size in bytes for training in build index", 0) \
     M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
     M(Bool, optimize_move_to_prewhere_for_vector_search, true, "Enables or disables special PREWHERE optimization for vector search in SELECT queries which move all viable WHERE to PREWHERE.", 0) \
-    M(UInt64, two_stage_search_option, 0, "Control two stage search options for vector search in SELECT queries. 0 - disable. 1 - adaptive enable depending on disk mode and saved IO. 2 - always enable.", 0) \
+    M(UInt64, two_stage_search_option, 1, "Control two stage search options for vector search in SELECT queries. 0 - disable. 1 - adaptive enable depending on disk mode and saved IO. 2 - always enable.", 0) \
     M(String, stream_like_engine_insert_queue, "", "When stream like engine reads from multiple queues, user will need to select one queue to insert into when writing. Used by Redis Streams and NATS.", 0) \
     M(Bool, dictionary_validate_primary_key_type, false, "Validate primary key type for dictionaries. By default id type for simple layouts will be implicitly converted to UInt64.", 0) \
     M(Bool, distributed_insert_skip_read_only_replicas, false, "If true, INSERT into Distributed will skip read-only replicas.", 0) \
