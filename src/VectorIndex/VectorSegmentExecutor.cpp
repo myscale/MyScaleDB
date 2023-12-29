@@ -287,14 +287,15 @@ Status VectorSegmentExecutor::cache()
     return Status();
 }
 
-Status VectorSegmentExecutor::serialize()
+Status VectorSegmentExecutor::serialize(std::shared_ptr<DB::MergeTreeDataPartChecksums> & checksums)
 {
     try
     {
+        vector_index_checksums = checksums;
         auto file_writer = Search::IndexDataFileWriter<Search::AbstractOStream>(
             segment_id.getFullPath(),
             [this](const std::string & name, std::ios::openmode /*mode*/)
-            { return std::make_shared<VectorIndexWriter>(segment_id.getDisk(), name); });
+            { return std::make_shared<VectorIndexWriter>(segment_id.getDisk(), name, vector_index_checksums); });
 
         index->serialize(&file_writer);
         index->saveDataID(&file_writer);
