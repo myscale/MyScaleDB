@@ -269,6 +269,9 @@ struct ContextSharedPart : boost::noncopyable
     mutable OnceFlag async_loader_initialized;
     mutable std::unique_ptr<AsyncLoader> async_loader; /// Thread pool for asynchronous initialization of arbitrary DAG of `LoadJob`s (used for tables loading)
 
+    /// Keeper path to the instance. For license check, renew active status of instance.
+    String instance_license_keeper_path;
+
     mutable std::unique_ptr<EmbeddedDictionaries> embedded_dictionaries TSA_GUARDED_BY(embedded_dictionaries_mutex);    /// Metrica's dictionaries. Have lazy initialization.
     mutable std::unique_ptr<ExternalDictionariesLoader> external_dictionaries_loader TSA_GUARDED_BY(external_dictionaries_mutex);
 
@@ -5690,6 +5693,18 @@ void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
 void Context::resetVecScanDescription() const
 {
     vector_scan_description.reset();
+}
+
+String Context::getInstanceLicenseKeeperPath() const
+{
+    return shared->instance_license_keeper_path;
+}
+
+void Context::setInstanceLicenseKeeperPath(const String & path)
+{
+    /// Only changes when service is restarted
+    if (shared->instance_license_keeper_path.empty())
+        shared->instance_license_keeper_path = path;
 }
 
 WriteSettings Context::getWriteSettings() const
