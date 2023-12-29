@@ -118,6 +118,10 @@ protected:
     /// Return false if the worker was stopped (stop_flag = true)
     virtual bool initializeMainThread();
 
+    /// Renew active status of instance. For license check, prevent keeper connection loss.
+    bool renew_instance_status = false;
+    void renewInstanceLicenseStatus(const ZooKeeperPtr & zookeeper);
+
     void runMainThread();
     void runCleanupThread();
 
