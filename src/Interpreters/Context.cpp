@@ -233,6 +233,9 @@ struct ContextSharedPart : boost::noncopyable
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;          /// Temporary files that occur when processing the request accounted here.
 
+    /// Keeper path to the instance. For license check, renew active status of instance.
+    String instance_license_keeper_path;
+
     mutable std::unique_ptr<EmbeddedDictionaries> embedded_dictionaries;    /// Metrica's dictionaries. Have lazy initialization.
     mutable std::unique_ptr<ExternalDictionariesLoader> external_dictionaries_loader;
 
@@ -4157,6 +4160,18 @@ void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
 void Context::resetVecScanDescription() const
 {
     vector_scan_description.reset();
+}
+
+String Context::getInstanceLicenseKeeperPath() const
+{
+    return shared->instance_license_keeper_path;
+}
+
+void Context::setInstanceLicenseKeeperPath(const String & path)
+{
+    /// Only changes when service is restarted
+    if (shared->instance_license_keeper_path.empty())
+        shared->instance_license_keeper_path = path;
 }
 
 WriteSettings Context::getWriteSettings() const

@@ -1164,6 +1164,10 @@ public:
     void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
 
+    /// Used for license check
+    String getInstanceLicenseKeeperPath() const;
+    void setInstanceLicenseKeeperPath(const String & path);
+
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;
 
