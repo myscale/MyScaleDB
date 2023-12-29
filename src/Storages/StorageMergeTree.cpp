@@ -141,10 +141,12 @@ void StorageMergeTree::startup()
 
     /// Temporary directories contain incomplete results of merges (after forced restart)
     ///  and don't allow to reinitialize them, so delete each of them immediately
-    clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_"});
+    /// expand cleanup folder vector_tmp
+    clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
     /// Temporary directories contain incomplete results of vector index building.
-    clearTemporaryIndexBuildDirectories();
+    /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
+    // clearTemporaryIndexBuildDirectories();
 
     /// clear nvme cache
     clearVectorNvmeCache();
@@ -220,7 +222,8 @@ void StorageMergeTree::shutdown()
     try
     {
         /// Temporary directories contain incomplete results of vector index building.
-        clearTemporaryIndexBuildDirectories();
+        /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
+        // clearTemporaryIndexBuildDirectories();
 
         /// Clear cached vector index
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
