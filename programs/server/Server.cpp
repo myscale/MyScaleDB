@@ -236,7 +236,6 @@ namespace ErrorCodes
 
 namespace
 {
-    const size_t RESCHEDULE_INTERVAL_S = 86400;
     const size_t RETRY_TIMES = 3;
     const size_t RETRY_INTERVAL_S = 1200;
 
@@ -1247,7 +1246,9 @@ void Server::checkLicense()
     try
     {
         doCheckLicense(config(), loaded_config.preprocessed_xml, global_context, &logger());
-        (*license_task)->scheduleAfter(RESCHEDULE_INTERVAL_S * 1000);
+        size_t check_period = config().getUInt64("license_check_period", 86400);
+        LOG_DEBUG(&logger(), "Schedule to check license again in {} seconds.", check_period);
+        (*license_task)->scheduleAfter(check_period * 1000);
         retry_times = RETRY_TIMES;
     }
     catch (const Exception & e)
