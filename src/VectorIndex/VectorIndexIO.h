@@ -109,7 +109,7 @@ public:
 
     ~VectorIndexWriter() override
     {
-        if (checksums && !file_name.empty())
+        if (checksums && !file_name.empty() && hashing_out)
             checksums->addFile(file_name, hashing_out->count(), hashing_out->getHash());
     }
 
