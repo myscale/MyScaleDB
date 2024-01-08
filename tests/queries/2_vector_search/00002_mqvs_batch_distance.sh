@@ -22,7 +22,7 @@ if [ $time -eq 5 ]; then
         echo "fail to build index"
 fi
 clickhouse-client -q "select '-- batch_distance of metric_type=L2';"
-clickhouse-client -q "SELECT id, vector, batch_distance(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) as dist FROM test_vector order by dist.1,dist.2 limit 10 by dist.1;"
+clickhouse-client -q "SELECT id, vector, batch_distance(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) as dist FROM test_vector order by dist.1,dist.2 limit 10 by dist.1 SETTINGS enable_brute_force_vector_search=1;"
 
 clickhouse-client -q "ALTER TABLE test_vector DROP VECTOR INDEX v1;"
 
@@ -39,7 +39,7 @@ if [ $time -eq 5 ]; then
         echo "fail to build index"
 fi
 clickhouse-client -q "select '-- batch_distance of metric_type=IP';"
-clickhouse-client -q "SELECT id, vector, batch_distance(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) as dist FROM test_vector order by dist.1,dist.2 DESC limit 10 by dist.1;"
+clickhouse-client -q "SELECT id, vector, batch_distance(vector, [[0.1, 0.1, 0.1], [0.2, 0.2, 0.2], [50.1, 50.1, 50.1]]) as dist FROM test_vector order by dist.1,dist.2 DESC limit 10 by dist.1 SETTINGS enable_brute_force_vector_search=1;"
 
 clickhouse-client -q "DROP TABLE IF EXISTS test_vector"
 

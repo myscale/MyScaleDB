@@ -1,5 +1,7 @@
 -- Tags: no-parallel
 
+SET enable_brute_force_vector_search=1;
+
 SELECT '-- Test newly added vector column with multiple vector indices';
 DROP TABLE IF EXISTS test_multi_249_new_column;
 CREATE TABLE test_multi_249_new_column (`id` UInt32, `v1` Array(Float32),

@@ -1,0 +1,21 @@
+min_rows_to_build_vector_index = 0
+enable_brute_force_vector_search = 0
+enable_brute_force_vector_search = 1
+1	0
+0	3
+2	3
+3	12
+4	27
+small part
+enable_brute_force_vector_search = 0
+1	0
+0	3
+2	3
+3	12
+4	27
+enable_brute_force_vector_search = 1
+1	0
+0	3
+2	3
+3	12
+4	27
