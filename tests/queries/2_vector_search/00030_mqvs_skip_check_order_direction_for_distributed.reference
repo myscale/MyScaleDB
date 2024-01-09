@@ -1,6 +1,8 @@
 metric_type=L2
+0
 1	0
 2	3
 metric_type=IP
+0
 100	300
 99	297
