@@ -209,59 +209,64 @@ spec:
           port: 2181
 
     settings:
-      disable_internal_dns_cache: 1
+      allow_experimental_transactions: "42"
+      disable_internal_dns_cache: "1"
+      logger/count: "3"
       logger/level: information
       logger/size: 1000M
-      logger/count: 3
-      vector_index_cache_path: /var/lib/clickhouse/vector_index_cache
-      mark_cache_size: 209715200
-      uncompressed_cache_size: 314572800
-      max_parts_in_total: 10000
-      max_concurrent_queries: 1000
-      max_table_size_to_drop: 1000000000000
+      mark_cache_size: "209715200"
+      max_concurrent_queries: "1000"
+      max_parts_in_total: "10000"
+      max_table_size_to_drop: "1000000000000"
+      merge_tree/allow_remote_fs_zero_copy_replication: "0"
+      merge_tree/build_vector_index_on_random_single_replica: "1"
+      merge_tree/default_mstg_disk_mode: "1"
+      merge_tree/max_bytes_to_merge_at_max_space_in_pool: "5368709120"
+      merge_tree/max_parts_to_merge_at_once: "100"
+      merge_tree/merge_max_block_size: "256"
+      merge_tree/number_of_free_entries_in_pool_to_execute_mutation: "2"
+      merge_tree/number_of_free_entries_in_pool_to_lower_max_size_of_merge: "2"
+      merge_tree/old_parts_lifetime: "5"
+      merge_tree/simple_merge_selector_base: "1.2"
+      merge_tree/storage_policy: default
+      primary_key_cache_size: "67108864"
       query_log/database: system
       query_log/flush_interval_milliseconds: "7500"
       query_log/partition_by: toYYYYMMDD(event_date)
       query_log/table: query_log
       query_log/ttl: event_date + INTERVAL 3 DAY DELETE
-      merge_tree/number_of_free_entries_in_pool_to_execute_mutation: 2
-      merge_tree/number_of_free_entries_in_pool_to_lower_max_size_of_merge: 2
-      merge_tree/max_parts_to_merge_at_once: 100
-      merge_tree/merge_max_block_size: 256
-      merge_tree/old_parts_lifetime: 5
-      merge_tree/default_mstg_disk_mode: 1
-      merge_tree/max_bytes_to_merge_at_max_space_in_pool: 5368709120
-      merge_tree/simple_merge_selector_base: 1.2
-      allow_experimental_transactions: 42
       transactions_info_log/database: system
+      transactions_info_log/flush_interval_milliseconds: "7500"
       transactions_info_log/table: transactions_info_log
-      transactions_info_log/flush_interval_milliseconds: 7500
+      uncompressed_cache_size: "314572800"
+      vector_index_cache_path: /var/lib/clickhouse/vector_index_cache
+      user_defined_executable_functions_config: /var/lib/clickhouse/udf_configs/functions.xml
+      user_scripts_path: /var/lib/clickhouse/user_scripts
     users:
       default/networks/ip:
         - "127.0.0.1"
         - "::1"
         - "0.0.0.0/0"
     profiles:
-      default/allow_experimental_lightweight_delete: "true"
-      default/mutations_sync: "1"
+      default/allow_experimental_database_replicated: "true"
+      default/allow_experimental_object_type: "true"
+      default/async_insert: "1"
+      default/background_merges_mutations_concurrency_ratio: "2"
+      default/background_pool_size: "4"
+      default/database_replicated_allow_explicit_arguments: "false"
+      default/database_replicated_allow_replicated_engine_arguments: "false"
+      default/database_replicated_always_convert_table_to_replicated: "true"
+      default/database_replicated_always_execute_with_on_cluster: "true"
+      default/database_replicated_default_cluster_name: '{cluster}'
+      default/database_replicated_default_zk_path_prefix: /clickhouse/{installation}/{cluster}/databases/
+      default/default_database_engine: Replicated
+      default/default_table_engine: ReplicatedMergeTree
       default/log_queries_cut_to_length: "100"
       default/log_queries_min_type: QUERY_FINISH
-      default/log_query_threads: 0
-      default/log_query_views: 0
-      default/background_pool_size: 4
-      default/background_merges_mutations_concurrency_ratio: 2
-      default/min_insert_block_size_bytes: 33554432
-      default/allow_experimental_database_replicated: "true"
-      default/database_replicated_always_convert_table_to_replicated: "true"
-      default/database_replicated_allow_replicated_engine_arguments: "false"
-      default/database_replicated_default_zk_path_prefix: "/clickhouse/{installation}/{cluster}/databases/"
-      default/default_database_engine: "Replicated"
-      default/default_table_engine: "ReplicatedMergeTree"
-      default/database_replicated_always_execute_with_on_cluster: "true"
-      default/database_replicated_default_cluster_name: "{cluster}"
-      default/database_replicated_allow_explicit_arguments: "false"
-      default/async_insert: 1
-      default/allow_experimental_object_type: "true"
+      default/log_query_threads: "0"
+      default/log_query_views: "0"
+      default/min_insert_block_size_bytes: "33554432"
+      default/mutations_sync: "1"
 
     clusters:
       - name: clickhouse
@@ -326,6 +331,12 @@ spec:
             - key: node.kubernetes.io/localpath-volume
               value: "true"
               effect: NoExecute
+          initContainers:
+            - name: myscale-init
+              image: harbor.internal.moqi.ai/mqdb/udfs:UDF_IMAGE_VERSION
+              volumeMounts:
+                - mountPath: /var/lib/clickhouse
+                  name: data-volume-claim-template
           containers:
             - name: clickhouse
               image: harbor.internal.moqi.ai/mqdb/mqdb:BASE_IMAGE
@@ -350,10 +361,10 @@ spec:
                   protocol: TCP
               resources:
                 requests:
-                  cpu: 1000m
-                  memory: 3Gi
+                  cpu: 2
+                  memory: 4Gi
                 limits:
-                  cpu: 3000m
+                  cpu: 2
                   memory: 4Gi
               volumeMounts:
                 - mountPath: /var/lib/clickhouse/vector_index_cache

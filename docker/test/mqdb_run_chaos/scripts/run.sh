@@ -39,6 +39,7 @@ function setup_mqdb()
   cp -f docker/test/mqdb_run_chaos/deploy/chaos-runner.yaml docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
   cp -f docker/test/mqdb_run_chaos/deploy/mqdb-replicated.yaml docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
   sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?UDF_IMAGE_VERSION?$UDF_IMAGE_VERSION?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
   sed -i "s?IMAGE_VERSION?$VERSION_STRING-$GIT_COMMIT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
   sed -i "s?CHAOS_TIMEOUT?$CHAOS_TIMEOUT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
   sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
@@ -112,6 +113,8 @@ then
   kubectl delete ns $current_namespace
   exit 1
 fi
+# just in case keeper is not ready
+kubectl rollout status --watch --timeout=600s -n "${current_namespace}" statefulset/clickhouse-keeper
 
 start_time="$(date +%s)000"
 echo "apply chaos runner job"
