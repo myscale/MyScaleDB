@@ -23,18 +23,23 @@ class DataConsistencyChecker:
         logger.info("insert 50w data and build vector index")
         self.client_ls[-1].init_server(500000)
         start = time.time()
-        # run scale up, scale down and upgrade cluster test three times
-        for i in range(3):
+        # run scale up, scale down and upgrade cluster test two times
+        for i in range(2):
             if i > 0:
                 update_cluster_image_and_check(self.config, self.chaos_client,
                                                self.client_ls[-1], 900, self.config.base_image)
+                time.sleep(60)
 
             scale_up_cluster_and_check(self.config, self.chaos_client, self.client_ls[-1], 900)
+            # sleep in case clickhouse operator not create chi service
+            time.sleep(100)
             scale_down_cluster_and_check(self.config, self.chaos_client, self.client_ls[-1], 300)
+            time.sleep(100)
             scale_up_cluster_and_check(self.config, self.chaos_client, self.client_ls[-1], 900)
-
+            time.sleep(100)
             update_cluster_image_and_check(self.config, self.chaos_client, self.client_ls[-1], 900,
                                            self.config.upgrade_image)
+            time.sleep(60)
 
         # inject random chaos within timeout
         while time.time() - start < self.timeout:

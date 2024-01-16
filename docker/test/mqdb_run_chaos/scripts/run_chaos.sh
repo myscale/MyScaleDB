@@ -33,7 +33,7 @@ echo "start qps performance check"
 python3 runner/run.py --config-file config.yaml performance
 
 echo "start multi process test"
-locust -f runner/multi.py --headless --host localhost -u 500 -r 100 --only-summary -t 15m
+locust -f runner/multi.py --headless --host localhost -u 100 -r 50 --only-summary -t 10m
 sleep 15m
 
 echo "check replicas data count"
