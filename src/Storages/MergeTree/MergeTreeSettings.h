@@ -184,7 +184,6 @@ struct Settings;
     M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
     M(Bool, vector_index_parameter_check, true, "Enable checking for vector index parameters and vector search parameters.", 0) \
     M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
-    M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Maximum zookeeper queue size to consider data syncing is finished for a replica.", 0) \
     M(UInt64, build_vector_index_on_random_single_replica, 0, "Control single replica build vector index options. 0 - disable. 1 - choose one random replica to build vector index, others wait to download the result. 2 - always choose the last active replica.", 0) \
     M(Seconds, vector_index_cache_recheck_interval_seconds, 600, "The period of executing remove dropped vector index caches operation in background.", 0) \
     \
@@ -197,6 +196,7 @@ struct Settings;
     M(UInt64, replicated_max_parallel_fetches, 0, "Obsolete setting, does nothing.", 0) \
     M(UInt64, replicated_max_parallel_fetches_for_table, 0, "Obsolete setting, does nothing.", 0) \
     M(Bool, write_final_mark, true, "Obsolete setting, does nothing.", 0) \
+    M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Obsolete setting, does nothing.", 0) \
     /// Settings that should not change after the creation of a table.
     /// NOLINTNEXTLINE
 #define APPLY_FOR_IMMUTABLE_MERGE_TREE_SETTINGS(M) \
