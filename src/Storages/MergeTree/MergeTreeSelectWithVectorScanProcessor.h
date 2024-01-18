@@ -1,11 +1,13 @@
 #pragma once
 
 #include <Storages/MergeTree/MergeTreeSelectProcessor.h>
+#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/SelectQueryInfo.h>
 
 #include <Common/logger_useful.h>
 
 #include <SearchIndex/Common/DenseBitmap.h>
+
 
 namespace DB
 {
