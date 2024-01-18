@@ -938,7 +938,7 @@ Pipe ReadFromMergeTree::spreadMarkRangesAmongStreamsWithOrder(
     return Pipe::unitePipes(std::move(pipes));
 }
 
-static void addMergingFinal(
+void ReadFromMergeTree::addMergingFinal(
     Pipe & pipe,
     const SortDescription & sort_description,
     MergeTreeData::MergingParams merging_params,
@@ -971,8 +971,16 @@ static void addMergingFinal(
                             sort_description, max_block_size);
 
             case MergeTreeData::MergingParams::Replacing:
-                return std::make_shared<ReplacingSortedTransform>(header, num_outputs,
-                            sort_description, merging_params.is_deleted_column, merging_params.version_column, max_block_size, /*out_row_sources_buf_*/ nullptr, /*use_average_block_sizes*/ false, /*cleanup*/ !merging_params.is_deleted_column.empty());
+                return std::make_shared<ReplacingSortedTransform>(
+                    header,
+                    num_outputs,
+                    sort_description,
+                    merging_params.is_deleted_column,
+                    merging_params.version_column,
+                    max_block_size,
+                    /*out_row_sources_buf_*/ nullptr,
+                    /*use_average_block_sizes*/ false,
+                    /*cleanup*/ !merging_params.is_deleted_column.empty());
 
             case MergeTreeData::MergingParams::VersionedCollapsing:
                 return std::make_shared<VersionedCollapsingTransform>(header, num_outputs,

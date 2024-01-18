@@ -1353,6 +1353,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
             sample_factor_column_queried,
             max_block_numbers_to_read,
             log,
+            merge_tree_select_result_ptr,
             enable_parallel_reading
         );
     }

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
@@ -213,7 +209,7 @@ private:
     static Block applyPrewhereActions(Block block, const PrewhereInfoPtr & prewhere_info);
 
     /// used in vector scan;
-   ColumnPtr tmp_filter;
+    ColumnPtr tmp_filter;
 
     /// True if _part_offset column is added for vector scan, but should not exist in select result.
     bool need_remove_part_offset = false;
@@ -223,5 +219,4 @@ private:
 };
 
 using MergeTreeSelectAlgorithmPtr = std::unique_ptr<IMergeTreeSelectAlgorithm>;
-
 }
