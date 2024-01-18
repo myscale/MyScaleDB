@@ -962,7 +962,9 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
             max_block_size,
             num_streams,
             max_block_numbers_to_read,
-            log);
+            log,
+            merge_tree_select_result_ptr,
+            enable_parallel_reading);
     }
 
     return std::make_unique<ReadFromMergeTree>(
