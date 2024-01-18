@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 #include <Processors/QueryPlan/SourceStepWithFilter.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
@@ -10,6 +6,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeReadPool.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
+
 
 namespace DB
 {
@@ -34,7 +31,7 @@ using MergeTreeDataSelectAnalysisResultPtr = std::shared_ptr<MergeTreeDataSelect
 
 /// This step is created to read from MergeTree* table.
 /// For now, it takes a list of parts and creates source from it.
-class ReadFromMergeTree final : public SourceStepWithFilter
+class ReadFromMergeTree : public SourceStepWithFilter
 {
 public:
 
@@ -181,6 +178,8 @@ public:
     size_t getMaxBlockSize() const { return max_block_size; }
     size_t getNumStreams() const { return requested_num_streams; }
     bool isParallelReadingEnabled() const { return read_task_callback != std::nullopt; }
+    static void addMergingFinal(Pipe & pipe,const SortDescription & sort_description,MergeTreeData::MergingParams merging_params,
+        Names partition_key_columns,size_t max_block_size);
 
 private:
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToReadImpl(
@@ -269,6 +268,8 @@ private:
     bool is_parallel_reading_from_replicas;
     std::optional<MergeTreeAllRangesCallback> all_ranges_callback;
     std::optional<MergeTreeReadTaskCallback> read_task_callback;
+
+    friend class ReadWithVectorScan;
 };
 
 struct MergeTreeDataSelectAnalysisResult

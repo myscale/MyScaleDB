@@ -2,11 +2,12 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
+#include <Processors/Transforms/ExpressionTransform.h>
 
 namespace DB
 {
 
-class ReadWithVectorScan final : public SourceStepWithFilter
+class ReadWithVectorScan final : public ReadFromMergeTree
 {
 public:
     ReadWithVectorScan(
@@ -22,6 +23,7 @@ public:
         bool sample_factor_column_queried_,
         std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
         Poco::Logger * log_,
+        MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
         bool enable_parallel_reading
     );
 
@@ -74,7 +76,6 @@ private:
         Names required_columns,
         bool use_uncompressed_cache);
 
-    MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(MergeTreeData::DataPartsVector parts) const;
     ReadFromMergeTree::AnalysisResult getAnalysisResult() const;
     MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr;
 };
