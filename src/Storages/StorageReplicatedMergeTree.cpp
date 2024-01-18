@@ -11412,9 +11412,6 @@ void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
 
         try
         {
-            size_t queue_size = getSettings()->max_queue_size_to_consider_replica_as_synced;
-            LOG_INFO(log, "Wait for replica syncing, target queue size: {}", queue_size);
-
             watch.start();
             synced = waitForProcessingQueue(getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), SyncReplicaMode::DEFAULT, {});
             watch.stop();
