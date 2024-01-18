@@ -3,12 +3,12 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
+#include <Processors/Transforms/ExpressionTransform.h>
 
 namespace DB
 {
 
-/// Reference from ReadFromMergeTree
-class ReadWithVectorScan final : public SourceStepWithFilter
+class ReadWithVectorScan final : public ReadFromMergeTree
 {
 public:
     ReadWithVectorScan(
@@ -22,7 +22,10 @@ public:
         size_t max_block_size_,
         size_t num_streams_,
         std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
-        LoggerPtr log_);
+        LoggerPtr log_,
+        MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
+        bool enable_parallel_reading
+    );
 
     String getName() const override { return "ReadWithVectorScan"; }
 
@@ -63,7 +66,6 @@ private:
         size_t num_streams,
         const Names & column_names);
 
-    ReadFromMergeTree::AnalysisResultPtr selectRangesToRead(bool find_exact_ranges = false) const;
     ReadFromMergeTree::AnalysisResult getAnalysisResult() const;
     mutable ReadFromMergeTree::AnalysisResultPtr analyzed_result_ptr;
     VirtualFields shared_virtual_fields;

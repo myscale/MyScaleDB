@@ -1100,7 +1100,7 @@ Pipe ReadFromMergeTree::spreadMarkRangesAmongStreamsWithOrder(
     return Pipe::unitePipes(std::move(pipes));
 }
 
-static void addMergingFinal(
+void ReadFromMergeTree::addMergingFinal(
     Pipe & pipe,
     const SortDescription & sort_description,
     MergeTreeData::MergingParams merging_params,
