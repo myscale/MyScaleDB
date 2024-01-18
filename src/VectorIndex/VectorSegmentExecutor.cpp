@@ -246,7 +246,6 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps(const IndexWithMetaHo
         {
             LOG_DEBUG(log, "Update row id maps, cache key = {}", segment_id.getCacheKey().toString());
             std::unique_lock<std::shared_mutex> lock(index_with_meta.rwLock_of_row_id_maps);
-            index_with_meta.fallback_to_flat = fallback_to_flat;
             index_with_meta.inverted_row_ids_map = this->inverted_row_ids_map;
             index_with_meta.inverted_row_sources_map = this->inverted_row_sources_map;
             index_with_meta.row_ids_map = this->row_ids_map;
