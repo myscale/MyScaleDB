@@ -133,9 +133,9 @@ void IMergeTreeReader::evaluateMissingDefaults(Block additional_columns, Columns
 String IMergeTreeReader::getColumnNameInPart(const NameAndTypePair & required_column) const
 {
     auto name_in_storage = required_column.getNameInStorage();
-    if (alter_conversions.isColumnRenamed(name_in_storage))
+    if (alter_conversions->isColumnRenamed(name_in_storage))
     {
-        name_in_storage = alter_conversions.getColumnOldName(name_in_storage);
+        name_in_storage = alter_conversions->getColumnOldName(name_in_storage);
         return Nested::concatenateName(name_in_storage, required_column.getSubcolumnName());
     }
 

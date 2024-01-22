@@ -10,6 +10,7 @@
 #include <Core/NamesAndTypes.h>
 #include <Storages/IStorage.h>
 #include <Storages/LightweightDeleteDescription.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/IDataPartStorage.h>
 #include <Storages/MergeTree/MergeTreeDataPartState.h>
 #include <Storages/MergeTree/MergeTreeIndexGranularity.h>
@@ -97,6 +98,7 @@ public:
         const MarkRanges & mark_ranges,
         UncompressedCache * uncompressed_cache,
         MarkCache * mark_cache,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReaderSettings & reader_settings_,
         const ValueSizeMap & avg_value_size_hints_,
         const ReadBufferFromFileBase::ProfileCallback & profile_callback_) const = 0;
@@ -210,6 +212,12 @@ public:
     MergeTreeIndexGranularityInfo index_granularity_info;
 
     size_t rows_count = 0;
+
+    /// Existing rows count (excluding lightweight deleted rows)
+    /// UINT64_MAX -> uninitialized
+    /// 0 -> all rows were deleted
+    /// if reading failed, it will be set to rows_count
+    size_t existing_rows_count = UINT64_MAX;
 
     time_t modification_time = 0;
     /// When the part is removed from the working set. Changes once.
@@ -582,6 +590,10 @@ public:
     UInt64 getBytesOnDisk() const { return bytes_on_disk; }
     void setBytesOnDisk(UInt64 bytes_on_disk_) { bytes_on_disk = bytes_on_disk_; }
 
+    /// Returns estimated size of existing rows if setting exclude_deleted_rows_for_part_size_in_merge is true
+    /// Otherwise returns bytes_on_disk
+    UInt64 getExistingBytesOnDisk() const;
+
     size_t getFileSizeOrZero(const String & file_name) const;
 
     /// Moves a part to detached/ directory and adds prefix to its name
@@ -711,6 +723,9 @@ public:
 
     /// True if here is lightweight deleted mask file in part.
     bool hasLightweightDelete() const { return columns.contains(LightweightDeleteDescription::FILTER_COLUMN.name); }
+
+    /// Read existing rows count from _row_exists column
+    UInt64 readExistingRowsCount();
 
     /// convert old version vector index files if need_convert_index_file.
     /// Remove vector index files if its checksums file does not exist,
@@ -856,6 +871,9 @@ private:
     /// Load rows count for this part from disk (for the newer storage format version).
     /// For the older format version calculates rows count from the size of a column with a fixed size.
     void loadRowsCount();
+
+    /// Load existing rows count from _row_exists column if load_existing_rows_count_for_old_parts is true.
+    void loadExistingRowsCount();
 
     static void appendFilesOfRowsCount(Strings & files);
 

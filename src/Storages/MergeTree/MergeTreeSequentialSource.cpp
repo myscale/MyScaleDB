@@ -110,13 +110,15 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
                 data_part->getMarksCount(), data_part->name, data_part->rows_count);
     }
 
+    auto alter_conversions = storage.getAlterConversionsForPart(data_part);
+
     /// Note, that we don't check setting collaborate_with_coordinator presence, because this source
     /// is only used in background merges.
     /// addTotalRowsApprox(data_part->rows_count);
 
     /// Add columns because we don't want to read empty blocks
     injectRequiredColumns(
-        LoadedMergeTreeDataPartInfoForReader(data_part),
+        LoadedMergeTreeDataPartInfoForReader(data_part, alter_conversions),
         storage_snapshot,
         storage.supportsSubcolumns(),
         columns_to_read);
@@ -151,9 +153,16 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
     if (!mark_ranges)
         mark_ranges.emplace(MarkRanges{MarkRange(0, data_part->getMarksCount())});
 
-    reader = data_part->getReader(columns_for_reader, storage_snapshot->metadata,
+    reader = data_part->getReader(
+        columns_for_reader,
+        storage_snapshot->metadata,
         *mark_ranges,
-        /* uncompressed_cache = */ nullptr, mark_cache.get(), reader_settings, {}, {});
+        /* uncompressed_cache = */ nullptr,
+        mark_cache.get(),
+        alter_conversions,
+        reader_settings,
+        {},
+        {});
 }
 
 Chunk MergeTreeSequentialSource::generate()
