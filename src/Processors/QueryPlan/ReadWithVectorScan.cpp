@@ -44,6 +44,7 @@ static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_inf
 
 ReadWithVectorScan::ReadWithVectorScan(
     MergeTreeData::DataPartsVector parts_,
+    std::vector<AlterConversionsPtr> alter_conversions_,
     Names real_column_names_,
     Names virt_column_names_,
     const MergeTreeData & data_,
@@ -57,11 +58,25 @@ ReadWithVectorScan::ReadWithVectorScan(
     Poco::Logger * log_,
     MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
     bool enable_parallel_reading)
-    : ReadFromMergeTree(parts_,real_column_names_,virt_column_names_,data_,query_info_,storage_snapshot_,context_,
-                        max_block_size_,num_streams_,sample_factor_column_queried_,max_block_numbers_to_read_,
-                        log_,analyzed_result_ptr_,enable_parallel_reading)
+    : ReadFromMergeTree(
+        parts_,
+        alter_conversions_,
+        real_column_names_,
+        virt_column_names_,
+        data_,
+        query_info_,
+        storage_snapshot_,
+        context_,
+        max_block_size_,
+        num_streams_,
+        sample_factor_column_queried_,
+        max_block_numbers_to_read_,
+        log_,
+        analyzed_result_ptr_,
+        enable_parallel_reading)
     , reader_settings(getMergeTreeReaderSettings(context_))
     , prepared_parts(std::move(parts_))
+    , alter_conversions_for_parts(std::move(alter_conversions_))
     , real_column_names(std::move(real_column_names_))
     , virt_column_names(std::move(virt_column_names_))
     , data(data_)
@@ -184,7 +199,7 @@ ReadWithVectorScan::ReadWithVectorScan(
 
 ReadFromMergeTree::AnalysisResult ReadWithVectorScan::getAnalysisResult() const
 {
-    auto result_ptr = analyzed_result_ptr ? analyzed_result_ptr : selectRangesToRead(prepared_parts);
+    auto result_ptr = analyzed_result_ptr ? analyzed_result_ptr : selectRangesToRead(prepared_parts, alter_conversions_for_parts);
     if (std::holds_alternative<std::exception_ptr>(result_ptr->result))
         std::rethrow_exception(std::get<std::exception_ptr>(result_ptr->result));
 
@@ -488,6 +503,7 @@ Pipe ReadWithVectorScan::readFromParts(
             data,
             storage_snapshot,
             part.data_part,
+            part.alter_conversions,
             max_block_size,
             preferred_block_size_bytes,
             preferred_max_column_in_block_size_bytes,

@@ -581,6 +581,15 @@ UInt64 IMergeTreeDataPart::getMarksCount() const
     return index_granularity.getMarksCount();
 }
 
+UInt64 IMergeTreeDataPart::getExistingBytesOnDisk() const
+{
+    if (storage.getSettings()->exclude_deleted_rows_for_part_size_in_merge && existing_rows_count < rows_count
+        && supportLightweightDeleteMutate() && hasLightweightDelete() && rows_count > 0)
+        return bytes_on_disk * existing_rows_count / rows_count;
+    else
+        return bytes_on_disk;
+}
+
 size_t IMergeTreeDataPart::getFileSizeOrZero(const String & file_name) const
 {
     auto checksum = checksums.files.find(file_name);
@@ -635,6 +644,7 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
         calculateColumnsAndSecondaryIndicesSizesOnDisk();
         loadIndex(); /// Must be called after loadIndexGranularity as it uses the value of `index_granularity`
         loadRowsCount(); /// Must be called after loadIndexGranularity() as it uses the value of `index_granularity`.
+        loadExistingRowsCount(); /// Must be called after loadRowsCount() as it uses the value of `rows_count`.
         loadPartitionAndMinMaxIndex();
         if (!parent_part)
         {
@@ -1473,6 +1483,80 @@ void IMergeTreeDataPart::loadRowsCount()
     }
 }
 
+void IMergeTreeDataPart::loadExistingRowsCount()
+{
+    if (!rows_count || !storage.getSettings()->load_existing_rows_count_for_old_parts || !supportLightweightDeleteMutate()
+        || !hasLightweightDelete())
+        existing_rows_count = rows_count;
+    else
+        existing_rows_count = readExistingRowsCount();
+}
+
+UInt64 IMergeTreeDataPart::readExistingRowsCount()
+{
+    const size_t total_mark = getMarksCount();
+    if (!total_mark)
+        return rows_count;
+
+    NamesAndTypesList cols;
+    cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
+
+    MergeTreeReaderPtr reader = getReader(
+        cols,
+        storage.getInMemoryMetadataPtr(),
+        MarkRanges{MarkRange(0, total_mark)},
+        nullptr,
+        storage.getContext()->getMarkCache().get(),
+        std::make_shared<AlterConversions>(),
+        MergeTreeReaderSettings{},
+        ValueSizeMap{},
+        ReadBufferFromFileBase::ProfileCallback{});
+
+    if (!reader)
+    {
+        LOG_WARNING(storage.log, "Create reader failed while reading existing rows count");
+        return rows_count;
+    }
+
+    size_t current_mark = 0;
+    bool continue_reading = false;
+    size_t current_row = 0;
+    size_t existing_count = 0;
+
+    while (current_row < rows_count)
+    {
+        size_t rows_to_read = index_granularity.getMarkRows(current_mark);
+        continue_reading = (current_mark != 0);
+
+        Columns result;
+        result.resize(1);
+
+        size_t rows_read = reader->readRows(current_mark, total_mark, continue_reading, rows_to_read, result);
+        if (!rows_read)
+        {
+            LOG_WARNING(storage.log, "Part {} has lightweight delete, but _row_exists column not found", name);
+            return rows_count;
+        }
+
+        current_row += rows_read;
+        current_mark += (rows_to_read == rows_read);
+
+        const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(result[0].get());
+        if (!row_exists_col)
+        {
+            LOG_WARNING(storage.log, "Part {} _row_exists column type is not UInt8", name);
+            return rows_count;
+        }
+
+        for (UInt8 row_exists : row_exists_col->getData())
+            if (row_exists)
+                existing_count++;
+    }
+
+    LOG_DEBUG(storage.log, "Part {} existing_rows_count = {}", name, existing_count);
+    return existing_count;
+}
+
 void IMergeTreeDataPart::appendFilesOfRowsCount(Strings & files)
 {
     files.push_back("count.txt");
@@ -2298,9 +2382,6 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
     buffered_columns.resize(1);
     buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
 
-    StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
-    StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr, storage.getContext());
-
     MergeTreeReaderSettings reader_settings;
 
     if (getMarksCount() == 0)
@@ -2310,14 +2391,15 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
     }
 
     MergeTreeReaderPtr reader = getReader(
-            cols,
-            storage_snapshot_ptr->metadata,
-            MarkRanges{MarkRange(0, getMarksCount())},
-            nullptr,
-            storage.getContext()->getMarkCache().get(),
-            reader_settings,
-            ValueSizeMap{},
-            ReadBufferFromFileBase::ProfileCallback{});
+        cols,
+        storage.getInMemoryMetadataPtr(),
+        MarkRanges{MarkRange(0, getMarksCount())},
+        nullptr,
+        storage.getContext()->getMarkCache().get(),
+        std::make_shared<AlterConversions>(),
+        reader_settings,
+        ValueSizeMap{},
+        ReadBufferFromFileBase::ProfileCallback{});
 
     if (!reader)
     {

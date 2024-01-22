@@ -129,7 +129,8 @@ protected:
         const ReadBufferFromFileBase::ProfileCallback & profile_callback);
 
     void initializeMergeTreeReadersForPart(
-        MergeTreeData::DataPartPtr & data_part,
+        const MergeTreeData::DataPartPtr & data_part,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReadTaskColumns & task_columns,
         const StorageMetadataPtr & metadata_snapshot,
         const MarkRanges & mark_ranges,
@@ -199,7 +200,8 @@ private:
 
     /// Initialize pre readers.
     void initializeMergeTreePreReadersForPart(
-        MergeTreeData::DataPartPtr & data_part,
+        const MergeTreeData::DataPartPtr & data_part,
+        const AlterConversionsPtr & alter_conversions,
         const MergeTreeReadTaskColumns & task_columns,
         const StorageMetadataPtr & metadata_snapshot,
         const MarkRanges & mark_ranges,

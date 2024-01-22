@@ -631,7 +631,8 @@ bool optimizeUseAggregateProjections(QueryPlan::Node & node, QueryPlan::Nodes & 
         query_info_copy.prewhere_info = nullptr;
 
         projection_reading = reader.readFromParts(
-            {},
+            /* parts = */ {},
+            /* alter_conversions = */ {},
             best_candidate->dag->getRequiredColumnsNames(),
             proj_snapshot,
             query_info_copy,

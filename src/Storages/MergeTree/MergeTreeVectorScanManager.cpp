@@ -1073,6 +1073,8 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     tmp_vector_scan_result->top_k = k;
     tmp_vector_scan_result->query_vector_num = static_cast<int>(nq);
 
+    auto alter_conversions = part->storage.getAlterConversionsForPart(part);
+
     MergeTreeReaderSettings reader_settings = {.save_marks_in_cache = true};
 
     /// create part reader to read vector column
@@ -1082,6 +1084,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
         MarkRanges{MarkRange(0, part->getMarksCount())},
         /* uncompressed_cache = */ nullptr,
         part->storage.getContext()->getMarkCache().get(),
+        alter_conversions,
         reader_settings,
         {},
         {});

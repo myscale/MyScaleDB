@@ -13,6 +13,8 @@
 #include <Storages/MergeTree/IMergeTreeReadPool.h>
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/SelectQueryInfo.h>
+#include <Storages/MergeTree/AlterConversions.h>
+#include <Interpreters/Context_fwd.h>
 
 #include <mutex>
 
