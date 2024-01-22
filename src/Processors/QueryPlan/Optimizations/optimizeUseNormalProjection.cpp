@@ -125,7 +125,7 @@ bool optimizeUseNormalProjections(Stack & stack, QueryPlan::Nodes & nodes)
     ContextPtr context = reading->getContext();
     MergeTreeDataSelectExecutor reader(reading->getMergeTreeData());
 
-    auto ordinary_reading_select_result = reading->selectRangesToRead(parts);
+    auto ordinary_reading_select_result = reading->selectRangesToRead(parts, /* alter_conversions = */ {});
     size_t ordinary_reading_marks = ordinary_reading_select_result->marks();
 
     // LOG_TRACE(&Poco::Logger::get("optimizeUseProjections"),
@@ -180,7 +180,8 @@ bool optimizeUseNormalProjections(Stack & stack, QueryPlan::Nodes & nodes)
     query_info_copy.prewhere_info = nullptr;
 
     auto projection_reading = reader.readFromParts(
-        {},
+        /*parts=*/ {},
+        /*alter_conversions=*/ {},
         required_columns,
         proj_snapshot,
         query_info_copy,

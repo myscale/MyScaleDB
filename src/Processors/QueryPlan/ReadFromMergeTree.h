@@ -3,6 +3,7 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Storages/SelectQueryInfo.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeReadPool.h>
 #include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
@@ -99,6 +100,7 @@ public:
 
     ReadFromMergeTree(
         MergeTreeData::DataPartsVector parts_,
+        std::vector<AlterConversionsPtr> alter_conversions_,
         Names real_column_names_,
         Names virt_column_names_,
         const MergeTreeData & data_,
@@ -136,6 +138,7 @@ public:
 
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(
         MergeTreeData::DataPartsVector parts,
+        std::vector<AlterConversionsPtr> alter_conversions,
         const PrewhereInfoPtr & prewhere_info,
         const ActionDAGNodes & added_filter_nodes,
         const StorageMetadataPtr & metadata_snapshot_base,
@@ -149,7 +152,8 @@ public:
         bool sample_factor_column_queried,
         Poco::Logger * log);
 
-    MergeTreeDataSelectAnalysisResultPtr selectRangesToRead(MergeTreeData::DataPartsVector parts) const;
+    MergeTreeDataSelectAnalysisResultPtr
+    selectRangesToRead(MergeTreeData::DataPartsVector parts, std::vector<AlterConversionsPtr> alter_conversions) const;
 
     ContextPtr getContext() const { return context; }
     const SelectQueryInfo & getQueryInfo() const { return query_info; }
@@ -171,7 +175,11 @@ public:
 
     bool hasAnalyzedResult() const { return analyzed_result_ptr != nullptr; }
     void setAnalyzedResult(MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_) { analyzed_result_ptr = std::move(analyzed_result_ptr_); }
-    void resetParts(MergeTreeData::DataPartsVector parts) { prepared_parts = std::move(parts); }
+    void resetParts(MergeTreeData::DataPartsVector parts)
+    {
+        prepared_parts = std::move(parts);
+        alter_conversions_for_parts = {};
+    }
 
     const MergeTreeData::DataPartsVector & getParts() const { return prepared_parts; }
     const MergeTreeData & getMergeTreeData() const { return data; }
@@ -184,6 +192,7 @@ public:
 private:
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToReadImpl(
         MergeTreeData::DataPartsVector parts,
+        std::vector<AlterConversionsPtr> alter_conversions,
         const StorageMetadataPtr & metadata_snapshot_base,
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
@@ -207,6 +216,8 @@ private:
     MergeTreeReaderSettings reader_settings;
 
     MergeTreeData::DataPartsVector prepared_parts;
+    std::vector<AlterConversionsPtr> alter_conversions_for_parts;
+
     Names real_column_names;
     Names virt_column_names;
 
