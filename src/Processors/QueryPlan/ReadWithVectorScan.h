@@ -12,6 +12,7 @@ class ReadWithVectorScan final : public ReadFromMergeTree
 public:
     ReadWithVectorScan(
         MergeTreeData::DataPartsVector parts_,
+        std::vector<AlterConversionsPtr> alter_conversions_,
         Names real_column_names_,
         Names virt_column_names_,
         const MergeTreeData & data_,
@@ -40,6 +41,8 @@ private:
     const MergeTreeReaderSettings reader_settings;
 
     MergeTreeData::DataPartsVector prepared_parts;
+    std::vector<AlterConversionsPtr> alter_conversions_for_parts;
+
     Names real_column_names;
     Names virt_column_names;
 

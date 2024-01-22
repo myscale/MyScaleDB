@@ -60,6 +60,7 @@ try
 
     task = std::make_unique<MergeTreeReadTask>(
         data_part,
+        alter_conversions,
         mark_ranges_for_task,
         part_index_in_query,
         column_name_set,

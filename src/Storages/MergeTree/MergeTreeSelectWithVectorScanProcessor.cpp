@@ -48,7 +48,7 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
 {
     OpenTelemetry::SpanHolder span("MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()");
     task_columns = getReadTaskColumns(
-        LoadedMergeTreeDataPartInfoForReader(data_part), storage_snapshot,
+        LoadedMergeTreeDataPartInfoForReader(data_part, alter_conversions), storage_snapshot,
         required_columns, virt_column_names, nullptr, actions_settings, reader_settings, /*with_subcolumns=*/ true);
 
     /// Will be used to distinguish between PREWHERE and WHERE columns when applying filter
@@ -65,7 +65,7 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
         all_mark_ranges, {}, {});
 */
     reader = data_part->getReader(task_columns.columns, storage_snapshot->getMetadataForQuery(),
-        all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), reader_settings,
+        all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), alter_conversions, reader_settings,
         {}, {});
 
     pre_reader_for_step.clear();
@@ -74,7 +74,7 @@ void MergeTreeSelectWithVectorScanProcessor::initializeReadersWithVectorScan()
     if (reader_settings.apply_deleted_mask && data_part->hasLightweightDelete())
     {
         pre_reader_for_step.push_back(data_part->getReader({LightweightDeleteDescription::FILTER_COLUMN}, storage_snapshot->getMetadataForQuery(),
-            all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), reader_settings,
+            all_mark_ranges, owned_uncompressed_cache.get(), owned_mark_cache.get(), alter_conversions, reader_settings,
             {}, {}));
     }
 }
@@ -126,6 +126,7 @@ Search::DenseBitmapPtr MergeTreeSelectWithVectorScanProcessor::performPrefilter(
         storage,
         storage_snapshot,
         data_part,
+        alter_conversions,
         max_block_size_rows,
         preferred_block_size_bytes,
         preferred_max_column_in_block_size_bytes,
@@ -198,6 +199,7 @@ bool MergeTreeSelectWithVectorScanProcessor::readPrimaryKeyBin(Columns & out_col
         MarkRanges{MarkRange(0, task->data_part->getMarksCount())},
         nullptr,
         storage.getContext()->getMarkCache().get(),
+        alter_conversions,
         reader_settings,
         {},
         {});
@@ -655,6 +657,7 @@ try
 
     task = std::make_unique<MergeTreeReadTask>(
         data_part,
+        alter_conversions,
         mark_ranges_for_task,
         part_index_in_query,
         column_name_set,

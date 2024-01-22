@@ -1,5 +1,6 @@
 #include <Columns/ColumnArray.h>
 #include <DataTypes/DataTypeArray.h>
+#include <Storages/MergeTree/AlterConversions.h>
 #include <VectorIndex/PartReader.h>
 
 namespace VectorIndex
@@ -27,6 +28,7 @@ PartReader::PartReader(
         DB::MarkRanges{DB::MarkRange(0, total_mask)},
         /* uncompressed_cache = */ nullptr,
         mark_cache_,
+        std::make_shared<DB::AlterConversions>(),
         reader_settings,
         {},
         {});

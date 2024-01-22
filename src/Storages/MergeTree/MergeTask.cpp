@@ -555,10 +555,14 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         else
             continue;
 
+        auto part = global_ctx->future_part->parts[part_num];
+        auto alter_conversions = part->storage.getAlterConversionsForPart(part);
+
         auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
             *global_ctx->data,
             global_ctx->storage_snapshot,
-            global_ctx->future_part->parts[part_num],
+            part,
+            alter_conversions,
             global_ctx->context->getSettingsRef().max_block_size,
             global_ctx->context->getSettingsRef().preferred_block_size_bytes,
             global_ctx->context->getSettingsRef().preferred_max_column_in_block_size_bytes,
