@@ -222,6 +222,7 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         return;
     }
 
+/*
     if(isFinal(query_info))
     {
         std::vector<String> add_columns = metadata_for_reading->getColumnsRequiredForSortingKey();
@@ -246,6 +247,7 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         ::sort(column_names_to_read.begin(), column_names_to_read.end());
         column_names_to_read.erase(std::unique(column_names_to_read.begin(), column_names_to_read.end()), column_names_to_read.end());
     }
+*/
 
     /// Reference spreadMarkRangesAmongStreams()
     Pipe pipe = createReadProcessorsAmongParts(
@@ -377,6 +379,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
         });
     }
 
+/*
     if(isFinal(query_info))
     {
         /// Add generating sorting key processor
@@ -411,6 +414,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
             max_block_size);
 
     }
+*/
 
     return pipe;
 }
