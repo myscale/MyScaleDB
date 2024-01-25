@@ -180,7 +180,8 @@ struct Settings;
     M(Bool, disable_rebuild_for_decouple, false, "(Test only) Disable rebuild of new vector indices for decouple.", 0) \
     M(UInt64, min_rows_to_build_vector_index, 0, "The minimum row size of data part to build vector index", 0) \
     M(UInt64, min_bytes_to_build_vector_index, 0, "The minimum byte size of data part to build vector index", 0) \
-    M(String, vector_search_metric_type, "L2", "Default metric type for brute force search", 0) \
+    M(String, float_vector_search_metric_type, "L2", "Default metric type for Float vector brute force search", 0) \
+    M(String, binary_vector_search_metric_type, "HAMMING", "Default metric type for Binary vector brute force search", 0) \
     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
     M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
     M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
@@ -199,6 +200,7 @@ struct Settings;
     M(UInt64, replicated_max_parallel_fetches_for_table, 0, "Obsolete setting, does nothing.", 0) \
     M(Bool, write_final_mark, true, "Obsolete setting, does nothing.", 0) \
     M(UInt64, max_queue_size_to_consider_replica_as_synced, 0, "Obsolete setting, does nothing.", 0) \
+    M(String, vector_search_metric_type, "L2", "Obsolete setting, does nothing.", 0) \
     /// Settings that should not change after the creation of a table.
     /// NOLINTNEXTLINE
 #define APPLY_FOR_IMMUTABLE_MERGE_TREE_SETTINGS(M) \

@@ -2,6 +2,7 @@
 
 #include <Core/Defines.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeFixedString.h>
 #include <DataTypes/IDataType.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/TreeRewriter.h>
@@ -17,6 +18,7 @@
 #include <Common/quoteString.h>
 
 #include <VectorIndex/VectorIndexCommon.h>
+#include <Interpreters/parseVectorScanParameters.h>
 
 namespace DB
 {
@@ -37,6 +39,7 @@ VectorIndexDescription::VectorIndexDescription(const VectorIndexDescription & ot
     , column(other.column)
     , data_type(other.data_type)
     , sample_block(other.sample_block)
+    , vector_search_type(other.vector_search_type)
     //, granularity(other.granularity)
 {
     if (other.expression)
@@ -63,6 +66,7 @@ VectorIndexDescription & VectorIndexDescription::operator=(const VectorIndexDesc
     sample_block = other.sample_block;
     parameters = other.parameters;
     dim = other.dim;
+    vector_search_type = other.vector_search_type;
     // granularity = other.granularity;
     return *this;
 }
@@ -109,11 +113,6 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
     result.type = vec_index_definition->type->name;
     VectorIndex::getIndexType(result.type);
 
-    if (!constraints.empty())
-    {
-        result.dim = static_cast<int>(constraints.getArrayLengthByColumnName(result.column).first);
-    }
-
     /// currently not used
     const auto & definition_arguments = vec_index_definition->type->arguments;
     if (definition_arguments)
@@ -127,18 +126,20 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
         }
     }
 
-    /// validate for vector index params
-    if (result.data_type->getTypeId() != TypeIndex::Array)
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Vector index can be used only with `Array` column.");
+    result.vector_search_type = getVectorSearchType(result.data_type);
+    VectorIndex::verifyVectorIndexType(result.type, result.vector_search_type);
 
-    /*
-    const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(result.data_type.get());
-    if (array_type)
+    if (result.vector_search_type == VectorSearchType::Float32Vector && !constraints.empty())
     {
-        if (array_type->getDim() == 0)
-            throw Exception("Vector index can be used only with `FixedArray` column with dim > 0.", ErrorCodes::INCORRECT_QUERY);
+        result.dim = static_cast<int>(constraints.getArrayLengthByColumnName(result.column).first);
     }
-*/
+    else if (result.vector_search_type == VectorSearchType::BinaryVector)
+    {
+        const DataTypeFixedString *fixed_string_type = typeid_cast<const DataTypeFixedString *>(result.data_type.get());
+        if (fixed_string_type)
+            result.dim = static_cast<int>(fixed_string_type->getN() * 8);
+    }
+
     for (const auto & arg : result.arguments)
         if (arg.getType() != Field::Types::String)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "All parameters to vector index must be String");
@@ -148,7 +149,7 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
     String param_str;
 
     Poco::JSON::Parser json_parser;
-    auto sass_index_params = json_parser.parse(result.saas_index_parameter);
+    auto sass_index_params = json_parser.parse(saas_index_parameter);
     Poco::JSON::Object::Ptr sass_index_obj = sass_index_params.extract<Poco::JSON::Object::Ptr>();
     Poco::Dynamic::Var body = sass_index_obj->get(Poco::toUpper(result.type));
     /// parse JSON str
@@ -192,13 +193,6 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
         }
     }
 
-    const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(result.data_type.get());
-    if (array_type)
-    {
-        WhichDataType which(array_type->getNestedType());
-        if (!which.isFloat32())
-            throw Exception(ErrorCodes::INCORRECT_QUERY, "The element type inside the array must be `Float32`.");
-    }
     return result;
 }
 
