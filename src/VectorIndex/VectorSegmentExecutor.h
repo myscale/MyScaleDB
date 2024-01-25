@@ -1,7 +1,6 @@
 #pragma once
 #include <string>
 #include <Compression/CompressionInfo.h>
-#include <SearchIndex/VectorSearch.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Storages/VectorIndicesDescription.h>
 #include <VectorIndex/CacheManager.h>
@@ -11,9 +10,48 @@
 #include <VectorIndex/SegmentId.h>
 #include <VectorIndex/Status.h>
 #include <Common/logger_useful.h>
+#include <Common/MemoryStatisticsOS.h>
+#include <sys/resource.h>
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-conversion"
+#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
+#include <SearchIndex/VectorSearch.h>
+#pragma clang diagnostic pop
+#endif
 
 namespace VectorIndex
 {
+inline void printMemoryInfo(const Poco::Logger *log, std::string msg)
+{
+#if defined(OS_LINUX) || defined(OS_FREEBSD)
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    DB::MemoryStatisticsOS memory_stat;
+    DB::MemoryStatisticsOS::Data data = memory_stat.get();
+    LOG_INFO(
+            log,
+            "{}: peak resident memory {} MB, resident memory {} MB, virtual memory {} MB",
+            msg,
+            usage.ru_maxrss / 1024,
+            data.resident / 1024 / 1024,
+            data.virt / 1024 / 1024);
+#endif
+}
+
+inline Search::IndexType fallbackToFlat(DB::VectorSearchType &search_type)
+{
+    switch (search_type)
+    {
+        case DB::VectorSearchType::Float32Vector:
+            return Search::IndexType::FLAT;
+        case DB::VectorSearchType::BinaryVector:
+            return Search::IndexType::BinaryFLAT;
+        default:
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupported vector search type");
+    }
+}
 
 enum class BuildMemoryCheckResult
 {
@@ -27,7 +65,7 @@ struct IndexWithMeta
     IndexWithMeta() = delete;
 
     IndexWithMeta(
-        VectorIndexPtr & index_,
+        VectorIndexVariantPtr & index_variant_,
         uint64_t total_vec_,
         Search::DenseBitmapPtr delete_bitmap_,
         Search::Parameters des_,
@@ -37,7 +75,7 @@ struct IndexWithMeta
         int disk_mode_,
         bool fallback_to_flat_,
         String & vector_index_cache_prefix_)
-        : index(index_)
+        : index_variant(index_variant_)
         , total_vec(total_vec_)
         , delete_bitmap(delete_bitmap_)
         , des(des_)
@@ -50,7 +88,7 @@ struct IndexWithMeta
     {
     }
 
-    VectorIndexPtr index;
+    VectorIndexVariantPtr index_variant;
     size_t total_vec;
 
 private:
@@ -96,6 +134,7 @@ public:
     /// Create the index but not inserting any data
     VectorSegmentExecutor(
         const SegmentId & segment_id_,
+        DB::VectorSearchType vector_search_type_,
         Search::IndexType type_,
         Search::Metric metric_,
         size_t dimension_,
@@ -131,16 +170,17 @@ public:
 
     /// A method that wraps VectorIndex::search() and does some check and post-process.
     std::shared_ptr<Search::SearchResult> search(
-        VectorDatasetPtr queries,
+        VectorDatasetVariantPtr queries,
         int32_t k,
         const Search::DenseBitmapPtr & filter,
         Search::Parameters & parameters,
         bool first_stage_only = false);
 
     std::shared_ptr<Search::SearchResult>
-    computeTopDistanceSubset(VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k);
+    computeTopDistanceSubset(VectorDatasetVariantPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k);
 
-    void buildIndex(PartReader * reader, const std::function<bool()> & check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size);
+    template<DB::VectorSearchType T>
+    void buildIndex(PartReader<T> * reader, const std::function<bool()> & check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size);
 
     /// Put the index stored in VectorSegmentExecutor into cache.
     Status cache();
@@ -161,13 +201,14 @@ public:
 
     static std::list<std::pair<CacheKey, Search::Parameters>> getAllCacheNames();
 
+    template <DB::VectorSearchType T>
     static Status searchWithoutIndex(
-        VectorDatasetPtr query_data,
-        VectorDatasetPtr bash_data,
-        int32_t k,
-        float *& distances,
-        int64_t *& labels,
-        const Search::Metric & metric);
+            VectorDatasetPtr<T> query_data,
+            VectorDatasetPtr<T> bash_data,
+            int32_t k,
+            float *& distances,
+            int64_t *& labels,
+            const Search::Metric & metric);
 
     /// expire the related index from cache.
     static Status removeFromCache(const CacheKey & cache_key);
@@ -268,7 +309,15 @@ public:
     /// Update merged old part's delete bitmap after lightweight delete on disk and cache if exists.
     void updateMergedBitMap(const std::vector<UInt64> & deleted_row_ids);
 
-    bool supportTwoStageSearch() const { return index->supportTwoStageSearch(); }
+    bool supportTwoStageSearch() const
+    {
+        bool isSupported = false;
+        std::visit([&isSupported](auto && index_ptr)
+                   {
+                       isSupported = index_ptr->supportTwoStageSearch();
+                   }, index_variant);
+        return isSupported;
+    }
 
     const std::vector<UInt64> readDeleteBitmapAccordingSegmentId() const;
 
@@ -326,13 +375,17 @@ private:
     const int DEFAULT_DISK_MODE;
 
     SegmentId segment_id; // this index's related segment_id and file write position.
+    DB::VectorSearchType vector_search_type = DB::VectorSearchType::InvalidVector;
     Search::IndexType type;
     Search::Metric metric;
     size_t dimension;
     size_t total_vec = 0;
     Search::Parameters des;
     size_t min_bytes_to_build_vector_index;
-    VectorIndexPtr index = nullptr; // index related to this VectorSegmentExecutor
+    size_t each_vector_bytes;
+
+    VectorIndexVariantPtr index_variant; // index related to this VectorSegmentExecutor
+
     Search::DenseBitmapPtr delete_bitmap = nullptr; // manage deletion from database
     std::shared_ptr<std::vector<UInt64>> row_ids_map = std::make_shared<std::vector<UInt64>>();
     std::shared_ptr<std::vector<UInt64>> inverted_row_ids_map = std::make_shared<std::vector<UInt64>>();
@@ -347,6 +400,141 @@ private:
     /// build memory reserved before build
     size_t build_memory_size_recorded = 0;
 };
+
+template<DB::VectorSearchType T>
+void VectorSegmentExecutor::buildIndex(PartReader<T> *reader, const std::function<bool()> &check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size)
+{
+    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::buildIndex");
+
+    auto num_threads = max_threads;
+    if (slow_mode)
+        num_threads = num_threads / 2;
+    if (num_threads == 0)
+        num_threads = 1;
+
+    if (T != vector_search_type)
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Wrong vector search type for build vector index");
+
+    if (total_vec * each_vector_bytes < min_bytes_to_build_vector_index)
+    {
+        fallback_to_flat = true;
+        type = fallbackToFlat(vector_search_type);
+        std::erase_if(
+            des,
+            [](const auto & item)
+            {
+                auto const & [key, value] = item;
+                return key != "metric_type";
+            });
+    }
+
+    try
+    {
+        configureDiskMode();
+
+        typename VectorSearchTypeMap<T>::VectorIndexPtr index;
+        if constexpr (T == DB::VectorSearchType::Float32Vector)
+        {
+            index = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                    segment_id.getIndexName(),
+                    type,
+                    metric,
+                    dimension,
+                    total_vec,
+                    des,
+                    false /* load_diskann_after_build */,
+                    vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                    getDiskIOManager(),
+#endif
+                    true /* use_file_checksum */,
+                    true /* manage_cache_folder */);
+        }
+        else if constexpr (T == DB::VectorSearchType::BinaryVector)
+        {
+            index = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::BinaryVector>(
+                    segment_id.getIndexName(),
+                    type,
+                    metric,
+                    dimension,
+                    total_vec,
+                    des,
+                    false /* load_diskann_after_build */,
+                    vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                    getDiskIOManager(),
+#endif
+                    true /* use_file_checksum */,
+                    true /* manage_cache_folder */);
+        }
+
+        index->setTrainDataChunkSize(train_block_size);
+        index->setAddDataChunkSize(add_block_size);
+
+        checkBuildMemory(index->getResourceUsage().build_memory_usage_bytes);
+
+        printMemoryInfo(log, "Before build");
+        index->build(reader, num_threads, check_build_canceled_callbak);
+        printMemoryInfo(log, "After build");
+
+        index_variant = index;
+    }
+    catch (const SearchIndexException &e)
+    {
+        LOG_WARNING(log, "Failed to build index for {}: {}", segment_id.current_part_name, e.what());
+        throw IndexException(e.getCode(), e.what());
+    }
+    catch (const DB::Exception &e)
+    {
+        throw e;
+    }
+
+    delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
+}
+
+template <DB::VectorSearchType T>
+Status VectorSegmentExecutor::searchWithoutIndex(
+        VectorDatasetPtr<T> query_data,
+        VectorDatasetPtr<T> base_data,
+        int32_t k,
+        float *& distances,
+        int64_t *& labels,
+        const Search::Metric & metric)
+{
+    omp_set_num_threads(1);
+    auto new_metric = metric;
+    if constexpr (T == DB::VectorSearchType::Float32Vector)
+    {
+        if (metric == Search::Metric::Cosine)
+        {
+            LOG_DEBUG(&Poco::Logger::get("VectorSegmentExecutor"), "Normalize vectors for cosine similarity brute force search");
+            new_metric = Search::Metric::IP;
+            query_data->normalize();
+            base_data->normalize();
+        }
+    }
+    auto status = tryBruteForceSearch<T>(
+            query_data->getData(),
+            base_data->getData(),
+            query_data->getDimension(),
+            k,
+            query_data->getVectorNum(),
+            base_data->getVectorNum(),
+            labels,
+            distances,
+            new_metric);
+    if constexpr (T == DB::VectorSearchType::Float32Vector)
+    {
+        if (metric == Search::Metric::Cosine)
+        {
+            for (int64_t i = 0; i < k * query_data->getVectorNum(); i++)
+            {
+                distances[i] = 1 - distances[i];
+            }
+        }
+    }
+    return status;
+}
 
 using VectorSegmentExecutorPtr = std::shared_ptr<VectorSegmentExecutor>;
 }

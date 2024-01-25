@@ -1053,21 +1053,11 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column {} does not exist", vec_index_name, column_name);
 
         auto column_desc = metadata.columns.get(column_name);
-
-        auto col_data_type = column_desc.type;
-
-        if (col_data_type->getTypeId() != TypeIndex::Array)
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not array", vec_index_name);
-        else
+        VectorSearchType search_type = getVectorSearchType(column_desc.type);
+        if (search_type == VectorSearchType::Float32Vector && metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
         {
-            const auto * array_type = typeid_cast<const DataTypeArray *>(col_data_type.get());
-            auto nested_type = array_type->getNestedType()->getTypeId();
-            if (nested_type != TypeIndex::Float32 && nested_type != TypeIndex::Float64)
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column type is not float array", vec_index_name);
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add Float32Vector index {}: column has no length constraint", vec_index_name);
         }
-
-        if (metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column has no length constraint", vec_index_name);
 
         auto insert_it = metadata.vec_indices.end();
 

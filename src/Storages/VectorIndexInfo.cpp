@@ -20,19 +20,27 @@ VectorIndexInfo::VectorIndexInfo(
     , owner_part(segment_id.current_part_name == segment_id.owner_part_name ? "" : segment_id.owner_part_name)
     , owner_part_id(segment_id.owner_part_id)
     , name(desc.name)
-    , dimension(metadata.getConstraints().getArrayLengthByColumnName(desc.column).first)
     , total_vec(total_vec_)
     , status(status_)
     , err_msg(err_msg_)
 {
     try
     {
+        dimension = getVectorDimension(desc.vector_search_type, metadata, desc.column);
         auto parameters = VectorIndex::convertPocoJsonToMap(desc.parameters);
         auto index_type = VectorIndex::getIndexType(desc.type);
-        auto metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(settings->vector_search_metric_type)));
+
+        Search::Metric metric;
+        if (desc.vector_search_type == DB::VectorSearchType::Float32Vector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(settings->float_vector_search_metric_type)), desc.vector_search_type);
+        else if (desc.vector_search_type == DB::VectorSearchType::BinaryVector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(settings->binary_vector_search_metric_type)), desc.vector_search_type);
+        else
+            throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unsupported vector search type");
 
         VectorIndex::VectorSegmentExecutor executor(
             segment_id,
+            desc.vector_search_type,
             index_type,
             metric,
             dimension,

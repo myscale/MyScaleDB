@@ -44,6 +44,8 @@
 #include <Common/checkStackSize.h>
 #include <Common/ProfileEvents.h>
 #include "base/defines.h"
+#include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeFixedString.h>
 
 
 namespace ProfileEvents
@@ -751,9 +753,16 @@ BlockIO InterpreterInsertQuery::execute()
     for (const auto & vec_index : metadata_snapshot->getVectorIndices())
     {
         auto col_name = vec_index.column;
-        if (metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
+        std::optional<NameAndTypePair> search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(col_name);
+        if(!search_column_type)
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", col_name);
+
+        VectorSearchType search_type = getVectorSearchType(search_column_type->type);
+
+        // As for Binary vector, no need to check, because N > 0 when FixedString(N) column is created.
+        if (search_type == VectorSearchType::Float32Vector && metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
         {
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot insert data: column with vector index need correct length constraint");
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot insert data: column {} with Float32 vector index need correct length constraint", col_name);
         }
     }
 

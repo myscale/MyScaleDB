@@ -256,8 +256,7 @@ protected:
                     for (auto & index : indices)
                     {
                         if (!index.dim)
-                            index.dim
-                                = static_cast<int>(metadata_snapshot->getConstraints().getArrayLengthByColumnName(index.column).first);
+                            index.dim = static_cast<int>(getVectorDimension(index.vector_search_type, *metadata_snapshot, index.column));
 
                         bool found = false;
                         if (part->containRowIdsMaps(index.name))
