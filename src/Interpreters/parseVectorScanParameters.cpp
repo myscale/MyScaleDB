@@ -6,34 +6,61 @@
 #include <Poco/JSON/Parser.h>
 namespace DB
 {
-/// SaaS valid index parameter
-const String saas_index_parameter =
-    R"({
-        "MSTG": {
-            "alpha": {"type": "float", "case_sensitive": "false", "range":[1,4], "candidates":[] }
-        },
-        "FLAT": {},
-        "IVFFLAT": {
-            "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
-        },
-        "IVFPQ": {
-            "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
-        },
-        "IVFSQ": {
-            "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
-        },
-        "HNSWFLAT": {
-            "ef_s": {"type": "int", "case_sensitive": "false", "range":[16,1024], "candidates":[] }
-        },
-        "HNSWSQ": {
-            "ef_s": {"type": "int", "case_sensitive": "false", "range":[16,1024], "candidates":[] }
-        }
-    })";
 
 namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
 }
+
+/// SaaS valid index parameter
+const String saas_index_parameter =
+        R"({
+            "MSTG": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "alpha": {"type": "float", "case_sensitive": "false", "range":[1,4], "candidates":[] }
+            },
+            "FLAT": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] }
+            },
+            "IVFFLAT": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] },
+                "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
+            },
+            "IVFPQ": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] },
+                "M": {"type": "int", "case_sensitive": "false", "range":[0, 2147483647], "candidates":[] },
+                "bit_size": {"type": "int", "case_sensitive": "false", "range":[2, 12], "candidates":[] },
+                "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
+            },
+            "IVFSQ": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "ncentroids": {"type": "int", "case_sensitive": "false", "range":[1, 1048576], "candidates":[] },
+                "bit_size": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["4bit","6bit","8bit","8bit_uniform", "8bit_direct", "4bit_uniform", "QT_fp16"] },
+                "nprobe": {"type": "int", "case_sensitive": "false", "range":[1,1048576], "candidates":[] }
+            },
+            "HNSWFLAT": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "m": {"type": "int", "case_sensitive": "false", "range":[8, 128], "candidates":[] },
+                "ef_c": {"type": "int", "case_sensitive": "false", "range":[16, 1024], "candidates":[] },
+                "ef_s": {"type": "int", "case_sensitive": "false", "range":[16,1024], "candidates":[] }
+            },
+            "HNSWSQ": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["L2", "Cosine", "IP"] },
+                "m": {"type": "int", "case_sensitive": "false", "range":[8, 128], "candidates":[] },
+                "ef_c": {"type": "int", "case_sensitive": "false", "range":[16, 1024], "candidates":[] },
+                "bit_size": {"type": "string", "case_sensitive": "true", "range":[], "candidates":["4bit","6bit","8bit","8bit_uniform", "8bit_direct", "4bit_uniform", "QT_fp16"] },
+                "ef_s": {"type": "int", "case_sensitive": "false", "range":[16,1024], "candidates":[] }
+            },
+            "BINARYFLAT": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["Hamming", "Jaccard"] }
+            },
+            "BINARYMSTG": {
+                "metric_type": {"type": "string", "case_sensitive": "false", "range":[], "candidates":["Hamming", "Jaccard"] },
+                "alpha": {"type": "float", "case_sensitive": "false", "range":[1,4], "candidates":[] }
+            }
+        })";
 
 String parse_arg(String & input, const String index_type, bool check_parameter)
 {

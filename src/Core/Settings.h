@@ -154,6 +154,7 @@ class IColumn;
     M(UInt64, max_local_write_bandwidth, 0, "The maximum speed of local writes in bytes per second.", 0) \
     M(Bool, stream_like_engine_allow_direct_select, false, "Allow direct SELECT query for Kafka, RabbitMQ, FileLog, Redis Streams, and NATS engines. In case there are attached materialized views, SELECT query is not allowed even if this setting is enabled.", 0) \
     M(UInt64, max_build_index_train_block_size, 100 * 1024 * 1024, "Maximum block size in bytes for training in build index", 0) \
+    M(UInt64, max_build_binary_vector_index_train_block_size, 2 * 1024 * 1024, "Maximum block size in bytes for training Binary vectors in build index", 0) \
     M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
     M(Bool, optimize_move_to_prewhere_for_vector_search, true, "Enables or disables special PREWHERE optimization for vector search in SELECT queries which move all viable WHERE to PREWHERE.", 0) \
     M(UInt64, two_stage_search_option, 1, "Control two stage search options for vector search in SELECT queries. 0 - disable. 1 - adaptive enable depending on disk mode and saved IO. 2 - always enable.", 0) \

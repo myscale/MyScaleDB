@@ -83,8 +83,10 @@ ReadWithVectorScan::ReadWithVectorScan(
     auto vector_scan_info_ptr = query_info.vector_scan_info;
 
     /// Determine if we can use two stage search
+    /// Only Float32 vector can create MSTG index, and use two stage search
     /// Currently two stage search doesn't support batch distance
-    if (context->getSettingsRef().two_stage_search_option > 0 && vector_scan_info_ptr && !vector_scan_info_ptr->is_batch &&
+    if (context->getSettingsRef().two_stage_search_option > 0 && vector_scan_info_ptr && !vector_scan_info_ptr->is_batch && 
+        vector_scan_info_ptr->vector_scan_descs[0].vector_search_type == DB::VectorSearchType::Float32Vector &&
         metadata_for_reading->hasVectorIndexOnColumn(vector_scan_info_ptr->vector_scan_descs[0].search_column_name))
     {
         /// TODO: Currently support one distance function
@@ -118,7 +120,7 @@ ReadWithVectorScan::ReadWithVectorScan(
                 total_rows += part->rows_count;
 
             /// Use total rows of all parts to get num_reorder for first search stage
-            num_reorder = VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
+            num_reorder = VectorIndex::SearchFloatVectorIndex::computeFirstStageNumCandidates(type, disk_mode, total_rows, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
 
             LOG_DEBUG(log, "num_reorder for first stage = {}", num_reorder);
 
@@ -131,7 +133,7 @@ ReadWithVectorScan::ReadWithVectorScan(
                 for (auto part : prepared_parts)
                 {
                     /// get num_reorder for every part
-                    total_num_reorder += VectorIndex::SearchVectorIndex::computeFirstStageNumCandidates(
+                    total_num_reorder += VectorIndex::SearchFloatVectorIndex::computeFirstStageNumCandidates(
                                             type, disk_mode, part->rows_count, vector_scan_desc.search_column_dim, vector_scan_desc.topk, search_params);
                 }
 

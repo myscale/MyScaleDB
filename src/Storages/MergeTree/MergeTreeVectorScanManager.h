@@ -97,7 +97,14 @@ private:
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeVectorScanManager");
 
-    VectorIndex::VectorDatasetPtr generateVectorDataset(bool is_batch, const VectorScanDescription& vector_scan_desc);
+    template <VectorSearchType T>
+    VectorIndex::VectorDatasetPtr<T> generateVectorDataset(bool is_batch, const VectorScanDescription & desc);
+
+    template <>
+    VectorIndex::VectorDatasetPtr<VectorSearchType::Float32Vector> generateVectorDataset(bool is_batch, const VectorScanDescription & desc);
+
+    template <>
+    VectorIndex::VectorDatasetPtr<VectorSearchType::BinaryVector> generateVectorDataset(bool is_batch, const VectorScanDescription & desc);
 
     VectorScanResultPtr vectorScan(
         bool is_batch,
@@ -110,11 +117,12 @@ private:
         String & metric_str, const MergeTreeData::DataPartPtr & data_part = nullptr, const bool & ignore_index_load_error = false);
 
     /// brute force vector search
+    template <VectorSearchType T>
     VectorScanResultPtr vectorScanWithoutIndex(
         const MergeTreeData::DataPartPtr part,
         const ReadRanges & read_ranges,
         const Search::DenseBitmapPtr filter,
-        VectorIndex::VectorDatasetPtr & query_vector,
+        VectorIndex::VectorDatasetPtr<T> & query_vector,
         const String & search_column,
         int dim,
         int k,
@@ -137,10 +145,11 @@ private:
         const Search::DenseBitmapPtr = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
 
+    template <VectorSearchType T>
     void searchWrapper(
         bool prewhere,
-        VectorIndex::VectorDatasetPtr & query_vector,
-        VectorIndex::VectorDatasetPtr & base_data,
+        VectorIndex::VectorDatasetPtr<T> & query_vector,
+        VectorIndex::VectorDatasetPtr<T> & base_data,
         int k,
         int dim,
         int nq,

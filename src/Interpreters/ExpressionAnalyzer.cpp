@@ -49,6 +49,7 @@
 #include <Storages/StorageDistributed.h>
 #include <Storages/StorageDictionary.h>
 #include <Storages/StorageJoin.h>
+#include <Storages/VectorIndexInfo.h>
 #include <Functions/FunctionsExternalDictionaries.h>
 
 #include <Dictionaries/DictionaryStructure.h>
@@ -466,20 +467,20 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAG & temp_actions)
         vector_scan_descriptions.emplace_back(*vec_scan_desc);
         has_vector_scan = true;
     }
-    /// Fill in dim from metadata
+    /// Fill in dim and recognize VectorSearchType from metadata
     if (has_vector_scan)
     {
         if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
         {
             auto & vector_scan_desc = vector_scan_descriptions[0];
-            vector_scan_desc.search_column_dim
-                = syntax->storage_snapshot->metadata->getConstraints().getArrayLengthByColumnName(vector_scan_desc.search_column_name).first;
-            if (vector_scan_desc.search_column_dim == 0)
-            {
-                LOG_ERROR(m_log, "wrong type dim: 0, please check length constraint on search column.");
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong type dim: 0, please check length constraint on search column.");
-            }
-            LOG_DEBUG(m_log, "type dim: {}", vector_scan_desc.search_column_dim);
+            auto &metadata_snapshot = syntax->storage_snapshot->metadata;
+            std::optional<NameAndTypePair> search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
+            if (!search_column_type)
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vector_scan_desc.search_column_name);
+
+            vector_scan_desc.vector_search_type = getVectorSearchType(search_column_type->type);
+            vector_scan_desc.search_column_dim = getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
+            checkVectorDimension(vector_scan_desc.vector_search_type, vector_scan_desc.search_column_dim);
         }
     }
 }

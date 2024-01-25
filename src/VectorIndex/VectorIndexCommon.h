@@ -10,8 +10,17 @@
 #include <Compression/CompressedWriteBuffer.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Common/Exception.h>
+#include <Interpreters/VectorScanDescription.h>
 
-#include <VectorIndex/BruteForceSearch.h>
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
+#pragma clang diagnostic ignored "-Wfloat-conversion"
+#pragma clang diagnostic ignored "-Wimplicit-float-conversion"
+#include <SearchIndex/VectorSearch.h>
+#pragma clang diagnostic pop
+#endif
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
@@ -41,11 +50,35 @@ namespace ErrorCodes
 namespace VectorIndex
 {
 
+using SearchFloatVectorIndex = Search::VectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>;
+using FloatVectorIndexPtr = std::shared_ptr<SearchFloatVectorIndex>;
+
+using SearchBinaryVectorIndex = Search::VectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::BinaryVector>;
+using BinaryVectorIndexPtr = std::shared_ptr<SearchBinaryVectorIndex>;
+
+using VectorIndexVariantPtr = std::variant<FloatVectorIndexPtr, BinaryVectorIndexPtr>;
+
+/// VectorSearchTypeMap maps VectorSearchType enum values actual types
+template <DB::VectorSearchType>
+struct VectorSearchTypeMap;
+
+template <>
+struct VectorSearchTypeMap<DB::VectorSearchType::Float32Vector>
+{
+    using VectorDatasetType = float;
+    using IndexDatasetType = float;
+    using VectorIndexPtr = FloatVectorIndexPtr;
+};
+
+template <>
+struct VectorSearchTypeMap<DB::VectorSearchType::BinaryVector>
+{
+    using VectorDatasetType = uint8_t;
+    using IndexDatasetType = bool;
+    using VectorIndexPtr = BinaryVectorIndexPtr;
+};
+
 const int DEFAULT_TOPK = 30;
-
-using SearchVectorIndex = Search::VectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>;
-using VectorIndexPtr = std::shared_ptr<SearchVectorIndex>;
-
 
 static inline std::string ParametersToString(const Search::Parameters & params)
 {
@@ -109,19 +142,60 @@ inline Search::IndexType getIndexType(const std::string & type)
         return Search::IndexType::HNSWfastSQ;
     else if (upper == "MSTG")
         return Search::IndexType::MSTG;
+    else if (upper == "BINARYFLAT")
+        return Search::IndexType::BinaryFLAT;
+    else if (upper == "BINARYMSTG")
+        return Search::IndexType::BinaryMSTG;
     throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unknown index type: {}", type);
 }
 
-inline Search::Metric getMetric(const std::string & metric)
+inline Search::Metric getMetric(const std::string & metric, DB::VectorSearchType search_type)
 {
     auto upper = Poco::toUpper(metric);
-    if (upper == "L2")
-        return Search::Metric::L2;
-    else if (upper == "IP")
-        return Search::Metric::IP;
-    else if (upper == "COSINE")
-        return Search::Metric::Cosine;
+    switch (search_type)
+    {
+        case DB::VectorSearchType::Float32Vector:
+            if (upper == "L2")
+                return Search::Metric::L2;
+            else if (upper == "IP")
+                return Search::Metric::IP;
+            else if (upper == "COSINE")
+                return Search::Metric::Cosine;
+            break;
+        case DB::VectorSearchType::BinaryVector:
+            if (upper == "HAMMING")
+                return Search::Metric::Hamming;
+            else if (upper == "JACCARD")
+                return Search::Metric::Jaccard;
+            break;
+        default:
+            throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unsupported vector search type");
+    }
     throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Unknown metric type: {}", metric);
+}
+
+inline void verifyVectorIndexType(const String &index_type, const DB::VectorSearchType &search_type)
+{
+    auto search_index_type = getIndexType(index_type);
+    switch (search_type)
+    {
+        case DB::VectorSearchType::Float32Vector:
+        {
+            auto types = Search::FLOAT_VECTOR_INDEX_TEST_TYPES;
+            if (std::find(types.begin(), types.end(), search_index_type) == types.end())
+                throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Wrong vector index type for Float32 vector: {}", index_type);
+            break;
+        }
+        case DB::VectorSearchType::BinaryVector:
+        {
+            auto types = Search::BINARY_VECTOR_INDEX_TYPES;
+            if (std::find(types.begin(), types.end(), search_index_type) == types.end())
+                throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Wrong vector index type for Binary vector: {}", index_type);
+            break;
+        }
+        default:
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupported vector search type");
+    }
 }
 
 }

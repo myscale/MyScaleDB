@@ -22,7 +22,12 @@ namespace VectorIndex
 
 size_t IndexWithMetaWeightFunc::operator()(const IndexWithMeta & index_meta) const
 {
-    return index_meta.index->getResourceUsage().memory_usage_bytes;
+    size_t res;
+    std::visit([&res](auto &&index_ptr)
+               {
+                   res = index_ptr->getResourceUsage().memory_usage_bytes;
+               }, index_meta.index_variant);
+    return res;
 }
 
 void IndexWithMetaReleaseFunction::operator()(std::shared_ptr<IndexWithMeta> index_meta_ptr)
