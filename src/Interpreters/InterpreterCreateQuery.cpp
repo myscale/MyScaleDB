@@ -845,18 +845,28 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
             for (const auto & vec_index : create.columns_list->vec_indices->children)
             {
                 const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
-                if (properties.constraints.empty())
+                std::optional<NameAndTypePair> vector_column = properties.columns.tryGetPhysical(vec_index_definition->column);
+                if(!vector_column)
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vec_index_definition->column);
+
+                VectorSearchType search_type = DB::getVectorSearchType(vector_column->type);
+
+                /// Binary Vector is represented as FixedString(N), no need to check constraints
+                if (search_type == VectorSearchType::Float32Vector)
                 {
-                    throw Exception(
-                        ErrorCodes::INCORRECT_QUERY,
-                        "When creating table with a vector index, you need to define the Constraint information for the table.");
+                    if (properties.constraints.empty())
+                    {
+                        throw Exception(ErrorCodes::INCORRECT_QUERY, "Cannot create table with column '{}' which type is '{}' "
+                                        "because the constraint information was not defined during the creation of a vector index for the column", vector_column->name, vector_column->type->getName());
+                    }
+                    if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
+                    {
+                        throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
+                    }
                 }
-                if (properties.constraints.getArrayLengthByColumnName(vec_index_definition->column).first == 0)
-                {
-                    throw Exception(ErrorCodes::INCORRECT_QUERY, "A vector index cannot be built on a vector with a dimension of 0.");
-                }
+
                 properties.vec_indices.push_back(
-                    VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+                        VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
             }
 
         if (create.columns_list->projections)

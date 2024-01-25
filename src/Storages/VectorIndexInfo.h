@@ -120,4 +120,37 @@ private:
 
 using VectorIndexInfoPtr = std::shared_ptr<VectorIndexInfo>;
 using VectorIndexInfoPtrList = std::vector<VectorIndexInfoPtr>;
+
+inline uint64_t getVectorDimension(const VectorSearchType &search_type, const StorageInMemoryMetadata &metadata, const String &column_name)
+{
+    std::optional<NameAndTypePair> search_column_type = metadata.columns.getAllPhysical().tryGetByName(column_name);
+    if (!search_column_type)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "vector search column name: {}, type is not exist", column_name);
+    uint64_t result_dim = 0;
+    switch (search_type)
+    {
+        case VectorSearchType::Float32Vector:
+        {
+            const DataTypeArray *array_type = typeid_cast<const DataTypeArray *>(search_column_type->type.get());
+            if (!array_type)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector search type is Float32Vector for column {}, but datatype is not Array()", column_name);
+            result_dim = metadata.getConstraints().getArrayLengthByColumnName(column_name).first;
+            LOG_DEBUG(&Poco::Logger::get("VectorIndexInfo"), "vector search type: Float32Vector, search column dim: {}", result_dim);
+            break;
+        }
+        case VectorSearchType::BinaryVector:
+        {
+            const DataTypeFixedString *fixed_string_type = typeid_cast<const DataTypeFixedString *>(search_column_type->type.get());
+            if (!fixed_string_type)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector search type is BinaryVector for column {}, but datatype is not FixedString", column_name);
+            result_dim = static_cast<uint64_t>(fixed_string_type->getN() * 8);
+            LOG_DEBUG(&Poco::Logger::get("VectorIndexInfo"), "vector search type: BinaryVector, search column dim: {}", result_dim);
+            break;
+        }
+        default:
+            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported Vector search Type");
+    }
+    return result_dim;
+}
+
 }
