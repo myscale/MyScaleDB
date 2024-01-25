@@ -15,6 +15,14 @@ namespace DB
 
 // namespace JSONBuilder { class JSONMap; }
 
+/// Different data types supported by vector search
+enum class VectorSearchType
+{
+    InvalidVector = 0,
+    Float32Vector,
+    BinaryVector,     /// BinaryVector is represented as FixedString(N) in Database
+};
+
 struct VectorScanDescription
 {
     Array parameters;        /// Parameters of the (parametric) vector scan function.
@@ -25,6 +33,8 @@ struct VectorScanDescription
     ColumnPtr query_column;         /// const column for query
     String query_column_name;
     String column_name;             /// What name to use for a column with vector scan function values
+
+    VectorSearchType vector_search_type = VectorSearchType::InvalidVector;
 
     uint64_t search_column_dim{0};
     int topk = -1;    /// topK value extracted from limit N

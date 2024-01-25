@@ -20,6 +20,7 @@
 #include <Interpreters/Context.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Interpreters/VectorIndexEventLog.h>
+#include <Interpreters/VectorScanDescription.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/CacheManager.h>
 #include <VectorIndex/IndexException.h>
@@ -56,23 +57,6 @@ int VectorSegmentExecutor::max_threads = getNumberOfPhysicalCPUCores() * 2;
 std::mutex VectorSegmentExecutor::build_memory_mutex;
 size_t VectorSegmentExecutor::build_memory_size_limit = 0;
 size_t VectorSegmentExecutor::current_build_memory_size = 0;
-
-void printMemoryInfo(const Poco::Logger * log, std::string msg)
-{
-#if defined(OS_LINUX) || defined(OS_FREEBSD)
-    struct rusage usage;
-    getrusage(RUSAGE_SELF, &usage);
-    DB::MemoryStatisticsOS memory_stat;
-    DB::MemoryStatisticsOS::Data data = memory_stat.get();
-    LOG_INFO(
-        log,
-        "{}: peak resident memory {} MB, resident memory {} MB, virtual memory {} MB",
-        msg,
-        usage.ru_maxrss / 1024,
-        data.resident / 1024 / 1024,
-        data.virt / 1024 / 1024);
-#endif
-}
 
 String cutMutVer(const String & part_name)
 {
@@ -119,6 +103,7 @@ void VectorSegmentExecutor::init()
 
 VectorSegmentExecutor::VectorSegmentExecutor(
     const SegmentId & segment_id_,
+    DB::VectorSearchType vector_search_type_,
     Search::IndexType type_,
     Search::Metric metric_,
     size_t dimension_,
@@ -128,6 +113,7 @@ VectorSegmentExecutor::VectorSegmentExecutor(
     int DEFAULT_DISK_MODE_)
     : DEFAULT_DISK_MODE(DEFAULT_DISK_MODE_)
     , segment_id(segment_id_)
+    , vector_search_type(vector_search_type_)
     , type(type_)
     , metric(metric_)
     , dimension(dimension_)
@@ -135,75 +121,24 @@ VectorSegmentExecutor::VectorSegmentExecutor(
     , des(des_)
     , min_bytes_to_build_vector_index(min_bytes_to_build_vector_index_)
 {
+    switch (vector_search_type)
+    {
+        case DB::VectorSearchType::Float32Vector:
+            each_vector_bytes = dimension * sizeof(float);
+            break;
+        case DB::VectorSearchType::BinaryVector:
+            // As for Binary Vector, each dimension is 1 bit
+            each_vector_bytes = dimension / 8;
+            break;
+        default:
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupported vector search type");
+    }
     init();
 }
 
 VectorSegmentExecutor::VectorSegmentExecutor(const SegmentId & segment_id_) : DEFAULT_DISK_MODE(0), segment_id(segment_id_)
 {
     init();
-}
-
-void VectorSegmentExecutor::buildIndex(PartReader * reader, const std::function<bool()> & check_build_canceled_callbak, bool slow_mode, size_t train_block_size, size_t add_block_size)
-{
-    DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::buildIndex");
-
-    auto num_threads = max_threads;
-    if (slow_mode)
-        num_threads = num_threads / 2;
-    if (num_threads == 0)
-        num_threads = 1;
-
-    if (total_vec * dimension * sizeof(float) < min_bytes_to_build_vector_index)
-    {
-        fallback_to_flat = true;
-        type = Search::IndexType::FLAT;
-        std::erase_if(
-            des,
-            [](const auto & item)
-            {
-                auto const & [key, value] = item;
-                return key != "metric_type";
-            });
-    }
-
-    try
-    {
-        configureDiskMode();
-        index = Search::
-            createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                segment_id.getIndexName(),
-                type,
-                metric,
-                dimension,
-                total_vec,
-                des,
-                false /* load_diskann_after_build */,
-                vector_index_cache_prefix,
-#ifdef ENABLE_SCANN
-                getDiskIOManager(),
-#endif
-                true /* use_file_checksum */,
-                true /* manage_cache_folder */);
-        index->setTrainDataChunkSize(train_block_size);
-        index->setAddDataChunkSize(add_block_size);
-
-        checkBuildMemory(index->getResourceUsage().build_memory_usage_bytes);
-
-        printMemoryInfo(log, "Before build");
-        index->build(reader, num_threads, check_build_canceled_callbak);
-        printMemoryInfo(log, "After build");
-    }
-    catch (const SearchIndexException & e)
-    {
-        LOG_WARNING(log, "Failed to build index for {}: {}", segment_id.current_part_name, e.what());
-        throw IndexException(e.getCode(), e.what());
-    }
-    catch (const DB::Exception & e)
-    {
-        throw e;
-    }
-
-    delete_bitmap = std::make_shared<Search::DenseBitmap>(total_vec, true);
 }
 
 String VectorSegmentExecutor::getUniqueVectorIndexCachePrefix() const
@@ -262,14 +197,22 @@ void VectorSegmentExecutor::updateCacheValueWithRowIdsMaps(const IndexWithMetaHo
 Status VectorSegmentExecutor::cache()
 {
     CacheManager * mgr = CacheManager::getInstance();
-    if (index == nullptr)
-    {
-        LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
+
+    int status_id = 0;
+    std::visit([&](auto &&index_ptr)
+               {
+                   if (index_ptr == nullptr)
+                   {
+                       LOG_INFO(log, "{} index is null, not caching", segment_id.getCacheKey().toString());
+                       status_id = 3;
+                   }
+               }, index_variant);
+    if (status_id == 3)
         return Status(3);
-    }
+
     /// when cacheIndexAndMeta() is called, related files should have already been loaded.
     IndexWithMetaPtr cache_item = std::make_shared<IndexWithMeta>(
-        index,
+        index_variant,
         total_vec,
         delete_bitmap,
         des,
@@ -296,19 +239,23 @@ Status VectorSegmentExecutor::serialize(std::shared_ptr<DB::MergeTreeDataPartChe
             [this](const std::string & name, std::ios::openmode /*mode*/)
             { return std::make_shared<VectorIndexWriter>(segment_id.getDisk(), name, vector_index_checksums); });
 
-        index->serialize(&file_writer);
-        index->saveDataID(&file_writer);
-        printMemoryInfo(log, "After serialization");
+        std::visit(
+            [&](auto && index_ptr)
+            {
+                index_ptr->serialize(&file_writer);
+                index_ptr->saveDataID(&file_writer);
+                printMemoryInfo(log, "After serialization");
 
-        std::string version = index->getVersion().toString();
-        auto usage = index->getResourceUsage();
-        LOG_INFO(log, "memory_usage_bytes: {}, disk_usage_bytes: {}", usage.memory_usage_bytes, usage.disk_usage_bytes);
-        std::unordered_map<std::string, std::string> infos;
-        infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
-        infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
-        Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
-        auto buf = segment_id.getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
-        metadata.writeText(*buf);
+                std::string version = index_ptr->getVersion().toString();
+                auto usage = index_ptr->getResourceUsage();
+                LOG_INFO(log, "memory_usage_bytes: {}, disk_usage_bytes: {}", usage.memory_usage_bytes, usage.disk_usage_bytes);
+                std::unordered_map<std::string, std::string> infos;
+                infos["memory_usage_bytes"] = std::to_string(usage.memory_usage_bytes);
+                infos["disk_usage_bytes"] = std::to_string(usage.disk_usage_bytes);
+                Metadata metadata(segment_id, version, type, metric, dimension, total_vec, fallback_to_flat, des, infos);
+                auto buf = segment_id.getDisk()->writeFile(segment_id.getVectorDescriptionFilePath(), 4096);
+                metadata.writeText(*buf);
+            }, index_variant);
 
         return Status(0);
     }
@@ -426,7 +373,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 fallback_to_flat = metadata.fallback_to_flat;
                 if (fallback_to_flat)
                 {
-                    type = Search::IndexType::FLAT;
+                    type = fallbackToFlat(vector_search_type);
                     std::erase_if(
                         des,
                         [](const auto & item)
@@ -438,21 +385,41 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 des.setParam("load_index_version", metadata.version);
 
                 configureDiskMode();
-                index = Search::
-                    createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                        segment_id.getIndexName(),
-                        type,
-                        metric,
-                        dimension,
-                        total_vec,
-                        des,
-                        false /* load_diskann_after_build */,
-                        vector_index_cache_prefix,
+
+                if (vector_search_type == DB::VectorSearchType::Float32Vector)
+                {
+                    index_variant = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                            segment_id.getIndexName(),
+                            type,
+                            metric,
+                            dimension,
+                            total_vec,
+                            des,
+                            false /* load_diskann_after_build */,
+                            vector_index_cache_prefix,
 #ifdef ENABLE_SCANN
-                        getDiskIOManager(),
+                            getDiskIOManager(),
 #endif
-                        true /* use_file_checksum */,
-                        true /* manage_cache_folder */);
+                            true /* use_file_checksum */,
+                            true /* manage_cache_folder */);
+                }
+                else if (vector_search_type == DB::VectorSearchType::BinaryVector)
+                {
+                    index_variant = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::BinaryVector>(
+                            segment_id.getIndexName(),
+                            type,
+                            metric,
+                            dimension,
+                            total_vec,
+                            des,
+                            false /* load_diskann_after_build */,
+                            vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                            getDiskIOManager(),
+#endif
+                            true /* use_file_checksum */,
+                            true /* manage_cache_folder */);
+                }
 
                 LOG_INFO(log, "loading vector index from {}", segment_id.getFullPath());
                 auto file_reader = Search::IndexDataFileReader<Search::AbstractIStream>(
@@ -460,10 +427,14 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                     [this](const std::string & name, std::ios::openmode /*mode*/)
                     { return std::make_shared<VectorIndexReader>(segment_id.getDisk(), name); });
                 printMemoryInfo(log, "Before load");
-                index->load(&file_reader);
-                index->loadDataID(&file_reader);
+                std::visit([&](auto &&index_ptr)
+                           {
+                                index_ptr->load(&file_reader);
+                                index_ptr->loadDataID(&file_reader);
+                                total_vec = index_ptr->numData();
+                           }, index_variant);
+
                 printMemoryInfo(log, "After load");
-                total_vec = index->numData();
                 LOG_INFO(log, "load total_vec={}", total_vec);
                 /// May failed to load merged row ids map due to background index build may remove them when finished.
                 handleMergedMaps();
@@ -473,7 +444,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
                 convertBitmap(del_row_ids);
 
                 return std::make_shared<IndexWithMeta>(
-                    index,
+                    index_variant,
                     total_vec,
                     delete_bitmap,
                     des,
@@ -488,12 +459,19 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             {
                 LOG_ERROR(log, "SearchIndexException: {}", e.what());
                 /// Destruct the index in advance to ensure that removing vector index cache will not affect the next load
-                index.reset();
+                std::visit([](auto &&index_ptr)
+                           {
+                               index_ptr.reset();
+                           }, index_variant);
                 throw IndexException(e.getCode(), e.what());
             }
             catch (...)
             {
-                index.reset();
+                LOG_ERROR(log, "Failed to load vector index, cache key={}", segment_id.getCacheKey().toString());
+                std::visit([](auto &&index_ptr)
+                           {
+                               index_ptr.reset();
+                           }, index_variant);
                 throw;
             }
         };
@@ -506,7 +484,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
             if (index_holder)
             {
                 IndexWithMeta & new_index = index_holder->value();
-                index = new_index.index;
+                index_variant = new_index.index_variant;
                 total_vec = new_index.total_vec;
                 delete_bitmap = new_index.getDeleteBitmap();
                 des = new_index.des;
@@ -602,7 +580,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
     {
         LOG_DEBUG(log, "Hit cache, cache_key_str = {}", cache_key_str);
         IndexWithMeta & new_index = index_holder->value();
-        index = new_index.index;
+        index_variant = new_index.index_variant;
         total_vec = new_index.total_vec;
         fallback_to_flat = new_index.fallback_to_flat;
         delete_bitmap = new_index.getDeleteBitmap();
@@ -663,7 +641,7 @@ Status VectorSegmentExecutor::load(bool isActivePart)
 }
 
 std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
-    VectorDatasetPtr queries,
+    VectorDatasetVariantPtr queries,
     int32_t k,
     const Search::DenseBitmapPtr & filter,
     Search::Parameters & parameters,
@@ -672,19 +650,33 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
     DB::OpenTelemetry::SpanHolder span("VectorSegmentExecutor::search()");
 
     // Check if the index is initialized and ready for searching
-    if (index == nullptr)
+    if ((vector_search_type == DB::VectorSearchType::Float32Vector && std::holds_alternative<FloatVectorIndexPtr>(index_variant) && std::holds_alternative<Float32VectorDatasetPtr>(queries)) ||
+        (vector_search_type == DB::VectorSearchType::BinaryVector && std::holds_alternative<BinaryVectorIndexPtr>(index_variant) && std::holds_alternative<BinaryVectorDatasetPtr>(queries)))
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not initialized before searching!");
-    }
-    if (!index->ready())
-    {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not ready before searching!");
-    }
+        std::visit([](auto &&index_ptr)
+                   {
+                       if (index_ptr == nullptr)
+                       {
+                           throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not initialized before searching!");
+                       }
+                       if (!index_ptr->ready())
+                       {
+                           throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Index not ready before searching!");
+                       }
+                   }, index_variant);
 
-    // Check if the dimensions of the searched index and input match
-    if (queries->getDimension() != static_cast<int64_t>(dimension))
+        std::visit([this](auto &&query_dataset)
+                   {
+                       // Check if the dimensions of the searched index and input match
+                       if (query_dataset->getDimension() != static_cast<int64_t>(dimension))
+                       {
+                           throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "The dimension of searched index and input doesn't match.");
+                       }
+                   }, queries);
+    }
+    else
     {
-        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "The dimension of searched index and input doesn't match.");
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Vector index type and dataset type do not match search type");
     }
 
     LOG_DEBUG(log, "Index {} has {} vectors", this->segment_id.getFullPath(), this->total_vec);
@@ -707,9 +699,26 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
         // Perform the actual search
         {
             DB::OpenTelemetry::SpanHolder span_search("VectorSegmentExecutor::performSearch()::search");
-            auto search_queries
-                = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
-            ret = index->search(search_queries, k, parameters, first_stage_only, merged_filter.get());
+            if (vector_search_type == DB::VectorSearchType::Float32Vector)
+            {
+                Float32VectorDatasetPtr &float_query_dataset = std::get<Float32VectorDatasetPtr>(queries);
+                auto search_queries = std::make_shared<Search::DataSet<VectorSearchTypeMap<DB::VectorSearchType::Float32Vector>::IndexDatasetType>>(
+                                                        float_query_dataset->getData(),
+                                                        float_query_dataset->getVectorNum(),
+                                                        float_query_dataset->getDimension());
+                FloatVectorIndexPtr &float_index = std::get<FloatVectorIndexPtr>(index_variant);
+                ret = float_index->search(search_queries, k, parameters, first_stage_only, merged_filter.get());
+            }
+            else if (vector_search_type == DB::VectorSearchType::BinaryVector)
+            {
+                BinaryVectorDatasetPtr &binary_query_dataset = std::get<BinaryVectorDatasetPtr>(queries);
+                auto search_queries = std::make_shared<Search::DataSet<VectorSearchTypeMap<DB::VectorSearchType::BinaryVector>::IndexDatasetType>>(
+                                                        binary_query_dataset->getBoolData(),
+                                                        binary_query_dataset->getVectorNum(),
+                                                        binary_query_dataset->getDimension());
+                BinaryVectorIndexPtr &binary_index = std::get<BinaryVectorIndexPtr>(index_variant);
+                ret = binary_index->search(search_queries, k, parameters, first_stage_only, merged_filter.get());
+            }
         }
 
         // Transfer the results to newRowIds
@@ -732,50 +741,20 @@ std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::search(
 }
 
 std::shared_ptr<Search::SearchResult> VectorSegmentExecutor::computeTopDistanceSubset(
-    VectorDatasetPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k)
+    VectorDatasetVariantPtr queries, std::shared_ptr<Search::SearchResult> first_stage_result, int32_t top_k)
 {
-    auto search_queries = std::make_shared<Search::DataSet<float>>(queries->getData(), queries->getVectorNum(), queries->getDimension());
-    auto ret = index->computeTopDistanceSubset(search_queries, first_stage_result, top_k);
+    if (vector_search_type != DB::VectorSearchType::Float32Vector)
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Only Float32 Vector support two stage vector search");
+
+    if (!std::holds_alternative<FloatVectorIndexPtr>(index_variant) || !std::holds_alternative<Float32VectorDatasetPtr>(queries))
+        throw IndexException(DB::ErrorCodes::LOGICAL_ERROR, "Vector index type and dataset type do not match search type");
+
+    FloatVectorIndexPtr float_index = std::get<FloatVectorIndexPtr>(index_variant);
+    Float32VectorDatasetPtr float32_dataset = std::get<Float32VectorDatasetPtr>(queries);
+    auto search_queries = std::make_shared<Search::DataSet<float>>(float32_dataset->getData(), float32_dataset->getVectorNum(), float32_dataset->getDimension());
+    auto ret = float_index->computeTopDistanceSubset(search_queries, first_stage_result, top_k);
     transferToNewRowIds(ret);
     return ret;
-}
-
-Status VectorSegmentExecutor::searchWithoutIndex(
-    VectorDatasetPtr query_data,
-    VectorDatasetPtr base_data,
-    int32_t k,
-    float *& distances,
-    int64_t *& labels,
-    const Search::Metric & metric)
-{
-    omp_set_num_threads(1);
-    auto metric2 = metric;
-    if (metric == Search::Metric::Cosine)
-    {
-        LOG_DEBUG(&Poco::Logger::get("VectorSegmentExecutor"), "Normalize vectors for cosine similarity brute force search");
-        metric2 = Search::Metric::IP;
-        query_data->normalize();
-        base_data->normalize();
-    }
-
-    auto status = tryBruteForceSearch(
-        query_data->getData(),
-        base_data->getData(),
-        query_data->getDimension(),
-        k,
-        query_data->getVectorNum(),
-        base_data->getVectorNum(),
-        labels,
-        distances,
-        metric2);
-    if (metric == Search::Metric::Cosine)
-    {
-        for (int64_t i = 0; i < k * query_data->getVectorNum(); i++)
-        {
-            distances[i] = 1 - distances[i];
-        }
-    }
-    return status;
 }
 
 void VectorSegmentExecutor::cancelVectorIndexLoading(const CacheKey & cache_key)
@@ -787,12 +766,15 @@ void VectorSegmentExecutor::cancelVectorIndexLoading(const CacheKey & cache_key)
     if (index_holder != nullptr)
     {
         IndexWithMeta & index = index_holder->value();
-        Search::IndexStatus index_status = index.index->getStatus();
-        if (index_status == Search::IndexStatus::LOADING)
-        {
-            LOG_DEBUG(log, "Index {} is in {}, will be aborted", cache_key.toString(), index_status);
-            index.index->abort();
-        }
+        std::visit([&](auto &&index_ptr)
+                   {
+                       Search::IndexStatus index_status = index_ptr->getStatus();
+                       if (index_status == Search::IndexStatus::LOADING)
+                       {
+                           LOG_DEBUG(log, "Index {} is in {}, will be aborted", cache_key.toString(), index_status);
+                           index_ptr->abort();
+                       }
+                   }, index.index_variant);
     }
 }
 
@@ -1066,42 +1048,76 @@ void VectorSegmentExecutor::convertBitmap(const std::vector<UInt64> & deleted_ro
 
 Search::IndexResourceUsage VectorSegmentExecutor::getIndexResourceUsage()
 {
-    if (index)
-        return index->getResourceUsage();
+    bool index_built = false;
+    Search::IndexResourceUsage res_usage;
+    std::visit([&](auto &&index_ptr)
+               {
+                   if (index_ptr)
+                   {
+                       index_built = true;
+                       res_usage = index_ptr->getResourceUsage();
+                   }
+               }, index_variant);
+    if (index_built)
+        return res_usage;
 
     try
     {
-        if (total_vec * dimension * sizeof(float) < min_bytes_to_build_vector_index)
-            type = Search::IndexType::FLAT;
-
         /// avoid overwriting vector_index_cache_prefix
         if (vector_index_cache_prefix.empty())
             configureDiskMode();
 
-        index = Search::
-            createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
-                segment_id.getIndexName(),
-                type,
-                metric,
-                dimension,
-                total_vec,
-                des,
-                false /* load_diskann_after_build */,
-                vector_index_cache_prefix,
-#ifdef ENABLE_SCANN
-                getDiskIOManager(),
-#endif
-                true /* use_file_checksum */,
-                true /* manage_cache_folder */);
+        if (total_vec * each_vector_bytes < min_bytes_to_build_vector_index)
+            type = fallbackToFlat(vector_search_type);
 
-        return index->getResourceUsage();
+        if (vector_search_type == DB::VectorSearchType::Float32Vector)
+        {
+            index_variant = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::FloatVector>(
+                    segment_id.getIndexName(),
+                    type,
+                    metric,
+                    dimension,
+                    total_vec,
+                    des,
+                    false /* load_diskann_after_build */,
+                    vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                    getDiskIOManager(),
+#endif
+                    true /* use_file_checksum */,
+                    true /* manage_cache_folder */);
+        }
+        else if (vector_search_type == DB::VectorSearchType::BinaryVector)
+        {
+            index_variant = Search::createVectorIndex<Search::AbstractIStream, Search::AbstractOStream, Search::DenseBitmap, Search::DataType::BinaryVector>(
+                    segment_id.getIndexName(),
+                    type,
+                    metric,
+                    dimension,
+                    total_vec,
+                    des,
+                    false /* load_diskann_after_build */,
+                    vector_index_cache_prefix,
+#ifdef ENABLE_SCANN
+                    getDiskIOManager(),
+#endif
+                    true /* use_file_checksum */,
+                    true /* manage_cache_folder */);
+        }
+
+        std::visit([&](auto &&index_ptr)
+                   {
+                       res_usage = index_ptr->getResourceUsage();
+                   }, index_variant);
+
+        return res_usage;
     }
     catch (...)
     {
         LOG_INFO(
-            &Poco::Logger::get("VectorSegmentExecutor"),
-            "Failed to build dummy index while getting resource usage: {}",
-            DB::getCurrentExceptionMessage(false));
+                &Poco::Logger::get("VectorSegmentExecutor"),
+                "Failed to build dummy index while getting resource usage: {}",
+                DB::getCurrentExceptionMessage(false));
         return Search::IndexResourceUsage{};
     }
 }

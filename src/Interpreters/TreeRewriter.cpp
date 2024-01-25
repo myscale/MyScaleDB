@@ -1398,24 +1398,9 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         }
 
         /// Check vector column data type
-        if (search_column_type)
-        {
-            const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>((*search_column_type).type.get());
-            if (!array_type)
-            {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Search column {} should be Array type", vec_col_name);
-            }
-            else
-            {
-                WhichDataType which(array_type->getNestedType());
-                if (!which.isFloat32())
-                    throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "The element type inside the array must be `Float32`.");
-            }
-        }
-        else
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", vec_col_name);
-        }
+        if (!search_column_type)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "search column name: {}, type is not exist", vec_col_name);
+        auto vector_search_type = getVectorSearchType(search_column_type->type);
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.
         /// Skip the check when table is distributed.
@@ -1458,8 +1443,9 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                     }
                 }
             }
-            /// The default value is vector_search_metric_type in MergeTree, but we cannot get it here.
-            String metric_type = "L2";
+
+            /// The default value is float_vector_search_metric_type or binary_vector_search_metric_type in MergeTree, but we cannot get it here.
+            String metric_type;
             for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
             {
                 if (vector_index_desc.column == vec_col_name)
@@ -1471,6 +1457,28 @@ void TreeRewriterResult::collectForVectorScanFunctions(
                         metric_type = index_parameter.at("metric_type");
                         break;
                     }
+                }
+            }
+            if (metric_type.empty() && metadata_snapshot->hasSettingsChanges())
+            {
+                const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+                Field change_metric;
+                if ((vector_search_type == DB::VectorSearchType::Float32Vector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
+                    (vector_search_type == DB::VectorSearchType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
+                {
+                    metric_type = change_metric.safeGet<String>();
+                }
+            }
+            if (metric_type.empty())
+            {
+                const auto settings = context->getMergeTreeSettings();
+                if (vector_search_type == DB::VectorSearchType::Float32Vector)
+                {
+                    metric_type = settings.float_vector_search_metric_type.toString();
+                }
+                else if (vector_search_type == DB::VectorSearchType::BinaryVector)
+                {
+                    metric_type = settings.binary_vector_search_metric_type.toString();
                 }
             }
 

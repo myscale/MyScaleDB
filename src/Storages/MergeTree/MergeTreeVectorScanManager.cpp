@@ -9,6 +9,7 @@
 
 #include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/FieldVisitorConvertToNumber.h>
+#include <Interpreters/VectorScanDescription.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
@@ -54,7 +55,7 @@ std::vector<float> getQueryVector(const IColumn * query_vector_column, size_t di
 
     size_t dim_of_query = query_vec.size();
 
-    /// in batch distance case, dim_of_query = dim * offsets. dim in query is already checked in getQueryVectorInBatch().
+    /// in batch distance case, dim_of_query = dim * offsets. dim in query is already checked in getFloatQueryVectorInBatch().
     if (!is_batch && (dim_of_query != dim))
         throw Exception(
             ErrorCodes::LOGICAL_ERROR,
@@ -73,12 +74,12 @@ std::vector<float> getQueryVector(const IColumn * query_vector_column, size_t di
     return query_new_data;
 }
 
-std::vector<float> getQueryVectorInBatch(const IColumn * query_vectors_column, const size_t dim, int & query_vector_num)
+std::vector<float> getFloatQueryVectorInBatch(const IColumn * query_vectors_column, const size_t dim, int & query_vector_num)
 {
     const ColumnArray * query_vectors_col = checkAndGetColumn<ColumnArray>(query_vectors_column);
 
     if (!query_vectors_col)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array)) in batch distance function");
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array(Array()) in batch distance function");
 
     const IColumn & query_vectors = query_vectors_col->getData();
     auto & offsets = query_vectors_col->getOffsets();
@@ -127,7 +128,8 @@ void MergeTreeVectorScanManager::eraseResult()
     }
 }
 
-VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(bool is_batch, const VectorScanDescription& desc)
+template <>
+VectorIndex::Float32VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(bool is_batch, const VectorScanDescription& desc)
 {
     auto & query_column = desc.query_column;
     auto dim = desc.search_column_dim;
@@ -146,15 +148,12 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
         const IColumn & query_data = query_col->getData();
 
         int query_vector_num = 0;
-        std::vector<float> query_new_data = getQueryVectorInBatch(&query_data, dim, query_vector_num);
+        std::vector<float> query_new_data = getFloatQueryVectorInBatch(&query_data, dim, query_vector_num);
 
-        // default value
-        Search::Parameters search_params = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
-        int k = desc.topk > 0 ? desc.topk : VectorIndex::DEFAULT_TOPK;
-        LOG_DEBUG(log, "Set k to {}, dim to {}", k, dim);
-
-        return std::make_shared<VectorIndex::VectorDataset>(
-            query_vector_num, static_cast<int32_t>(dim), const_cast<float *>(query_new_data.data()));
+        return std::make_shared<VectorIndex::VectorDataset<VectorSearchType::Float32Vector>>(
+                   query_vector_num,
+                   static_cast<int32_t>(dim),
+                   const_cast<float *>(query_new_data.data()));
     }
     else
     {
@@ -173,7 +172,86 @@ VectorIndex::VectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(
         else
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Float32 or Float64 inside Array() in distance function");
 
-        return std::make_shared<VectorIndex::VectorDataset>(1, static_cast<int32_t>(dim), const_cast<float *>(query_new_data.data()));
+        return std::make_shared<VectorIndex::VectorDataset<VectorSearchType::Float32Vector>>(
+            1,
+            static_cast<int32_t>(dim),
+            const_cast<float *>(query_new_data.data()));
+    }
+}
+
+template <>
+VectorIndex::BinaryVectorDatasetPtr MergeTreeVectorScanManager::generateVectorDataset(bool is_batch, const VectorScanDescription& desc)
+{
+    auto & query_column = desc.query_column;
+    if (!query_column)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type");
+
+    auto dim = desc.search_column_dim;
+    if (dim % 8 != 0)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Dimension of Binary vector must be a multiple of 8");
+
+    ColumnPtr holder = query_column->convertToFullColumnIfConst();
+
+    if (is_batch)
+    {
+        const ColumnArray * query_col = checkAndGetColumn<ColumnArray>(holder.get());
+        if (!query_col)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array in batch distance function");
+
+        const ColumnString *src_data_concrete = checkAndGetColumn<ColumnString>(query_col->getData());
+        if (!src_data_concrete)
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Wrong query column type, expect fixed String inside Array() in batch distance function");
+
+        auto &offsets = src_data_concrete->getOffsets();
+        size_t query_vector_num = offsets.size();
+
+        std::vector<uint8_t> query_data(query_vector_num * dim / 8);
+
+        for (size_t i = 0; i < query_vector_num; i++)
+        {
+            size_t vec_start_offset = i != 0 ? offsets[i - 1] : 0;
+            size_t vec_end_offset = offsets[i];
+
+            // every string ends with terminating zero byte.
+            size_t str_len = vec_end_offset - vec_start_offset - 1;
+            if (str_len * 8 != dim)
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong dimension in batch distance: {}, search column dimension: {}", std::to_string(str_len * 8), std::to_string(dim));
+            }
+
+            const char *str = src_data_concrete->getDataAt(i).data;
+            std::memcpy(query_data.data() + i * str_len, str, str_len);
+        }
+
+        return std::make_shared<VectorIndex::VectorDataset<VectorSearchType::BinaryVector>>(
+                query_vector_num,
+                static_cast<int32_t>(dim),
+                const_cast<uint8_t *>(query_data.data()));
+    }
+    else
+    {
+        const ColumnString * query_col = checkAndGetColumn<ColumnString>(holder.get());
+
+        if (!query_col)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect fixed String in distance function");
+
+        // every String column ends with terminating zero byte.
+        auto bytes_of_query = query_col->getChars().size() - 1;
+        if (bytes_of_query * 8 != dim)
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Dimension for Binary vector search is not equal: query: {} vs search column: {}",
+                bytes_of_query * 8,
+                dim);
+        const char * str_binary = query_col->getDataAt(0).data;
+
+        std::vector<uint8_t> query_new_data(bytes_of_query);
+        std::memcpy(query_new_data.data(), str_binary, bytes_of_query);
+
+        return std::make_shared<VectorIndex::VectorDataset<VectorSearchType::BinaryVector>>(
+            1,
+            static_cast<int32_t>(dim),
+            const_cast<uint8_t *>(query_new_data.data()));
     }
 }
 
@@ -246,7 +324,18 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     auto distance_column = DataTypeFloat32().createColumn();
     auto label_column = DataTypeUInt32().createColumn();
 
-    auto vec_data = generateVectorDataset(is_batch, desc);
+    VectorIndex::VectorDatasetVariantPtr vec_data;
+    switch (desc.vector_search_type)
+    {
+        case VectorSearchType::Float32Vector:
+            vec_data = generateVectorDataset<VectorSearchType::Float32Vector>(is_batch, desc);
+            break;
+        case VectorSearchType::BinaryVector:
+            vec_data = generateVectorDataset<VectorSearchType::BinaryVector>(is_batch, desc);
+            break;
+        default:
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "unsupported vector search type");
+    }
 
     UInt64 dim = desc.search_column_dim;
     Search::Parameters search_params = VectorIndex::convertPocoJsonToMap(desc.vector_parameters);
@@ -262,10 +351,16 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     std::vector<VectorIndex::VectorSegmentExecutorPtr> vec_executors
         = prepareForVectorScan(metric_str, data_part, enable_brute_force_for_part);
 
-    Search::Metric metric = VectorIndex::getMetric(metric_str);
+    Search::Metric metric = VectorIndex::getMetric(metric_str, desc.vector_search_type);
 
     if (!vec_executors.empty())
     {
+        int64_t query_vector_num = 0;
+        std::visit([&query_vector_num](auto &&vec_data_ptr)
+                   {
+                       query_vector_num = vec_data_ptr->getVectorNum();
+                   }, vec_data);
+
         /// find index
         for (VectorIndex::VectorSegmentExecutorPtr & vec_executor : vec_executors)
         {
@@ -283,7 +378,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
                 continue;
             }
 
-            LOG_DEBUG(log, "Start search: vector num: {}", vec_data->getVectorNum());
+            LOG_DEBUG(log, "Start search: vector num: {}", query_vector_num);
 
             /// Although the vector index type support two stage search, the actual built index may fallback to flat.
             bool first_stage_only = false;
@@ -303,7 +398,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
             if (is_batch)
             {
                 OpenTelemetry::SpanHolder span4("MergeTreeVectorScanManager::vectorScan()::find_index::segment_batch_generate_results");
-                for (int64_t label = 0; label < k * vec_data->getVectorNum(); ++label)
+                for (int64_t label = 0; label < k * query_vector_num; ++label)
                 {
                     UInt32 vector_id = static_cast<uint32_t>(label / k);
                     if (per_id[label] > -1)
@@ -331,7 +426,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
         if (is_batch)
         {
             OpenTelemetry::SpanHolder span3("MergeTreeVectorScanManager::vectorScan()::find_index::data_part_batch_generate_results");
-            tmp_vector_scan_result->query_vector_num = static_cast<int>(vec_data->getVectorNum());
+            tmp_vector_scan_result->query_vector_num = static_cast<int>(query_vector_num);
             tmp_vector_scan_result->result_columns[1] = std::move(vector_id_column);
             tmp_vector_scan_result->result_columns[2] = std::move(distance_column);
         }
@@ -351,7 +446,12 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScan(
     }
     else if (enable_brute_force_for_part)
     {
-        return vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data, search_column_name, static_cast<int>(dim), k, is_batch, metric);
+        VectorScanResultPtr res_without_index;
+        std::visit([&](auto &&vec_data_ptr)
+                   {
+                       res_without_index = vectorScanWithoutIndex(data_part, read_ranges, filter, vec_data_ptr, search_column_name, static_cast<int>(dim), k, is_batch, metric);
+                   }, vec_data);
+        return res_without_index;
     }
     else
     {
@@ -372,6 +472,12 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
     const VectorScanDescriptions & descs = vector_scan_info->vector_scan_descs;
 
     const VectorScanDescription & desc = descs[0];
+
+    /// Currently, only Float32Vector can create MSTG index, and use two stage search
+    if (desc.vector_search_type != DB::VectorSearchType::Float32Vector)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Only Float32 Vector support two stage search");
+    }
 
     VectorScanResultPtr tmp_vector_scan_result = std::make_shared<VectorScanResult>();
 
@@ -403,7 +509,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::executeSecondStageVectorScan(
     else
     {
         /// Prepare paramters for computeTopDistanceSubset() if index supports two stage search
-        auto vec_data = generateVectorDataset(false, desc);
+        VectorIndex::VectorDatasetVariantPtr vec_data = generateVectorDataset<VectorSearchType::Float32Vector>(false, desc);
         auto first_stage_result = Search::SearchResult::createTopKHolder(1, num_reorder);
         auto sr_indices = first_stage_result->getResultIndices();
         auto sr_distances = first_stage_result->getResultDistances();
@@ -491,7 +597,11 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
 
     UInt64 dim = desc.search_column_dim;
 
-    metric_str = data_part->storage.getSettings()->vector_search_metric_type;
+    auto search_type = desc.vector_search_type;
+    if (search_type == VectorSearchType::Float32Vector)
+        metric_str = data_part->storage.getSettings()->float_vector_search_metric_type;
+    else if (search_type == VectorSearchType::BinaryVector)
+        metric_str = data_part->storage.getSettings()->binary_vector_search_metric_type;
 
     std::vector<VectorIndex::SegmentId> segment_ids;
     for (auto & v_index : vector_indices)
@@ -520,7 +630,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
     if (!find_index)
         return vec_executors;
 
-    Search::Metric metric = VectorIndex::getMetric(metric_str);
+    Search::Metric metric = VectorIndex::getMetric(metric_str, desc.vector_search_type);
 
     LOG_DEBUG(log, "Find index, segment_ids size: {}", segment_ids.size());
     Search::IndexType index_type = VectorIndex::getIndexType(index.type);
@@ -540,6 +650,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
         // FIXME (qliu): rows_count is wrong for decoupled parts
         VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
             segment_id,
+            desc.vector_search_type,
             index_type,
             metric,
             dim,
@@ -601,6 +712,7 @@ std::vector<VectorIndex::VectorSegmentExecutorPtr> MergeTreeVectorScanManager::p
             LOG_DEBUG(log, "Create vector segment executor for : {}", segment_ids[0].getFullPath());
             VectorIndex::VectorSegmentExecutorPtr vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
                 segment_ids[0],
+                desc.vector_search_type,
                 index_type,
                 metric,
                 dim,
@@ -1024,11 +1136,12 @@ void MergeTreeVectorScanManager::mergeVectorScanResult(
 /// 1. read raw vector data block by block
 /// 2. for each block, compute topk targets
 /// 3. get the first topk targets
+template <VectorSearchType T>
 VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     const MergeTreeData::DataPartPtr part,
     const ReadRanges & read_ranges,
     const Search::DenseBitmapPtr filter,
-    VectorIndex::VectorDatasetPtr & query_vector,
+    VectorIndex::VectorDatasetPtr<T> & query_vector,
     const String & search_column,
     int dim,
     int k,
@@ -1173,101 +1286,198 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                     continue;
                 }
 
+                size_t total_rows = 0;
+                std::vector<size_t> actual_id_in_range;
+                VectorIndex::VectorDatasetPtr<T> base_data;
+                std::vector<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType, AllocatorWithMemoryTracking<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType>> vector_raw_data;
+
                 /// prepare continuous data
                 /// data of search column stored in one_column, commonly is vector data
                 const auto & one_column = result[0];
-                const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
-                const IColumn & src_data = array->getData();
-                const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
-                const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-                const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
+                if (!one_column)
+                    throw Exception(ErrorCodes::LOGICAL_ERROR, "vector column {} doesn't exists in part {}", search_column, part->name);
 
-                if (src_vec.empty())
-                    continue;
-
-                std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data;
-                vector_raw_data.reserve(dim * offsets.size());
-
-                std::vector<size_t> actual_id_in_range;
-                actual_id_in_range.reserve(offsets.size());
-                /// filter out the data we want to do ANN on using the filter
-                size_t start_pos = filter_parsed;
-
-                /// only for debug
-                LOG_TRACE(
-                    get_logger(),
-                    "filter_parsed:{}",
-                    filter_parsed);
-
-                /// this outer for loop's i is the position of data relative to the filter
-                /// imagine filter as a array of array:[0,1,0,0,0,1,...][0,1,0...][...]
-                /// where actually all these arrays are concatenated into a single array and
-                /// each array represents all the rows in a single range
-                mark_left_rows = 0;
-                for (size_t i = start_pos; i < start_pos + default_read_num; ++i)
+                if constexpr (T == DB::VectorSearchType::Float32Vector)
                 {
-                    ///filter and num_rows could be larger than real row size in this mark
-                    if (i == filter->get_size())
-                        break;
+                    const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
+                    const IColumn & src_data = array->getData();
+                    const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
+                    const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+                    const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
 
-                    if (filter->unsafe_test(i))
+                    if (src_vec.empty())
+                        continue;
+
+                    total_rows = offsets.size();
+                    actual_id_in_range.reserve(total_rows);
+                    vector_raw_data.reserve(dim * total_rows);
+
+                    /// filter out the data we want to do ANN on using the filter
+                    size_t start_pos = filter_parsed;
+
+                    /// only for debug
+                    LOG_TRACE(
+                        get_logger(),
+                        "filter_parsed:{}",
+                        filter_parsed);
+
+                    /// this outer for loop's i is the position of data relative to the filter
+                    /// imagine filter as a array of array:[0,1,0,0,0,1,...][0,1,0...][...]
+                    /// where actually all these arrays are concatenated into a single array and
+                    /// each array represents all the rows in a single range
+                    mark_left_rows = 0;
+                    for (size_t i = start_pos; i < start_pos + default_read_num; ++i)
                     {
-                        size_t vec_start_offset = current_rows_in_mark != 0 ? offsets[current_rows_in_mark - 1] : 0;
-                        size_t vec_end_offset = offsets[current_rows_in_mark];
-                        if(vec_start_offset != vec_end_offset)
-                        {
-                            for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
-                                vector_raw_data.emplace_back(src_vec[offset]);
-                            /// only for debug
-                            LOG_TRACE(
-                                get_logger(),
-                                "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
-                                current_rows_in_range,
-                                i,
-                                src_vec[vec_start_offset]);
+                        ///filter and num_rows could be larger than real row size in this mark
+                        if (i == filter->get_size())
+                            break;
 
-                            actual_id_in_range.emplace_back(current_rows_in_range);
-                            mark_left_rows ++;
+                        if (filter->unsafe_test(i))
+                        {
+                            size_t vec_start_offset = current_rows_in_mark != 0 ? offsets[current_rows_in_mark - 1] : 0;
+                            size_t vec_end_offset = offsets[current_rows_in_mark];
+                            if(vec_start_offset != vec_end_offset)
+                            {
+                                for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                                    vector_raw_data.emplace_back(src_vec[offset]);
+                                /// only for debug
+                                LOG_TRACE(
+                                        get_logger(),
+                                        "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
+                                        current_rows_in_range,
+                                        i,
+                                        src_vec[vec_start_offset]);
+
+                                actual_id_in_range.emplace_back(current_rows_in_range);
+                                mark_left_rows ++;
+                            }
                         }
+
+                        current_rows_in_mark++;
+                        current_rows_in_range++;
                     }
 
-                    current_rows_in_mark++;
-                    current_rows_in_range++;
+                    filter_parsed += default_read_num;
+
+                    if (vector_raw_data.empty())
+                    {
+                        ASSERT(mark_left_rows == 0)
+                        continue;
+                    }
+
+                    base_data = std::make_shared<VectorIndex::VectorDataset<T>>(
+                            static_cast<int32_t>(mark_left_rows),
+                            static_cast<int32_t>(dim),
+                            const_cast<float *>(vector_raw_data.data()));
+
+                    ASSERT(vector_raw_data.size() == mark_left_rows * dim)
                 }
-
-                filter_parsed += default_read_num;
-
-                if (vector_raw_data.empty())
+                else if constexpr (T == DB::VectorSearchType::BinaryVector)
                 {
-                    ASSERT(mark_left_rows == 0)
-                    continue;
+                    mark_left_rows = 0;
+                    size_t start_pos = filter_parsed;
+
+                    using BinaryVectorDatasetType = typename VectorIndex::VectorSearchTypeMap<VectorSearchType::BinaryVector>::VectorDatasetType;
+                    if (const ColumnFixedString *fixed_string = checkAndGetColumn<ColumnFixedString>(one_column.get()))
+                    {
+                        auto fixed_N = fixed_string->getN();
+                        total_rows = fixed_string->size();
+                        if (total_rows == 0)
+                            return nullptr;
+
+                        actual_id_in_range.reserve(total_rows);
+                        vector_raw_data.reserve(total_rows * fixed_N);
+
+                        /// this outer for loop's i is the position of data relative to the filter
+                        /// imagine filter as a array of FixedString(N):[0001..., 0010...., ...]
+                        /// where actually all these arrays are concatenated into a single array and
+                        /// each array represents all the rows in a single range
+                        for (size_t i = start_pos; i < start_pos + default_read_num; ++i)
+                        {
+                            ///filter and num_rows could be larger than real row size in this mark
+                            if (i == filter->get_size())
+                                break;
+
+                            if (filter->unsafe_test(i))
+                            {
+                                auto binary_vector_data = reinterpret_cast<const BinaryVectorDatasetType *>(fixed_string->getDataAt(current_rows_in_mark).data);
+                                vector_raw_data.insert(vector_raw_data.end(), binary_vector_data, binary_vector_data + fixed_N);
+                                actual_id_in_range.emplace_back(current_rows_in_range);
+                                mark_left_rows++;
+                            }
+                            current_rows_in_mark++;
+                            current_rows_in_range++;
+                        }
+                    }
+                    /// BinaryVector is represented as FixedString(N), sometimes it maybe Sparse(FixedString(N))
+                    else if (const ColumnSparse *sparse_column = checkAndGetColumn<ColumnSparse>(one_column.get()))
+                    {
+                        LOG_INFO(get_logger(), "test DB::VectorSearchType::BinaryVector: Sparse(FixedString(N))");
+                        const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
+                        if (!sparse_fixed_string)
+                            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+
+                        auto fixed_N = sparse_fixed_string->getN();
+                        total_rows = sparse_fixed_string->size();
+                        if (total_rows == 0)
+                            return nullptr;
+
+                        actual_id_in_range.reserve(total_rows);
+                        vector_raw_data.reserve(total_rows * fixed_N);
+
+                        for (size_t i = start_pos; i < start_pos + default_read_num; ++i)
+                        {
+                            if (i == filter->get_size())
+                                break;
+
+                            if (filter->unsafe_test(i))
+                            {
+                                auto binary_vector_data = reinterpret_cast<const BinaryVectorDatasetType *>(sparse_fixed_string->getDataAt(current_rows_in_mark).data);
+                                vector_raw_data.insert(vector_raw_data.end(), binary_vector_data, binary_vector_data + fixed_N);
+                                actual_id_in_range.emplace_back(current_rows_in_range);
+                                mark_left_rows++;
+                            }
+                            current_rows_in_mark++;
+                            current_rows_in_range++;
+                        }
+                    }
+                    else
+                        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+
+                    filter_parsed += default_read_num;
+
+                    if (vector_raw_data.empty())
+                    {
+                        ASSERT(mark_left_rows == 0)
+                        continue;
+                    }
+
+                    base_data = std::make_shared<VectorIndex::VectorDataset<T>>(
+                            static_cast<int32_t>(mark_left_rows),
+                            static_cast<int32_t>(dim),
+                            const_cast<uint8_t *>(vector_raw_data.data()));
+
+                    ASSERT(vector_raw_data.size() == mark_left_rows * dim / 8)
                 }
-
-                auto base_data = std::make_shared<VectorIndex::VectorDataset>(
-                    static_cast<int32_t>(mark_left_rows),
-                    static_cast<int32_t>(dim),
-                    const_cast<float *>(vector_raw_data.data()));
-
-                ASSERT(vector_raw_data.size() == mark_left_rows * dim)
 
                 Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(mark_left_rows, true);
 
                 /// invokes searchWrapper each time reading one mark, use actual_id_in_range to record the real row id in each range,
                 /// so row_exists bitmap won't be used, and the num_read_rows will be zero for that we use real row id already.
                 searchWrapper(
-                    true,
-                    query_vector,
-                    base_data,
-                    k,
-                    dim,
-                    static_cast<int>(nq),
-                    0,
-                    final_id,
-                    final_distance,
-                    actual_id_in_range,
-                    metric,
-                    row_exists,
-                    0);
+                        true,
+                        query_vector,
+                        base_data,
+                        k,
+                        dim,
+                        static_cast<int>(nq),
+                        0,
+                        final_id,
+                        final_distance,
+                        actual_id_in_range,
+                        metric,
+                        row_exists,
+                        0);
 
                 /// for debug
                 if(mark_left_rows)
@@ -1335,46 +1545,88 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             if (num_rows == 0)
                 break;
 
+            VectorIndex::VectorDatasetPtr<T> base_data;
+            std::vector<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType, AllocatorWithMemoryTracking<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType>> vector_raw_data;
             const auto & one_column = result[0];
-            const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
-            const IColumn & src_data = array->getData();
-            const ColumnArray::Offsets & offsets = array->getOffsets();
-            const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-            if (!src_data_concrete)
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
-            const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
+            if (!one_column)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "vector column {} doesn't exists in part {}", search_column, part->name);
+            size_t total_rows = 0;
 
-            if (src_vec.empty())
+            if constexpr (T == VectorSearchType::Float32Vector)
             {
-                num_rows_read += num_rows;
-                continue;
-            }
+                const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
+                const IColumn & src_data = array->getData();
+                const ColumnArray::Offsets & offsets = array->getOffsets();
+                total_rows = offsets.size();
 
-            std::vector<float, AllocatorWithMemoryTracking<float>> vector_raw_data(dim * offsets.size(), std::numeric_limits<float>().max());
+                const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
+                if (!src_data_concrete)
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
+                const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
 
-            for (size_t row = 0; row < offsets.size(); ++row)
-            {
-                size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
-                size_t vec_end_offset = offsets[row];
-                if(vec_start_offset != vec_end_offset)
+                if (src_vec.empty())
                 {
-                    for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
+                    num_rows_read += num_rows;
+                    continue;
+                }
+
+                vector_raw_data.assign(total_rows * dim, std::numeric_limits<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType>().max());
+                for (size_t row = 0; row < total_rows; row++)
+                {
+                    size_t vec_start_offset = row != 0 ? offsets[row - 1] : 0;
+                    size_t vec_end_offset = offsets[row];
+                    if(vec_start_offset != vec_end_offset)
                     {
-                        vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                        for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
+                        {
+                            vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                        }
                     }
                 }
             }
+            else if constexpr (T == VectorSearchType::BinaryVector)
+            {
+                if (const ColumnFixedString *fixed_string = checkAndGetColumn<ColumnFixedString>(one_column.get()))
+                {
+                    total_rows = fixed_string->size();
+                    auto fixed_N = fixed_string->getN();
 
+                    vector_raw_data.reserve(total_rows * fixed_N);
+                    auto &chars = fixed_string->getChars();
+                    std::memcpy(vector_raw_data.data(), chars.data(), chars.size());
+                }
+                /// BinaryVector is represented as FixedString(N), sometimes it maybe Sparse(FixedString(N))
+                else if (const ColumnSparse *sparse_column = checkAndGetColumn<ColumnSparse>(one_column.get()))
+                {
+                    const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
+                    if (!sparse_fixed_string)
+                        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+
+                    total_rows = sparse_column->size();
+                    auto fixed_N = sparse_fixed_string->getN();
+                    vector_raw_data.reserve(total_rows * fixed_N);
+
+                    using BinaryVectorDatasetType = typename VectorIndex::VectorSearchTypeMap<VectorSearchType::BinaryVector>::VectorDatasetType;
+                    for (size_t i = 0; i < sparse_column->size(); i++)
+                    {
+                        std::memcpy(vector_raw_data.data() + i * fixed_N, reinterpret_cast<const BinaryVectorDatasetType *>(sparse_column->getDataAt(i).data), sparse_column->getDataAt(i).size);
+                    }
+                }
+                else
+                    throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+            }
             /// for debug
             LOG_TRACE(
                 log,
                 "Part: {}, "
+                "num_rows: {}, "
                 "raw_data size: {}",
                 part->name,
+                num_rows,
                 vector_raw_data.size());
 
             int deleted_row_num = 0;
-            Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(offsets.size(), true);
+            Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(total_rows, true);
 
             //make sure result contain lwd row_exists column
             if (result.size() == 2 && part->storage.hasLightweightDeletedMask())
@@ -1405,8 +1657,10 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 }
             }
 
-            auto base_data = std::make_shared<VectorIndex::VectorDataset>(
-                static_cast<int32_t>(offsets.size()), static_cast<int32_t>(dim), const_cast<float *>(vector_raw_data.data()));
+            base_data = std::make_shared<VectorIndex::VectorDataset<T>>(
+                    static_cast<int32_t>(total_rows),
+                    static_cast<int32_t>(dim),
+                    const_cast<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType *>(vector_raw_data.data()));
 
             std::vector<size_t> place_holder;
 
@@ -1479,11 +1733,11 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     return tmp_vector_scan_result;
 }
 
-
+template <VectorSearchType T>
 void MergeTreeVectorScanManager::searchWrapper(
     bool prewhere,
-    VectorIndex::VectorDatasetPtr & query_vector,
-    VectorIndex::VectorDatasetPtr & base_data,
+    VectorIndex::VectorDatasetPtr<T> & query_vector,
+    VectorIndex::VectorDatasetPtr<T> & base_data,
     int k,
     int /* dim */,
     int nq,
@@ -1497,17 +1751,41 @@ void MergeTreeVectorScanManager::searchWrapper(
 {
     std::vector<float> per_distance;
     std::vector<float> tmp_per_distance;
-    if (metric == Search::Metric::IP)
+
+    switch (T)
     {
-        per_distance = std::vector<float>(k * nq, std::numeric_limits<float>().min());
-        if (delete_id_num > 0)
-            tmp_per_distance = std::vector<float>((k + delete_id_num) * nq, std::numeric_limits<float>().min());
-    }
-    else
-    {
-        per_distance = std::vector<float>(k * nq, std::numeric_limits<float>().max());
-        if (delete_id_num > 0)
-            tmp_per_distance = std::vector<float>((k + delete_id_num) * nq, std::numeric_limits<float>().max());
+        case VectorSearchType::Float32Vector:
+        {
+            if (metric == Search::Metric::IP)
+            {
+                per_distance = std::vector<float>(k * nq, std::numeric_limits<float>().min());
+                if (delete_id_num > 0)
+                    tmp_per_distance = std::vector<float>((k + delete_id_num) * nq, std::numeric_limits<float>().min());
+            }
+            else if (metric == Search::Metric::Cosine || metric == Search::Metric::L2)
+            {
+                per_distance = std::vector<float>(k * nq, std::numeric_limits<float>().max());
+                if (delete_id_num > 0)
+                    tmp_per_distance = std::vector<float>((k + delete_id_num) * nq, std::numeric_limits<float>().max());
+            }
+            else
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported metric type for Float32 vector");
+            break;
+        }
+        case VectorSearchType::BinaryVector:
+        {
+            if (metric == Search::Metric::Hamming || metric == Search::Metric::Jaccard)
+            {
+                per_distance = std::vector<float>(k * nq, std::numeric_limits<float>().max());
+                if (delete_id_num > 0)
+                    tmp_per_distance = std::vector<float>((k + delete_id_num) * nq, std::numeric_limits<float>().max());
+            }
+            else
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported metric type for Binary vector");
+            break;
+        }
+        default:
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported vector search type");
     }
 
     std::vector<int64_t> per_id(k * nq, -1);
@@ -1530,8 +1808,7 @@ void MergeTreeVectorScanManager::searchWrapper(
 
     LOG_TRACE(log, "the base data length:{}", base_data->getVectorNum());
 
-    auto s = VectorIndex::VectorSegmentExecutor::searchWithoutIndex(
-        query_vector, base_data, k + delete_id_num, distance_data, id_data, metric);
+    auto s = VectorIndex::VectorSegmentExecutor::searchWithoutIndex<T>(query_vector, base_data, k + delete_id_num, distance_data, id_data, metric);
     if (!s.fine())
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "brute force search failed");
