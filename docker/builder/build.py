@@ -153,6 +153,7 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
     cmake["-DCMAKE_INSTALL_LOCALSTATEDIR"] = "/var"
     cmake["-DENABLE_THINLTO"] = "OFF"
     # disable rust api
+    cmake["-DBINARY_CPP_DATASET_TEST"] = "OFF"
     cmake["-DENABLE_RUST"] = "OFF"
     cmake["-DCMAKE_BUILD_TYPE"] = build_type
     cmake["-DVERSION_DATE"] = f"'{git_commit_date()}'"
