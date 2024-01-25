@@ -28,6 +28,7 @@
 #include <DataTypes/DataTypeEnum.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypeFixedString.h>
 #include <DataTypes/DataTypeUUID.h>
 #include <DataTypes/hasNullable.h>
 #include <DataTypes/NestedUtils.h>
@@ -8532,9 +8533,8 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
     Search::IndexType index_type;
     Search::Metric metric;
     Search::Parameters index_params;
-    size_t dim;
+    size_t dim = 0;
 
-    String metric_str = getSettings()->vector_search_metric_type;
     size_t min_bytes_to_build_vector_index = getSettings()->min_bytes_to_build_vector_index;
     int default_mstg_disk_mode = getSettings()->default_mstg_disk_mode;
 
@@ -8551,7 +8551,6 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
                 continue;
 
             auto v_index = v_index_map[vidx_name];
-            dim = metadata.getConstraints().getArrayLengthByColumnName(v_index.column).first;
 
             if (!valid_vidx.contains(vidx_name))
             {
@@ -8564,18 +8563,33 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
                     continue;
                 }
 
-                const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
-                if (!array_type)
+                if (v_index.vector_search_type == VectorSearchType::Float32Vector)
                 {
-                    invalid_vidx.insert(vidx_name);
-                    LOG_ERROR(log, "Vector index column {} type is not array", v_index.column);
-                    continue;
+                    const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
+                    if (!array_type)
+                    {
+                        invalid_vidx.insert(vidx_name);
+                        LOG_ERROR(log, "Float32 Vector index column {} type is not array", v_index.column);
+                        continue;
+                    }
+                    dim = metadata.getConstraints().getArrayLengthByColumnName(v_index.column).first;
+                }
+                else if (v_index.vector_search_type == VectorSearchType::BinaryVector)
+                {
+                    const DataTypeFixedString * fixed_string_type = typeid_cast<const DataTypeFixedString *>(col_and_type->getTypeInStorage().get());
+                    if (!fixed_string_type)
+                    {
+                        invalid_vidx.insert(vidx_name);
+                        LOG_ERROR(log, "Binary Vector index column {} type is not FixedString(N)", v_index.column);
+                        continue;
+                    }
+                    dim = fixed_string_type->getN() * 8;
                 }
 
                 if (dim == 0)
                 {
                     invalid_vidx.insert(vidx_name);
-                    LOG_ERROR(log, "Wrong dimension: 0 for column {}, please check length constraint on the column.", v_index.column);
+                    LOG_ERROR(log, "Wrong dimension: 0 for column {}.", v_index.column);
                     continue;
                 }
 
@@ -8587,11 +8601,19 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 
             index_type = VectorIndex::getIndexType(v_index.type);
 
+            String metric_str;
             if (v_index.parameters && v_index.parameters->has("metric_type"))
             {
                 metric_str = v_index.parameters->getValue<String>("metric_type");
             }
-            metric = VectorIndex::getMetric(metric_str);
+            else
+            {
+                if (v_index.vector_search_type == DB::VectorSearchType::Float32Vector)
+                    metric_str = getSettings()->float_vector_search_metric_type;
+                else if (v_index.vector_search_type == DB::VectorSearchType::BinaryVector)
+                    metric_str = getSettings()->binary_vector_search_metric_type;
+            }
+            metric = VectorIndex::getMetric(metric_str, v_index.vector_search_type);
 
             index_params = VectorIndex::convertPocoJsonToMap(v_index.parameters);
             index_params.erase("metric_type");
@@ -8601,6 +8623,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
             {
                 auto vec_executor = std::make_shared<VectorIndex::VectorSegmentExecutor>(
                     segment_id,
+                    v_index.vector_search_type,
                     index_type,
                     metric,
                     dim,

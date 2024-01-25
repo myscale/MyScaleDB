@@ -1,5 +1,6 @@
 #include <Core/ServerSettings.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeFixedString.h>
 #include <IO/HashingReadBuffer.h>
 #include <Interpreters/VectorIndexEventLog.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
@@ -471,6 +472,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             return BuildVectorIndexStatus::SUCCESS;
         }
 
+        DB::VectorSearchType search_type = vec_index_desc.vector_search_type;
+
         /// only one column to build vector index, using a large dimension as default value.
         uint64_t dim = 0;
         NamesAndTypesList cols;
@@ -479,16 +482,8 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
         if (col_and_type)
         {
             cols.emplace_back(*col_and_type);
-            const DataTypeArray * array_type = typeid_cast<const DataTypeArray *>(col_and_type->getTypeInStorage().get());
-            if (array_type)
-            {
-                dim = metadata_snapshot->getConstraints().getArrayLengthByColumnName(vec_index_desc.column).first;
-                if (dim == 0)
-                {
-                    LOG_ERROR(log, "Wrong dimension: 0, please check length constraint on the column.");
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong dimension: 0, please check length constraint on the column.");
-                }
-            }
+            dim = getVectorDimension(search_type, *metadata_snapshot, vec_index_desc.column);
+            checkVectorDimension(search_type, dim);
         }
         else
         {
@@ -561,14 +556,19 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
 
         VectorIndex::SegmentId segment_id(
             part->getDataPartStoragePtr(), vector_tmp_full_path, part->name, vec_index_desc.name, vec_index_desc.column);
-        VectorIndex::PartReader part_reader(
-            part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), check_build_canceled, dim, enforce_fixed_array);
 
         Search::Parameters parameters = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
-        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
+
+        Search::Metric metric;
+        if (search_type == VectorSearchType::Float32Vector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->float_vector_search_metric_type)), search_type);
+        else if (search_type == VectorSearchType::BinaryVector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->binary_vector_search_metric_type)), search_type);
+
         VectorIndex::VectorSegmentExecutorPtr vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
             segment_id,
+            search_type,
             index_type,
             metric,
             dim,
@@ -576,15 +576,36 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
             parameters,
             data.getSettings()->min_bytes_to_build_vector_index,
             data.getSettings()->default_mstg_disk_mode);
-        size_t max_build_index_add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
-        size_t max_build_index_train_block_size = data.getContext()->getSettingsRef().max_build_index_train_block_size;
 
         VectorIndexEventLog::addEventLog(data.getContext(), part, vector_index_name, VectorIndexEventLogElement::BUILD_START);
-        vec_index_builder->buildIndex(&part_reader, check_build_canceled, slow_mode, max_build_index_train_block_size, max_build_index_add_block_size);
+        size_t add_block_size = data.getContext()->getSettingsRef().max_build_index_add_block_size;
+        switch (search_type)
+        {
+            case DB::VectorSearchType::Float32Vector:
+            {
+                size_t train_block_size = data.getContext()->getSettingsRef().max_build_index_train_block_size;
+                VectorIndex::PartReader<DB::VectorSearchType::Float32Vector> part_reader(part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), check_build_canceled, dim, enforce_fixed_array);
+                vec_index_builder->buildIndex(&part_reader, check_build_canceled, slow_mode, train_block_size, add_block_size);
 
-        const auto empty_ids = part_reader.emptyIds();
-        if (!empty_ids.empty())
-            vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
+                const auto empty_ids = part_reader.emptyIds();
+                if (!empty_ids.empty())
+                    vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
+                break;
+            }
+            case DB::VectorSearchType::BinaryVector:
+            {
+                size_t train_block_size = data.getContext()->getSettingsRef().max_build_binary_vector_index_train_block_size;
+                VectorIndex::PartReader<DB::VectorSearchType::BinaryVector> part_reader(part, cols, metadata_snapshot, data.getContext()->getMarkCache().get(), check_build_canceled, dim, enforce_fixed_array);
+                vec_index_builder->buildIndex(&part_reader, check_build_canceled, slow_mode, train_block_size, add_block_size);
+
+                const auto empty_ids = part_reader.emptyIds();
+                if (!empty_ids.empty())
+                    vec_index_builder->removeByIds(empty_ids.size(), empty_ids.data());
+                break;
+            }
+            default:
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported vector search type");
+        }
 
         if (!part->isBuildCancelled() && BuildIndexHelpers::checkOperationIsNotCanceled(builds_blocker))
         {
@@ -735,10 +756,16 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::TryMoveVectorIndexFil
         /// Initialize builder
         Search::Parameters parameters = VectorIndex::convertPocoJsonToMap(vec_index_desc.parameters);
         Search::IndexType index_type = VectorIndex::getIndexType(vec_index_desc.type);
-        Search::Metric metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->vector_search_metric_type)));
+
+        Search::Metric metric;
+        if (vec_index_desc.vector_search_type == VectorSearchType::Float32Vector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->float_vector_search_metric_type)), vec_index_desc.vector_search_type);
+        else if (vec_index_desc.vector_search_type == VectorSearchType::BinaryVector)
+            metric = VectorIndex::getMetric(parameters.extractParam("metric_type", std::string(data.getSettings()->binary_vector_search_metric_type)), vec_index_desc.vector_search_type);
 
         vec_index_builder = std::make_shared<VectorIndex::VectorSegmentExecutor>(
             future_segment,
+            vec_index_desc.vector_search_type,
             index_type,
             metric,
             dim,
