@@ -232,12 +232,15 @@ namespace ErrorCodes
     extern const int NETWORK_ERROR;
     extern const int CORRUPTED_DATA;
     extern const int LICENSE_ERROR;
+    extern const int LIMIT_EXCEEDED;
 }
 
 namespace
 {
     const size_t RETRY_TIMES = 3;
     const size_t RETRY_INTERVAL_S = 1200;
+    const size_t MAX_CPU_COMMUNITY_EDITION = 4;
+    const uint64_t MAX_MEMORY_COMMUNITY_EDITION = 8589934592;
 
     const String LICENSE_CLUSTERS_PREFIX = "/license_clusters";
     const String LICENSE_CLUSTER_PREFIX_FMT = "/license_clusters/{}";
@@ -1310,6 +1313,43 @@ void offlineInstanceInZookeeper(const Poco::Util::AbstractConfiguration & config
         {
             tryLogCurrentException("offlineInstanceInZookeeper");
         }
+    }
+}
+
+void Server::checkHardwareResourceLimits()
+{
+    Poco::Logger * log = &logger();
+    LOG_DEBUG(log, "Start checking hardware resource limits of community edition");
+
+    try
+    {
+        /// Check CPU and memory
+        auto cpu_count = getNumberOfPhysicalCPUCores();
+        auto memory_amount = getMemoryAmount();
+
+        if (cpu_count <= MAX_CPU_COMMUNITY_EDITION)
+            LOG_INFO(log, "The number of CPU is checked: {}, MAX: {}.", cpu_count, MAX_CPU_COMMUNITY_EDITION);
+        else
+        {
+            LOG_ERROR(log, "The number of CPU exceeds the limit: {}, MAX: {}.", cpu_count, MAX_CPU_COMMUNITY_EDITION);
+            throw Exception(
+                ErrorCodes::LIMIT_EXCEEDED,
+                "Check hardware resource limits of community edition failed, the number of CPU exceeds the limit.");
+        }
+
+        if (memory_amount <= MAX_MEMORY_COMMUNITY_EDITION)
+            LOG_INFO(log, "Memory amount is checked: {}, MAX: {}.", memory_amount, MAX_MEMORY_COMMUNITY_EDITION);
+        else
+        {
+            LOG_ERROR(log, "Memory amount exceeds the limit: {}, MAX: {}.", memory_amount, MAX_MEMORY_COMMUNITY_EDITION);
+            throw Exception(
+                ErrorCodes::LIMIT_EXCEEDED, "Check hardware resource limits of community edition failed, memory amount exceeds the limit.");
+        }
+    }
+    catch (...)
+    {
+        tryLogCurrentException("checkHardwareResourceLimits");
+        terminate();
     }
 }
 
@@ -2754,6 +2794,16 @@ try
     }
     /// try set up encryption. There are some errors in config, error will be printed and server wouldn't start.
     CompressionCodecEncrypted::Configuration::instance().load(config(), "encryption_codecs");
+
+#ifdef ENABLE_MYSCALE_COMMUNITY_EDITION
+    /// Check hardware resource
+    checkHardwareResourceLimits();
+#endif
+
+#if defined(ENABLE_LICENSE_CHECK)
+    /// Check license
+    scheduleLicense();
+#endif
 
     /// DNSCacheUpdater uses BackgroundSchedulePool which lives in shared context
     /// and thus this object must be created after the SCOPE_EXIT object where shared
