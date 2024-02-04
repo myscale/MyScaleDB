@@ -72,6 +72,8 @@ protected:
     void checkLicense();
     void scheduleLicense();
 
+    void checkHardwareResourceLimits();
+
 private:
     ContextMutablePtr global_context;
     /// Updated/recent config, to compare http_handlers
