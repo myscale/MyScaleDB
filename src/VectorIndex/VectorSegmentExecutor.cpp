@@ -818,6 +818,7 @@ void VectorSegmentExecutor::setCacheManagerSizeInBytes(size_t size)
 
 void VectorSegmentExecutor::setBuildMemorySizeInBytes(size_t size)
 {
+    std::lock_guard lock(build_memory_mutex);
     build_memory_size_limit = size;
 }
 
