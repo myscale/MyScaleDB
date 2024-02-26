@@ -2385,6 +2385,32 @@ try
             auto * global_overcommit_tracker = global_context->getGlobalOvercommitTracker();
             total_memory_tracker.setOvercommitTracker(global_overcommit_tracker);
 
+            /// Set vector index cache memory limit
+            float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
+            if (vector_index_cache_ratio < 0.1f)
+                vector_index_cache_ratio = 0.1f;
+            else if (vector_index_cache_ratio > 0.9f)
+                vector_index_cache_ratio = 0.9f;
+            LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
+
+            const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
+            LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
+
+            VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+
+            /// Set vector index build memory limit
+            float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
+            if (vector_index_build_ratio < 0.1f)
+                vector_index_build_ratio = 0.1f;
+            else if (vector_index_build_ratio > 0.9f)
+                vector_index_build_ratio = 0.9f;
+            LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
+
+            const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
+            LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
+
+            VectorIndex::VectorSegmentExecutor::setBuildMemorySizeInBytes(vector_index_build_max_size);
+
             // FIXME logging-related things need synchronization -- see the 'Logger * log' saved
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
@@ -2833,29 +2859,6 @@ try
     std::string default_database = server_settings.default_database.toString();
     global_context->setCurrentDatabaseNameInGlobalContext(default_database);
 
-    /// Set vector index cache memory limit
-    float vector_index_cache_ratio = server_settings.vector_index_cache_size_ratio_of_memory;
-    if (vector_index_cache_ratio < 0.1f)
-        vector_index_cache_ratio = 0.1f;
-    else if (vector_index_cache_ratio > 0.9f)
-        vector_index_cache_ratio = 0.9f;
-    LOG_INFO(log, "vector index cache size ratio = {}", vector_index_cache_ratio);
-
-    const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
-    LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
-
-    VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
-
-    /// Set vector index build memory limit
-    float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
-    if (vector_index_build_ratio < 0.1f)
-        vector_index_build_ratio = 0.1f;
-    else if (vector_index_build_ratio > 0.9f)
-        vector_index_build_ratio = 0.9f;
-    LOG_INFO(log, "vector index build size ratio = {}", vector_index_build_ratio);
-
-    const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
-    LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
     LOG_INFO(log, "Loading metadata from {}", path_str);
 
     LoadTaskPtrs load_metadata_tasks;

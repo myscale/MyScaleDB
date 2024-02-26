@@ -88,7 +88,7 @@ public:
     static void flushWillUnloadLog();
 
 protected:
-    mutable std::unique_ptr<VectorIndexCache> cache;
+    static std::unique_ptr<VectorIndexCache> cache;
     Poco::Logger * log;
 };
 
