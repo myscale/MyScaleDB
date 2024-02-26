@@ -20,6 +20,8 @@ extern const Metric LoadedVectorIndexMemorySize;
 namespace VectorIndex
 {
 
+std::unique_ptr<VectorIndexCache> CacheManager::cache;
+
 size_t IndexWithMetaWeightFunc::operator()(const IndexWithMeta & index_meta) const
 {
     size_t res;
@@ -169,6 +171,10 @@ IndexWithMetaHolderPtr CacheManager::load(const CacheKey & cache_key,
 void CacheManager::setCacheSize(size_t size_in_bytes)
 {
     cache_size_in_bytes = size_in_bytes;
+
+    if (m && cache)
+        cache->updateMaxWeight(size_in_bytes);
+
     m = true;
 
     CurrentMetrics::set(CurrentMetrics::VectorIndexCacheManagerSize, size_in_bytes);
