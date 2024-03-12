@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
+if [ $# -ne 2 ]; then
+    echo 'Requires docker hub user account and password!'
+    exit 1
+fi
+
 source docker/builder/tools/version.sh
 
 cp -rfv artifacts/clickhouse-*.tgz docker/mqdb/
 
-DOCKER_HUB_USER_NAME="myscale"
-DOCKER_HUB_USER_PASSWORD="dckr_pat_G5xUzsovxR4NrnaenDqZGtxM6CA"
+DOCKER_HUB_USER_NAME="$1"
+DOCKER_HUB_USER_PASSWORD="$2"
 
 echo $DOCKER_HUB_USER_PASSWORD | docker login --username $DOCKER_HUB_USER_NAME --password-stdin
 
