@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
+if [ $# -ne 2 ]; then
+    echo 'Requires harbor user account and password!'
+    exit 1
+fi
+
 source docker/builder/tools/version.sh
 
 cp -rfv artifacts/clickhouse-*.tgz docker/mqdb/
 
-HARBOR_USER_NAME="yim@moqi.ai"
-HARBOR_USER_PASSWORD="Zhu88jie"
+HARBOR_USER_NAME="$1"
+HARBOR_USER_PASSWORD="$2"
 HARBOR_REGISTRY="harbor.internal.moqi.ai"
 HARBOR_NAMESPACE="mqdb"
 
