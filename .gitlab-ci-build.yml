@@ -32,7 +32,7 @@ build_binary:
       if [ "$CI_MERGE_REQUEST_LABELS" = "quick-image" ]; then
         docker/builder/tools/docker-info.sh
         docker/builder/tools/docker-buildx.sh
-        docker/builder/tools/quick-image.sh
+        docker/builder/tools/quick-image.sh "$(echo $HARBOR_USER_B64 | base64 -d)" $HARBOR_PASSWORD $DOCKERHUB_USERNAME $DOCKERHUB_PASSWORD
       fi
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'

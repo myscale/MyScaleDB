@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 set -e
 
+if [ $# -ne 4 ]; then
+    echo 'Requires harbor/docker hub user account and password!'
+    exit 1
+fi
+
 source docker/builder/tools/version.sh
 
 cp -rfv artifacts/clickhouse-*.tgz docker/mqdb/
 
-HARBOR_USER_NAME="yim@moqi.ai"
-HARBOR_USER_PASSWORD="Zhu88jie"
+HARBOR_USER_NAME="$1"
+HARBOR_USER_PASSWORD="$2"
+DOCKER_HUB_USER_NAME="$3"
+DOCKER_HUB_USER_PASSWORD="$4"
 HARBOR_REGISTRY="harbor.internal.moqi.ai"
 HARBOR_NAMESPACE="mqdb"
 
 echo $HARBOR_USER_PASSWORD | docker login $HARBOR_REGISTRY --username $HARBOR_USER_NAME --password-stdin
-
-DOCKER_HUB_USER_NAME="myscale"
-DOCKER_HUB_USER_PASSWORD="dckr_pat_G5xUzsovxR4NrnaenDqZGtxM6CA"
 
 echo $DOCKER_HUB_USER_PASSWORD | docker login --username $DOCKER_HUB_USER_NAME --password-stdin
 
