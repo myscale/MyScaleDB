@@ -17,9 +17,9 @@ MyScale is a cost-effective, highly scalable data management solution that simpl
 * Millisecond search on billion vectors
 * Highly reliable & linearly scalable
 * Hybrid search & complex SQL vector queries
-* Support disk-based vector index for high data density*
+* Support disk-based vector index for high data density.[^1]
 
-See our [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages.
+See our [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. See our [open-source benchmark](https://myscale.github.io/benchmark/) for comparison with other vector database products.
 
 ## Creating a MyScaleDB Instance
 
@@ -31,13 +31,15 @@ The simplest way to use MyScaleDB is to start an instance on MyScale Cloud servi
 
 #### MyScaleDB Docker Image
 
-*Recommended way, write more here, see [paradedb](https://github.com/paradedb/paradedb?tab=readme-ov-file#paradedb-docker-image)*.
+* [ ] *Recommended way, write more here, see [paradedb](https://github.com/paradedb/paradedb?tab=readme-ov-file#paradedb-docker-image)*.
 
 #### Build from source
 
-*Just a short and concise description would work here.*
+* [ ] *Just a short and concise description would work here.*
 
 ## Tutorial
+
+* [ ] *Write more SQL examples here, refer to [timescaledb](https://github.com/timescale/timescaledb?tab=readme-ov-file#using-timescaledb)*
 
 ## Roadmap
 
@@ -45,3 +47,5 @@ The simplest way to use MyScaleDB is to start an instance on MyScale Cloud servi
 * [ ] Support more storage engines, e.g. ReplacingMergeTree
 * [ ] LLM observability with MyScale
 * [ ] Data-centric LLM
+
+[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm with much higher data density and better indexing & search performance on large-scale vector data is available through [MyScale Cloud](myscale.com).
