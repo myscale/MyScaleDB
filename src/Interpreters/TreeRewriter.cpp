@@ -62,6 +62,7 @@
 #include <IO/WriteHelpers.h>
 #include <Storages/IStorage.h>
 #include <Storages/StorageJoin.h>
+#include "Common/Allocator.h"
 #include <Common/checkStackSize.h>
 #include <Storages/StorageView.h>
 
@@ -1399,7 +1400,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
 
         /// Check vector column data type
         if (!search_column_type)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "search column name: {}, type is not exist", vec_col_name);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", vec_col_name);
         auto vector_search_type = getVectorSearchType(search_column_type->type);
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.
