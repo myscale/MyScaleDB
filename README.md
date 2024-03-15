@@ -48,4 +48,4 @@ The simplest way to use MyScaleDB is to start an instance on MyScale Cloud servi
 * [ ] LLM observability with MyScale
 * [ ] Data-centric LLM
 
-[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm with much higher data density and better indexing & search performance on large-scale vector data is available through [MyScale Cloud](myscale.com).
+[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScale Cloud](myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
