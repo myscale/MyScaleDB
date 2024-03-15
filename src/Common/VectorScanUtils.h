@@ -50,10 +50,10 @@ inline VectorSearchType getVectorSearchType(DataTypePtr &data_type)
         case TypeIndex::FixedString:
             return VectorSearchType::BinaryVector;
         default:
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector search can be used with `Array(Float32)` or `FixedString` column");
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Vector search can be used with `Array(Float32)` or `FixedString` column");
     }
 
-    throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported Vector search Type");
+    throw Exception(ErrorCodes::INCORRECT_DATA, "Unsupported Vector search Type");
 }
 
 inline void checkVectorDimension(const VectorSearchType & search_type, const uint64_t & dim)

@@ -1298,7 +1298,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 /// data of search column stored in one_column, commonly is vector data
                 const auto & one_column = result[0];
                 if (!one_column)
-                    throw Exception(ErrorCodes::LOGICAL_ERROR, "vector column {} doesn't exists in part {}", search_column, part->name);
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "vector column {} doesn't exists in part {}", search_column, part->name);
 
                 if constexpr (T == DB::VectorSearchType::Float32Vector)
                 {
@@ -1418,7 +1418,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                         LOG_INFO(get_logger(), "test DB::VectorSearchType::BinaryVector: Sparse(FixedString(N))");
                         const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
                         if (!sparse_fixed_string)
-                            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+                            throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
 
                         auto fixed_N = sparse_fixed_string->getN();
                         total_rows = sparse_fixed_string->size();
@@ -1445,7 +1445,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                         }
                     }
                     else
-                        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+                        throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
 
                     filter_parsed += default_read_num;
 
@@ -1552,7 +1552,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
             std::vector<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType, AllocatorWithMemoryTracking<typename VectorIndex::VectorSearchTypeMap<T>::VectorDatasetType>> vector_raw_data;
             const auto & one_column = result[0];
             if (!one_column)
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "vector column {} doesn't exists in part {}", search_column, part->name);
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "vector column {} doesn't exists in part {}", search_column, part->name);
             size_t total_rows = 0;
 
             if constexpr (T == VectorSearchType::Float32Vector)
@@ -1603,7 +1603,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                 {
                     const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
                     if (!sparse_fixed_string)
-                        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+                        throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
 
                     total_rows = sparse_column->size();
                     auto fixed_N = sparse_fixed_string->getN();
@@ -1616,7 +1616,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                     }
                 }
                 else
-                    throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
+                    throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
             }
             /// for debug
             LOG_TRACE(
