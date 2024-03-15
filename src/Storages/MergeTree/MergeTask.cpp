@@ -594,195 +594,216 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         }
     }
 
-    ctx->rows_sources_write_buf->next();
-    ctx->rows_sources_uncompressed_write_buf->next();
-    /// Ensure data has written to disk.
-    ctx->rows_sources_uncompressed_write_buf->finalize();
-
-    size_t rows_sources_count = ctx->rows_sources_write_buf->count();
-    /// get rows sources info from local file
-    auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
-    LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
-    rows_sources_read_buf->seek(0, 0);
-
-    /// inverted_row_ids_map file write buffer
-    global_ctx->inverted_row_ids_map_uncompressed_buf = global_ctx->new_data_part->getDataPartStorage().writeFile(
-        global_ctx->inverted_row_ids_map_file_path, 4096, global_ctx->context->getWriteSettings());
-    global_ctx->inverted_row_ids_map_buf = std::make_unique<CompressedWriteBuffer>(*global_ctx->inverted_row_ids_map_uncompressed_buf);
-
-    /// row_ids_map file write buffers
-    global_ctx->row_ids_map_bufs.clear();
-    global_ctx->row_ids_map_uncompressed_bufs.clear();
-    for (const auto & row_ids_map_file : global_ctx->row_ids_map_files)
+    try
     {
-        auto row_ids_map_uncompressed_buf
-            = global_ctx->new_data_part->getDataPartStorage().writeFile(row_ids_map_file, 4096, global_ctx->context->getWriteSettings());
-        global_ctx->row_ids_map_bufs.emplace_back(std::make_unique<CompressedWriteBuffer>(*row_ids_map_uncompressed_buf));
-        global_ctx->row_ids_map_uncompressed_bufs.emplace_back(std::move(row_ids_map_uncompressed_buf));
-    }
+        ctx->rows_sources_write_buf->next();
+        ctx->rows_sources_uncompressed_write_buf->next();
+        /// Ensure data has written to disk.
+        ctx->rows_sources_uncompressed_write_buf->finalize();
 
-    /// read data into buffer
-    uint64_t new_part_row_id = 0;
-    std::vector<uint64_t> source_row_ids(global_ctx->future_part->parts.size(), 0);
-    /// used to store new row ids for each old part
-    std::vector<std::unordered_map<UInt64, UInt64>> parts_new_row_ids(global_ctx->future_part->parts.size());
-    /// TODO: confirm read all in one round?
+        size_t rows_sources_count = ctx->rows_sources_write_buf->count();
+        /// get rows sources info from local file
+        auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
+        LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
+        rows_sources_read_buf->seek(0, 0);
 
-    /// Replacing Merge Tree
-    if (ctx->merging_params.mode == MergeTreeData::MergingParams::Collapsing
-        || ctx->merging_params.mode == MergeTreeData::MergingParams::Replacing
-        || ctx->merging_params.mode == MergeTreeData::MergingParams::VersionedCollapsing)
-    {
-        /// write one file(inverted row ids map), new part -> pos in old part, if not in, skip writing
-        while (!rows_sources_read_buf->eof())
+        /// inverted_row_ids_map file write buffer
+        global_ctx->inverted_row_ids_map_uncompressed_buf = global_ctx->new_data_part->getDataPartStorage().writeFile(
+            global_ctx->inverted_row_ids_map_file_path, 4096, global_ctx->context->getWriteSettings());
+        global_ctx->inverted_row_ids_map_buf = std::make_unique<CompressedWriteBuffer>(*global_ctx->inverted_row_ids_map_uncompressed_buf);
+
+        /// row_ids_map file write buffers
+        global_ctx->row_ids_map_bufs.clear();
+        global_ctx->row_ids_map_uncompressed_bufs.clear();
+        for (const auto & row_ids_map_file : global_ctx->row_ids_map_files)
         {
-            RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
-            RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
-            while (row_source_pos < row_sources_end)
-            {
-                /// row_source is the part from which row comes
-                RowSourcePart row_source = *row_source_pos;
-                /// part pos number in part_offsets
-                size_t source_num = row_source.getSourceNum() ;
+            auto row_ids_map_uncompressed_buf
+                = global_ctx->new_data_part->getDataPartStorage().writeFile(row_ids_map_file, 4096, global_ctx->context->getWriteSettings());
+            global_ctx->row_ids_map_bufs.emplace_back(std::make_unique<CompressedWriteBuffer>(*row_ids_map_uncompressed_buf));
+            global_ctx->row_ids_map_uncompressed_bufs.emplace_back(std::move(row_ids_map_uncompressed_buf));
+        }
 
-                if (!row_source_pos->getSkipFlag())
+        /// read data into buffer
+        uint64_t new_part_row_id = 0;
+        std::vector<uint64_t> source_row_ids(global_ctx->future_part->parts.size(), 0);
+        /// used to store new row ids for each old part
+        std::vector<std::unordered_map<UInt64, UInt64>> parts_new_row_ids(global_ctx->future_part->parts.size());
+        /// TODO: confirm read all in one round?
+
+        /// Replacing Merge Tree
+        if (ctx->merging_params.mode == MergeTreeData::MergingParams::Collapsing
+            || ctx->merging_params.mode == MergeTreeData::MergingParams::Replacing
+            || ctx->merging_params.mode == MergeTreeData::MergingParams::VersionedCollapsing)
+        {
+            /// write one file(inverted row ids map), new part -> pos in old part, if not in, skip writing
+            while (!rows_sources_read_buf->eof())
+            {
+                RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
+                RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
+                while (row_source_pos < row_sources_end)
                 {
+                    /// row_source is the part from which row comes
+                    RowSourcePart row_source = *row_source_pos;
+                    /// part pos number in part_offsets
+                    size_t source_num = row_source.getSourceNum() ;
+
+                    if (!row_source_pos->getSkipFlag())
+                    {
+                        /// source_row_ids stores the row offset of the corresponding part
+                        auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
+
+                        /// parts_new_row_ids stores mapping from a formal row in old part to its current pos in new merged part
+                        parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
+                        writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
+                        /// need to add this, or we cannot correctly read uint64 value
+                        writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
+                        ++new_part_row_id;
+                    }
+                    ++source_row_ids[source_num];
+
+                    ++row_source_pos;
+                }
+                rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+            }
+
+            /// write row_ids_map_bufs,
+            for (size_t source_num = 0; source_num < old_parts_num; source_num++)
+            /// write multiple files(row id map buf), old part -> pos in new part,if not in skip writing
+            {
+                auto metadata_snapshot = global_ctx->data->getInMemoryMetadataPtr();
+                UInt64 old_row_id = 0;
+                auto partRowNum = global_ctx->future_part->parts[source_num]->rows_count;
+                std::vector<uint64_t> deleteRowIds(partRowNum, 0);
+                int i = 0;
+                while (old_row_id < partRowNum)
+                {
+                    if (parts_new_row_ids[source_num].count(old_row_id) > 0)
+                    {
+                        UInt64 new_row_id = parts_new_row_ids[source_num][old_row_id];
+                        writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+                        writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+                    }
+                    else
+                    {
+                        //generate delete row id for using in vector index
+                        deleteRowIds[i] = static_cast<UInt64>(old_row_id);
+                        i++;
+                    }
+                    ++old_row_id;
+                }
+
+                if (i > 0)
+                {
+                    /// Support multiple vector indices
+                    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+                    {
+                        const DataPartStorageOnDiskBase * part_storage
+                            = dynamic_cast<const DataPartStorageOnDiskBase *>(global_ctx->future_part->parts[source_num]->getDataPartStoragePtr().get());
+                        if (part_storage == nullptr)
+                        {
+                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
+                        }
+
+                        VectorIndex::SegmentId segment_id(
+                            global_ctx->future_part->parts[source_num]->getDataPartStoragePtr(),
+                            global_ctx->future_part->parts[source_num]->name,
+                            vec_index_desc.name,
+                            vec_index_desc.column);
+                        VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
+                        vec_executor.updateBitMap(deleteRowIds);
+                    }
+                }
+            }
+        }
+        else
+        {
+            while (!rows_sources_read_buf->eof())
+            {
+                RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
+                RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
+                while (row_source_pos < row_sources_end)
+                {
+                    /// row_source is the part from which row comes
+                    RowSourcePart row_source = *row_source_pos;
+                    /// part pos number in part_offsets
+                    size_t source_num = row_source.getSourceNum();
                     /// source_row_ids stores the row offset of the corresponding part
                     auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
-
-                    /// parts_new_row_ids stores mapping from a formal row in old part to its current pos in new merged part
+                    /// stores mapping from a formal row in old part to its current pos in new merged part
                     parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
+
+                    /// writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
                     writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
                     /// need to add this, or we cannot correctly read uint64 value
+                    /// writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
                     writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
+
                     ++new_part_row_id;
+                    ++source_row_ids[source_num];
+
+                    ++row_source_pos;
                 }
-                ++source_row_ids[source_num];
 
-                ++row_source_pos;
+                rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
             }
-            rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
-        }
 
-        /// write row_ids_map_bufs,
-        for (size_t source_num = 0; source_num < old_parts_num; source_num++)
-        /// write multiple files(row id map buf), old part -> pos in new part,if not in skip writing
-        {
-            auto metadata_snapshot = global_ctx->data->getInMemoryMetadataPtr();
-            UInt64 old_row_id = 0;
-            auto partRowNum = global_ctx->future_part->parts[source_num]->rows_count;
-            std::vector<uint64_t> deleteRowIds(partRowNum, 0);
-            int i = 0;
-            while (old_row_id < partRowNum)
+            /// write row_ids_map_bufs
+            for (size_t source_num = 0; source_num < old_parts_num; source_num++)
             {
-                if (parts_new_row_ids[source_num].count(old_row_id) > 0)
+                UInt64 old_row_id = 0;
+                while (old_row_id < global_ctx->future_part->parts[source_num]->rows_count)
                 {
-                    UInt64 new_row_id = parts_new_row_ids[source_num][old_row_id];
+                    UInt64 new_row_id = -1;
+                    if (parts_new_row_ids[source_num].count(old_row_id) > 0)
+                    {
+                        new_row_id = parts_new_row_ids[source_num][old_row_id];
+                    }
                     writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
                     writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                }
-                else
-                {
-                    //generate delete row id for using in vector index
-                    deleteRowIds[i] = static_cast<UInt64>(old_row_id);
-                    i++;
-                }
-                ++old_row_id;
-            }
-
-            if (i > 0)
-            {
-                /// Support multiple vector indices
-                for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
-                {
-                    const DataPartStorageOnDiskBase * part_storage
-                        = dynamic_cast<const DataPartStorageOnDiskBase *>(global_ctx->future_part->parts[source_num]->getDataPartStoragePtr().get());
-                    if (part_storage == nullptr)
-                    {
-                        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-                    }
-
-                    VectorIndex::SegmentId segment_id(
-                        global_ctx->future_part->parts[source_num]->getDataPartStoragePtr(),
-                        global_ctx->future_part->parts[source_num]->name,
-                        vec_index_desc.name,
-                        vec_index_desc.column);
-                    VectorIndex::VectorSegmentExecutor vec_executor(segment_id);
-                    vec_executor.updateBitMap(deleteRowIds);
+                    ++old_row_id;
                 }
             }
         }
-    }
-    else
-    {
-        while (!rows_sources_read_buf->eof())
+
+        LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
+
+        if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
         {
-            RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
-            RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
-            while (row_source_pos < row_sources_end)
-            {
-                /// row_source is the part from which row comes
-                RowSourcePart row_source = *row_source_pos;
-                /// part pos number in part_offsets
-                size_t source_num = row_source.getSourceNum();
-                /// source_row_ids stores the row offset of the corresponding part
-                auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
-                /// stores mapping from a formal row in old part to its current pos in new merged part
-                parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
-
-                /// writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
-                /// need to add this, or we cannot correctly read uint64 value
-                /// writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
-
-                ++new_part_row_id;
-                ++source_row_ids[source_num];
-
-                ++row_source_pos;
-            }
-
-            rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+            ctx->rows_sources_file.reset();
+            ctx->rows_sources_write_buf.reset();
+            ctx->rows_sources_uncompressed_write_buf.reset();
         }
 
-        /// write row_ids_map_bufs
-        for (size_t source_num = 0; source_num < old_parts_num; source_num++)
+        for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
         {
-            UInt64 old_row_id = 0;
-            while (old_row_id < global_ctx->future_part->parts[source_num]->rows_count)
-            {
-                UInt64 new_row_id = -1;
-                if (parts_new_row_ids[source_num].count(old_row_id) > 0)
-                {
-                    new_row_id = parts_new_row_ids[source_num][old_row_id];
-                }
-                writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                ++old_row_id;
-            }
+            global_ctx->row_ids_map_bufs[i]->next();
+            global_ctx->row_ids_map_uncompressed_bufs[i]->next();
+            global_ctx->row_ids_map_uncompressed_bufs[i]->finalize();
         }
+        global_ctx->inverted_row_ids_map_buf->next();
+        global_ctx->inverted_row_ids_map_uncompressed_buf->next();
+        global_ctx->inverted_row_ids_map_uncompressed_buf->finalize();
+
+        return false;
     }
-
-    LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
-
-    if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
+    catch (...)
     {
-        ctx->rows_sources_file.reset();
-        ctx->rows_sources_write_buf.reset();
-        ctx->rows_sources_uncompressed_write_buf.reset();
+        /// Release the buffer in advance to prevent fatal occurrences during subsequent buffer destruction.
+        for (size_t i = 0; i < global_ctx->row_ids_map_bufs.size(); ++i)
+        {
+            global_ctx->row_ids_map_bufs[i].reset();
+        }
+        for (size_t i = 0; i < global_ctx->row_ids_map_uncompressed_bufs.size(); ++i)
+        {
+            global_ctx->row_ids_map_uncompressed_bufs[i].reset();
+        }
+
+        global_ctx->inverted_row_ids_map_buf.reset();
+        global_ctx->inverted_row_ids_map_uncompressed_buf.reset();
+
+        throw;
     }
 
-    for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
-    {
-        global_ctx->row_ids_map_bufs[i]->next();
-        global_ctx->row_ids_map_uncompressed_bufs[i]->next();
-        global_ctx->row_ids_map_uncompressed_bufs[i]->finalize();
-    }
-    global_ctx->inverted_row_ids_map_buf->next();
-    global_ctx->inverted_row_ids_map_uncompressed_buf->next();
-    global_ctx->inverted_row_ids_map_uncompressed_buf->finalize();
-
-    return false;
 }
 
 bool MergeTask::VerticalMergeStage::prepareVerticalMergeForAllColumns() const

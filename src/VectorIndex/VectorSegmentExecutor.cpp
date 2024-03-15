@@ -1064,12 +1064,12 @@ Search::IndexResourceUsage VectorSegmentExecutor::getIndexResourceUsage()
 
     try
     {
+        if (total_vec * each_vector_bytes < min_bytes_to_build_vector_index)
+            type = fallbackToFlat(vector_search_type);
+
         /// avoid overwriting vector_index_cache_prefix
         if (vector_index_cache_prefix.empty())
             configureDiskMode();
-
-        if (total_vec * each_vector_bytes < min_bytes_to_build_vector_index)
-            type = fallbackToFlat(vector_search_type);
 
         if (vector_search_type == DB::VectorSearchType::Float32Vector)
         {
