@@ -19,7 +19,7 @@ MyScale is a cost-effective, highly scalable data management solution that simpl
 * Hybrid search & complex SQL vector queries
 * Support disk-based vector index for high data density.[^1]
 
-See our [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. See our [open-source benchmark](https://myscale.github.io/benchmark/) for comparison with other vector database products.
+See MyScale [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our[open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
 ## Creating a MyScaleDB Instance
 
@@ -39,7 +39,7 @@ The simplest way to use MyScaleDB is to start an instance on MyScale Cloud servi
 
 ## Tutorial
 
-* [ ] *Write more SQL examples here, refer to [timescaledb](https://github.com/timescale/timescaledb?tab=readme-ov-file#using-timescaledb)*
+* [ ] *Write more SQL examples here, refer to [timescaledb](https://github.com/timescale/timescaledb?tab=readme-ov-file#using-timescaledb).*
 
 ## Roadmap
 
