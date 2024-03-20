@@ -71,7 +71,7 @@ namespace ErrorCodes
 }
 }
 
-/// Convert search index execption to DB::Exception
+/// Convert search index exception to DB::Exception
 #define VECTOR_INDEX_EXCEPTION_ADAPT(callable, func_name)               \
     try                                                                 \
     {                                                                   \
