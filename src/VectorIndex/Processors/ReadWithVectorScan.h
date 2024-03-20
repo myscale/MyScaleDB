@@ -14,10 +14,10 @@
  */
 
 #pragma once
-#include <Storages/MergeTree/RangesInDataPart.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanUtils.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/Transforms/ExpressionTransform.h>
+#include <Storages/MergeTree/RangesInDataPart.h>
+#include <VectorIndex/Utils/MergeTreeVectorScanUtils.h>
 
 namespace DB
 {

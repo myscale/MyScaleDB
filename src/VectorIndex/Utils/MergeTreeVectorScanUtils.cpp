@@ -16,7 +16,7 @@
 #include <pdqsort.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanUtils.h>
+#include <VectorIndex/Utils/MergeTreeVectorScanUtils.h>
 
 namespace DB
 {

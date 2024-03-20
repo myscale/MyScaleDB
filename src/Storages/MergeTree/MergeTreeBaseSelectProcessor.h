@@ -6,7 +6,7 @@
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Processors/Chunk.h>
 
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
+#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
 
 
 namespace DB

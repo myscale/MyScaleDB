@@ -35,12 +35,12 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
 #include <VectorIndex/Common/SegmentId.h>
 #include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
 #include <VectorIndex/Storages/VectorScanDescription.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 namespace DB
 {

@@ -5,13 +5,13 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/IndicesDescription.h>
-#include <Storages/ProjectionsDescription.h>
 #include <Storages/KeyDescription.h>
+#include <Storages/ProjectionsDescription.h>
 #include <Storages/SelectQueryDescription.h>
 #include <Storages/TTLDescription.h>
-#include <Common/MultiVersion.h>
 #include <VectorIndex/Storages/VectorIndicesDescription.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
+#include <Common/MultiVersion.h>
 
 namespace DB
 {

@@ -15,7 +15,7 @@
 
 #include <mutex>
 
-#include <VectorIndex/Common/CacheManager.h>
+#include <VectorIndex/Cache/CacheManager.h>
 #include <VectorIndex/Common/IndexBuildMemoryUsageHelper.h>
 
 namespace DB

@@ -21,8 +21,8 @@
 #include <base/types.h>
 #include <Common/logger_useful.h>
 
+#include <VectorIndex/Cache/VectorIndexCacheObject.h>
 #include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Common/VectorIndexCacheObject.h>
 
 namespace fs = std::filesystem;
 

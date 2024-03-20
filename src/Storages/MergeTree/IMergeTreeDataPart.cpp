@@ -35,10 +35,10 @@
 #include <Common/StringUtils/StringUtils.h>
 #include <Common/escapeForFileName.h>
 
+#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
 #include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/SegmentId.h>
 #include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
 
 
 namespace CurrentMetrics

@@ -17,7 +17,7 @@
 #include <optional>
 #include <Interpreters/Context.h>
 
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
+#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
 
 namespace DB
 {

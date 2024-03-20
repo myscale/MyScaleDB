@@ -34,13 +34,13 @@
 #include <Common/Stopwatch.h>
 #include <Common/StringUtils/StringUtils.h>
 
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/IndexReadFromPart.h>
-#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
+#include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
 #include <VectorIndex/Storages/VectorIndexEntry.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 namespace ProfileEvents
 {

@@ -101,7 +101,7 @@
 
 #include <Poco/DirectoryIterator.h>
 
-#include <VectorIndex/Common/CacheManager.h>
+#include <VectorIndex/Cache/CacheManager.h>
 #include <VectorIndex/Storages/ReplicatedVectorIndexTask.h>
 
 #include <base/scope_guard.h>

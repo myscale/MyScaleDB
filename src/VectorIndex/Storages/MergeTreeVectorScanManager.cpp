@@ -28,14 +28,14 @@
 
 #include <Storages/MergeTree/MergeTreeDataPartState.h>
 
-#include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
-#include <VectorIndex/Storages/VectorScanDescription.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include <Storages/MergeTree/IMergeTreeReader.h>
 #include <VectorIndex/Common/BruteForceSearch.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
 #include <VectorIndex/Common/SearchThreadLimiter.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/VectorScanDescription.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 #include <memory>
 

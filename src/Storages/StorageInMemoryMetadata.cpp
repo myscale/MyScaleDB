@@ -13,7 +13,7 @@
 #include <IO/ReadHelpers.h>
 #include <IO/Operators.h>
 
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 
 
 namespace DB

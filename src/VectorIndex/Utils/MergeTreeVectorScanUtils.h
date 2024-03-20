@@ -14,9 +14,9 @@
  */
 
 #pragma once
-#include <Storages/MergeTree/RangesInDataPart.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include "../../Storages/MergeTree/MergeTreeData.h"
+#include "../../Storages/MergeTree/RangesInDataPart.h"
+#include "../Storages/MergeTreeVectorScanManager.h"
 
 namespace DB
 {

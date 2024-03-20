@@ -32,9 +32,9 @@
 #include <Storages/MergeTree/MergeTreeInOrderSelectProcessor.h>
 #include <Storages/MergeTree/MergeTreeSequentialSource.h>
 #include <Storages/MergeTree/MergeTreeSource.h>
+#include <VectorIndex/Cache/CacheManager.h>
 #include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
-#include <VectorIndex/Common/CacheManager.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 #include <Common/ActionBlocker.h>
 #include <Common/logger_useful.h>
 

@@ -20,8 +20,8 @@
 #include <memory>
 #include <string>
 
-#include <Common/LRUResourceCache.h>
-#include <VectorIndex/Common/VectorIndexCacheObject.h>
+#include "../../Common/LRUResourceCache.h"
+#include "VectorIndexCacheObject.h"
 
 namespace std
 {

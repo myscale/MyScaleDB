@@ -20,8 +20,8 @@
 
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
 #include <SearchIndex/Common/DenseBitmap.h>
+#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
 
 namespace DB
 {

@@ -82,9 +82,9 @@
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
-#include <VectorIndex/Interpreters/GetVectorScanVisitor.h>
-#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/Interpreters/GetVSVisitor.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 namespace DB
 {

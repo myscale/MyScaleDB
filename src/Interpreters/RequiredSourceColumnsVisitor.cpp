@@ -9,7 +9,7 @@
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTInterpolateElement.h>
 
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 
 #include <Common/logger_useful.h>
 

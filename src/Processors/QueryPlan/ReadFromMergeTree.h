@@ -1,12 +1,12 @@
 #pragma once
 #include <Processors/QueryPlan/SourceStepWithFilter.h>
-#include <Storages/MergeTree/RangesInDataPart.h>
-#include <Storages/MergeTree/RequestResponse.h>
-#include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeReadPool.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanUtils.h>
+#include <Storages/MergeTree/RangesInDataPart.h>
+#include <Storages/MergeTree/RequestResponse.h>
+#include <Storages/SelectQueryInfo.h>
+#include <VectorIndex/Utils/MergeTreeVectorScanUtils.h>
 
 
 namespace DB

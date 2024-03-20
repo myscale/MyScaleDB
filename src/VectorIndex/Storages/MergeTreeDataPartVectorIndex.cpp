@@ -25,17 +25,17 @@
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
 
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
 #include <VectorIndex/Common/BruteForceSearch.h>
-#include <VectorIndex/Common/VectorDataset.h>
-#include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/IndexReadFromPart.h>
+#include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/SearchThreadLimiter.h>
 #include <VectorIndex/Common/SegmentId.h>
+#include <VectorIndex/Common/VectorDataset.h>
 #include <VectorIndex/Common/VectorIndexCommon.h>
 #include <VectorIndex/Common/VectorIndexIO.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 namespace DB
 {

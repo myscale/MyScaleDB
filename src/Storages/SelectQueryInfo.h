@@ -9,10 +9,10 @@
 #include <Interpreters/PreparedSets.h>
 #include <Planner/PlannerContext.h>
 #include <QueryPipeline/StreamLocalLimits.h>
-#include <Storages/ProjectionsDescription.h>
 #include <Storages/MergeTree/ParallelReplicasReadingCoordinator.h>
+#include <Storages/ProjectionsDescription.h>
 #include <VectorIndex/Storages/VectorScanDescription.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 
 #include <memory>
 

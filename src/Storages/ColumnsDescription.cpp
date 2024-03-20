@@ -32,7 +32,7 @@
 #include <Interpreters/FunctionNameNormalizer.h>
 
 #include <DataTypes/DataTypesNumber.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 
 #include <Common/logger_useful.h>
 

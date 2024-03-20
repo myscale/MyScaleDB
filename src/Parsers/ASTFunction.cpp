@@ -19,7 +19,7 @@
 #include <Parsers/ASTSetQuery.h>
 #include <Core/QualifiedTableName.h>
 
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 
 using namespace std::literals;
 

@@ -2,11 +2,11 @@
 
 #include <utility>
 #include <Core/ColumnsWithTypeAndName.h>
-#include <Core/NamesAndTypes.h>
 #include <Core/Names.h>
+#include <Core/NamesAndTypes.h>
 #include <Interpreters/Context_fwd.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
 #include <Common/logger_useful.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
 
 #include "config.h"
 

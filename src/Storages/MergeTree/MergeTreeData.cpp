@@ -91,11 +91,11 @@
 #include <fmt/format.h>
 #include <Poco/Logger.h>
 
-#include <VectorIndex/Common/CacheManager.h>
+#include <VectorIndex/Cache/CacheManager.h>
+#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
 #include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
+#include <VectorIndex/Utils/VectorIndexUtils.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>

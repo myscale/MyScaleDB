@@ -15,11 +15,11 @@
 
 #include <memory>
 
-#include <Common/CurrentMetrics.h>
 #include <Interpreters/Context.h>
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Common/CacheManager.h>
+#include <VectorIndex/Cache/CacheManager.h>
 #include <VectorIndex/Common/IndexException.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <Common/CurrentMetrics.h>
 
 namespace DB::ErrorCodes
 {

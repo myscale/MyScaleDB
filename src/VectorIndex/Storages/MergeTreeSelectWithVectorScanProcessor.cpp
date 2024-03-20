@@ -22,7 +22,7 @@
 #include <DataTypes/DataTypeTuple.h>
 
 #include <VectorIndex/Storages/MergeTreeSelectWithVectorScanProcessor.h>
-#include <VectorIndex/Storages/MergeTreeVectorScanUtils.h>
+#include <VectorIndex/Utils/MergeTreeVectorScanUtils.h>
 
 namespace DB
 {

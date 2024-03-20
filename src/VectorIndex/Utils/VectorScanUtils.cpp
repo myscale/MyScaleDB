@@ -22,8 +22,8 @@
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Storages/VectorScanDescription.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Utils/VectorScanUtils.h>
+#include <SearchIndex/SearchIndexCommon.h>
 
 namespace Search
 {
