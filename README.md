@@ -1,8 +1,20 @@
 # MyScaleDB
 
-Enable every developer to build production-grade GenAI applications with powerful and familiar SQL.
+<div align="center">
 
-[] (social media+discord)
+<a href='https://www.myscale.com/?utm_source=github&utm_medium=myscaledb'>
+<img src="docs/tidb-logo-with-text.png" alt="MyScale, the SQL Vector Database for Scalable AI" height=100></img>
+</a>
+<br></br>
+
+[![Official Website](<https://img.shields.io/badge/-Visit%20the%20Official%20Website%20%E2%86%92-rgb(21,204,116)?style=for-the-badge>)](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme)
+[![Playground](<https://img.shields.io/badge/-Try%20It%20Online%20%E2%86%92-rgb(84,56,255)?style=for-the-badge>)](https://console.myscale.com/playground/?utm_source=github&utm_medium=myscaledb_readme)
+
+[![LICENSE](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](https://github.com/myscale/myscaledb/blob/main/LICENSE)
+[![Language](https://img.shields.io/badge/Language-C++20-blue.svg)](https://isocpp.org/)
+
+*Enable every developer to build production-grade GenAI applications with powerful and familiar SQL.*
+</div>
 
 ## What is MyScaleDB?
 
@@ -23,7 +35,7 @@ Last but not least, with MyScale's SQL support and [rich data types and function
 * Millisecond search on billion vectors
 * Highly reliable & linearly scalable
 * Hybrid search & complex SQL vector queries
-* Support disk-based vector index for high data density.[^1]
+* Support disk-based vector index for high data density[^1]
 
 See MyScale [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
@@ -109,7 +121,7 @@ For support, please [contact us](https://myscale.com/contact/).
 ## Roadmap
 
 * [ ] Inverted index & performant keyword/vector hybrid search
-* [ ] Support more storage engines, e.g. ReplacingMergeTree
+* [ ] Support more storage engines, e.g. `ReplacingMergeTree`
 * [ ] LLM observability with MyScale
 * [ ] Data-centric LLM
 
