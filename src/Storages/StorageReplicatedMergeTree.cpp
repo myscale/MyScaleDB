@@ -101,8 +101,8 @@
 
 #include <Poco/DirectoryIterator.h>
 
-#include <VectorIndex/Cache/CacheManager.h>
-#include <VectorIndex/Storages/ReplicatedVectorIndexTask.h>
+#include <VectorIndex/Cache/VICacheManager.h>
+#include <VectorIndex/Storages/ReplicatedVITask.h>
 
 #include <base/scope_guard.h>
 #include <Common/scope_guard_safe.h>
@@ -3180,7 +3180,7 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
     }
     else if (job_type == LogEntry::BUILD_VECTOR_INDEX)
     {
-        auto task = std::make_shared<ReplicatedVectorIndexTask>(
+        auto task = std::make_shared<ReplicatedVITask>(
             *this, selected_entry, vec_index_builder_updater, common_assignee_trigger);
 
         /// slow mode uses a different background pool.
@@ -3335,19 +3335,19 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                 auto settings = getContext()->getSettingsRef();
                 auto metadata_snapshot = getInMemoryMetadataPtr();
 
-                VectorIndexEntryPtr vector_index_entry = nullptr;
+                VIEntryPtr vector_index_entry = nullptr;
                 bool slow_mode = false;
 
                 /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
-                if (vec_index_builder_updater.allowToBuildVectorIndex(false, merges_and_mutations_queued.vector_index_builds))
+                if (vec_index_builder_updater.allowToBuildVI(false, merges_and_mutations_queued.vector_index_builds))
                 {
-                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
+                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, false);
                 }
 
-                if (!vector_index_entry && vec_index_builder_updater.allowToBuildVectorIndex(true, merges_and_mutations_queued.slow_vector_index_builds))
+                if (!vector_index_entry && vec_index_builder_updater.allowToBuildVI(true, merges_and_mutations_queued.slow_vector_index_builds))
                 {
                     /// No fast build index selected, try to select slow build index.
-                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
+                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, true);
                     slow_mode = true;
                 }
 
@@ -3716,7 +3716,7 @@ void StorageReplicatedMergeTree::cleanupVectorIndexBuildStatusFromZK(const Strin
     LOG_DEBUG(log, "Cleaned up vector index `{}` build status from zookeeper", index_name);
 }
 
-void StorageReplicatedMergeTree::startVectorIndexJob(const VectorIndicesDescription & old_vec_indices, const VectorIndicesDescription & new_vec_indices)
+void StorageReplicatedMergeTree::startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices)
 {
     /// Compare old and new vector_indices to determine add or drop vector index
     /// Check drop vector index
@@ -5040,7 +5040,7 @@ void StorageReplicatedMergeTree::shutdown()
     clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 
     /// Clear primary key cache if exists.
-    clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
+    clearPKCache(getDataPartsVectorForInternalUsage());
 }
 
 
@@ -5773,7 +5773,7 @@ void StorageReplicatedMergeTree::alter(
         bool have_mutation = !maybe_mutation_commands.empty();
         alter_entry->have_mutation = have_mutation;
 
-        auto maybe_vec_index_commands = commands.getVectorIndexCommands(*current_metadata, query_context);
+        auto maybe_vec_index_commands = commands.getVICommands(*current_metadata, query_context);
 
         alter_path_idx = ops.size();
         ops.emplace_back(zkutil::makeCreateRequest(
@@ -9900,7 +9900,8 @@ void StorageReplicatedMergeTree::writeVectorIndexInfoToZookeeper(bool force)
 
     if (force || getInMemoryMetadata().hasVectorIndices())
     {
-        auto cache_list = VectorIndex::CacheManager::getAllCacheNames();
+        /// get cached vector index info
+        auto cache_list = VectorIndex::VICacheManager::getAllCacheNames();
         auto table_id = toString(getStorageID().uuid);
 
         std::unordered_map<String, std::unordered_set<String>> cached_index_parts;

@@ -14,7 +14,7 @@
  */
 
 #include <Core/Field.h>
-#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
 
 #include <Poco/Dynamic/Var.h>
 #include <Poco/JSON/Parser.h>

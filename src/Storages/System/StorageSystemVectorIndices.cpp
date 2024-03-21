@@ -58,7 +58,7 @@ public:
     String getName() const override { return "DataVectorIndices"; }
 
 protected:
-    size_t getBuiltParts(const MergeTreeData::DataPartsVector& data_parts, const VectorIndexDescription& index) 
+    size_t getBuiltParts(const MergeTreeData::DataPartsVector& data_parts, const VIDescription & index)
     {
         size_t built_parts = 0;
         for (auto & data_part : data_parts)
@@ -74,7 +74,7 @@ protected:
         return built_parts;
     }
 
-    size_t getSmallParts(const MergeTreeData* /*data*/, const MergeTreeData::DataPartsVector & data_parts, const VectorIndexDescription& index)
+    size_t getSmallParts(const MergeTreeData* /*data*/, const MergeTreeData::DataPartsVector & data_parts, const VIDescription & index)
     {
         size_t small_parts = 0;
         for (auto & data_part : data_parts)

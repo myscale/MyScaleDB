@@ -14,9 +14,9 @@
 #include <Storages/VirtualColumnUtils.h>
 
 #include <SearchIndex/Common/Utils.h>
-#include <VectorIndex/Common/Metadata.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Storages/VectorIndexInfo.h>
+#include <VectorIndex/Common/VIMetadata.h>
+#include <VectorIndex/Storages/VIInfo.h>
 
 namespace DB
 {
@@ -62,7 +62,7 @@ public:
 
 protected:
     void getVectorIndexInfo(
-        const VectorIndexDescription & index,
+        const VIDescription & index,
         const VectorIndexInfoPtr & vec_info,
         const std::string & table_name,
         const MergeTreeData::DataPartPtr & part,
@@ -224,7 +224,7 @@ protected:
             const bool check_access_for_tables = check_access_for_databases && !access->isGranted(AccessType::SHOW_TABLES, database_name);
 
             std::set<std::string> cached_indices;
-            for (const auto & it : VectorIndex::CacheManager::getAllCacheNames())
+            for (const auto & it : VectorIndex::VICacheManager::getAllCacheNames())
                 cached_indices.emplace(it.first.toString());
 
             for (; rows_count < max_block_size && tables_it->isValid(); tables_it->next())

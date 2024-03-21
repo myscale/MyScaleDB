@@ -6,7 +6,7 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Storages/SelectQueryInfo.h>
-#include <VectorIndex/Utils/MergeTreeVectorScanUtils.h>
+#include <VectorIndex/Utils/VSUtils.h>
 
 
 namespace DB
@@ -280,7 +280,7 @@ private:
     std::optional<MergeTreeAllRangesCallback> all_ranges_callback;
     std::optional<MergeTreeReadTaskCallback> read_task_callback;
 
-    friend class ReadWithVectorScan;
+    friend class ReadWithVS;
 };
 
 struct MergeTreeDataSelectAnalysisResult

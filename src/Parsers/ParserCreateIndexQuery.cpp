@@ -7,10 +7,10 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/CommonParsers.h>
 #include <Parsers/ExpressionListParsers.h>
+#include <Parsers/ParserCreateQuery.h>
 #include <Parsers/ParserDataType.h>
 #include <Parsers/parseDatabaseAndTableName.h>
-#include <Parsers/ParserCreateQuery.h>
-#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 namespace DB
 {
 
@@ -33,7 +33,7 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
     if (!data_type_p.parse(pos, type, expected))
         return false;
 
-    auto index = std::make_shared<ASTVectorIndexDeclaration>();
+    auto index = std::make_shared<ASTVIDeclaration>();
     index->std_create = true;
     index->column = column->as<ASTIdentifier &>().name();
     index->set(index->type, type);
@@ -136,7 +136,7 @@ bool ParserCreateIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expect
     {
         if (!parser_create_vec_idx_decl.parse(pos, index_decl, expected))
             return false;
-        auto & ast_vec_index_decl = index_decl->as<ASTVectorIndexDeclaration &>();
+        auto & ast_vec_index_decl = index_decl->as<ASTVIDeclaration &>();
         ast_vec_index_decl.name = index_name->as<ASTIdentifier &>().name();
     }
     else

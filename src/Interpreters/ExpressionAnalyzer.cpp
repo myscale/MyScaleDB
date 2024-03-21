@@ -81,10 +81,10 @@
 
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Interpreters/GetVSVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
-#include <VectorIndex/Utils/VectorIndexUtils.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 namespace DB
 {
@@ -713,7 +713,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
     {
         if (node->arguments)
             getRootActionsNoMakeSet(node->arguments, actions);
-        VectorScanDescription vector_scan_desc;
+        VSDescription vector_scan_desc;
         vector_scan_desc.column_name = node->getColumnName();
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
 
@@ -723,7 +723,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                     "wrong argument number in distance function");
         }
 
-        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
+        /// Save short column name in VSDescription, exclude database name and table name if exists.
         if (auto * identifier = arguments[0]->as<ASTIdentifier>())
             vector_scan_desc.search_column_name = identifier->shortName();
         else

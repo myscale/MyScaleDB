@@ -85,7 +85,7 @@ size_t countPartitions(const MergeTreeData::DataPartsVector & prepared_parts)
 
 }
 
-#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 namespace ProfileEvents
 {
@@ -1722,7 +1722,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
         LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
         for (auto & part : result.parts_with_ranges)
         {
-            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
+            part.vector_scan_manager = std::make_shared<MergeTreeVSManager>(metadata_for_reading, vector_scan_info_ptr, context);
             /// no prewhere info, first perform vector scan
             if (!prewhere_info)
             {

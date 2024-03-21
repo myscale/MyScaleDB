@@ -25,7 +25,7 @@
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTColumnDeclaration.h>
 
-#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 
 namespace DB
@@ -177,7 +177,13 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
     if (!data_type_p.parse(pos, type, expected))
         return false;
 
-    auto index = std::make_shared<ASTVectorIndexDeclaration>();
+    // if (!s_granularity.ignore(pos, expected))
+    //     return false;
+
+    // if (!granularity_p.parse(pos, granularity, expected))
+    //     return false;
+
+    auto index = std::make_shared<ASTVIDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();
     index->set(index->type, type);
@@ -350,7 +356,7 @@ bool ParserTablePropertiesDeclarationList::parseImpl(Pos & pos, ASTPtr & node, E
             columns->children.push_back(elem);
         else if (elem->as<ASTIndexDeclaration>())
             indices->children.push_back(elem);
-        else if (elem->as<ASTVectorIndexDeclaration>())
+        else if (elem->as<ASTVIDeclaration>())
             vec_indices->children.push_back(elem);
         else if (elem->as<ASTConstraintDeclaration>())
             constraints->children.push_back(elem);

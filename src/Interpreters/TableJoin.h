@@ -3,13 +3,13 @@
 #include <Core/Names.h>
 #include <Core/NamesAndTypes.h>
 #include <Core/SettingsEnums.h>
-#include <Parsers/ASTTablesInSelectQuery.h>
-#include <Interpreters/IJoin.h>
-#include <Interpreters/JoinUtils.h>
-#include <QueryPipeline/SizeLimits.h>
 #include <DataTypes/getLeastSupertype.h>
+#include <Interpreters/IJoin.h>
 #include <Interpreters/IKeyValueEntity.h>
-#include <VectorIndex/Storages/VectorScanDescription.h>
+#include <Interpreters/JoinUtils.h>
+#include <Parsers/ASTTablesInSelectQuery.h>
+#include <QueryPipeline/SizeLimits.h>
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include <Common/Exception.h>
 #include <Parsers/IAST_fwd.h>
@@ -152,7 +152,7 @@ private:
     NamesAndTypesList columns_added_by_join;
 
     /// vector scan functions from joined table
-    mutable std::optional<VectorScanDescription> vector_scan_description;
+    mutable std::optional<VSDescription> vector_scan_description;
 
     /// Target type to convert key columns before join
     NameToTypeMap left_type_map;
@@ -360,8 +360,9 @@ public:
 
     std::shared_ptr<const IKeyValueEntity> getStorageKeyValue() { return right_kv_storage; }
 
-    std::optional<VectorScanDescription> getVecScanDescription() const;
-    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    /// Used for vector scan functions
+    std::optional<VSDescription> getVecScanDescription() const;
+    void setVecScanDescription(VSDescription & vec_scan_desc) const;
 };
 
 }

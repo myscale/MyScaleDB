@@ -17,9 +17,9 @@
 
 #include <memory>
 #include <vector>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Storages/VSDescription.h>
 #include <base/types.h>
-#include <VectorIndex/Storages/VectorScanDescription.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
 
 namespace Search
 {

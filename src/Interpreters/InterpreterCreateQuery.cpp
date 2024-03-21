@@ -78,7 +78,7 @@
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionVisitor.h>
 
-#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 namespace Search
 {
@@ -494,7 +494,7 @@ ASTPtr InterpreterCreateQuery::formatIndices(const IndicesDescription & indices)
     return res;
 }
 
-ASTPtr InterpreterCreateQuery::formatVectorIndices(const VectorIndicesDescription & vec_indices)
+ASTPtr InterpreterCreateQuery::formatVectorIndices(const VIDescriptions & vec_indices)
 {
     auto res = std::make_shared<ASTExpressionList>();
 
@@ -760,7 +760,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
         if (create.columns_list->vec_indices)
             for (const auto & vec_index : create.columns_list->vec_indices->children)
             {
-                const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
+                const auto * vec_index_definition = vec_index->as<ASTVIDeclaration>();
                 std::optional<NameAndTypePair> vector_column = properties.columns.tryGetPhysical(vec_index_definition->column);
                 if(!vector_column)
                     throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vec_index_definition->column);
@@ -782,7 +782,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 }
 
                 properties.vec_indices.push_back(
-                        VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+                    VIDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
             }
 
         if (create.columns_list->projections)

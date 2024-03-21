@@ -11,7 +11,7 @@
 #include <Storages/MergeTree/AlterConversions.h>
 #include <Interpreters/Context_fwd.h>
 
-#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 #include <mutex>
 

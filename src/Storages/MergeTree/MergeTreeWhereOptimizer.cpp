@@ -13,7 +13,7 @@
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
-#include <VectorIndex/Utils/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 #include <base/map.h>
 #include <Common/typeid_cast.h>
 

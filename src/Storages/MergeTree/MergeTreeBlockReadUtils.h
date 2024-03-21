@@ -8,8 +8,8 @@
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
 
-#include <VectorIndex/Storages/VectorScanResult.h>
-#include <VectorIndex/Utils/VectorScanUtils.h>
+#include <VectorIndex/Storages/VSResult.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {

@@ -47,7 +47,7 @@
 
 #include <Storages/MergeTree/CommonANNIndexes.h>
 
-#include <VectorIndex/Processors/ReadWithVectorScan.h>
+#include <VectorIndex/Processors/ReadWithVS.h>
 
 namespace CurrentMetrics
 {
@@ -1356,7 +1356,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
 
     if (query_info.vector_scan_info)
     {
-        return std::make_unique<ReadWithVectorScan>(
+        return std::make_unique<ReadWithVS>(
             std::move(parts),
             std::move(alter_conversions),
             real_column_names,

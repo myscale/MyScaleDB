@@ -36,9 +36,9 @@
 #include <Storages/MergeTree/PartitionPruner.h>
 #include <Storages/MergeTree/checkDataPart.h>
 #include <Storages/PartitionCommands.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Storages/VectorIndexTask.h>
-#include <VectorIndex/Utils/VectorIndexUtils.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Storages/VITask.h>
+#include <VectorIndex/Utils/VIUtils.h>
 #include <base/sort.h>
 #include <Common/ProfileEventsScope.h>
 #include <Common/ThreadPool.h>
@@ -217,7 +217,7 @@ void StorageMergeTree::shutdown()
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 
         /// Clear primary key cache if exists.
-        clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
+        clearPKCache(getDataPartsVectorForInternalUsage());
     }
     catch (...)
     {
@@ -346,7 +346,7 @@ void StorageMergeTree::alter(
     auto maybe_mutation_commands = commands.getMutationCommands(new_metadata, local_context->getSettingsRef().materialize_ttl_after_modify, local_context);
     Int64 mutation_version = -1;
     /// get vector index commands
-    auto maybe_vec_index_commands = commands.getVectorIndexCommands(new_metadata, local_context);
+    auto maybe_vec_index_commands = commands.getVICommands(new_metadata, local_context);
     /// Apply alter commands and update new_metadata
     commands.apply(new_metadata, local_context);
 
@@ -512,7 +512,7 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
     return version;
 }
 
-void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_index_commands)
+void StorageMergeTree::startVectorIndexJob(const VICommands & vector_index_commands)
 {
     /// Handle multiple index commands case
     for (auto & vec_index_command : vector_index_commands)
@@ -1315,8 +1315,8 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
     auto metadata_snapshot = getInMemoryMetadataPtr();
     MergeMutateSelectedEntryPtr merge_entry, mutate_entry;
-    std::shared_ptr<VectorIndexEntry> slow_mode_vector_index_entry;
-    std::shared_ptr<VectorIndexEntry> vector_index_entry;
+    std::shared_ptr<VIEntry> slow_mode_vector_index_entry;
+    std::shared_ptr<VIEntry> vector_index_entry;
 
     auto shared_lock = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
 
@@ -1346,7 +1346,7 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
         }
 
         /// Consider vector index building when no merge or mutate.
-        /// TODO: Add selectPartToBuildVectorIndex to do some checks, including memory limit/pool size.
+        /// TODO: Add selectPartToBuildVI to do some checks, including memory limit/pool size.
         if (!merge_entry && !mutate_entry)
         {
             if (vec_index_builder_updater.builds_blocker.isCancelled())
@@ -1354,9 +1354,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
             /// first for new data parts, then for merged data parts   
             /// only select one part for each build
-            vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
+            vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, false);
             if (!vector_index_entry)
-                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
+                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, true);
         }
     }
 
@@ -1379,14 +1379,14 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     }
     if (vector_index_entry)
     {
-        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
+        std::shared_ptr<VITask> task = std::make_shared<VITask>(
             *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
         assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (slow_mode_vector_index_entry)
     {
-        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
+        std::shared_ptr<VITask> task = std::make_shared<VITask>(
             *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
         assignee.scheduleSlowModeVectorIndexTask(task);
         return true;

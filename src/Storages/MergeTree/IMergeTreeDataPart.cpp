@@ -35,10 +35,10 @@
 #include <Common/StringUtils/StringUtils.h>
 #include <Common/escapeForFileName.h>
 
-#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
-#include <VectorIndex/Common/Metadata.h>
+#include <VectorIndex/Cache/PKCacheManager.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Common/VIMetadata.h>
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 
 namespace CurrentMetrics
@@ -1863,7 +1863,7 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
         for (auto & segment_id : segmentIds)
         {
             /// Update vector index deleted bitmap in cache if exists.
-            CacheManager * mgr = CacheManager::getInstance();
+            VICacheManager * mgr = VICacheManager::getInstance();
             IndexWithMetaHolderPtr index_holder = mgr->get(segment_id.getCacheKey());
 
             if (index_holder)

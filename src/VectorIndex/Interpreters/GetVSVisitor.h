@@ -19,7 +19,7 @@
 #include <Interpreters/InDepthNodeVisitor.h>
 #include <Parsers/formatAST.h>
 
-#include <VectorIndex/Utils/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {

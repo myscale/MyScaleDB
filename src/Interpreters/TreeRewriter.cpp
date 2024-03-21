@@ -71,9 +71,9 @@
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Interpreters/GetVectorScanVisitor.h>
-#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Interpreters/GetVSVisitor.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
 
 #include <Parsers/formatAST.h>
 

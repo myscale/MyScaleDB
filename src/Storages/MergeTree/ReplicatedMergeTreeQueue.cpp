@@ -26,7 +26,7 @@ namespace ErrorCodes
 ReplicatedMergeTreeQueue::ReplicatedMergeTreeQueue(
     StorageReplicatedMergeTree & storage_,
     ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker_,
-    ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker_)
+    ReplicatedMergeTreeBuildVIStrategyPicker & build_vindex_strategy_picker_)
     : storage(storage_)
     , merge_strategy_picker(merge_strategy_picker_)
     , build_vindex_strategy_picker(build_vindex_strategy_picker_)

@@ -24,7 +24,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage_fwd.h>
 
-#include <VectorIndex/Storages/VectorScanDescription.h>
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include "config.h"
 
@@ -100,7 +100,7 @@ class ProcessorsProfileLog;
 class FilesystemCacheLog;
 class FilesystemReadPrefetchesLog;
 class AsynchronousInsertLog;
-class VectorIndexEventLog;
+class VIEventLog;
 class IAsynchronousReader;
 struct MergeTreeSettings;
 struct InitialAllRangesAnnouncement;
@@ -406,7 +406,9 @@ private:
     /// Temporary data for query execution accounting.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;
 
-    mutable std::optional<VectorScanDescription> vector_scan_description;
+    /// TODO: will be enhanced similar as scalars.
+    /// Used when vector scan func exists in right joined table
+    mutable std::optional<VSDescription> vector_scan_description;
 
 public:
     /// Some counters for current query execution.
@@ -894,8 +896,8 @@ public:
     void dropIndexUncompressedCache() const;
 
     /// Primary key cache size limit.
-    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
-    size_t getPrimaryKeyCacheSize() const;
+    void setPKCacheSize(size_t max_size_in_bytes);
+    size_t getPKCacheSize() const;
 
     /// Create a cache of index marks of specified size. This can be done only once.
     void setIndexMarkCache(size_t cache_size_in_bytes);
@@ -981,7 +983,7 @@ public:
     std::shared_ptr<FilesystemCacheLog> getFilesystemCacheLog() const;
     std::shared_ptr<FilesystemReadPrefetchesLog> getFilesystemReadPrefetchesLog() const;
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
-    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
+    std::shared_ptr<VIEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     /// Returns an object used to log operations with parts if it possible.
     /// Provide table name to make required checks.
@@ -1152,8 +1154,9 @@ public:
 
     ParallelReplicasMode getParallelReplicasMode() const;
 
-    std::optional<VectorScanDescription> getVecScanDescription() const;
-    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    /// Used for vector scan functions
+    std::optional<VSDescription> getVecScanDescription() const;
+    void setVecScanDescription(VSDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
 
 private:

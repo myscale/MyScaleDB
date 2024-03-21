@@ -91,11 +91,11 @@
 #include <fmt/format.h>
 #include <Poco/Logger.h>
 
-#include <VectorIndex/Cache/CacheManager.h>
-#include <VectorIndex/Cache/PrimaryKeyCacheManager.h>
+#include <VectorIndex/Cache/PKCacheManager.h>
+#include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Utils/VectorIndexUtils.h>
+#include <VectorIndex/Interpreters/VIEventLog.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -2337,7 +2337,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
 
                 if (force)
                 {
-                    VectorIndex::CacheManager::removeFromCache(cache_key);
+                    VectorIndex::VICacheManager::removeFromCache(cache_key);
                 }
                 else
                 {
@@ -2357,7 +2357,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
                         auto [clear_cache, _] = needClearVectorIndexCacheAndFile(active_part, meta_snapshot, cache_key);
                         if (clear_cache)
                         {
-                            VectorIndex::CacheManager::removeFromCache(cache_key);
+                            VectorIndex::VICacheManager::removeFromCache(cache_key);
                         }
                     }
                 }
@@ -2434,7 +2434,7 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
     return std::make_pair(!existed, is_same);
 }
 
-void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
+void MergeTreeData::clearPKCache(const DataPartsVector & parts)
 {
     if (!canUsePrimaryKeyCache())
         return;
@@ -2446,7 +2446,7 @@ void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
             continue;
 
         const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
-        PrimaryKeyCacheManager::getMgr().removeFromPKCache(cache_key);
+        PKCacheManager::getMgr().removeFromPKCache(cache_key);
     }
 }
 
@@ -2500,16 +2500,16 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     if (parts_to_remove.empty())
         return;
 
-    clearPrimaryKeyCache(parts_to_remove);
+    clearPKCache(parts_to_remove);
     clearCachedVectorIndex(parts_to_remove, false);
 
     auto table_id = getStorageID();
-    VectorIndexEventLogElement vec_elem;
+    VIEventLogElement vec_elem;
     bool detach = getContext()->isDetachQuery();
     auto vec_event_log = getContext()->getVectorIndexEventLog(table_id.database_name);
     if (vec_event_log && !detach)
     {
-        vec_elem.event_type = VectorIndexEventLogElement::CLEARED;
+        vec_elem.event_type = VIEventLogElement::CLEARED;
         const auto time_now = std::chrono::system_clock::now();
         vec_elem.event_time = timeInSeconds(time_now);
         vec_elem.event_time_microseconds = timeInMicroseconds(time_now);
@@ -2520,7 +2520,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     {
         if (vec_event_log &&
             part->vector_index.containAnyVectorIndexInReady() &&
-            vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+            vec_elem.event_type != VIEventLogElement::DEFAULT)
         {
             vec_elem.part_name = part->name;
             vec_elem.partition_id = part->info.partition_id;
@@ -8513,7 +8513,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 {
     auto metadata = getInMemoryMetadata();
 
-    std::unordered_map<String, VectorIndexDescription> v_index_map;
+    std::unordered_map<String, VIDescription> v_index_map;
     for (const auto & v_index : metadata.getVectorIndices())
     {
         v_index_map.try_emplace(v_index.name, v_index);
@@ -8674,7 +8674,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 void MergeTreeData::abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys)
 {
     for (const auto & key : loaded_keys)
-        VectorIndex::CacheManager::removeFromCache(key);
+        VectorIndex::VICacheManager::removeFromCache(key);
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

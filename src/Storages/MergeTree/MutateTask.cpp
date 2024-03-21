@@ -23,7 +23,7 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
 
-#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
 
 
 namespace CurrentMetrics

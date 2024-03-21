@@ -40,8 +40,8 @@
 #include <ctime>
 #include <numeric>
 
+#include <VectorIndex/Storages/VIBuilderUpdater.h>
 #include <boost/algorithm/string/replace.hpp>
-#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
 
 
 namespace CurrentMetrics
@@ -694,7 +694,7 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
                 for (auto & segment_id : segment_ids)
                 {
                     LOG_DEBUG(log, "Remove vector index {} for old part {} from cache", vec_index.name, old_part->name);
-                    VectorIndex::CacheManager::removeFromCache(segment_id.getCacheKey());
+                    VectorIndex::VICacheManager::removeFromCache(segment_id.getCacheKey());
                 }
             }
         }
