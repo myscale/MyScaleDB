@@ -1,6 +1,12 @@
 # MyScaleDB
 
-**MyScale** is a open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScale include:
+Enable every developer to build production-grade GenAI applications with powerful and familiar SQL.
+
+[] (social media+discord)
+
+## What is MyScaleDB?
+
+**MyScaleDB** is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScale include:
 
 * **Built for AI applications:** Manages and supports search and analytical processing of structured and vectorized data on a single platform.
 * **Built for performance and scalability:** Cutting-edge OLAP database architecture combined with advanced vector algorithms to perform operations on vectorized data at incredible speeds and scalability.
@@ -52,6 +58,8 @@ docker exec -it myscaledb bash
 clickhouse-client
 ```
 
+## Tutorial
+
 To install MyScaleDB locally or on-premise, we recommend using our `docker-compose.yml` file. Alternatively, you can customize the configuration file of MyScaleDB.
 
 ```yaml
@@ -84,6 +92,20 @@ Here is the mapping of this configuration file:
 - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
 ```
 
+## Community
+
+You're welcome to become a part of the groups or channels listed below to engage in discussions, pose queries regarding MyScaleDB, and stay updated on the newest developments related to MyScaleDB:
+
+* Seek help when you use MyScaleDB: [Discord](https://discord.gg/D2qpkqc4Jq)
+
+* Get the latest MyScaleDB news or updates
+
+  * Follow [@MyScaleDB](https://twitter.com/MyScaleDB) on Twitter
+  * Follow [@MyScale](https://www.linkedin.com/company/myscale/) on LinkedIn
+  * Read [MyScale Blog](https://myscale.com/blog/)
+
+For support, please [contact us](https://myscale.com/contact/).
+
 ## Roadmap
 
 * [ ] Inverted index & performant keyword/vector hybrid search
@@ -92,3 +114,7 @@ Here is the mapping of this configuration file:
 * [ ] Data-centric LLM
 
 [^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScale Cloud](myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
+
+## License
+
+MyScaleDB is licensed under the Apache License, Version 2.0. View a copy of the [License file](https://github.com/myscale/myscaledb?tab=License-1-ov-file).
