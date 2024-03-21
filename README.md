@@ -39,7 +39,50 @@ The simplest way to use MyScaleDB is to start an instance on MyScale Cloud servi
 
 #### MyScaleDB Docker Image
 
-* [ ] *Recommended way, write more here, see [paradedb](https://github.com/paradedb/paradedb?tab=readme-ov-file#paradedb-docker-image)*.
+To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
+
+```bash
+docker run --name myscaledb myscale/myscaledb:1.2
+```
+
+This will start a MyScaleDB instance with default user `default` and no password. You can then connect to the database using `clickhouse-client`:
+
+```bash
+docker exec -it myscaledb bash
+clickhouse-client
+```
+
+To install MyScaleDB locally or on-premise, we recommend using our `docker-compose.yml` file. Alternatively, you can customize the configuration file of MyScaleDB.
+
+```yaml
+version: '3.7'
+
+services:
+  myscaledb:
+    image: myscale/myscaledb:1.2
+    tty: true
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+      - '8998:8998'
+      - '9363:9363'
+      - '9116:9116'
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/var/lib/clickhouse
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/log:/var/log/clickhouse-server
+    deploy:
+      resources:
+        limits:
+          cpus: "16.00"
+          memory: 32Gb
+```
+
+If you want to customize the configuration file of MyScaleDB, please first copy the `/etc/clickhouse-server` directory from the `myscaledb` container to a directory on your local physical machine. Assuming you have copied it to the `volumes/config` directory, you can freely modify the configuration within the `volumes/config` directory. Then, you just need to add a directory mapping in the above-mentioned `docker-compose.yaml` file to make the configuration take effect.
+Here is the mapping of this configuration file:
+
+```yaml
+- ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
+```
 
 #### Build from source
 
