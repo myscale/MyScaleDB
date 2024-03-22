@@ -3,7 +3,7 @@
 <div align="center">
 
 <a href='https://www.myscale.com/?utm_source=github&utm_medium=myscaledb'>
-<img src="docs/tidb-logo-with-text.png" alt="MyScale, the SQL Vector Database for Scalable AI" height=100></img>
+<img src="docs/myscaledb-logo-with-text.png" alt="MyScale, the SQL Vector Database for Scalable AI" height=100></img>
 </a>
 <br></br>
 
@@ -70,9 +70,7 @@ docker exec -it myscaledb bash
 clickhouse-client
 ```
 
-## Tutorial
-
-To install MyScaleDB locally or on-premise, we recommend using our `docker-compose.yml` file. Alternatively, you can customize the configuration file of MyScaleDB.
+To install MyScaleDB locally or on-premise, we recommend using our `docker-compose.yml` file as below. Alternatively, you can customize the configuration file of MyScaleDB.
 
 ```yaml
 version: '3.7'
@@ -103,6 +101,10 @@ Here is the mapping of this configuration file:
 ```yaml
 - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
 ```
+
+## Tutorial
+
+Please refer to our [guide](https://myscale.com/docs/en/vector-search/) for how to create a SQL table with vector index and perform vector search. It's recommended to specify `TYPE SCANN` when creating a vector index in open source MyScaleDB.
 
 ## Community
 
