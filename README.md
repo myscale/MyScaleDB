@@ -7,35 +7,38 @@
 </a>
 <br></br>
 
-[![Official Website](<https://img.shields.io/badge/-Visit%20the%20Official%20Website%20%E2%86%92-rgb(21,204,116)?style=for-the-badge>)](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme)
-[![Playground](<https://img.shields.io/badge/-Try%20It%20Online%20%E2%86%92-rgb(84,56,255)?style=for-the-badge>)](https://console.myscale.com/playground/?utm_source=github&utm_medium=myscaledb_readme)
-
 [![LICENSE](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](https://github.com/myscale/myscaledb/blob/main/LICENSE)
 [![Language](https://img.shields.io/badge/Language-C++20-blue.svg)](https://isocpp.org/)
+[![Discord](https://img.shields.io/discord/1098133460310294528?logo=Discord)](https://discord.gg/D2qpkqc4Jq)
+[![Twitter](https://img.shields.io/twitter/url/http/shields.io.svg?style=social&label=Twitter)](https://twitter.com/MyScaleDB)
+
+[![Official Website](<https://img.shields.io/badge/-Visit%20the%20Official%20Website%20%E2%86%92-rgb(21,204,116)?style=for-the-badge>)](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme)
+[![Playground](<https://img.shields.io/badge/-Try%20It%20Online%20%E2%86%92-rgb(84,56,255)?style=for-the-badge>)](https://console.myscale.com/playground/?utm_source=github&utm_medium=myscaledb_readme)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/myscale)
 
 *Enable every developer to build production-grade GenAI applications with powerful and familiar SQL.*
 </div>
 
 ## What is MyScaleDB?
 
-**MyScaleDB** is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScale include:
+[**MyScaleDB**](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme) is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScale include:
 
-* **Built for AI applications:** Manages and supports search and analytical processing of structured and vectorized data on a single platform.
-* **Built for performance and scalability:** Cutting-edge OLAP database architecture combined with advanced vector algorithms to perform operations on vectorized data at incredible speeds and scalability.
+* **Built for production AI applications:** Manages and supports search and analytical processing of structured and vectorized data on a single platform with powerful and familiar SQL.
+* **Built for performance and scalability:** Cutting-edge OLAP database architecture combined with advanced vector algorithms to perform vector operations at incredible speeds, scalability and cost-efficiency.
 * **Built for universal accessibility**: SQL with vector-related functions is the only programming language needed to interact with MyScale.
 
-Compared with the customized APIs of specialzied vector databases, MyScale is [more powerful, performant and cost-effective](https://myscale.com/blog/myscale-outperform-specialized-vectordb/) yet simpler to use; thus, suitable for a large community of programmers. Compared with integrated vector databases such as PostgreSQL with pgvector and ElasticSearch with vector extension, MyScale consumes much lower resources and [achieves much better accuracy/speed at structured and vector joint queries](https://myscale.com/blog/myscale-vs-postgres-opensearch/), such as filtered search.
+Compared with specialized vector databases that use custom APIs, MyScale is [more powerful, performant, and cost-effective](https://myscale.com/blog/myscale-outperform-specialized-vectordb) while remaining simpler to use. This makes it suitable for a large community of programmers. Additionally, when compared to integrated vector databases like PostgreSQL with pgvector or ElasticSearch with vector extensions, MyScale consumes fewer resources and [achieves better accuracy and speed for structured and vector joint queries](https://myscale.com/blog/myscale-vs-postgres-opensearch), such as filtered searches.
 
-Last but not least, with MyScale's SQL support and [rich data types and functions](https://myscale.com/docs/en/functions/), you can seamlessly manage and query multiple data modalities in a unified system, allowing you to leverage structured, vector, text, time-series and more data types simultaneously with a single SQL query. This streamlined approach ensures rapid and efficient processing, saving time and reducing complexity, empowering you to tackle AI/LLM and big data tasks with ease.
+Moreover, with MyScale's SQL support and [rich data types and functions](https://myscale.com/docs/en/functions/), you can seamlessly manage and query multiple data modalities in a unified system. This allows you to leverage structured, vector, text, time-series, and other data types simultaneously with a single query. The SQL data model supports flexible and sophisticated data modeling, which has been battle-tested for [over half a century](https://en.wikipedia.org/wiki/SQL#History). MyScale's streamlined SQL vector approach ensures rapid and efficient processing, saving time and reducing complexity, empowering you to tackle AI/LLM and big data tasks with ease.
 
 ## Why MyScaleDB
 
-* Unified unstructured data and structured data management
+* Unified structured and vectorized data management
 * SQL vector database
 * Millisecond search on billion vectors
 * Highly reliable & linearly scalable
 * Hybrid search & complex SQL vector queries
-* Support disk-based vector index for high data density[^1]
+* Disk-based vector index for high data density[^1]
 
 See MyScale [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
@@ -129,9 +132,10 @@ Here is the mapping of this configuration file:
 
 Please refer to our [guide](https://myscale.com/docs/en/vector-search/) for how to create a SQL table with vector index and perform vector search. It's recommended to specify `TYPE SCANN` when creating a vector index in open source MyScaleDB.
 
-### Create a Table in MyScaleDB
+### Create a Table with Vector Column
 
 ```sql
+-- Create a table with body_vector of length 384
 CREATE TABLE default.wiki_abstract
 (
     `id` UInt64,
@@ -148,24 +152,32 @@ ORDER BY id;
 ### Insert Data to Your Table
 
 ```sql
+-- Insert data from parquet files on S3
 INSERT INTO default.wiki_abstract SELECT * FROM s3('https://myscale-datasets.s3.ap-southeast-1.amazonaws.com/wiki_abstract_with_vector.parquet','Parquet');
-
-OPTIMIZE TABLE default.wiki_abstract FINAL;
 ```
 
 ### Create the Vector Index
 
 ```sql
+-- Build a SCANN vector index with Cosine metric on the body_vector
 ALTER TABLE default.wiki_abstract ADD VECTOR INDEX vec_idx body_vector TYPE SCANN('metric_type=Cosine');
 
--- We can query the index build progress from the `vector_indices` table and wait until the progress becomes `Built`, indicating that the index creation is complete.
+-- Query the index build progress from the `vector_indices` table
+-- Wait until the index progress becomes `Built`
 SELECT * FROM system.vector_indices;
 ```
 
 ### Execute Vector Search
 
 ```sql
-SELECT id, title, distance(body_vector, [-0.051993933,-0.014571957,-0.067694284,-0.025587771,-0.039530866,-0.038116932,-0.025040321,0.09107845,-0.042887665,-0.05916685,0.0016676356,-0.03583563,-0.046406135,-0.018933294,-0.019242926,0.05435089,-0.0022332764,-0.029247247,-0.047381226,-0.028552702,0.074579544,-0.013048853,-0.02171472,-0.024649369,-0.016868504,0.049497478,-0.094687544,0.013853871,0.044450607,-0.026169028,-0.004910583,0.050561734,0.003975122,0.027577253,0.0063147848,-0.064254835,0.00589612,-0.022918286,-0.03153694,0.054887727,0.14274344,0.0079141045,0.010968703,-0.0035762321,-0.061702404,0.015499965,-0.060662124,0.025801793,-0.020549921,0.00081662735,-0.05465167,0.03287687,-0.05216912,-0.034720425,0.09211666,0.01391376,-0.013022239,0.07159377,-0.016452607,0.025693206,-0.007101831,0.008424894,-0.0653154,0.009117553,0.054408558,-0.019227771,-0.016855529,-0.0017008693,-0.030391308,0.042674664,-0.03890756,0.09212165,-0.062187918,-0.019561214,0.0025066605,0.021409642,0.025898892,-0.049299367,-0.021074196,-0.1189605,-0.07355872,-0.15445043,-0.057826668,-0.014547524,0.013788045,0.047765154,-0.045130353,-0.033162475,0.0798823,0.00014898424,-0.07370452,0.042748183,0.051670443,0.010215425,0.038576707,0.02325246,0.042541727,-0.027946398,-0.052863315,0.07435391,-0.030535538,-0.026040124,0.12288541,-0.0020252853,0.0037650217,-0.049053755,0.035206515,0.002714659,-0.055957433,-0.1043515,0.12296011,-0.018407518,0.11477282,-0.018928673,0.041221637,-0.034674577,-0.05691061,-0.011879819,0.009807924,-0.0016493463,0.045088265,0.027347907,0.04364125,0.008214966,0.016615324,-0.098858,0.074695654,-1.9762962e-33,0.030646795,-0.07171656,-0.0070392075,0.06650123,0.045193307,0.012263713,-0.023790587,0.051231034,-0.011579724,0.051707372,0.02878731,-0.001285007,0.017610451,0.07617186,0.12837116,-0.030996455,0.08911589,-0.028641228,0.013207627,0.0029564973,0.043276913,0.010178338,-0.02085952,-0.04588205,-0.031221278,-0.0387124,0.020109951,-0.02699747,0.024315225,0.07131897,0.035871625,-0.06737809,-0.07465318,-0.014699111,0.048917893,-0.009248528,-0.018016934,0.02356299,0.037189223,-0.0070787882,-0.051331587,-0.039600756,-0.031648707,-0.029654862,-0.038506385,-0.061981704,0.04653717,0.05385589,-0.032988995,0.06430667,0.06100978,0.0062337937,0.02448809,0.08676914,0.052251935,-0.025303239,0.015694777,0.02655673,0.012427463,0.1381833,-0.010661728,0.08350895,-0.105721444,-0.018787563,-0.07858833,0.056970757,0.07071342,-0.018518107,0.070829704,0.018870745,-0.03736615,-0.048424892,0.008875318,0.024713999,0.02551521,-0.011756489,0.073875934,0.0114348745,-0.04483199,-0.016004276,-0.08356264,0.010703036,0.0066822283,-0.05353009,-0.018569078,-0.004168434,0.05815997,-0.07308629,-0.059285823,0.029934714,0.0003925204,-0.029858263,0.012823868,-0.054889712,0.04934564,7.279117e-34,-0.041897744,0.054874696,-0.031515755,0.10118687,0.0458668,-0.06283181,0.04172824,-0.0153129045,0.047121603,-0.03010246,-0.061485767,0.013687931,-0.021871995,0.073475316,0.0829944,0.011405637,-0.032571495,-0.027177166,0.0642351,-0.020283077,0.05567658,-0.057863697,0.08828164,0.07192206,0.0007150115,0.059799276,-0.043101445,-0.018918894,-0.059285942,-0.033429902,0.01998538,-0.03714634,-0.04410662,0.040724766,-0.08054264,0.0058395006,0.10387117,0.053397756,0.04949688,-0.032475222,0.07815859,-0.040285874,0.010772476,-0.006843925,-0.052518513,0.08010702,0.02556263,-0.018286457,-0.06187721,-0.006310011,-0.06052168,0.03772284,-0.028093407,-0.00971233,-0.0028837582,-0.10602951,0.046458527,-0.0033366857,-0.030772595,0.03566498,0.015609401,-0.04063339,-0.030757135,0.0012650898,0.04576847,0.023140637,0.020672783,-0.082763225,-0.057267062,0.02977531,-0.038069632,0.093539745,-0.049752194,-0.09787799,-0.14522925,0.083466195,-0.097279325,-0.017175317,0.00025348098,0.09004034,-0.09311094,-0.025154117,0.007995562,-0.044069506,-0.09381035,-0.002082798,0.088507004,0.008801484,0.0034103142,-0.004868861,0.02166316,0.0583604,-0.012032157,0.05901603,0.014640149,-1.3841484e-8,-0.004460958,0.066267215,0.0016688921,0.0015052046,0.05686885,-0.008889378,-0.023157073,0.006498412,0.020371925,-0.025288232,0.11189946,-0.035977192,0.012520477,0.053084545,0.058390282,-0.010065113,-0.05930951,-0.057696298,-0.0655608,-0.03956036,0.052485723,-0.0059757195,-0.014863029,0.0030453473,-0.10093801,-0.02814902,0.031147273,-0.008842873,0.044070948,-0.0055524884,0.07154635,0.051045228,0.02193814,-0.0027840915,0.0294103,-0.09688244,-0.08516746,0.03036262,0.037378754,0.10777078,-0.05593432,0.08047652,-0.046416387,0.036919285,0.08739361,-0.025080625,0.007479923,-0.05024608,-0.018117117,-0.10586108,0.011069658,0.089402206,0.002131186,0.08381613,0.049733363,-0.018331422,0.024617516,-0.0040164976,-0.0828176,0.059984796,-0.116080105,-0.03668811,0.04750555,0.031703997]) AS distance FROM default.wiki_abstract ORDER BY distance ASC LIMIT 5;
+-- Perform vector search return the top-5 results
+SELECT
+  id,
+  title,
+  distance(body_vector, [-0.052, -0.0146, -0.0677, -0.0256, -0.0395, -0.0381, -0.025, 0.0911, -0.0429, -0.0592, 0.0017, -0.0358, -0.0464, -0.0189, -0.0192, 0.0544, -0.0022, -0.0292, -0.0474, -0.0286, 0.0746, -0.013, -0.0217, -0.0246, -0.0169, 0.0495, -0.0947, 0.0139, 0.0445, -0.0262, -0.0049, 0.0506, 0.004, 0.0276, 0.0063, -0.0643, 0.0059, -0.0229, -0.0315, 0.0549, 0.1427, 0.0079, 0.011, -0.0036, -0.0617, 0.0155, -0.0607, 0.0258, -0.0205, 0.0008, -0.0547, 0.0329, -0.0522, -0.0347, 0.0921, 0.0139, -0.013, 0.0716, -0.0165, 0.0257, -0.0071, 0.0084, -0.0653, 0.0091, 0.0544, -0.0192, -0.0169, -0.0017, -0.0304, 0.0427, -0.0389, 0.0921, -0.0622, -0.0196, 0.0025, 0.0214, 0.0259, -0.0493, -0.0211, -0.119, -0.0736, -0.1545, -0.0578, -0.0145, 0.0138, 0.0478, -0.0451, -0.0332, 0.0799, 0.0001, -0.0737, 0.0427, 0.0517, 0.0102, 0.0386, 0.0233, 0.0425, -0.0279, -0.0529, 0.0744, -0.0305, -0.026, 0.1229, -0.002, 0.0038, -0.0491, 0.0352, 0.0027, -0.056, -0.1044, 0.123, -0.0184, 0.1148, -0.0189, 0.0412, -0.0347, -0.0569, -0.0119, 0.0098, -0.0016, 0.0451, 0.0273, 0.0436, 0.0082, 0.0166, -0.0989, 0.0747, -0.0, 0.0306, -0.0717, -0.007, 0.0665, 0.0452, 0.0123, -0.0238, 0.0512, -0.0116, 0.0517, 0.0288, -0.0013, 0.0176, 0.0762, 0.1284, -0.031, 0.0891, -0.0286, 0.0132, 0.003, 0.0433, 0.0102, -0.0209, -0.0459, -0.0312, -0.0387, 0.0201, -0.027, 0.0243, 0.0713, 0.0359, -0.0674, -0.0747, -0.0147, 0.0489, -0.0092, -0.018, 0.0236, 0.0372, -0.0071, -0.0513, -0.0396, -0.0316, -0.0297, -0.0385, -0.062, 0.0465, 0.0539, -0.033, 0.0643, 0.061, 0.0062, 0.0245, 0.0868, 0.0523, -0.0253, 0.0157, 0.0266, 0.0124, 0.1382, -0.0107, 0.0835, -0.1057, -0.0188, -0.0786, 0.057, 0.0707, -0.0185, 0.0708, 0.0189, -0.0374, -0.0484, 0.0089, 0.0247, 0.0255, -0.0118, 0.0739, 0.0114, -0.0448, -0.016, -0.0836, 0.0107, 0.0067, -0.0535, -0.0186, -0.0042, 0.0582, -0.0731, -0.0593, 0.0299, 0.0004, -0.0299, 0.0128, -0.0549, 0.0493, 0.0, -0.0419, 0.0549, -0.0315, 0.1012, 0.0459, -0.0628, 0.0417, -0.0153, 0.0471, -0.0301, -0.0615, 0.0137, -0.0219, 0.0735, 0.083, 0.0114, -0.0326, -0.0272, 0.0642, -0.0203, 0.0557, -0.0579, 0.0883, 0.0719, 0.0007, 0.0598, -0.0431, -0.0189, -0.0593, -0.0334, 0.02, -0.0371, -0.0441, 0.0407, -0.0805, 0.0058, 0.1039, 0.0534, 0.0495, -0.0325, 0.0782, -0.0403, 0.0108, -0.0068, -0.0525, 0.0801, 0.0256, -0.0183, -0.0619, -0.0063, -0.0605, 0.0377, -0.0281, -0.0097, -0.0029, -0.106, 0.0465, -0.0033, -0.0308, 0.0357, 0.0156, -0.0406, -0.0308, 0.0013, 0.0458, 0.0231, 0.0207, -0.0828, -0.0573, 0.0298, -0.0381, 0.0935, -0.0498, -0.0979, -0.1452, 0.0835, -0.0973, -0.0172, 0.0003, 0.09, -0.0931, -0.0252, 0.008, -0.0441, -0.0938, -0.0021, 0.0885, 0.0088, 0.0034, -0.0049, 0.0217, 0.0584, -0.012, 0.059, 0.0146, -0.0, -0.0045, 0.0663, 0.0017, 0.0015, 0.0569, -0.0089, -0.0232, 0.0065, 0.0204, -0.0253, 0.1119, -0.036, 0.0125, 0.0531, 0.0584, -0.0101, -0.0593, -0.0577, -0.0656, -0.0396, 0.0525, -0.006, -0.0149, 0.003, -0.1009, -0.0281, 0.0311, -0.0088, 0.0441, -0.0056, 0.0715, 0.051, 0.0219, -0.0028, 0.0294, -0.0969, -0.0852, 0.0304, 0.0374, 0.1078, -0.0559, 0.0805, -0.0464, 0.0369, 0.0874, -0.0251, 0.0075, -0.0502, -0.0181, -0.1059, 0.0111, 0.0894, 0.0021, 0.0838, 0.0497, -0.0183, 0.0246, -0.004, -0.0828, 0.06, -0.1161, -0.0367, 0.0475, 0.0317]) AS distance
+FROM default.wiki_abstract
+ORDER BY distance ASC
+LIMIT 5;
 ```
 
 ## Community
