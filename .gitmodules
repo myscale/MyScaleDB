@@ -221,7 +221,7 @@
 	url = https://github.com/ClickHouse/sqlite-amalgamation
 [submodule "contrib/s2geometry"]
 	path = contrib/s2geometry
-	url = git@git.moqi.ai:mqdb/s2geometry.git
+	url = git@github.com:myscale/s2geometry.git
 [submodule "contrib/bzip2"]
 	path = contrib/bzip2
 	url = https://github.com/ClickHouse/bzip2
@@ -233,7 +233,7 @@
 	url = https://github.com/google/libprotobuf-mutator
 [submodule "contrib/sysroot"]
 	path = contrib/sysroot
-	url = git@git.moqi.ai:mqdb/sysroot.git
+	url = git@github.com:myscale/sysroot.git
 [submodule "contrib/nlp-data"]
 	path = contrib/nlp-data
 	url = https://github.com/ClickHouse/nlp-data
@@ -335,6 +335,6 @@
 [submodule "contrib/liburing"]
 	path = contrib/liburing
 	url = https://github.com/axboe/liburing
-[submodule "contrib/search-index-oss"]
-	path = contrib/search-index-oss
-	url = git@git.moqi.ai:mqdb/search-index-oss.git
+[submodule "contrib/search-index"]
+	path = contrib/search-index
+	url = git@github.com:myscale/search-index.git
