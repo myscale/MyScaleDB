@@ -21,15 +21,15 @@
 
 ## What is MyScaleDB?
 
-[**MyScaleDB**](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme) is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScale include:
+[**MyScaleDB**](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme) is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScaleDB include:
 
-* **Built for production AI applications:** Manages and supports search and analytical processing of structured and vectorized data on a single platform with powerful and familiar SQL.
+* **Built for production AI applications:** Manages and supports search and analytical processing of structured text, and vectorized data on a single platform. Combining different data modalities, such as in filtered search, is also crucial for [improving RAG accuracy](https://myscale.com/blog/filtered-vector-search-in-myscale/#filtered-vector-search-is-essential-for-improving-the-accuracy-of-rag-systems).
 * **Built for performance and scalability:** Cutting-edge OLAP database architecture combined with advanced vector algorithms to perform vector operations at incredible speeds, scalability and cost-efficiency.
-* **Built for universal accessibility**: SQL with vector-related functions is the only programming language needed to interact with MyScale.
+* **Built for universal accessibility**: SQL with vector-related functions is the only programming language needed to interact with MyScaleDB.
 
-Compared with specialized vector databases that use custom APIs, MyScale is [more powerful, performant, and cost-effective](https://myscale.com/blog/myscale-outperform-specialized-vectordb) while remaining simpler to use. This makes it suitable for a large community of programmers. Additionally, when compared to integrated vector databases like PostgreSQL with pgvector or ElasticSearch with vector extensions, MyScale consumes fewer resources and [achieves better accuracy and speed for structured and vector joint queries](https://myscale.com/blog/myscale-vs-postgres-opensearch), such as filtered searches.
+Compared with specialized vector databases that use custom APIs, MyScaleDB is [more powerful, performant, and cost-effective](https://myscale.com/blog/myscale-outperform-specialized-vectordb) while remaining simpler to use. This makes it suitable for a large community of programmers. Additionally, when compared to integrated vector databases like PostgreSQL with pgvector or ElasticSearch with vector extensions, MyScaleDB consumes fewer resources and [achieves better accuracy and speed for structured and vector joint queries](https://myscale.com/blog/myscale-vs-postgres-opensearch), such as filtered searches.
 
-Moreover, with MyScale's SQL support and [rich data types and functions](https://myscale.com/docs/en/functions/), you can seamlessly manage and query multiple data modalities in a unified system. This allows you to leverage structured, vector, text, time-series, and other data types simultaneously with a single query. The SQL data model supports flexible and sophisticated data modeling, which has been battle-tested for [over half a century](https://en.wikipedia.org/wiki/SQL#History). MyScale's streamlined SQL vector approach ensures rapid and efficient processing, saving time and reducing complexity, empowering you to tackle AI/LLM and big data tasks with ease.
+Moreover, with MyScaleDB's SQL support and [rich data types and functions](https://myscale.com/docs/en/functions/), you can seamlessly manage and query multiple data modalities in a unified system. This allows you to leverage structured, vector, text, time-series, and other data types simultaneously with a single query. The SQL data model supports flexible and sophisticated data modeling, which has been battle-tested for [over half a century](https://en.wikipedia.org/wiki/SQL#History). MyScaleDB's streamlined SQL vector approach ensures rapid and efficient processing, saving time and reducing complexity, empowering you to tackle AI/LLM and big data tasks with ease.
 
 ## Why MyScaleDB
 
@@ -40,13 +40,13 @@ Moreover, with MyScale's SQL support and [rich data types and functions](https:/
 * Hybrid search & complex SQL vector queries
 * Disk-based vector index for high data density[^1]
 
-See MyScale [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
+See MyScaleDB [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
-## Why build MyScale on top of ClickHouse?
+## Why build MyScaleDB on top of ClickHouse?
 
 [ClickHouse](https://github.com/ClickHouse/ClickHouse) is a popular open-source analytical database that excels at big data processing and analytics due to its columnar storage with advanced compression, skip indexing, and SIMD processing. Unlike transactional databases like PostgreSQL and MySQL, which use row storage and main optimzies for transactional processing, ClickHouse has significantly faster analytical and data scanning speeds.
 
-One of the key operations in combining structured and vector search is filtered search, which involves filtering by other attributes first and then performing vector search on the remaining data. [Columnar storage and pre-filtering are crucial](https://myscale.com/blog/filtered-vector-search-in-myscale/#behind-the-scene) for ensuring high accuracy and high performance in filtered search, which is why we chose to build MyScale on top of ClickHouse.
+One of the key operations in combining structured and vector search is filtered search, which involves filtering by other attributes first and then performing vector search on the remaining data. [Columnar storage and pre-filtering are crucial](https://myscale.com/blog/filtered-vector-search-in-myscale/#behind-the-scene) for ensuring high accuracy and high performance in filtered search, which is why we chose to build MyScaleDB on top of ClickHouse.
 
 While we have modified ClickHouse's execution and storage engine in many ways to ensure fast and cost-effective SQL vector queries, many of the features ([#37893](https://github.com/ClickHouse/ClickHouse/issues/56728), [#38048](https://github.com/ClickHouse/ClickHouse/pull/38048), [#37859](https://github.com/ClickHouse/ClickHouse/issues/37859), [#56728](https://github.com/ClickHouse/ClickHouse/issues/56728)) related to general SQL processing have been contributed back to the ClickHouse open source community.
 
@@ -54,7 +54,7 @@ While we have modified ClickHouse's execution and storage engine in many ways to
 
 ### MyScaleDB Cloud
 
-The simplest way to use MyScaleDB is to start an instance on MyScale Cloud service. We offer a free pod supporting 5M 768D vectors. Sign up [here](https://myscale.com/) and checkout [MyScale QuickStart](https://myscale.com/docs/en/quickstart/) for more instructions.
+The simplest way to use MyScaleDB is to start an instance on MyScaleDB Cloud service. We offer a free pod supporting 5M 768D vectors. Sign up [here](https://myscale.com/) and checkout [MyScaleDB QuickStart](https://myscale.com/docs/en/quickstart/) for more instructions.
 
 ### Self-Hosted
 
@@ -198,10 +198,10 @@ For support, please [contact us](https://myscale.com/contact/).
 
 * [ ] Inverted index & performant keyword/vector hybrid search
 * [ ] Support more storage engines, e.g. `ReplacingMergeTree`
-* [ ] LLM observability with MyScale
+* [ ] LLM observability with MyScaleDB
 * [ ] Data-centric LLM
 
-[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScale Cloud](myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
+[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScaleDB Cloud](myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
 
 ## License
 
