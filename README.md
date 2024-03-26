@@ -201,7 +201,7 @@ For support, please [contact us](https://myscale.com/contact/).
 * [ ] LLM observability with MyScaleDB
 * [ ] Data-centric LLM
 
-[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScaleDB Cloud](myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
+[^1]: The disk-based MSTG (Multi-scale Tree Graph) algorithm is available through [MyScaleDB Cloud](https://myscale.com), achieving high data density and better indexing & search performance on billion-scale vector data.
 
 ## License
 
