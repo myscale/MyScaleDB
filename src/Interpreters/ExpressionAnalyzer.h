@@ -8,7 +8,6 @@
 #include <Columns/FilterDescription.h>
 #include <Interpreters/ActionsVisitor.h>
 #include <Interpreters/AggregateDescription.h>
-#include <Interpreters/VectorScanDescription.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/TreeRewriter.h>
 #include <Interpreters/WindowDescription.h>
@@ -16,6 +15,8 @@
 #include <Parsers/IAST_fwd.h>
 #include <Storages/IStorage_fwd.h>
 #include <Storages/SelectQueryInfo.h>
+
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include <Common/logger_useful.h>
 
@@ -81,7 +82,7 @@ struct ExpressionAnalyzerData
     AggregateDescriptions aggregate_descriptions;
 
     bool has_vector_scan = false;
-    VectorScanDescriptions vector_scan_descriptions;
+    VSDescriptions vector_scan_descriptions;
 
     WindowDescriptions window_descriptions;
     NamesAndTypesList window_columns;
@@ -372,7 +373,7 @@ public:
     bool hasConstAggregationKeys() const { return has_const_aggregation_keys; }
     const NamesAndTypesLists & aggregationKeysList() const { return aggregation_keys_list; }
     const AggregateDescriptions & aggregates() const { return aggregate_descriptions; }
-    VectorScanDescriptions & vectorScanDescs() { return vector_scan_descriptions; }
+    VSDescriptions & vectorScanDescs() { return vector_scan_descriptions; }
 
     std::unique_ptr<QueryPlan> getJoinedPlan();
 

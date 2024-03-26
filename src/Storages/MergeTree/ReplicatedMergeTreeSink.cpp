@@ -528,6 +528,10 @@ void ReplicatedMergeTreeSinkImpl<false>::finishDelayedChunk(const ZooKeeperWithF
         {
             commitPart(zookeeper, part, partition.block_id, delayed_chunk->replicas_num, false);
 
+            /// init vector index
+            for (auto & vec_desc : metadata_snapshot->getVectorIndices())
+                part->vector_index.addVectorIndex(vec_desc);
+
             last_block_is_duplicate = last_block_is_duplicate || part->is_duplicate;
 
             /// Set a special error code if the block is duplicate

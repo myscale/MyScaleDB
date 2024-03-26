@@ -52,6 +52,7 @@ all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
 all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
 all_4_4_0	all_4_4_0	0	vec_ind	LOADED
 --- merge
+all_2_4_1_3	all_2_4_1_3	0	vec_ind	PENDING
 all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
 all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 --- query
@@ -66,6 +67,7 @@ all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 9	137.09
 10	180.29
 0
+all_2_4_1_3	all_2_4_1_3	0	vec_ind	PENDING
 all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
 all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 --- drop table

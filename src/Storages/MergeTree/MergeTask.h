@@ -14,7 +14,7 @@
 #include <Compression/CompressedReadBufferFromFile.h>
 #include <Common/filesystemHelpers.h>
 
-#include <VectorIndex/SegmentId.h>
+#include <VectorIndex/Common/SegmentId.h>
 
 #include <memory>
 #include <list>
@@ -190,7 +190,7 @@ private:
         std::unordered_map<String, bool> all_parts_have_vector_index;
         bool can_be_decouple = false;
         bool only_one_vpart_merged = false; /// True if only one VPart is merged.
-
+        size_t first_part_with_data{0};
         /// used to store row_ids_map_bufs
         std::vector<std::unique_ptr<WriteBuffer>> row_ids_map_bufs;
         std::vector<std::unique_ptr<WriteBufferFromFileBase>> row_ids_map_uncompressed_bufs;

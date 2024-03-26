@@ -279,7 +279,7 @@ void ReplicatedMergeTreeTableMetadata::checkEquals(const ReplicatedMergeTreeTabl
                 from_zk.skip_indices, parsed_zk_skip_indices, skip_indices);
     }
 
-    String parsed_zk_vector_indices = VectorIndicesDescription::parse(from_zk.vector_indices, columns).toString();
+    String parsed_zk_vector_indices = VIDescriptions::parse(from_zk.vector_indices, columns).toString();
     if (vector_indices != parsed_zk_vector_indices)
     {
         throw Exception(
@@ -422,7 +422,7 @@ StorageInMemoryMetadata ReplicatedMergeTreeTableMetadata::Diff::getNewMetadata(c
             new_metadata.secondary_indices = IndicesDescription::parse(new_skip_indices, new_columns, context);
 
         if (vector_indices_changed)
-            new_metadata.vec_indices = VectorIndicesDescription::parse(new_vector_indices, new_columns);
+            new_metadata.vec_indices = VIDescriptions::parse(new_vector_indices, new_columns);
 
         if (constraints_changed)
             new_metadata.constraints = ConstraintsDescription::parse(new_constraints);

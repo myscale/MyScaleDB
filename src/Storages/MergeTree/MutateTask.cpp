@@ -19,10 +19,11 @@
 #include <Storages/MergeTree/MergeTreeDataWriter.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
-#include <VectorIndex/VectorIndexCommon.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
+
+#include <VectorIndex/Common/VICommon.h>
 
 
 namespace CurrentMetrics
@@ -172,6 +173,7 @@ static void splitMutationCommands(
     }
 }
 
+/// [TODO] support rename vector column
 /// Get the columns list of the resulting part in the same order as storage_columns.
 static std::pair<NamesAndTypesList, SerializationInfoByName>
 getColumnsForNewDataPart(
@@ -390,6 +392,18 @@ static std::vector<ProjectionDescriptionRawPtr> getProjectionsForNewDataPart(
             new_projections.push_back(&projection);
 
     return new_projections;
+}
+
+static NameSet getVectorIndicesToRebuild(
+    const MutationCommands & commands)
+{
+    /// get need rebuild vector index column set
+    NameSet rebuild_vector_index_column;
+    for (const auto & command : commands)
+        if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
+            rebuild_vector_index_column.insert(command.column_name);
+
+    return rebuild_vector_index_column;
 }
 
 
@@ -689,7 +703,8 @@ void finalizeMutatedPart(
     ExecuteTTLType execute_ttl_type,
     const CompressionCodecPtr & codec,
     ContextPtr context,
-    bool sync)
+    bool sync,
+    const NameSet & rebuild_index_column = {})
 {
     std::vector<std::unique_ptr<WriteBufferFromFileBase>> written_files;
 
@@ -774,12 +789,9 @@ void finalizeMutatedPart(
     new_data_part->default_codec = codec;
 
     /// Origin part is decoupled with merged vector indices or has simple built vector index
-    if (source_part->containAnyRowIdsMaps() || source_part->containAnyVectorIndex())
-    {
-        new_data_part->loadVectorIndexChecksums();
-        new_data_part->loadVectorIndexMetadata();
-        source_part->removeAllVectorIndexInfo();
-    }
+    new_data_part->vector_index.loadVectorIndexFromLocalFile();
+    /// Inherit index status
+    new_data_part->vector_index.inheritVectorIndexStatus(source_part->vector_index, new_data_part->storage.getInMemoryMetadataPtr(), rebuild_index_column);
 
     /// TODO: Should new part inherit build error from old part?
     /// Retry build vector index for new parts.
@@ -854,10 +866,14 @@ struct MutationContext
     bool need_prefix = true;
 
     scope_guard temporary_directory_lock;
+    RWLockImpl::LockHolder move_index_read_lock;
     bool need_delete_rows{false};
 
     /// Whether this mutation contains lightweight delete
     bool has_lightweight_delete;
+
+    /// need rebuild vector index
+    NameSet rebuild_vector_index_column;
 };
 
 using MutationContextPtr = std::shared_ptr<MutationContext>;
@@ -1317,14 +1333,12 @@ private:
         static_pointer_cast<MergedBlockOutputStream>(ctx->out)->finalizePart(ctx->new_data_part, ctx->need_sync);
         ctx->out.reset();
 
-        /// Data part lock used for vector index move and mutating conflict
-        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
-
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         /// Reuse vector index when no rows are deleted
-        if (!ctx->need_delete_rows && (ctx->source_part->containAnyVectorIndex() || ctx->source_part->containAnyRowIdsMaps()))
+        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVectorIndexInReady())
         {
-            bool vector_files_found = false;
+            /// get current decouple index set
+            [[maybe_unused]] bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
             {
                 String file_name = it->name();
@@ -1335,13 +1349,13 @@ private:
                 vector_files_found = true;
             }
 
-            /// TODO: build index marks the vector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
-            if (vector_files_found)
-            {
-                ctx->new_data_part->loadVectorIndexChecksums();
-                ctx->new_data_part->loadVectorIndexMetadata();
-            }
+            /// get current decouple index set, Compute difference set, For the index whose attributes have changed, re-hard link
         }
+
+        /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
+        ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
+        /// Inherit index status
+        ctx->new_data_part->vector_index.inheritVectorIndexStatus(ctx->source_part->vector_index, ctx->metadata_snapshot, ctx->rebuild_vector_index_column);
 
         /// TODO: Should new part inherit build error from old part?
         /// Retry build vector index for new parts.
@@ -1410,9 +1424,6 @@ private:
 
     void prepare()
     {
-        /// Data part lock used for vector index move and mutating conflict
-        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
-
         if (ctx->execute_ttl_type != ExecuteTTLType::NONE)
             ctx->files_to_skip.insert("ttl.txt");
 
@@ -1551,7 +1562,7 @@ private:
             }
         }
 
-        MutationHelpers::finalizeMutatedPart(ctx->source_part, ctx->new_data_part, ctx->execute_ttl_type, ctx->compression_codec, ctx->context, ctx->need_sync);
+        MutationHelpers::finalizeMutatedPart(ctx->source_part, ctx->new_data_part, ctx->execute_ttl_type, ctx->compression_codec, ctx->context, ctx->need_sync, ctx->rebuild_vector_index_column);
     }
 
 
@@ -1713,13 +1724,11 @@ bool MutateTask::prepare()
                 ctx->need_delete_rows = true;
         }
     }
-
+    ctx->move_index_read_lock = ctx->source_part->vector_index.tryLockTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
+    ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands);
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         *ctx->data, ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
     {
-        /// Data part lock used for vector index move and mutating conflict
-        auto move_mutate_lock = ctx->source_part->lockPartForIndexMoveAndMutate(true);
-
         NameSet files_to_copy_instead_of_hardlinks;
         auto settings_ptr = ctx->data->getSettings();
         /// In zero-copy replication checksums file path in s3 (blob path) is used for zero copy locks in ZooKeeper. If we will hardlink checksums file, we will have the same blob path
@@ -1742,6 +1751,10 @@ bool MutateTask::prepare()
             prefix = "tmp_clone_";
 
         auto [part, lock] = ctx->data->cloneAndLoadDataPartOnSameDisk(ctx->source_part, prefix, ctx->future_part->part_info, ctx->metadata_snapshot, ctx->txn, &ctx->hardlinked_files, false, files_to_copy_instead_of_hardlinks);
+
+        /// Inherit index status
+        part->vector_index.inheritVectorIndexStatus(ctx->source_part->vector_index, ctx->metadata_snapshot);
+
         part->getDataPartStorage().beginTransaction();
 
         ctx->temporary_directory_lock = std::move(lock);
@@ -1900,6 +1913,10 @@ bool MutateTask::prepare()
                 files_to_copy_instead_of_hardlinks.insert(IMergeTreeDataPart::FILE_FOR_REFERENCES_CHECK);
 
             auto [part, lock] = ctx->data->cloneAndLoadDataPartOnSameDisk(ctx->source_part, prefix, ctx->future_part->part_info, ctx->metadata_snapshot, ctx->txn, &ctx->hardlinked_files, false, files_to_copy_instead_of_hardlinks);
+            
+            /// Inherit index status
+            part->vector_index.inheritVectorIndexStatus(ctx->source_part->vector_index, ctx->metadata_snapshot);
+            
             part->getDataPartStorage().beginTransaction();
 
             ctx->temporary_directory_lock = std::move(lock);

@@ -36,7 +36,7 @@
 #include <Interpreters/FunctionNameNormalizer.h>
 
 #include <DataTypes/DataTypesNumber.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 #include <Common/logger_useful.h>
 

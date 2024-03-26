@@ -76,7 +76,6 @@
 #include <Interpreters/InterserverIOHandler.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/SessionLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -117,9 +116,10 @@
 #include <Storages/StorageView.h>
 #include <Parsers/ASTFunction.h>
 #include <base/find_symbols.h>
-#include <VectorIndex/CacheManager.h>
 
 #include <Interpreters/Cache/FileCache.h>
+
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 #if USE_ROCKSDB
 #include <rocksdb/table.h>
@@ -2091,11 +2091,6 @@ ThreadPool & Context::getPrefetchThreadpool() const
     return *shared->prefetch_threadpool;
 }
 
-void Context::flushAllVectorIndexWillUnload() const
-{
-    VectorIndex::CacheManager::flushWillUnloadLog();
-}
-
 void Context::setIndexUncompressedCache(size_t max_size_in_bytes)
 {
     auto lock = getLock();
@@ -2121,14 +2116,14 @@ void Context::dropIndexUncompressedCache() const
         shared->index_uncompressed_cache->reset();
 }
 
-void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
+void Context::setPKCacheSize(size_t max_size_in_bytes)
 {
     auto lock = getLock();
     shared->primary_key_cache_size = max_size_in_bytes;
 }
 
 
-size_t Context::getPrimaryKeyCacheSize() const
+size_t Context::getPKCacheSize() const
 {
     auto lock = getLock();
     return shared->primary_key_cache_size;
@@ -3030,7 +3025,7 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
     return shared->system_logs->transactions_info_log;
 }
 
-std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
+std::shared_ptr<VIEventLog> Context::getVectorIndexEventLog(const String & part_database) const
 {
     auto lock = getLock();
 
@@ -4147,12 +4142,12 @@ ReadSettings Context::getReadSettings() const
     return res;
 }
 
-std::optional<VectorScanDescription> Context::getVecScanDescription() const
+std::optional<VSDescription> Context::getVecScanDescription() const
 {
     return vector_scan_description;
 }
 
-void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+void Context::setVecScanDescription(VSDescription & vec_scan_desc) const
 {
     vector_scan_description = vec_scan_desc;
 }

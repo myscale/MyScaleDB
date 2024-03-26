@@ -27,6 +27,7 @@ test_vector_event_log	LoadStart
 test_vector_event_log	LoadSucceed
 test_vector_event_log	DefinitionDroped
 test_vector_event_log	CacheExpire
+test_vector_event_log	CacheExpire
 test_vector_event_log	Cleared
 test_vector_event_log	DefinitionCreated
 test_vector_event_log	BuildStart

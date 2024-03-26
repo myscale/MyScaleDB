@@ -11,9 +11,9 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
-#include <Common/VectorScanUtils.h>
 
-#include <Storages/MergeTree/VectorScanResult.h>
+#include <VectorIndex/Storages/VSResult.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {
