@@ -12,9 +12,10 @@
 #include <Parsers/ASTCreateIndexQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Storages/AlterCommands.h>
 #include <Storages/StorageDistributed.h>
+
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 namespace DB
 {
@@ -86,7 +87,7 @@ BlockIO InterpreterCreateIndexQuery::execute()
         command.type = AlterCommand::ADD_VECTOR_INDEX;
         command.vec_index_name = create_index.index_name->as<ASTIdentifier &>().name();
 
-        auto & ast_vec_index_decl = command.vec_index_decl->as<ASTVectorIndexDeclaration &>();
+        auto & ast_vec_index_decl = command.vec_index_decl->as<ASTVIDeclaration &>();
         command.column_name = ast_vec_index_decl.column;
     }
     else

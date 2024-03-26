@@ -15,12 +15,12 @@ ALTER TABLE test_multi_status ADD VECTOR INDEX idx_v2 v2 TYPE MSTG('unknown=1');
 SELECT sleep(3);
 SELECT if(status<>'InProgress', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90)) FROM (select status from system.vector_indices where table = 'test_multi_status' and name = 'idx_v2' and database = currentDatabase());
 
-select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() and table = 'test_multi_status';
+select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() and table = 'test_multi_status';
 
 SELECT 'After drop the first vector index idx';
 ALTER TABLE test_multi_status DROP VECTOR INDEX idx;
 
-select table, name, expr, status, latest_failed_part, if(position(latest_fail_reason,'ception')>0, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8), latest_fail_reason) from system.vector_indices where database = currentDatabase() and table = 'test_multi_status';
+select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() and table = 'test_multi_status';
 
 SYSTEM STOP BUILD VECTOR INDICES test_multi_status;
 SELECT 'After newly add again the first vector index idx';

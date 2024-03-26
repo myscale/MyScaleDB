@@ -2,24 +2,24 @@
  * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
  * Co., Ltd. */
 
-#include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/KeyCondition.h>
+#include <DataTypes/NestedUtils.h>
+#include <Interpreters/ActionsDAG.h>
 #include <Interpreters/IdentifierSemantic.h>
 #include <Interpreters/TreeRewriter.h>
-#include <Parsers/ASTSelectQuery.h>
+#include <Interpreters/misc.h>
+#include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTExpressionList.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/formatAST.h>
-#include <Interpreters/misc.h>
-#include <Common/typeid_cast.h>
-#include <DataTypes/NestedUtils.h>
-#include <Interpreters/ActionsDAG.h>
+#include <Storages/MergeTree/KeyCondition.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 #include <base/map.h>
-#include <Common/VectorScanUtils.h>
+#include <Common/typeid_cast.h>
 
 namespace DB
 {

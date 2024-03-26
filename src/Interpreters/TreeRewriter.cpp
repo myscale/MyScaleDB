@@ -26,7 +26,6 @@
 #include <Interpreters/QueryNormalizer.h>
 #include <Interpreters/RequiredSourceColumnsVisitor.h>
 #include <Interpreters/RewriteOrderByVisitor.hpp>
-#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
@@ -76,8 +75,9 @@
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
-#include <Interpreters/parseVectorScanParameters.h>
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Interpreters/GetVSVisitor.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
 
 #include <Parsers/formatAST.h>
 
@@ -1401,7 +1401,7 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         /// Check vector column data type
         if (!search_column_type)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", vec_col_name);
-        auto vector_search_type = getVectorSearchType(search_column_type->type);
+        Search::DataType vector_search_type = getSearchIndexDataType(search_column_type->type);
 
         /// When metric_type = IP in definition of vector index, order by must be DESC.
         /// Skip the check when table is distributed.
@@ -1464,8 +1464,9 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             {
                 const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
                 Field change_metric;
-                if ((vector_search_type == DB::VectorSearchType::Float32Vector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
-                    (vector_search_type == DB::VectorSearchType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
+                /// TODO: Try not to use string literals directly
+                if ((vector_search_type == Search::DataType::FloatVector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
+                    (vector_search_type == Search::DataType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
                 {
                     metric_type = change_metric.safeGet<String>();
                 }
@@ -1473,11 +1474,11 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             if (metric_type.empty())
             {
                 const auto settings = context->getMergeTreeSettings();
-                if (vector_search_type == DB::VectorSearchType::Float32Vector)
+                if (vector_search_type == Search::DataType::FloatVector)
                 {
                     metric_type = settings.float_vector_search_metric_type.toString();
                 }
-                else if (vector_search_type == DB::VectorSearchType::BinaryVector)
+                else if (vector_search_type == Search::DataType::BinaryVector)
                 {
                     metric_type = settings.binary_vector_search_metric_type.toString();
                 }

@@ -7,18 +7,18 @@
 #include <Core/Names.h>
 #include <Storages/AlterCommands.h>
 #include <Storages/IStorage.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
-#include <Storages/MergeTree/MergeTreeDataWriter.h>
-#include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
-#include <Storages/MergeTree/MergeTreePartsMover.h>
-#include <Storages/MergeTree/MergeTreeMutationEntry.h>
-#include <Storages/MergeTree/MergeTreeMutationStatus.h>
-#include <Storages/MergeTree/MergeTreeDeduplicationLog.h>
 #include <Storages/MergeTree/FutureMergedMutatedPart.h>
 #include <Storages/MergeTree/MergePlainMergeTreeTask.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
+#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
+#include <Storages/MergeTree/MergeTreeDataWriter.h>
+#include <Storages/MergeTree/MergeTreeDeduplicationLog.h>
+#include <Storages/MergeTree/MergeTreeMutationEntry.h>
+#include <Storages/MergeTree/MergeTreeMutationStatus.h>
+#include <Storages/MergeTree/MergeTreePartsMover.h>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
+#include <VectorIndex/Storages/VIBuilderUpdater.h>
 
 #include <Disks/StoragePolicy.h>
 #include <Common/SimpleIncrement.h>
@@ -131,7 +131,7 @@ private:
     MergeTreeDataSelectExecutor reader;
     MergeTreeDataWriter writer;
     MergeTreeDataMergerMutator merger_mutator;
-    MergeTreeVectorIndexBuilderUpdater vec_index_builder_updater;
+    VIBuilderUpdater vec_index_builder_updater;
 
     std::unique_ptr<MergeTreeDeduplicationLog> deduplication_log;
 
@@ -189,6 +189,8 @@ private:
     MergeTreeDataPartPtr outdatePart(MergeTreeTransaction * txn, const String & part_name, bool force, bool clear_without_timeout = true);
     ActionLock stopMergesAndWait();
 
+    ActionLock stopBuildIndexAndWait();
+
     /// Allocate block number for new mutation, write mutation to disk
     /// and into in-memory structures. Wake up merge-mutation task.
     Int64 startMutation(const MutationCommands & commands, ContextPtr query_context);
@@ -233,7 +235,7 @@ private:
     UInt32 getMaxLevelInBetween(
         const DataPartPtr & left,
         const DataPartPtr & right) const;
-    void startVectorIndexJob(const VectorIndexCommands & vector_index_commands);
+    void startVectorIndexJob(const VICommands & vector_index_commands);
 
     /// Returns maximum version of a part, with respect of mutations which would not change it.
     Int64 getUpdatedDataVersion(
@@ -282,7 +284,7 @@ private:
     friend class MergeTreeData;
     friend class MergePlainMergeTreeTask;
     friend class MutatePlainMergeTreeTask;
-    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class VIBuilderUpdater;
 
 
 protected:

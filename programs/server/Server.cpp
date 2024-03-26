@@ -102,7 +102,8 @@
 #include <filesystem>
 #include <unordered_set>
 
-#include <VectorIndex/VectorSegmentExecutor.h>
+#include <VectorIndex/Common/VIBuildMemoryUsageHelper.h>
+#include <VectorIndex/Common/VICommon.h>
 
 #include "config.h"
 #include "config_version.h"
@@ -2015,7 +2016,7 @@ try
             const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
             LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
 
-            VectorIndex::VectorSegmentExecutor::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+            VectorIndex::VIBuildMemoryUsageHelper::setCacheManagerSizeInBytes(vector_index_cache_max_size);
 
             /// Set vector index build memory limit
             float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
@@ -2028,7 +2029,7 @@ try
             const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
             LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
 
-            VectorIndex::VectorSegmentExecutor::setBuildMemorySizeInBytes(vector_index_build_max_size);
+            VectorIndex::VIBuildMemoryUsageHelper::setBuildMemorySizeInBytes(vector_index_build_max_size);
 
             // FIXME logging-related things need synchronization -- see the 'Logger * log' saved
             // in a lot of places. For now, disable updating log configuration without server restart.
@@ -2300,7 +2301,7 @@ try
         LOG_INFO(log, "Primary key cache size was lowered to {} because the system has low amount of memory",
             formatReadableSizeWithBinarySuffix(mark_cache_size));
     }
-    global_context->setPrimaryKeyCacheSize(primary_key_cache_size);
+    global_context->setPKCacheSize(primary_key_cache_size);
 
     if (server_settings.mmap_cache_size)
         global_context->setMMappedFileCache(server_settings.mmap_cache_size);
@@ -2341,8 +2342,6 @@ try
         }
 
         async_metrics.stop();
-
-        global_context->flushAllVectorIndexWillUnload();
 
         /** Ask to cancel background jobs all table engines,
           *  and also query_log.

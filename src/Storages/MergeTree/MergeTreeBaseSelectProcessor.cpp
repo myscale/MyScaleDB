@@ -4,29 +4,26 @@
 
 #include <memory>
 #include <optional>
-#include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
-#include <Storages/MergeTree/MergeTreeRangeReader.h>
-#include <Storages/MergeTree/IMergeTreeDataPart.h>
-#include <Storages/MergeTree/IMergeTreeReader.h>
-#include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
-#include <Storages/MergeTree/RequestResponse.h>
-#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
-#include <Columns/FilterDescription.h>
-#include <Common/ElapsedTimeProfileEventIncrement.h>
 #include <Columns/ColumnArray.h>
-#include <Common/FieldVisitorConvertToNumber.h>
-#include <Common/typeid_cast.h>
-#include <Common/VectorScanUtils.h>
+#include <Columns/FilterDescription.h>
+#include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
-#include <DataTypes/DataTypeUUID.h>
-#include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypeUUID.h>
 #include <Processors/Transforms/AggregatingTransform.h>
+#include <Storages/MergeTree/IMergeTreeDataPart.h>
+#include <Storages/MergeTree/IMergeTreeReader.h>
+#include <Storages/MergeTree/MergeTreeBaseSelectProcessor.h>
+#include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
+#include <Storages/MergeTree/MergeTreeRangeReader.h>
+#include <Storages/MergeTree/RequestResponse.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
+#include <VectorIndex/Utils/CommonUtils.h>
+#include <Common/ElapsedTimeProfileEventIncrement.h>
+#include <Common/FieldVisitorConvertToNumber.h>
 #include <Common/logger_useful.h>
-
-#include <VectorIndex/VectorSegmentExecutor.h>
-#include <VectorIndex/Status.h>
+#include <Common/typeid_cast.h>
 
 #include <city.h>
 
@@ -475,7 +472,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
         /// 1. this task is vector search
         /// 2. primary key is only a column, and select columns is (pk, distance) or (pk, batch_distance)
         /// 3. primary key's value is represented by number
-        bool match = PrimaryKeyCacheManager::isSupportedPrimaryKey(pk_description)
+        bool match = PKCacheManager::isSupportedPrimaryKey(pk_description)
             && isVectorSearchByPk(pk_description.column_names, task->task_columns.columns.getNames());
 
         pk_cache_side = match;
@@ -494,7 +491,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
     if (pk_cache_side)
     {
-        std::optional<Columns> cols_opt = PrimaryKeyCacheManager::getMgr().getPartPkCache(cache_key);
+        std::optional<Columns> cols_opt = PKCacheManager::getMgr().getPartPkCache(cache_key);
 
         if (cols_opt.has_value())
         {
@@ -651,10 +648,10 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
         }
         else
         {
-            Search::DenseBitmapPtr filter = nullptr;
+            VIBitmapPtr filter = nullptr;
             if (read_result.final_filter.present())
             {
-                filter = std::make_shared<Search::DenseBitmap>(read_result.num_rows);
+                filter = std::make_shared<VIBitmap>(read_result.num_rows);
                 for (size_t i = 0; i < read_result.final_filter.getData().size(); i++)
                 {
                     if (read_result.final_filter.getData()[i])
@@ -682,7 +679,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress IMergeTreeSelectAlgorithm::readFromP
 
         if (r)
         {
-            PrimaryKeyCacheManager::getMgr().setPartPkCache(cache_key, pk_columns);
+            PKCacheManager::getMgr().setPartPkCache(cache_key, pk_columns);
         }
     }
 

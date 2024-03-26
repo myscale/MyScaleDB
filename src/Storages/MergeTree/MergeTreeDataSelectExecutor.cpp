@@ -27,7 +27,6 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/ReadFromPreparedSource.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
-#include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/QueryPlan/UnionStep.h>
 #include <Processors/QueryPlan/QueryIdHolder.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
@@ -47,6 +46,8 @@
 #include <IO/WriteBufferFromOStream.h>
 
 #include <Storages/MergeTree/CommonANNIndexes.h>
+
+#include <VectorIndex/Processors/ReadWithVS.h>
 
 namespace CurrentMetrics
 {
@@ -1355,7 +1356,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
 
     if (query_info.vector_scan_info)
     {
-        return std::make_unique<ReadWithVectorScan>(
+        return std::make_unique<ReadWithVS>(
             std::move(parts),
             std::move(alter_conversions),
             real_column_names,
