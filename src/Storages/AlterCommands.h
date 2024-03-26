@@ -10,9 +10,9 @@
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/ColumnsDescription.h>
-#include <Storages/VectorIndexCommands.h>
 #include <Common/SettingsChanges.h>
 
+#include <VectorIndex/Storages/VICommands.h>
 
 namespace DB
 {
@@ -211,7 +211,7 @@ struct AlterCommand
     /// metadata changes.
     std::optional<MutationCommand> tryConvertToMutationCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
 
-    std::optional<VectorIndexCommand> tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
+    std::optional<VICommand> tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
 };
 
 class Context;
@@ -262,7 +262,7 @@ public:
     static bool hasFullTextIndex(const StorageInMemoryMetadata & metadata);
     static bool hasLegacyInvertedIndex(const StorageInMemoryMetadata & metadata);
 
-    VectorIndexCommands getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
+    VICommands getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
 };
 
 }

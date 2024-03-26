@@ -10,14 +10,12 @@
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTStatisticsDeclaration.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTCreateNamedCollectionQuery.h>
 #include <Parsers/ASTTableOverrides.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSetQuery.h>
@@ -35,6 +33,8 @@
 #include <Parsers/ParserViewTargets.h>
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTColumnDeclaration.h>
+
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 
 namespace DB
@@ -276,7 +276,7 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
     // if (!granularity_p.parse(pos, granularity, expected))
     //     return false;
 
-    auto index = std::make_shared<ASTVectorIndexDeclaration>();
+    auto index = std::make_shared<ASTVIDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();
     // index->granularity = granularity->as<ASTLiteral &>().value.safeGet<UInt64>();
@@ -517,7 +517,7 @@ bool ParserTablePropertiesDeclarationList::parseImpl(Pos & pos, ASTPtr & node, E
         }
         else if (elem->as<ASTIndexDeclaration>())
             indices->children.push_back(elem);
-        else if (elem->as<ASTVectorIndexDeclaration>())
+        else if (elem->as<ASTVIDeclaration>())
             vec_indices->children.push_back(elem);
         else if (elem->as<ASTConstraintDeclaration>())
             constraints->children.push_back(elem);

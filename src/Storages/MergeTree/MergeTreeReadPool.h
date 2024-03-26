@@ -8,9 +8,11 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <Storages/MergeTree/RequestResponse.h>
-#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/AlterConversions.h>
+
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
+
 #include <mutex>
 
 

@@ -32,7 +32,6 @@
 #include <Interpreters/TextLog.h>
 #include <Interpreters/TraceLog.h>
 #include <Interpreters/TransactionsInfoLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/ZooKeeperLog.h>
 #include <IO/WriteHelpers.h>
 #include <Parsers/ASTCreateQuery.h>
@@ -50,6 +49,8 @@
 #include <Storages/MergeTree/MergeTreeSettings.h>
 
 #include <fmt/core.h>
+
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 
 namespace DB

@@ -38,7 +38,7 @@
 #include <Interpreters/PartLog.h>
 #include <Poco/Timestamp.h>
 #include <Common/threadPoolCallbackRunner.h>
-#include <VectorIndex/SegmentId.h>
+#include <VectorIndex/Common/SegmentId.h>
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/ordered_index.hpp>
@@ -689,7 +689,7 @@ public:
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
     void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
-    void clearPrimaryKeyCache(const DataPartsVector & parts);
+    void clearPKCache(const DataPartsVector & parts);
     void clearVectorNvmeCache() const;
     /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
     std::pair<bool, bool> needClearVectorIndexCacheAndFile(
@@ -884,7 +884,7 @@ public:
     bool canUsePrimaryKeyCache() const
     {
         const auto settings = getSettings();
-        return settings->enable_primary_key_cache.value && getContext()->getPrimaryKeyCacheSize()>0;
+        return settings->enable_primary_key_cache.value && getContext()->getPKCacheSize()>0;
     }
 
     /// Get constant pointer to storage settings.
@@ -1100,7 +1100,7 @@ public:
     /// Return introspection information about currently processing or recently processed vector index build jobs.
     MergeTreeVectorIndexStatus getVectorIndexBuildStatus(const String & index_name) const;
 
-    /// Update vector index status after buildVectorIndexForOnePart() is called for this part. May reset old
+    /// Update vector index status after buildVIForOnePart() is called for this part. May reset old
     /// error if built was successful. Otherwise update latested failed status.
     void updateVectorIndexBuildStatus(const String & part_name, const String & index_name, bool is_successful, const String & exception_message);
 
@@ -1177,7 +1177,7 @@ protected:
     friend class MergeTask;
     friend class IPartMetadataManager;
     friend class IMergedBlockOutputStream; // for access to log
-    friend class MergeTreeVectorIndexBuilderUpdater;
+    friend class VIBuilderUpdater;
 
     bool require_part_metadata;
 

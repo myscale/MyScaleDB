@@ -7,8 +7,8 @@
 #include <Core/NamesAndTypes.h>
 #include <Storages/MergeTree/MergeTreeReadTask.h>
 
-#include <Common/VectorScanUtils.h>
-#include <Storages/MergeTree/VectorScanResult.h>
+#include <VectorIndex/Storages/VSResult.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {
