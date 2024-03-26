@@ -518,7 +518,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--image-version",
-        default="2.9.1",
+        default="3.0.0",
     )
 
     parser.add_argument(
