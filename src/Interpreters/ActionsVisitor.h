@@ -13,7 +13,7 @@
 #include <Core/ColumnNumbers.h>
 #include <Core/ColumnWithTypeAndName.h>
 
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 
 namespace DB

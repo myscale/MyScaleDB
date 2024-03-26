@@ -6,11 +6,11 @@
 
 #include <utility>
 #include <Core/ColumnsWithTypeAndName.h>
-#include <Core/NamesAndTypes.h>
 #include <Core/Names.h>
+#include <Core/NamesAndTypes.h>
 #include <Interpreters/Context_fwd.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 #include <Common/logger_useful.h>
-#include <Common/VectorScanUtils.h>
 
 #include "config.h"
 

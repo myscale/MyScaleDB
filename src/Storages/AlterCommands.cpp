@@ -24,7 +24,6 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTSetQuery.h>
@@ -37,6 +36,8 @@
 #include <Common/typeid_cast.h>
 #include <Common/randomSeed.h>
 #include <Common/logger_useful.h>
+
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 namespace DB
 {
@@ -442,7 +443,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         command.vec_index_decl = command_ast->vec_index_decl;
         command.type = AlterCommand::ADD_VECTOR_INDEX;
 
-        const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVectorIndexDeclaration &>();
+        const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVIDeclaration &>();
 
         command.vec_index_name = ast_vec_index_decl.name;
         command.column_name = ast_vec_index_decl.column;
@@ -836,17 +837,17 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add vector index {}: column {} does not exist", vec_index_name, column_name);
 
         auto column_desc = metadata.columns.get(column_name);
-        VectorSearchType search_type = getVectorSearchType(column_desc.type);
-        if (search_type == VectorSearchType::Float32Vector && metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
+        Search::DataType search_type = getSearchIndexDataType(column_desc.type);
+        if (search_type == Search::DataType::FloatVector && metadata.constraints.getArrayLengthByColumnName(column_name).first == 0)
         {
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add Float32Vector index {}: column has no length constraint", vec_index_name);
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot add FloatVector index {}: column has no length constraint", vec_index_name);
         }
 
         auto insert_it = metadata.vec_indices.end();
 
         metadata.vec_indices.emplace(
             insert_it,
-            VectorIndexDescription::getVectorIndexFromAST(
+            VIDescription::getVectorIndexFromAST(
                 vec_index_decl, metadata.columns, metadata.constraints, getParameterCheckStatus(metadata, context)));
     }
     else if (type == DROP_VECTOR_INDEX)
@@ -1102,15 +1103,15 @@ bool AlterCommands::hasInvertedIndex(const StorageInMemoryMetadata & metadata)
     return false;
 }
 
-std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
+std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
 {
-    VectorIndexCommand result;
+    VICommand result;
     if (type == ADD_VECTOR_INDEX)
     {
         result.drop_command = false;
         result.column_name = column_name;
         result.index_name = vec_index_name;
-        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
+        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVIDeclaration>()->type->name);
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
         LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
     } 
@@ -1187,7 +1188,7 @@ void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context
     {
         try
         {
-            vec_index = VectorIndexDescription::getVectorIndexFromAST(
+            vec_index = VIDescription::getVectorIndexFromAST(
                 vec_index.definition_ast,
                 metadata_copy.columns,
                 metadata_copy.getConstraints(),
@@ -1640,11 +1641,11 @@ MutationCommands AlterCommands::getMutationCommands(StorageInMemoryMetadata meta
     return result;
 }
 /// currently only support one add vector index command in one alter query
-VectorIndexCommands AlterCommands::getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const
+VICommands AlterCommands::getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const
 {
-    VectorIndexCommands result;
+    VICommands result;
     for (const auto & alter_cmd : *this)
-        if (auto vec_index_cmd = alter_cmd.tryConvertToVectorIndexCommand(metadata, context); vec_index_cmd)
+        if (auto vec_index_cmd = alter_cmd.tryConvertToVICommand(metadata, context); vec_index_cmd)
             result.push_back(*vec_index_cmd);
 
     return result;

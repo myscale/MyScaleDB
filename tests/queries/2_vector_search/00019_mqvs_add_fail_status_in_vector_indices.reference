@@ -1,4 +1,4 @@
 0
-test_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = unknown\', \'ef_c=256\')	Error	all_1_1_0	 Unknown metric type: unknown. (BAD_ARGUMENTS) (version 23.3.2.1)
-test_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	Error	all_1_1_0	 VectorIndex: Error(UNSUPPORTED_PARAMETER): Unknown parameter: metric=IP. (UNSUPPORTED_PARAMETER) (version 23.3.2.1)
+test_fail_vector	v1_fail	v1_fail vector TYPE HNSWSQ(\'metric_type = unknown\', \'ef_c=256\')	Error	all_1_1_0	VectorIndex: Error in Build Index, Error(BAD_ARGUMENTS): Unknown metirc type for Float32 Vector: UNKNOWN
+test_fail_vector_2	vindex	vindex vector TYPE IVFFLAT(\'metric=IP\', \'ncentroids=5000\')	Error	all_1_1_0	VectorIndex: Error in Build Index, Error(UNSUPPORTED_PARAMETER): Unknown parameter: metric=IP
 test_success_vector	v1_success	v1_success vector TYPE HNSWFLAT	Built		
