@@ -16,7 +16,7 @@
 #include <QueryPipeline/SizeLimits.h>
 #include <Interpreters/ActionsDAG.h>
 
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 
 namespace DB

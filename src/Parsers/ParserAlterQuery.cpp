@@ -15,8 +15,9 @@
 #include <Parsers/ParserSetQuery.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/parseDatabaseAndTableName.h>
+
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 
 namespace DB

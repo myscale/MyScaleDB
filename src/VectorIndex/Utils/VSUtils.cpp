@@ -1,0 +1,94 @@
+#include <pdqsort.h>
+#include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
+#include <VectorIndex/Utils/VSUtils.h>
+
+namespace DB
+{
+
+void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTreeVSManagerPtr vector_scan_mgr, MarkRanges & mark_ranges)
+{
+    OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
+    MarkRanges res;
+
+    if (!vector_scan_mgr->getVectorScanResult()->computed)
+    {
+        mark_ranges = res;
+        return;
+    }
+
+    // bool has_final_mark = part->index_granularity.hasFinalMark();
+    size_t marks_count = part->index_granularity.getMarksCount();
+    /// const auto & index = part->index;
+    /// marks_count should not be 0 if we reach here
+
+    auto settings = vector_scan_mgr->getSettings();
+
+    size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
+        settings.merge_tree_min_rows_for_seek,
+        settings.merge_tree_min_bytes_for_seek,
+        part->index_granularity_info.fixed_index_granularity,
+        part->index_granularity_info.index_granularity_bytes);
+
+    auto need_this_range = [&](MarkRange & range)
+    {
+        auto begin = range.begin;
+        auto end = range.end;
+        auto start_row = part->index_granularity.getMarkStartingRow(begin);
+        auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
+
+        auto result = vector_scan_mgr->getVectorScanResult();
+
+        const ColumnUInt32 * label_column
+            = checkAndGetColumn<ColumnUInt32>(vector_scan_mgr->getVectorScanResult()->result_columns[0].get());
+        for (size_t ind = 0; ind < label_column->size(); ++ind)
+        {
+            auto label = label_column->getUInt(ind);
+            if (label >= start_row && label < end_row)
+            {
+                LOG_TRACE(
+                    &Poco::Logger::get("MergeTreeVectorScanUtils"),
+                    "Keep range: {}-{} in part: {}",
+                    begin,
+                    end,
+                    part->name);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::vector<MarkRange> ranges_stack = {{0, marks_count}};
+
+    while (!ranges_stack.empty())
+    {
+        MarkRange range = ranges_stack.back();
+        ranges_stack.pop_back();
+
+        if (!need_this_range(range))
+            continue;
+
+        if (range.end == range.begin + 1)
+        {
+            if (res.empty() || range.begin - res.back().end > min_marks_for_seek)
+                res.push_back(range);
+            else
+                res.back().end = range.end;
+        }
+        else
+        {
+            /// Break the segment and put the result on the stack from right to left.
+            size_t step = (range.end - range.begin - 1) / settings.merge_tree_coarse_index_granularity + 1;
+            size_t end;
+
+            for (end = range.end; end > range.begin + step; end -= step)
+                ranges_stack.emplace_back(end - step, end);
+
+            ranges_stack.emplace_back(range.begin, end);
+        }
+    }
+
+    mark_ranges = res;
+}
+
+}

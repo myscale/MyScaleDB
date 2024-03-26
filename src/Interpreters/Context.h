@@ -25,11 +25,12 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/StorageID.h>
 #include <Interpreters/MergeTreeTransactionHolder.h>
-#include <Interpreters/VectorScanDescription.h>
 #include <Parsers/IAST_fwd.h>
 #include <Server/HTTP/HTTPContext.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage_fwd.h>
+
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include "config.h"
 
@@ -119,7 +120,7 @@ class ObjectStorageQueueLog;
 class AsynchronousInsertLog;
 class BackupLog;
 class BlobStorageLog;
-class VectorIndexEventLog;
+class VIEventLog;
 class IAsynchronousReader;
 class IOUringReader;
 struct MergeTreeSettings;
@@ -479,7 +480,7 @@ protected:
 
     /// TODO: will be enhanced similar as scalars.
     /// Used when vector scan func exists in right joined table
-    mutable std::optional<VectorScanDescription> vector_scan_description;
+    mutable std::optional<VSDescription> vector_scan_description;
 
 public:
     /// Some counters for current query execution.
@@ -1063,16 +1064,14 @@ public:
     void clearMarkCache() const;
     ThreadPool & getLoadMarksThreadpool() const;
 
-    void flushAllVectorIndexWillUnload() const;
-
     void setIndexUncompressedCache(const String & cache_policy, size_t max_size_in_bytes, double size_ratio);
     void updateIndexUncompressedCacheConfiguration(const Poco::Util::AbstractConfiguration & config);
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
     void clearIndexUncompressedCache() const;
 
     /// Primary key cache size limit.
-    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
-    size_t getPrimaryKeyCacheSize() const;
+    void setPKCacheSize(size_t max_size_in_bytes);
+    size_t getPKCacheSize() const;
 
     void setIndexMarkCache(const String & cache_policy, size_t max_cache_size_in_bytes, double size_ratio);
     void updateIndexMarkCacheConfiguration(const Poco::Util::AbstractConfiguration & config);
@@ -1170,7 +1169,7 @@ public:
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
     std::shared_ptr<BackupLog> getBackupLog() const;
     std::shared_ptr<BlobStorageLog> getBlobStorageLog() const;
-    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
+    std::shared_ptr<VIEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     SystemLogs getSystemLogs() const;
 
@@ -1374,8 +1373,8 @@ public:
     const ServerSettings & getServerSettings() const;
 
     /// Used for vector scan functions
-    std::optional<VectorScanDescription> getVecScanDescription() const;
-    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    std::optional<VSDescription> getVecScanDescription() const;
+    void setVecScanDescription(VSDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
 
     /// Used for license check

@@ -64,7 +64,6 @@
 #include <Interpreters/ProcessList.h>
 #include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/QueryLog.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/ReplaceQueryParameterVisitor.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -80,6 +79,8 @@
 #include <Processors/Formats/IOutputFormat.h>
 #include <Processors/Executors/CompletedPipelineExecutor.h>
 #include <Processors/Sources/WaitForAsyncInsertSource.h>
+
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 #include <base/EnumReflection.h>
 #include <base/demangle.h>
@@ -384,7 +385,7 @@ QueryLogElement logQueryStart(
 
 void logQueryFinish(
     QueryLogElement & elem,
-    VectorIndexEventLogElement & vec_elem,
+    VIEventLogElement & vec_elem,
     const ContextMutablePtr & context,
     const ASTPtr & query_ast,
     const QueryPipeline & query_pipeline,
@@ -410,7 +411,7 @@ void logQueryFinish(
 
         addStatusInfoToQueryLogElement(elem, info, query_ast, context);
 
-        if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+        if (vec_elem.event_type != VIEventLogElement::DEFAULT)
         {
             if (auto vec_index_event_log = context->getVectorIndexEventLog())
             {
@@ -589,7 +590,7 @@ void logQueryException(
     }
 }
 
-VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
+VIEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
 {
     if(ast)
     {
@@ -601,20 +602,20 @@ VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
             create_query->columns_list->vec_indices &&
             !create_query->columns_list->vec_indices->children.empty())
         {
-            return VectorIndexEventLogElement::DEFINITION_CREATED;
+            return VIEventLogElement::DEFINITION_CREATED;
         }
         else if (alter_query)
         {
             for (const auto & command : alter_query->command_list->children)
             {
                 if ( command->as<ASTAlterCommand&>().type == ASTAlterCommand::ADD_VECTOR_INDEX )
-                    return VectorIndexEventLogElement::DEFINITION_CREATED;
+                    return VIEventLogElement::DEFINITION_CREATED;
                 else if (command->as<ASTAlterCommand&>().type == ASTAlterCommand::DROP_VECTOR_INDEX)
-                    return VectorIndexEventLogElement::DEFINITION_DROPPED;
+                    return VIEventLogElement::DEFINITION_DROPPED;
             }
         }
     }
-    return VectorIndexEventLogElement::DEFAULT;
+    return VIEventLogElement::DEFAULT;
 }
 
 void logExceptionBeforeStart(
@@ -636,11 +637,11 @@ void logExceptionBeforeStart(
 
     /// Log the start of query execution into the table if necessary.
     QueryLogElement elem;
-    VectorIndexEventLogElement vec_elem;
+    VIEventLogElement vec_elem;
     auto current_event_type = getQueryWithVectorType(ast);
-    if(current_event_type != VectorIndexEventLogElement::DEFAULT &&
-       current_event_type != VectorIndexEventLogElement::DEFINITION_DROPPED)
-        vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+    if(current_event_type != VIEventLogElement::DEFAULT &&
+       current_event_type != VIEventLogElement::DEFINITION_DROPPED)
+        vec_elem.event_type = VIEventLogElement::DEFINITION_ERROR;
     vec_elem.part_name = "";
     vec_elem.partition_id = "";
     vec_elem.event_time = timeInSeconds(query_end_time);
@@ -702,7 +703,7 @@ void logExceptionBeforeStart(
     CurrentThread::finalizePerformanceCounters();
 
     if (auto vector_index_event_log = context->getVectorIndexEventLog())
-        if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+        if (vec_elem.event_type != VIEventLogElement::DEFAULT)
             vector_index_event_log->add(vec_elem);
 
     if (settings.log_queries && elem.type >= settings.log_queries_min_type && !settings.log_queries_min_query_duration_ms.totalMilliseconds())
@@ -1391,13 +1392,13 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 query_table,
                 async_insert);
 
-            VectorIndexEventLogElement vec_elem;
+            VIEventLogElement vec_elem;
 
             vec_elem.part_name = "";
             vec_elem.partition_id = "";
             vec_elem.event_time = timeInSeconds(query_start_time);
             vec_elem.event_time_microseconds = timeInMicroseconds(query_start_time);
-            vec_elem.event_type = VectorIndexEventLogElement::DEFAULT;
+            vec_elem.event_type = VIEventLogElement::DEFAULT;
             if (query_database == "")
                 vec_elem.database_name = context->getCurrentDatabase();
             else
@@ -1441,9 +1442,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 if (my_quota)
                     my_quota->used(QuotaType::ERRORS, 1, /* check_exceeded = */ false);
 
-                if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+                if (vec_elem.event_type != VIEventLogElement::DEFAULT)
                 {
-                    vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+                    vec_elem.event_type = VIEventLogElement::DEFINITION_ERROR;
                     if (auto vec_index_event_log = context->getVectorIndexEventLog())
                     {
                         vec_index_event_log->add(vec_elem);

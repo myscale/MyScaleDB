@@ -23,7 +23,7 @@ INSERT INTO test_replicated_fail_vector_2 SELECT number, [number, number, number
 
 SELECT sleep(2);
 
-SELECT table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() order by table;
+SELECT table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() order by table;
 
 DROP TABLE test_replicated_fail_vector_2 SYNC;
 DROP TABLE test_replicated_fail_vector SYNC;

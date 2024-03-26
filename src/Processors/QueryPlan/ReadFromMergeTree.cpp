@@ -122,7 +122,7 @@ bool restorePrewhereInputs(PrewhereInfo & info, const NameSet & inputs)
 
 }
 
-#include <Storages/MergeTree/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 namespace ProfileEvents
 {

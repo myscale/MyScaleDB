@@ -13,8 +13,8 @@
 #include <Interpreters/PreparedSets.h>
 #include <Planner/PlannerContext.h>
 #include <QueryPipeline/StreamLocalLimits.h>
-#include <Interpreters/VectorScanDescription.h>
-#include <Common/VectorScanUtils.h>
+#include <VectorIndex/Storages/VSDescription.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 #include <memory>
 
@@ -145,10 +145,10 @@ struct InputOrderInfo
 
 struct VectorScanInfo
 {
-    VectorScanDescriptions vector_scan_descs;
+    VSDescriptions vector_scan_descs;
     bool is_batch;
 
-    VectorScanInfo(const VectorScanDescriptions & vector_scan_descs_) 
+    VectorScanInfo(const VSDescriptions & vector_scan_descs_)
         : vector_scan_descs(vector_scan_descs_) {
         is_batch = !vector_scan_descs.empty() && isBatchDistance(vector_scan_descs[0].column_name);
     }

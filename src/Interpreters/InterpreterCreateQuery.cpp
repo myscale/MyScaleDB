@@ -32,7 +32,6 @@
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTVectorIndexDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ParserCreateQuery.h>
@@ -94,6 +93,12 @@
 #include <Interpreters/ReplaceQueryParameterVisitor.h>
 #include <Parsers/QueryParameterVisitor.h>
 
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
+
+namespace Search
+{
+enum class DataType;
+}
 
 namespace CurrentMetrics
 {
@@ -545,7 +550,7 @@ ASTPtr InterpreterCreateQuery::formatIndices(const IndicesDescription & indices)
     return res;
 }
 
-ASTPtr InterpreterCreateQuery::formatVectorIndices(const VectorIndicesDescription & vec_indices)
+ASTPtr InterpreterCreateQuery::formatVectorIndices(const VIDescriptions & vec_indices)
 {
     auto res = std::make_shared<ASTExpressionList>();
 
@@ -844,15 +849,15 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
         if (create.columns_list->vec_indices)
             for (const auto & vec_index : create.columns_list->vec_indices->children)
             {
-                const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
+                const auto * vec_index_definition = vec_index->as<ASTVIDeclaration>();
                 std::optional<NameAndTypePair> vector_column = properties.columns.tryGetPhysical(vec_index_definition->column);
                 if(!vector_column)
                     throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vec_index_definition->column);
 
-                VectorSearchType search_type = DB::getVectorSearchType(vector_column->type);
+                Search::DataType search_type = getSearchIndexDataType(vector_column->type);
 
                 /// Binary Vector is represented as FixedString(N), no need to check constraints
-                if (search_type == VectorSearchType::Float32Vector)
+                if (search_type == Search::DataType::FloatVector)
                 {
                     if (properties.constraints.empty())
                     {
@@ -866,7 +871,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 }
 
                 properties.vec_indices.push_back(
-                        VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+                    VIDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
             }
 
         if (create.columns_list->projections)

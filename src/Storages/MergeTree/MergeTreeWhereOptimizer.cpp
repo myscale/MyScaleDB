@@ -3,7 +3,6 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Interpreters/IdentifierSemantic.h>
-#include <Interpreters/TreeRewriter.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
@@ -15,8 +14,8 @@
 #include <Common/typeid_cast.h>
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/ActionsDAG.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 #include <base/map.h>
-#include <Common/VectorScanUtils.h>
 
 namespace DB
 {
