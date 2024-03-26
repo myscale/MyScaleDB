@@ -91,9 +91,6 @@ bool MutatePlainMergeTreeTask::executeStep()
                 if (data_part_storage.hasActiveTransaction())
                     data_part_storage.precommitTransaction();
 
-                /// Data part lock used for vector index move and mutating conflict
-                auto move_mutate_lock = future_part->parts[0]->lockPartForIndexMoveAndMutate();
-
                 MergeTreeData::Transaction transaction(storage, merge_mutate_entry->txn.get());
                 /// FIXME Transactions: it's too optimistic, better to lock parts before starting transaction
                 storage.renameTempPartAndReplace(new_part, transaction);
@@ -108,12 +105,8 @@ bool MutatePlainMergeTreeTask::executeStep()
                 /// resulting in insufficient topk returned during subsequent searches.
                 if (new_part->lightweight_delete_mask_updated)
                 {
-                   if (new_part->containAnyVectorIndex())
+                   if (new_part->vector_index.containAnyVectorIndexInReady())
                        new_part->onLightweightDelete();
-
-                    /// Support multiple vector indices
-                   if (new_part->containAnyRowIdsMaps()) /// decoupled part with merged vector index support lightweight delete
-                       new_part->onDecoupledLightWeightDelete();
                 }
 
                 state = State::NEED_FINISH;

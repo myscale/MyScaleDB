@@ -19,7 +19,6 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/MergeTreeTransactionHolder.h>
-#include <Interpreters/VectorScanDescription.h>
 #include <IO/IResourceManager.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/IAST_fwd.h>
@@ -28,6 +27,8 @@
 #include <Server/HTTP/HTTPContext.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage_fwd.h>
+
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include "config.h"
 
@@ -103,7 +104,7 @@ class ProcessorsProfileLog;
 class FilesystemCacheLog;
 class FilesystemReadPrefetchesLog;
 class AsynchronousInsertLog;
-class VectorIndexEventLog;
+class VIEventLog;
 class IAsynchronousReader;
 struct MergeTreeSettings;
 struct InitialAllRangesAnnouncement;
@@ -411,7 +412,7 @@ private:
 
     /// TODO: will be enhanced similar as scalars.
     /// Used when vector scan func exists in right joined table
-    mutable std::optional<VectorScanDescription> vector_scan_description;
+    mutable std::optional<VSDescription> vector_scan_description;
 
 public:
     /// Some counters for current query execution.
@@ -893,16 +894,14 @@ public:
     /// and make a prefetch by putting a read task to threadpoolReader.
     size_t getPrefetchThreadpoolSize() const;
 
-    void flushAllVectorIndexWillUnload() const;
-
     /// Create a cache of index uncompressed blocks of specified size. This can be done only once.
     void setIndexUncompressedCache(size_t max_size_in_bytes);
     std::shared_ptr<UncompressedCache> getIndexUncompressedCache() const;
     void dropIndexUncompressedCache() const;
 
     /// Primary key cache size limit.
-    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
-    size_t getPrimaryKeyCacheSize() const;
+    void setPKCacheSize(size_t max_size_in_bytes);
+    size_t getPKCacheSize() const;
 
     /// Create a cache of index marks of specified size. This can be done only once.
     void setIndexMarkCache(size_t cache_size_in_bytes);
@@ -988,7 +987,7 @@ public:
     std::shared_ptr<FilesystemCacheLog> getFilesystemCacheLog() const;
     std::shared_ptr<FilesystemReadPrefetchesLog> getFilesystemReadPrefetchesLog() const;
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
-    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
+    std::shared_ptr<VIEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     /// Returns an object used to log operations with parts if it possible.
     /// Provide table name to make required checks.
@@ -1160,8 +1159,8 @@ public:
     ParallelReplicasMode getParallelReplicasMode() const;
 
     /// Used for vector scan functions
-    std::optional<VectorScanDescription> getVecScanDescription() const;
-    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    std::optional<VSDescription> getVecScanDescription() const;
+    void setVecScanDescription(VSDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
 
     /// Used for license check

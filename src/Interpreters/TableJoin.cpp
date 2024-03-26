@@ -743,12 +743,12 @@ void TableJoin::resetToCross()
     this->table_join.kind = JoinKind::Cross;
 }
 
-std::optional<VectorScanDescription> TableJoin::getVecScanDescription() const
+std::optional<VSDescription> TableJoin::getVecScanDescription() const
 {
     return vector_scan_description;
 }
 
-void TableJoin::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+void TableJoin::setVecScanDescription(VSDescription & vec_scan_desc) const
 {
     vector_scan_description = vec_scan_desc;
 }

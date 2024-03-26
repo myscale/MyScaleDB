@@ -1,11 +1,12 @@
 #pragma once
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Processors/Chunk.h>
+
+#include <VectorIndex/Cache/PKCacheManager.h>
 
 
 namespace DB
