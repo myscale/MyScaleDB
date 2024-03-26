@@ -19,7 +19,7 @@ ALTER TABLE test_fail_vector_2 ADD VECTOR INDEX vindex vector TYPE IVFFLAT('metr
 
 select sleep(2);
 
-select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() order by table;
+select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() order by table;
 
 DROP TABLE test_fail_vector_2;
 DROP TABLE test_fail_vector;

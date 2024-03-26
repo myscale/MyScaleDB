@@ -45,8 +45,8 @@
 #include <ctime>
 #include <numeric>
 
+#include <VectorIndex/Storages/VIBuilderUpdater.h>
 #include <boost/algorithm/string/replace.hpp>
-#include <Storages/MergeTree/MergeTreeVectorIndexBuilderUpdater.h>
 
 
 namespace CurrentMetrics
@@ -811,9 +811,6 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
     /// Check latest metadata if vector index has been dropped.
     const auto new_vector_indices = new_part->storage.getInMemoryMetadataPtr()->getVectorIndices();
 
-    /// The new part is decouple or not depending on the number of source parts
-    bool can_be_decouple = old_parts.size() == 1 ? false : true;
-
     /// Since new part will not load dropped vector index, in cases when drop vector index happens after move vector index,
     /// we need to remove left vector index files from new part.
     for (const auto & old_vec_index : metadata_snapshot->getVectorIndices())
@@ -823,33 +820,25 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
 
         /// This old vector index has been dropped during merge. Check decouple part or vpart cases.
         String vec_index_name = old_vec_index.name;
-        if (can_be_decouple)
-        {
-            LOG_DEBUG(log, "Try to remove old parts' vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
-            new_part->removeRowIdsMaps(vec_index_name);
-        }
-        else
-        {
-            LOG_DEBUG(log, "Try to remove vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
-            new_part->removeVectorIndex(vec_index_name);
-        }
+        LOG_DEBUG(log, "Try to remove vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
+        new_part->vector_index.removeVectorIndex(vec_index_name);
     }
 
     /// Special handling for merge one single VPart. If new part has vector index, expire the index cache for old part.
     /// TODO: Can use old part's index cache, just update cache key to avoid load it for new part?
-    if (new_part->containAnyVectorIndex() && old_parts.size() == 1)
+    if (new_part->vector_index.containAnyVectorIndexInReady() && old_parts.size() == 1)
     {
         auto old_part = old_parts[0];
         for (const auto & vec_index : new_vector_indices)
         {
-            if (new_part->containVectorIndex(vec_index.name))
+            if (new_part->vector_index.alreadyWithVIndexSegment(vec_index.name))
             {
                 /// Expire cache for old part
-                auto segment_ids = VectorIndex::getAllSegmentIds(old_part, vec_index.name, vec_index.column);
+                auto segment_ids = VectorIndex::getAllSegmentIds(old_part, vec_index.name);
                 for (auto & segment_id : segment_ids)
                 {
                     LOG_DEBUG(log, "Remove vector index {} for old part {} from cache", vec_index.name, old_part->name);
-                    VectorIndex::VectorSegmentExecutor::removeFromCache(segment_id.getCacheKey());
+                    VectorIndex::VICacheManager::removeFromCache(segment_id.getCacheKey());
                 }
             }
         }

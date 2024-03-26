@@ -49,7 +49,6 @@
 #include <Storages/StorageDistributed.h>
 #include <Storages/StorageDictionary.h>
 #include <Storages/StorageJoin.h>
-#include <Storages/VectorIndexInfo.h>
 #include <Functions/FunctionsExternalDictionaries.h>
 
 #include <Dictionaries/DictionaryStructure.h>
@@ -75,13 +74,11 @@
 
 #include <Interpreters/ActionsVisitor.h>
 #include <Interpreters/GetAggregatesVisitor.h>
-#include <Interpreters/GetVectorScanVisitor.h>
 #include <Interpreters/GlobalSubqueriesVisitor.h>
 #include <Interpreters/interpretSubquery.h>
 #include <Interpreters/JoinUtils.h>
 #include <Interpreters/misc.h>
 #include <Interpreters/PreparedSets.h>
-#include <Interpreters/parseVectorScanParameters.h>
 
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
@@ -94,7 +91,10 @@
 // txh added
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/VectorIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Interpreters/GetVSVisitor.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 namespace DB
 {
@@ -478,8 +478,8 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAG & temp_actions)
             if (!search_column_type)
                 throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vector_scan_desc.search_column_name);
 
-            vector_scan_desc.vector_search_type = getVectorSearchType(search_column_type->type);
-            vector_scan_desc.search_column_dim = getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
+            vector_scan_desc.vector_search_type = getSearchIndexDataType(search_column_type->type);
+            vector_scan_desc.search_column_dim = VectorIndex::getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
             checkVectorDimension(vector_scan_desc.vector_search_type, vector_scan_desc.search_column_dim);
         }
     }
@@ -639,7 +639,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAG & actions)
     {
         if (node->arguments)
             getRootActionsNoMakeSet(node->arguments, actions);
-        VectorScanDescription vector_scan_desc;
+        VSDescription vector_scan_desc;
         vector_scan_desc.column_name = node->getColumnName();
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
         // vector_scan_desc.argument_names.resize(arguments.size());
@@ -650,7 +650,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAG & actions)
                     "wrong argument number in distance function");
         }
 
-        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
+        /// Save short column name in VSDescription, exclude database name and table name if exists.
         if (auto * identifier = arguments[0]->as<ASTIdentifier>())
             vector_scan_desc.search_column_name = identifier->shortName();
         else

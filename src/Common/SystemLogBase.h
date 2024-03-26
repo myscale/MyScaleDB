@@ -33,7 +33,7 @@
     M(BackupLogElement) \
     M(BlobStorageLogElement) \
     M(ErrorLogElement) \
-    M(VectorIndexEventLogElement)
+    M(VIEventLogElement)
 
 namespace Poco
 {

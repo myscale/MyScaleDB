@@ -46,6 +46,7 @@
 #include "base/defines.h"
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeFixedString.h>
+#include <SearchIndex/SearchIndexCommon.h>
 
 
 namespace ProfileEvents
@@ -757,10 +758,10 @@ BlockIO InterpreterInsertQuery::execute()
         if(!search_column_type)
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", col_name);
 
-        VectorSearchType search_type = getVectorSearchType(search_column_type->type);
+        Search::DataType search_type = getSearchIndexDataType(search_column_type->type);
 
         // As for Binary vector, no need to check, because N > 0 when FixedString(N) column is created.
-        if (search_type == VectorSearchType::Float32Vector && metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
+        if (search_type == Search::DataType::FloatVector && metadata_snapshot->constraints.getArrayLengthByColumnName(col_name).first == 0)
         {
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Cannot insert data: column {} with Float32 vector index need correct length constraint", col_name);
         }

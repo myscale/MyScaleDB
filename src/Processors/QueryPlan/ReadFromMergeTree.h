@@ -7,7 +7,7 @@
 #include <Storages/MergeTree/MergeTreeReadPool.h>
 #include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/PartitionPruner.h>
-#include <Storages/MergeTree/MergeTreeVectorScanUtils.h>
+#include <VectorIndex/Utils/VSUtils.h>
 
 
 namespace DB
@@ -274,7 +274,7 @@ private:
     bool enable_vertical_final = false;
     bool enable_remove_parts_from_snapshot_optimization = true;
 
-    friend class ReadWithVectorScan;
+    friend class ReadWithVS;
 };
 
 }

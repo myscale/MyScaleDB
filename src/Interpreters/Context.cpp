@@ -80,7 +80,6 @@
 #include <Interpreters/InterserverCredentials.h>
 #include <Interpreters/Cluster.h>
 #include <Interpreters/InterserverIOHandler.h>
-#include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DDLWorker.h>
 #include <Interpreters/DDLTask.h>
@@ -125,6 +124,7 @@
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <base/defines.h>
 #include <VectorIndex/CacheManager.h>
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 
 namespace fs = std::filesystem;
@@ -3133,11 +3133,6 @@ ThreadPool & Context::getLoadMarksThreadpool() const
     return *shared->load_marks_threadpool;
 }
 
-void Context::flushAllVectorIndexWillUnload() const
-{
-    VectorIndex::CacheManager::flushWillUnloadLog();
-}
-
 void Context::setIndexUncompressedCache(const String & cache_policy, size_t max_size_in_bytes, double size_ratio)
 {
     std::lock_guard lock(shared->mutex);
@@ -3173,14 +3168,14 @@ void Context::clearIndexUncompressedCache() const
         shared->index_uncompressed_cache->clear();
 }
 
-void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
+void Context::setPKCacheSize(size_t max_size_in_bytes)
 {
     std::lock_guard lock(shared->mutex);
     shared->primary_key_cache_size = max_size_in_bytes;
 }
 
 
-size_t Context::getPrimaryKeyCacheSize() const
+size_t Context::getPKCacheSize() const
 {
     std::lock_guard lock(shared->mutex);
     return shared->primary_key_cache_size;
@@ -4291,7 +4286,7 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
     return shared->system_logs->transactions_info_log;
 }
 
-std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
+std::shared_ptr<VIEventLog> Context::getVectorIndexEventLog(const String & part_database) const
 {
     SharedLockGuard lock(shared->mutex);
 
@@ -5680,12 +5675,12 @@ ReadSettings Context::getReadSettings() const
     return res;
 }
 
-std::optional<VectorScanDescription> Context::getVecScanDescription() const
+std::optional<VSDescription> Context::getVecScanDescription() const
 {
     return vector_scan_description;
 }
 
-void Context::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+void Context::setVecScanDescription(VSDescription & vec_scan_desc) const
 {
     vector_scan_description = vec_scan_desc;
 }

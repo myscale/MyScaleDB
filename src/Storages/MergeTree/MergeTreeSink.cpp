@@ -225,6 +225,10 @@ void MergeTreeSink::finishDelayedChunk()
             transaction.commit(&lock);
         }
 
+        /// init vector index
+        for (auto & vec_desc : metadata_snapshot->getVectorIndices())
+            part->vector_index.addVectorIndex(vec_desc);
+
         /// Part can be deduplicated, so increment counters and add to part log only if it's really added
         if (added)
         {

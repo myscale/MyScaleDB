@@ -9,7 +9,7 @@
 #include <DataTypes/getLeastSupertype.h>
 #include <Interpreters/IKeyValueEntity.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
-#include <Interpreters/VectorScanDescription.h>
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include <Common/Exception.h>
 #include <Parsers/IAST_fwd.h>
@@ -174,7 +174,7 @@ private:
     NamesAndTypesList columns_added_by_join;
 
     /// vector scan functions from joined table
-    mutable std::optional<VectorScanDescription> vector_scan_description;
+    mutable std::optional<VSDescription> vector_scan_description;
 
     /// Target type to convert key columns before join
     NameToTypeMap left_type_map;
@@ -434,8 +434,8 @@ public:
     NamesAndTypesList correctedColumnsAddedByJoin() const;
 
     /// Used for vector scan functions
-    std::optional<VectorScanDescription> getVecScanDescription() const;
-    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
+    std::optional<VSDescription> getVecScanDescription() const;
+    void setVecScanDescription(VSDescription & vec_scan_desc) const;
 };
 
 }

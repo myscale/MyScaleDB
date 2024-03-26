@@ -30,7 +30,7 @@
     M(AsynchronousInsertLog, asynchronous_insert_log, "Contains a history for all asynchronous inserts executed on current server.") \
     M(BackupLog,             backup_log,           "Contains logging entries with the information about BACKUP and RESTORE operations.") \
     M(BlobStorageLog,        blob_storage_log,     "Contains logging entries with information about various blob storage operations such as uploads and deletes.") \
-    M(VectorIndexEventLog,   vector_index_event_log, "Contains logging entries with information about vector index events") \
+    M(VIEventLog,            vector_index_event_log, "Contains logging entries with information about vector index events") \
 
 
 namespace DB
