@@ -34,6 +34,7 @@ include:
   - ssh-keyscan -H git.moqi.ai >> ~/.ssh/known_hosts
   - cp $BUILDER_PRIVATE_SSH_KEY ~/.ssh/id_rsa
   - cp $BUILDER_PUBLIC_SSH_KEY ~/.ssh/id_rsa.pub
+  - chmod -R 600 /root/.ssh
 
 stages:
   - pre-check
