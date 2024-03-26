@@ -1972,6 +1972,12 @@ void IMergeTreeDataPart::convertIndexFileForUpgrade()
 
             if (!from_checksums && endsWith(new_file_name, VECTOR_INDEX_FILE_OLD_EXTENSION))
                 new_file_name = fs::path(new_file_name).replace_extension(VECTOR_INDEX_FILE_EXTENSION).string();
+            
+            /// for faiss index file, contain "<index_name>-<index_name>" file, replcace "<index_name>-<index_name>" to "<index_name>-data_bin"
+            std::vector<String> tokens;
+            boost::split(tokens, new_file_name, boost::is_any_of("-"));
+            if (tokens.size() == 2 && tokens[0] + VECTOR_INDEX_FILE_SUFFIX == tokens[1])
+                new_file_name = tokens[0] + "-data_bin" + VECTOR_INDEX_FILE_SUFFIX;
 
             converted_files_map[file_name] = new_file_name;
         }
