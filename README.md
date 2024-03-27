@@ -67,78 +67,78 @@ The simplest way to use MyScaleDB is to create an instance on MyScale Cloud serv
 
 ### Self-Hosted
 
-#### MyScaleDB Docker Image
-
-- Using Docker
+#### Using MyScaleDB Docker Image
   
-  To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
+To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
 
-  ```bash
-  docker run --name myscaledb myscale/myscaledb:1.4
-  ```
-  
-  This will start a MyScaleDB instance with default user `default` and no password. You can then connect to the database using `clickhouse-client`:
-  
-  ```bash
-  docker exec -it myscaledb clickhouse-client
-  ```
+```bash
+docker run --name myscaledb myscale/myscaledb:1.4
+```
 
-- Using Docker Compose
-  
- 1. User the following recommended directory structure and the location of the `docker-compose.yaml` file:
- 
-   ```bash
-   ❯ tree myscaledb
-   myscaledb
-   ├── docker-compose.yaml
-   └── volumes
-   
-   1 directory, 1 file
-   ```
-   
- 2. Define the configuration for your deployment. We recommend starting with the following configuration in your `docker-compose.yaml` file, which you can adjust based on your specific requirements:
-   
-   ```yaml
-   version: '3.7'
-   
-   services:
-     myscaledb:
-       image: myscale/myscaledb:1.4
-       tty: true
-       ports:
-         - '8123:8123'
-         - '9000:9000'
-         - '8998:8998'
-         - '9363:9363'
-         - '9116:9116'
-       volumes:
-         - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/var/lib/clickhouse
-         - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/log:/var/log/clickhouse-server
-       deploy:
-         resources:
-           limits:
-             cpus: "16.00"
-             memory: 32Gb
-   ```
-   > Note: You can also customize the configuration file of MyScaleDB. Copy the `/etc/clickhouse-server` directory from your `myscaledb` container to your local drive, modify the configuration, and add a directory mapping to the `docker-compose.yaml` file to make the configuration take effect:
-   > ```yaml
-   > - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
-   > ```
-   
-  3. Use the following command to get it running:
-   
-   ```bash
-   cd myscaledb
-   docker compose up -d
-   ```
-   
-  4. Access the MyScaleDB command line interface using the following command.
-   
-   ```bash
-   docker exec -it myscaledb-myscaledb-1 clickhouse-client
-   ```
- 5. You can now run SQL statements. See [Executing SQL Queries](https://myscale.com/docs/en/quickstart/#executing-sql-queries).
+This will start a MyScaleDB instance with default user `default` and no password. You can then connect to the database using `clickhouse-client`:
 
+```bash
+docker exec -it myscaledb clickhouse-client
+```
+
+#### Using Docker Compose
+  
+1. Use the following recommended directory structure and the location of the `docker-compose.yaml` file:
+
+```bash
+❯ tree myscaledb
+
+myscaledb
+├── docker-compose.yaml
+└── volumes
+    1 directory, 1 file
+```
+
+2. Define the configuration for your deployment. We recommend starting with the following configuration in your `docker-compose.yaml` file, which you can adjust based on your specific requirements:
+
+```yaml
+version: '3.7'
+
+services:
+  myscaledb:
+    image: myscale/myscaledb:1.4
+    tty: true
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+      - '8998:8998'
+      - '9363:9363'
+      - '9116:9116'
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/var/lib/clickhouse
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/log:/var/log/clickhouse-server
+    deploy:
+      resources:
+        limits:
+          cpus: "16.00"
+          memory: 32Gb
+```
+
+> Note: You can also customize the configuration file of MyScaleDB. Copy the `/etc/clickhouse-server` directory from your `myscaledb` container to your local drive, modify the configuration, and add a directory mapping to the `docker-compose.yaml` file to make the configuration take effect:
+>
+> ```yaml
+> - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
+> ```
+
+3. Use the following command to get it running:
+
+```bash
+cd myscaledb
+docker compose up -d
+```
+
+4. Access the MyScaleDB command line interface using the following command.
+
+```bash
+docker exec -it myscaledb-myscaledb-1 clickhouse-client
+```
+
+5. You can now run SQL statements. See [Executing SQL Queries](https://myscale.com/docs/en/quickstart/#executing-sql-queries).
 
 ## Tutorial
 
