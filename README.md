@@ -21,13 +21,15 @@
 
 ## What is MyScaleDB?
 
-MyScaleDB is an open-source cloud-native SQL vector database optimized for AI applications and solutions, built on the open-source **ClickHouse** database, allowing us to effectively manage massive volumes of data for the development of robust and scalable AI applications. Some of the most significant benefits of using MyScaleDB include:
+MyScaleDB is the SQL vector database that enables developers to build production-ready and scalable AI applications using familiar SQL. It is built on top of **ClickHouse** and optimized for AI applications and solutions, allowing developers to effectively manage and process massive volumes of data. 
+
+Key benefits of using MyScaleDB include:
 
 * **Fully SQL-Compatible**
   * Fast, powerful, and efficient vector search, filtered search, and SQL-vector join queries.
   * Use SQL with vector-related functions to interact with MyScaleDB. No need to learn complex new tools or frameworks – stick with what you know and love.
 * **Production-Ready for AI applications**
-  * A unified and time-tested platform to manage and process structured data, text, vector, JSON, geospatial, time-series data, and more.
+  * A unified and time-tested platform to manage and process structured data, text, vector, JSON, geospatial, time-series data, and more. See [supported data types and functions](https://myscale.com/docs/en/functions/)
   * Improved RAG accuracy by combining vectors with rich metadata and performing high-precision, high-efficiency filtered search at any ratio[^1].
 * **Unmatched performance and scalability**
   * MyScaleDB leverages cutting-edge OLAP database architecture and advanced vector algorithms for lightning-fast vector operations.
@@ -39,13 +41,11 @@ MyScaleDB is an open-source cloud-native SQL vector database optimized for AI ap
 
 [^2]: The MSTG (Multi-scale Tree Graph) algorithm is provided through [MyScale Cloud](https://myscale.com), achieving high data density with disk-based storage and better indexing & search performance on billion-scale vector data.
 
-Moreover, with MyScaleDB's SQL support and [rich data types and functions](https://myscale.com/docs/en/functions/), you can seamlessly manage and query multiple data modalities in a unified system. This allows you to leverage structured, vector, text, time-series, and other data types simultaneously with a single query. The SQL data model supports flexible and sophisticated data modeling, which has been battle-tested for [over half a century](https://en.wikipedia.org/wiki/SQL#History). MyScaleDB's streamlined SQL vector approach ensures rapid and efficient processing, saving time and reducing complexity, empowering you to tackle AI/LLM and big data tasks with ease.
-
 ## Why MyScaleDB
 
+* Fully SQL compatible
 * Unified structured and vectorized data management
-* SQL vector database
-* Millisecond search on billion vectors
+* Millisecond search on billion-scale vectors
 * Highly reliable & linearly scalable
 * Hybrid search & complex SQL vector queries
 
@@ -59,16 +59,16 @@ One of the key operations in combining structured and vector search is filtered 
 
 While we have modified ClickHouse's execution and storage engine in many ways to ensure fast and cost-effective SQL vector queries, many of the features ([#37893](https://github.com/ClickHouse/ClickHouse/issues/37893), [#38048](https://github.com/ClickHouse/ClickHouse/pull/38048), [#37859](https://github.com/ClickHouse/ClickHouse/issues/37859), [#56728](https://github.com/ClickHouse/ClickHouse/issues/56728), [#58223](https://github.com/ClickHouse/ClickHouse/pull/58223)) related to general SQL processing have been contributed back to the ClickHouse open source community.
 
-## Creating a MyScaleDB Instance
+## Quick Start
 
 ### MyScale Cloud
 
-The simplest way to use MyScaleDB is to start an instance on MyScale Cloud service. We offer a free pod supporting 5M 768D vectors. Sign up [here](https://myscale.com/) and checkout [MyScaleDB QuickStart](https://myscale.com/docs/en/quickstart/) for more instructions.
+The simplest way to use MyScaleDB is to create an instance on MyScale Cloud service. You can start from a free pod supporting 5M 768D vectors. Sign up [here](https://myscale.com/) and checkout [MyScaleDB QuickStart](https://myscale.com/docs/en/quickstart/) for more instructions.
 
 ### Self-Hosted
 
-#### MyScaleDB Docker Image
-
+#### Using MyScaleDB Docker Image
+  
 To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
 
 ```bash
@@ -81,18 +81,20 @@ This will start a MyScaleDB instance with default user `default` and no password
 docker exec -it myscaledb clickhouse-client
 ```
 
-To install MyScaleDB locally or on-premise, we recommend using Docker Compose to deploy MyScaleDB. Below is the recommended directory structure and the location of the `docker-compose.yaml` file.
+#### Using Docker Compose
+  
+1. Use the following recommended directory structure and the location of the `docker-compose.yaml` file:
 
 ```bash
 ❯ tree myscaledb
+
 myscaledb
 ├── docker-compose.yaml
 └── volumes
-
-1 directory, 1 file
+    1 directory, 1 file
 ```
 
-After familiarizing yourself with the directory structure and the location of the `docker-compose.yaml` file, the next step is to define the configuration for your deployment. We recommend starting with the following configuration in your `docker-compose.yaml` file, which you can adjust based on your specific requirements:
+2. Define the configuration for your deployment. We recommend starting with the following configuration in your `docker-compose.yaml` file, which you can adjust based on your specific requirements:
 
 ```yaml
 version: '3.7'
@@ -117,29 +119,30 @@ services:
           memory: 32Gb
 ```
 
-Use the following command to get it running:
+> Note: You can also customize the configuration file of MyScaleDB. Copy the `/etc/clickhouse-server` directory from your `myscaledb` container to your local drive, modify the configuration, and add a directory mapping to the `docker-compose.yaml` file to make the configuration take effect:
+>
+> ```yaml
+> - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
+> ```
+
+3. Use the following command to get it running:
 
 ```bash
 cd myscaledb
 docker compose up -d
 ```
 
-You can access the myscaledb command line interface using the following command. From now on, you are free to execute SQL statements.
+4. Access the MyScaleDB command line interface using the following command.
 
 ```bash
 docker exec -it myscaledb-myscaledb-1 clickhouse-client
 ```
 
-If you want to customize the configuration file of MyScaleDB, please first copy the `/etc/clickhouse-server` directory from your `myscaledb` container to a directory on your local physical machine. Assuming you have copied it to the `volumes/config` directory, you can freely modify the configuration within the `volumes/config` directory. Then, you just need to add a directory mapping in the above-mentioned `docker-compose.yaml` file to make the configuration take effect.
-Here is the mapping of this configuration file:
-
-```yaml
-- ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
-```
+5. You can now run SQL statements. See [Executing SQL Queries](https://myscale.com/docs/en/quickstart/#executing-sql-queries).
 
 ## Tutorial
 
-Please refer to our [guide](https://myscale.com/docs/en/vector-search/) for how to create a SQL table with vector index and perform vector search. It's recommended to specify `TYPE SCANN` when creating a vector index in open source MyScaleDB.
+See [Vector Search Documentation](https://myscale.com/docs/en/vector-search/) for how to create a SQL table with vector index and perform vector search. It's recommended to specify `TYPE SCANN` when creating a vector index in open source MyScaleDB.
 
 ### Create a Table with Vector Column
 
@@ -191,17 +194,15 @@ LIMIT 5;
 
 ## Community
 
-You're welcome to become a part of the groups or channels listed below to engage in discussions, pose queries regarding MyScaleDB, and stay updated on the newest developments related to MyScaleDB:
+We're committed to continuously improving and evolving MyScaleDB to meet the ever-changing needs of the AI industry. Join us on this exciting journey and be part of the revolution in AI data management!
 
-* Seek help when you use MyScaleDB: [Discord](https://discord.gg/D2qpkqc4Jq)
-
+* [Discord](https://discord.gg/D2qpkqc4Jq)
+* [Support](https://myscale.com/contact/)
 * Get the latest MyScaleDB news or updates
 
   * Follow [@MyScaleDB](https://twitter.com/MyScaleDB) on Twitter
   * Follow [@MyScale](https://www.linkedin.com/company/myscale/) on LinkedIn
   * Read [MyScale Blog](https://myscale.com/blog/)
-
-For support, please [contact us](https://myscale.com/contact/).
 
 ## Roadmap
 
