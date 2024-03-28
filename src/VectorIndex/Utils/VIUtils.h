@@ -15,13 +15,13 @@
 
 #pragma once
 
-#include "../../Common/logger_useful.h"
-#include "../../IO/copyData.h"
-#include "../../Storages/MergeTree/MergeTreeDataPartChecksum.h"
-#include "../../Storages/StorageInMemoryMetadata.h"
+#include <Common/logger_useful.h>
+#include <IO/copyData.h>
+#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
+#include <Storages/StorageInMemoryMetadata.h>
 
-#include "../Common/VICommon.h"
-#include "../Storages/VIDescriptions.h"
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Storages/VIDescriptions.h>
 
 #pragma GCC diagnostic ignored "-Wunused-function"
 

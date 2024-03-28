@@ -18,9 +18,9 @@
 #include <memory>
 #include <filesystem>
 
-#include "../../../base/base/types.h"
+#include <base/types.h>
 
-#include "../Common/VICommon.h"
+#include <VectorIndex/Common/VICommon.h>
 
 namespace fs = std::filesystem;
 

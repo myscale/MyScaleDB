@@ -20,9 +20,9 @@
 #include <functional>
 #include <optional>
 
-#include "../../Columns/IColumn.h"
-#include "../../Common/CacheBase.h"
-#include "../../Storages/KeyDescription.h"
+#include <Columns/IColumn.h>
+#include <Common/CacheBase.h>
+#include <Storages/KeyDescription.h>
 
 namespace DB
 {
