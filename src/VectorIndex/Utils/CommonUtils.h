@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../../base/base/types.h"
-#include "../../../base/poco/Foundation/include/Poco/String.h"
+#include <base/types.h>
+#include <Poco/String.h>
 
 namespace Search
 {

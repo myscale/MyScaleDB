@@ -1,7 +1,7 @@
 #pragma once
-#include "../../Storages/MergeTree/MergeTreeData.h"
-#include "../../Storages/MergeTree/RangesInDataPart.h"
-#include "../Storages/MergeTreeVSManager.h"
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/RangesInDataPart.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 namespace DB
 {
