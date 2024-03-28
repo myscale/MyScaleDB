@@ -5,8 +5,8 @@
 #include <memory>
 #include <string>
 
-#include "../../Common/LRUResourceCache.h"
-#include "VICacheObject.h"
+#include <Common/LRUResourceCache.h>
+#include <VectorIndex/Cache/VICacheObject.h>
 
 namespace std
 {
