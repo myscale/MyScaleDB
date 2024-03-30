@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<a href='https://www.myscale.com/?utm_source=github&utm_medium=myscaledb'>
+<a href='https://myscale.com/?utm_source=github&utm_medium=myscaledb'>
 <img src="docs/myscaledb-logo-with-text.png" alt="MyScale, the SQL Vector Database for Scalable AI" height=100></img>
 </a>
 <br></br>
@@ -12,7 +12,7 @@
 [![Discord](https://img.shields.io/discord/1098133460310294528?logo=Discord)](https://discord.gg/D2qpkqc4Jq)
 [![Twitter](https://img.shields.io/twitter/url/http/shields.io.svg?style=social&label=Twitter)](https://twitter.com/MyScaleDB)
 
-[![Official Website](<https://img.shields.io/badge/-Visit%20the%20Official%20Website%20%E2%86%92-rgb(21,204,116)?style=for-the-badge>)](https://www.myscale.com/?utm_source=github&utm_medium=myscaledb_readme)
+[![Official Website](<https://img.shields.io/badge/-Visit%20the%20Official%20Website%20%E2%86%92-rgb(21,204,116)?style=for-the-badge>)](https://myscale.com/?utm_source=github&utm_medium=myscaledb_readme)
 [![Playground](<https://img.shields.io/badge/-Try%20It%20Online%20%E2%86%92-rgb(84,56,255)?style=for-the-badge>)](https://console.myscale.com/playground/?utm_source=github&utm_medium=myscaledb_readme)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/myscale)
 
@@ -214,3 +214,12 @@ We're committed to continuously improving and evolving MyScaleDB to meet the eve
 ## License
 
 MyScaleDB is licensed under the Apache License, Version 2.0. View a copy of the [License file](https://github.com/myscale/myscaledb?tab=License-1-ov-file).
+
+## Credits
+
+We give special thanks for these open-source projects, upon which we have developed MyScaleDB:
+
+- [ClickHouse](https://github.com/ClickHouse/ClickHouse) - A free analytics DBMS for big data.
+- [Faiss](https://github.com/facebookresearch/faiss) - A library for efficient similarity search and clustering of dense vectors, by Meta's Fundamental AI Research.
+- [hnswlib](https://github.com/nmslib/hnswlib) - Header-only C++/python library for fast approximate nearest neighbors.
+- [ScaNN](https://github.com/google-research/google-research/tree/master/scann) - Scalable Nearest Neighbors library by Google Research.
