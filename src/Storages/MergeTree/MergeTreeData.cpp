@@ -3345,6 +3345,9 @@ void MergeTreeData::dropAllData()
 
             LOG_INFO(log, "dropAllData: removing table directory recursive to cleanup garbage");
             disk->removeRecursive(relative_data_path);
+#if USE_TANTIVY_SEARCH
+            TantivyIndexStoreFactory::instance().remove(relative_data_path);
+#endif
         }
         catch (const fs::filesystem_error & e)
         {
@@ -3510,6 +3513,12 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
     if (AlterCommands::hasLegacyInvertedIndex(new_metadata) && !settings.allow_experimental_inverted_index)
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                 "Experimental inverted index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+
+#if USE_TANTIVY_SEARCH
+    if (AlterCommands::hasTantivyIndex(new_metadata) && !settings.allow_experimental_inverted_index)
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+            "Experimental Tantivy Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+#endif
 
     for (const auto & disk : getDisks())
         if (!disk->supportsHardLinks() && !commands.isSettingsAlter() && !commands.isCommentAlter())

@@ -774,6 +774,10 @@ static NameToNameVector collectFilesForRenames(
         {
             static const std::array<String, 2> suffixes = {".idx2", ".idx"};
             static const std::array<String, 4> gin_suffixes = {".gin_dict", ".gin_post", ".gin_seg", ".gin_sid"}; /// .gin_* means generalized inverted index (aka. full-text-index)
+#if USE_TANTIVY_SEARCH
+            static const std::array<String, 2> tantivy_suffixes
+                = {TANTIVY_INDEX_OFFSET_FILE_TYPE, TANTIVY_INDEX_DATA_FILE_TYPE}; // tantivy index files
+#endif
 
             for (const auto & suffix : suffixes)
             {
@@ -792,6 +796,14 @@ static NameToNameVector collectFilesForRenames(
                 if (source_part->checksums.has(filename))
                     add_rename(filename, "");
             }
+#if USE_TANTIVY_SEARCH
+            for (const auto & tantivy_suffix : tantivy_suffixes)
+            {
+                const String filename = INDEX_FILE_PREFIX + command.column_name + tantivy_suffix;
+                if (source_part->checksums.has(filename))
+                    add_rename(filename, "");
+            }
+#endif
         }
         else if (command.type == MutationCommand::Type::DROP_PROJECTION)
         {

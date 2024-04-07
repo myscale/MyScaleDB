@@ -6,12 +6,12 @@
 namespace DB
 {
 
-void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTreeVSManagerPtr vector_scan_mgr, MarkRanges & mark_ranges)
+void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTreeBaseSearchManagerPtr base_search_mgr, MarkRanges & mark_ranges)
 {
     OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
     MarkRanges res;
 
-    if (!vector_scan_mgr->getVectorScanResult()->computed)
+    if (!base_search_mgr->preComputed())
     {
         mark_ranges = res;
         return;
@@ -22,7 +22,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
     /// const auto & index = part->index;
     /// marks_count should not be 0 if we reach here
 
-    auto settings = vector_scan_mgr->getSettings();
+    auto settings = base_search_mgr->getSettings();
 
     size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
         settings.merge_tree_min_rows_for_seek,
@@ -37,10 +37,10 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
         auto start_row = part->index_granularity.getMarkStartingRow(begin);
         auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
 
-        auto result = vector_scan_mgr->getVectorScanResult();
+        auto result = base_search_mgr->getSearchResult();
 
         const ColumnUInt32 * label_column
-            = checkAndGetColumn<ColumnUInt32>(vector_scan_mgr->getVectorScanResult()->result_columns[0].get());
+            = checkAndGetColumn<ColumnUInt32>(result->result_columns[0].get());
         for (size_t ind = 0; ind < label_column->size(); ++ind)
         {
             auto label = label_column->getUInt(ind);

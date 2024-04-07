@@ -1,5 +1,5 @@
 #include <Storages/MergeTree/MergeTreeWithVectorScanSource.h>
-#include <Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h>
+#include <Storages/MergeTree/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <Common/threadPoolCallbackRunner.h>
 #include <IO/SharedThreadPools.h>
 #include <Common/EventFD.h>
@@ -7,7 +7,7 @@
 namespace DB
 {
 
-MergeTreeWithVectorScanSource::MergeTreeWithVectorScanSource(MergeTreeSelectWithVectoScanProcessorPtr processor_, const std::string & log_name_)
+MergeTreeWithVectorScanSource::MergeTreeWithVectorScanSource(MergeTreeSelectWithHybridSearchProcessorPtr processor_, const std::string & log_name_)
     : ISource(processor_->getHeader()), processor(std::move(processor_)), log_name(log_name_)
 {
 }

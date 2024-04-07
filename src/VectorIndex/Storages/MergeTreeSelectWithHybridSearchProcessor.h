@@ -7,6 +7,7 @@
 
 #include <SearchIndex/Common/DenseBitmap.h>
 #include <VectorIndex/Cache/PKCacheManager.h>
+#include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 
 namespace DB
 {
@@ -14,7 +15,7 @@ namespace DB
 /// IMergeTreeSelectAlgorithm is refactored to MergeTreeSelectProcessor
 
 /// Merged from old MergeTreeSelectAlgorithm and IMergeTreeSelectAlgorithm
-class MergeTreeSelectWithVSProcessor
+class MergeTreeSelectWithHybridSearchProcessor
 {
 public:
     using ReadRange = MergeTreeRangeReader::ReadResult::ReadRangeInfo;
@@ -22,7 +23,7 @@ public:
     using BlockSizeParams = MergeTreeReadTask::BlockSizeParams;
     using BlockAndProgress = MergeTreeReadTask::BlockAndProgress;
 
-    explicit MergeTreeSelectWithVSProcessor(
+    explicit MergeTreeSelectWithHybridSearchProcessor(
         const MergeTreeData & storage_,
         const StorageSnapshotPtr & storage_snapshot_,
         const RangesInDataPart & part_with_ranges_,
@@ -33,7 +34,7 @@ public:
         const ExpressionActionsSettings & actions_settings_,
         const MergeTreeReadTask::BlockSizeParams & block_size_params_,
         const MergeTreeReaderSettings & reader_settings_,
-        MergeTreeVectorScanManagerPtr vector_scan_mamanger_ = nullptr);
+        MergeTreeBaseSearchManagerPtr base_search_manager_);
 
     static Block transformHeader(
         Block block, const PrewhereInfoPtr & prewhere_info, const DataTypePtr & partition_value_type, const Names & virtual_columns);
@@ -49,7 +50,7 @@ public:
 
     void cancel() { is_cancelled = true; }
 
-    String getName() const { return "MergeTreeReadWithVectorScan"; }
+    String getName() const { return "MergeTreeSelectWithHybridSearchProcessor"; }
 
 protected:
     BlockAndProgress readFromPart();
@@ -127,20 +128,22 @@ protected:
 
     size_t total_rows = 0;
 
-    MergeTreeVectorScanManagerPtr vector_scan_manager = nullptr;
-
 private:
     bool getNewTaskImpl();
 
-    BlockAndProgress readFromPartWithVectorScan();
+    BlockAndProgress readFromPartWithHybridSearch();
+    BlockAndProgress readFromPartWithPrimaryKeyCache(bool & success);
 
     Search::DenseBitmapPtr performPrefilter(MarkRanges & mark_ranges);
 
-    LoggerPtr log = getLogger("MergeTreeSelectWithVSProcessor");
+    LoggerPtr log = getLogger("MergeTreeSelectWithHybridSearchProcessor");
 
     std::atomic<bool> is_cancelled{false};
 
     bool getNewTask();
+
+    /// Shared_ptr for base class, the dynamic type may be derived class TextSearch/VectorScan/HybridSearch
+    MergeTreeBaseSearchManagerPtr base_search_manager = nullptr;
 
     /// True if _part_offset column is added for vector scan, but should not exist in select result.
     bool need_remove_part_offset = false;

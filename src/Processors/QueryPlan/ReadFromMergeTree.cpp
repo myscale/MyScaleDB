@@ -1993,7 +1993,6 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     selected_marks = result.selected_marks;
     selected_rows = result.selected_rows;
     selected_parts = result.selected_parts;
-
     /// Projection, that needed to drop columns, which have appeared by execution
     /// of some extra expressions, and to allow execute the same expressions later.
     /// NOTE: It may lead to double computation of expressions.

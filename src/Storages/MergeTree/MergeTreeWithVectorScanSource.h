@@ -4,8 +4,8 @@
 namespace DB
 {
 
-class MergeTreeSelectWithVectorScanProcessor;
-using MergeTreeSelectWithVectoScanProcessorPtr = std::unique_ptr<MergeTreeSelectWithVectorScanProcessor>;
+class  MergeTreeSelectWithHybridSearchProcessor;
+using MergeTreeSelectWithHybridSearchProcessorPtr = std::unique_ptr< MergeTreeSelectWithHybridSearchProcessor>;
 
 struct ChunkAndProgress;
 
@@ -13,7 +13,7 @@ struct ChunkAndProgress;
 class MergeTreeWithVectorScanSource final : public ISource
 {
 public:
-    explicit MergeTreeWithVectorScanSource(MergeTreeSelectWithVectoScanProcessorPtr processor_, const std::string & log_name_);
+    explicit MergeTreeWithVectorScanSource(MergeTreeSelectWithHybridSearchProcessorPtr processor_, const std::string & log_name_);
     ~MergeTreeWithVectorScanSource() override;
 
     std::string getName() const override;
@@ -26,7 +26,7 @@ protected:
     void onCancel() noexcept override;
 
 private:
-    MergeTreeSelectWithVectoScanProcessorPtr processor;
+     MergeTreeSelectWithHybridSearchProcessorPtr processor;
     const std::string log_name;
 
     Chunk processReadResult(ChunkAndProgress chunk);

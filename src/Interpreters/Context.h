@@ -482,6 +482,9 @@ protected:
     /// Used when vector scan func exists in right joined table
     mutable std::optional<VSDescription> vector_scan_description;
 
+    mutable TextSearchInfoPtr right_text_search_info;
+    mutable HybridSearchInfoPtr right_hybrid_search_info;
+
 public:
     /// Some counters for current query execution.
     /// Most of them are workarounds and should be removed in the future.
@@ -576,6 +579,7 @@ public:
     String getFilesystemCachesPath() const;
     String getFilesystemCacheUser() const;
     String getVectorIndexCachePath() const;
+    String getTantivyIndexCachePath() const;
 
     /// A list of warnings about server configuration to place in `system.warnings` table.
     Strings getWarnings() const;
@@ -595,6 +599,7 @@ public:
     void setDictionariesLibPath(const String & path);
     void setUserScriptsPath(const String & path);
     void setVectorIndexCachePath(const String & path);
+    void setTantivyIndexCachePath(const String & path);
 
     void addWarningMessage(const String & msg) const;
     void addWarningMessageAboutDatabaseOrdinary(const String & database_name) const;
@@ -1376,6 +1381,16 @@ public:
     std::optional<VSDescription> getVecScanDescription() const;
     void setVecScanDescription(VSDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
+
+    /// Used for text search functions
+    TextSearchInfoPtr getTextSearchInfo() const;
+    void setTextSearchInfo(TextSearchInfoPtr text_search_info) const;
+    void resetTextSearchInfo() const;
+
+    /// Used for text search functions
+    HybridSearchInfoPtr getHybridSearchInfo() const;
+    void setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const;
+    void resetHybridSearchInfo() const;
 
     /// Used for license check
     String getInstanceLicenseKeeperPath() const;

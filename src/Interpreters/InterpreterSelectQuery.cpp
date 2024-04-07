@@ -2561,11 +2561,20 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
 
         bool optimize_read_in_order = analysis_result.optimize_read_in_order;
         bool optimize_aggregation_in_order = analysis_result.optimize_aggregation_in_order && !query_analyzer->useGroupingSetKey();
-         if (analysis_result.need_vector_scan)
+        if (analysis_result.need_vector_scan)
         {
-            query_info.vector_scan_info
-                = std::make_shared<VectorScanInfo>(
-                    query_analyzer->vectorScanDescs());
+            query_info.vector_scan_info = std::make_shared<VectorScanInfo>(query_analyzer->vectorScanDescs());
+            query_info.has_hybrid_search = true;
+        }
+        if (analysis_result.need_text_search)
+        {
+            query_info.text_search_info = query_analyzer->textSearchInfoPtr();
+            query_info.has_hybrid_search = true;
+        }
+        if (analysis_result.need_hybrid_search)
+        {
+            query_info.hybrid_search_info = query_analyzer->hybridSearchInfoPtr();
+            query_info.has_hybrid_search = true;
         }
 
         /// Create optimizer with prepared actions.
@@ -2738,7 +2747,6 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         : static_cast<size_t>(settings.max_threads);
 
     bool storage_has_evenly_distributed_read = storage && storage->hasEvenlyDistributedRead();
-    LOG_DEBUG(log, "[executeAggregation] before add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 
     const bool should_produce_results_in_order_of_bucket_number = options.to_stage == QueryProcessingStage::WithMergeableState
         && (settings.distributed_aggregation_memory_efficient || settings.enable_memory_bound_merging_of_aggregation_results);
@@ -2760,7 +2768,6 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         settings.enable_memory_bound_merging_of_aggregation_results,
         !group_by_info && settings.force_aggregation_in_order);
     query_plan.addStep(std::move(aggregating_step));
-    LOG_DEBUG(log, "[executeAggregation] after add aggregate step, header: {}", query_plan.getCurrentDataStream().header.dumpStructure());
 }
 
 void InterpreterSelectQuery::executeMergeAggregated(QueryPlan & query_plan, bool overflow_row, bool final, bool has_grouping_sets)
