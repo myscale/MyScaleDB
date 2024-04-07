@@ -1,12 +1,14 @@
 #pragma once
 
 #include <Core/QueryProcessingStage.h>
-#include <Storages/SelectQueryInfo.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/RangesInDataPart.h>
-#include <Storages/MergeTree/PartitionPruner.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
-
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/MergeTreeIndexReader.h>
+#include <Storages/MergeTree/PartitionPruner.h>
+#include <Storages/MergeTree/RangesInDataPart.h>
+#include <Storages/SelectQueryInfo.h>
+#include <roaring.hh>
+#include <roaring64map.hh>
 namespace DB
 {
 
@@ -93,6 +95,19 @@ private:
         MarkCache * mark_cache,
         UncompressedCache * uncompressed_cache,
         LoggerPtr log);
+
+    static MarkRanges generateMarkRangesFromTantivy(
+        MergeTreeIndexPtr index_helper,
+        MergeTreeIndexConditionPtr condition,
+        MergeTreeData::DataPartPtr part,
+        MergeTreeIndexGranulePtr granule,
+        MergeTreeIndexReader & reader,
+        const MarkRanges & index_ranges,
+        const MarkRanges & ranges,
+        const size_t & min_marks_for_seek,
+        size_t & granules_dropped,
+        size_t & total_granules,
+        Poco::Logger * log);
 
     static MarkRanges filterMarksUsingMergedIndex(
         MergeTreeIndices indices,

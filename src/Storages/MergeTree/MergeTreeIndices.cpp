@@ -153,6 +153,11 @@ MergeTreeIndexFactory::MergeTreeIndexFactory()
     registerCreator("full_text", fullTextIndexCreator);
     registerValidator("full_text", fullTextIndexValidator);
     /// ------
+
+#if USE_TANTIVY_SEARCH
+    registerCreator("tantivy", tantivyIndexCreator);
+    registerValidator("tantivy", tantivyIndexValidator);
+#endif
 }
 
 MergeTreeIndexFactory & MergeTreeIndexFactory::instance()

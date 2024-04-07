@@ -262,6 +262,11 @@ public:
     static bool hasFullTextIndex(const StorageInMemoryMetadata & metadata);
     static bool hasLegacyInvertedIndex(const StorageInMemoryMetadata & metadata);
 
+    /// Check if commands have any tantivy index
+#if USE_TANTIVY_SEARCH
+    static bool hasTantivyIndex(const StorageInMemoryMetadata & metadata);
+#endif
+
     VICommands getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
 };
 

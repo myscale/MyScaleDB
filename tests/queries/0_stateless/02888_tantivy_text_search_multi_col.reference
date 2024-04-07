@@ -1,0 +1,49 @@
+[Test Case 1]: function equals / notEquals / == / !=
+1
+1
+9
+1
+1
+1
+9
+1
+[Test Case 2]: function hasToken / hasTokenOrNull / NOT hasToken
+2
+1
+8
+1
+1
+1
+0
+1
+1
+1
+[Test Case 3]: function like / not like
+1
+1
+1
+1
+3
+1
+7
+1
+[Test Case 4]: function startsWith / endsWith
+1
+1
+1
+1
+[Test Case 5]: function multiSearchAny / not multiSearchAny
+2
+1
+4
+1
+8
+1
+[Test Case 6]: function mapContains
+1
+1
+1
+1
+[Test Case 7]: function has
+1
+1

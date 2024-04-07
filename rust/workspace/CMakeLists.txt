@@ -40,3 +40,6 @@ add_library(ch_rust::prql ALIAS _ch_rust_prql)
 target_include_directories(_ch_rust_skim_rust INTERFACE skim/include)
 add_library(ch_rust::skim ALIAS _ch_rust_skim_rust)
 
+target_include_directories(tantivy_search INTERFACE tantivy_search/include)
+add_library(ch_rust::tantivy_search ALIAS tantivy_search)
+

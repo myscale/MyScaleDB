@@ -20,3 +20,25 @@ macro(extract_into_parent_list src_list dest_list)
     endforeach()
     set(${dest_list} "${${dest_list}}" PARENT_SCOPE)
 endmacro()
+
+function(remove_specific_headers_and_sources prefix)
+    set(files_to_remove ${ARGN})
+    set(root_path "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    foreach(file IN LISTS files_to_remove)
+        get_filename_component(full_path "${file}" ABSOLUTE)
+        if("${full_path}" MATCHES "^${root_path}")
+            file(RELATIVE_PATH relative_path "${root_path}" "${full_path}")
+            set(file_to_remove "${relative_path}")
+        else()
+            set(file_to_remove "${file}")
+        endif()
+        # remove files from headers and sources
+        list(REMOVE_ITEM ${prefix}_headers "${file_to_remove}")
+        list(REMOVE_ITEM ${prefix}_sources "${file_to_remove}")
+    endforeach()
+
+    # update headers and sources
+    set(${prefix}_headers ${${prefix}_headers} PARENT_SCOPE)
+    set(${prefix}_sources ${${prefix}_sources} PARENT_SCOPE)
+endfunction()

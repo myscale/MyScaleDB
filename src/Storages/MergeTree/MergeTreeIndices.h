@@ -17,6 +17,11 @@
 
 #include "config.h"
 
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#endif
+
+
 constexpr auto INDEX_FILE_PREFIX = "skp_idx_";
 
 namespace DB
@@ -174,6 +179,13 @@ struct IMergeTreeIndex
         return createIndexAggregator(settings);
     }
 
+#if USE_TANTIVY_SEARCH
+    virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] TantivyIndexStorePtr & store) const
+    {
+        return createIndexAggregator();
+    }
+#endif
+
     virtual MergeTreeIndexConditionPtr createIndexCondition(
         const ActionsDAG * filter_actions_dag, ContextPtr context) const = 0;
 
@@ -249,4 +261,8 @@ void legacyVectorSimilarityIndexValidator(const IndexDescription & index, bool a
 MergeTreeIndexPtr fullTextIndexCreator(const IndexDescription & index);
 void fullTextIndexValidator(const IndexDescription & index, bool attach);
 
+#if USE_TANTIVY_SEARCH
+MergeTreeIndexPtr tantivyIndexCreator(const IndexDescription & index);
+void tantivyIndexValidator(const IndexDescription & index, bool attach);
+#endif
 }
