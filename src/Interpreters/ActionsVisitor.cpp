@@ -1101,7 +1101,7 @@ void ActionsMatcher::visit(const ASTFunction & node, const ASTPtr & ast, Data & 
         function_builder = UserDefinedExecutableFunctionFactory::instance().tryGet(node.name, current_context, parameters);
     }
 
-    if (isVectorScanFunc(node.name))
+    if (isHybridSearchFunc(node.name))
         return;
 
     if (!function_builder)
