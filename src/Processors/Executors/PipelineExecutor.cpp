@@ -107,8 +107,6 @@ void PipelineExecutor::execute(size_t num_threads)
 
     try
     {
-        // txh added
-        LOG_DEBUG(log, "[execute] pipeline executor executeImpl {}", num_threads);
         executeImpl(num_threads);
 
         /// Execution can be stopped because of exception. Check and rethrow if any.

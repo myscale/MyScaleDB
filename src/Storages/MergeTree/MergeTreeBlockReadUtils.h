@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <optional>
@@ -12,7 +8,6 @@
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/MergeTree/IMergeTreeReader.h>
 
-#include <VectorIndex/Storages/VSResult.h>
 #include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
@@ -80,8 +75,6 @@ struct MergeTreeReadTask
     std::future<MergeTreeReaderPtr> reader;
     std::vector<std::future<MergeTreeReaderPtr>> pre_reader_for_step;
 
-    MergeTreeVectorScanManagerPtr vector_scan_manager;
-
     int64_t priority = 0; /// Priority of the task. Bigger value, bigger priority.
     bool operator <(const MergeTreeReadTask & rhs) const
     {
@@ -100,8 +93,7 @@ struct MergeTreeReadTask
         MergeTreeBlockSizePredictorPtr size_predictor_,
         int64_t priority_ = 0,
         std::future<MergeTreeReaderPtr> reader_ = {},
-        std::vector<std::future<MergeTreeReaderPtr>> && pre_reader_for_step_ = {},
-        const MergeTreeVectorScanManagerPtr & vector_scan_manager_ = nullptr);
+        std::vector<std::future<MergeTreeReaderPtr>> && pre_reader_for_step_ = {});
 
     ~MergeTreeReadTask();
 };

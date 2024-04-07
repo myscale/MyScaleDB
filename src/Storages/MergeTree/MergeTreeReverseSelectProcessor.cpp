@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Storages/MergeTree/MergeTreeReverseSelectProcessor.h>
 #include <Storages/MergeTree/IntersectionsIndexes.h>
 #include "Storages/MergeTree/MergeTreeBaseSelectProcessor.h"
@@ -52,17 +48,8 @@ bool MergeTreeReverseSelectAlgorithm::getNewTaskOrdinaryReading()
         : getSizePredictor(data_part, task_columns, sample_block);
 
     task = std::make_unique<MergeTreeReadTask>(
-        data_part,
-        alter_conversions,
-        mark_ranges_for_task,
-        part_index_in_query,
-        column_name_set,
-        task_columns,
-        std::move(size_predictor),
-        0,
-        std::future<MergeTreeReaderPtr>(),
-        std::vector<std::future<MergeTreeReaderPtr>>(),
-        vector_scan_manager);
+        data_part, alter_conversions, mark_ranges_for_task, part_index_in_query, column_name_set,
+        task_columns, std::move(size_predictor));
 
     return true;
 }
