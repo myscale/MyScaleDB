@@ -16,6 +16,8 @@
 #pragma once
 
 #include <Storages/MergeTree/MergeTreeSelectProcessor.h>
+#include <VectorIndex/Cache/PKCacheManager.h>
+#include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 #include <Storages/SelectQueryInfo.h>
 
 #include <Common/logger_useful.h>
@@ -25,15 +27,16 @@
 
 namespace DB
 {
-class MergeTreeSelectWithVSProcessor final : public MergeTreeSelectAlgorithm
+class MergeTreeSelectWithHybridSearchProcessor final : public MergeTreeSelectAlgorithm
 {
 public:
     using ReadRange = MergeTreeRangeReader::ReadResult::ReadRangeInfo;
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     template <typename... Args>
-    explicit MergeTreeSelectWithVSProcessor(Args &&... args)
+    explicit MergeTreeSelectWithHybridSearchProcessor(MergeTreeBaseSearchManagerPtr base_search_manager_, Args &&... args)
         : MergeTreeSelectAlgorithm{std::forward<Args>(args)...}
+        , base_search_manager(base_search_manager_)
     {
         LOG_TRACE(
             log,
@@ -48,10 +51,10 @@ public:
             original_remove_prewhere_column = prewhere_info->remove_prewhere_column;
     }
 
-    String getName() const override { return "MergeTreeReadWithVectorScan"; }
+    String getName() const override { return "MergeTreeReadWithHybridSearch"; }
 protected:
     BlockAndProgress readFromPart() override;
-    void initializeReadersWithVectorScan();
+    void initializeReadersWithHybridSearch();
 
     bool readPrimaryKeyBin(Columns & out_columns);
 
@@ -59,11 +62,15 @@ private:
     bool getNewTaskImpl() override;
     void finalizeNewTask() override {}
 
-    BlockAndProgress readFromPartWithVectorScan();
+    BlockAndProgress readFromPartWithHybridSearch();
+    BlockAndProgress readFromPartWithPrimaryKeyCache(bool & success);
 
     Search::DenseBitmapPtr performPrefilter(MarkRanges & mark_ranges);
 
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeSelectWithVSProcessor");
+    Poco::Logger * log = &Poco::Logger::get("MergeTreeSelectWithHybridSearchProcessor");
+
+    /// Shared_ptr for base class, the dynamic type may be derived class TextSearch/VectorScan/HybridSearch
+    MergeTreeBaseSearchManagerPtr base_search_manager = nullptr;
 
     /// True if _part_offset column is added for vector scan, but should not exist in select result.
     bool need_remove_part_offset = false;

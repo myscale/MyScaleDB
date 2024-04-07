@@ -233,6 +233,11 @@ public:
     /// Check if commands have any inverted index
     static bool hasInvertedIndex(const StorageInMemoryMetadata & metadata);
 
+    /// Check if commands have any tantivy index
+#if USE_TANTIVY_SEARCH
+    static bool hasTantivyIndex(const StorageInMemoryMetadata & metadata);
+#endif
+
     VICommands getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
 };
 

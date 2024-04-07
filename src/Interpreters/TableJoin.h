@@ -152,7 +152,11 @@ private:
     NamesAndTypesList columns_added_by_join;
 
     /// vector scan functions from joined table
-    mutable std::optional<VSDescription> vector_scan_description;
+    mutable std::optional<VSDescription> right_vector_scan_description;
+    /// text search info from joined table
+    mutable TextSearchInfoPtr right_text_search_info;
+    /// hybrid search info from joined table
+    mutable HybridSearchInfoPtr right_hybrid_search_info;
 
     /// Target type to convert key columns before join
     NameToTypeMap left_type_map;
@@ -363,6 +367,14 @@ public:
     /// Used for vector scan functions
     std::optional<VSDescription> getVecScanDescription() const;
     void setVecScanDescription(VSDescription & vec_scan_desc) const;
+
+    /// Used for text search function
+    TextSearchInfoPtr getTextSearchInfoPtr() const;
+    void setTextSearchInfoPtr(TextSearchInfoPtr text_search_info) const;
+
+    /// Used for hybrid search function
+    HybridSearchInfoPtr getHybridSearchInfoPtr() const;
+    void setHybridSearchInfoPtr(HybridSearchInfoPtr hybrid_search_info) const;
 };
 
 }

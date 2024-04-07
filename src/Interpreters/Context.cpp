@@ -223,7 +223,8 @@ struct ContextSharedPart : boost::noncopyable
     String user_files_path;                                 /// Path to the directory with user provided files, usable by 'file' table function.
     String dictionaries_lib_path;                           /// Path to the directory with user provided binaries and libraries for external dictionaries.
     String user_scripts_path;                               /// Path to the directory with user provided scripts.
-    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MSTG disk mode
+    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MSTG disk mode.
+    String tantivy_index_cache_path;                        /// Path to the directory of tantivy index cache.
     ConfigurationPtr config;                                /// Global configuration settings.
 
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
@@ -743,6 +744,12 @@ String Context::getVectorIndexCachePath() const
     return shared->vector_index_cache_path;
 }
 
+String Context::getTantivyIndexCachePath() const
+{
+    auto lock = getLock();
+    return shared->tantivy_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -808,6 +815,9 @@ void Context::setPath(const String & path)
     
     if (shared->vector_index_cache_path.empty())
         shared->vector_index_cache_path = shared->path + "vector_index_cache/";
+
+    if (shared->tantivy_index_cache_path.empty())
+        shared->tantivy_index_cache_path = shared->path + "tantivy_index_cache/";
 }
 
 static void setupTmpPath(Poco::Logger * log, const std::string & path)
@@ -949,6 +959,12 @@ void Context::setVectorIndexCachePath(const String & path)
 {
     auto lock = getLock();
     shared->vector_index_cache_path = path;
+}
+
+void Context::setTantivyIndexCachePath(const String & path)
+{
+    auto lock = getLock();
+    shared->tantivy_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const
@@ -4148,6 +4164,47 @@ void Context::setVecScanDescription(VSDescription & vec_scan_desc) const
 void Context::resetVecScanDescription() const
 {
     vector_scan_description.reset();
+}
+
+TextSearchInfoPtr Context::getTextSearchInfo() const
+{
+    return right_text_search_info;
+}
+
+void Context::setTextSearchInfo(TextSearchInfoPtr text_search_info) const
+{
+    right_text_search_info = text_search_info;
+}
+
+void Context::resetTextSearchInfo() const
+{
+    right_text_search_info = nullptr;
+}
+
+HybridSearchInfoPtr Context::getHybridSearchInfo() const
+{
+    return right_hybrid_search_info;
+}
+
+void Context::setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const
+{
+    right_hybrid_search_info = hybrid_search_info;
+}
+
+void Context::resetHybridSearchInfo() const
+{
+    right_hybrid_search_info = nullptr;
+}
+
+String Context::getInstanceLicenseKeeperPath() const
+{
+    return shared->instance_license_keeper_path;
+}
+
+void Context::setInstanceLicenseKeeperPath(const String & path)
+{
+    if (shared->instance_license_keeper_path.empty())
+        shared->instance_license_keeper_path = path;
 }
 
 WriteSettings Context::getWriteSettings() const

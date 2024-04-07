@@ -915,6 +915,8 @@ class IColumn;
     M(UInt64, http_max_request_param_data_size, 10_MiB, "Limit on size of request data used as a query parameter in predefined HTTP requests.", 0) \
     M(Bool, allow_experimental_undrop_table_query, false, "Allow to use undrop query to restore dropped table in a limited time", 0) \
     M(Bool, enable_brute_force_vector_search, false, "Enable brute-force search for data parts without vector indexes.", 0) \
+    M(Float, hybrid_search_fusion_weight, 0.5f, "Default fusion_weight for hybrid search Relative Score Fusion (RSF) function. Valid value is in interval [0.0f, 1.0f]", 0) \
+    M(UInt64, hybrid_search_fusion_k, 60, "Default fusion_k for hybrid search Reciprocal Rank Fusion (RRF) function", 0) \
     // End of COMMON_SETTINGS
     // Please add settings related to formats into the FORMAT_FACTORY_SETTINGS and move obsolete settings to OBSOLETE_SETTINGS.
 

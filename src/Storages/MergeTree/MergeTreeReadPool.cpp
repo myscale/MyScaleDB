@@ -215,8 +215,7 @@ MergeTreeReadTaskPtr MergeTreeReadPool::getTask(size_t thread)
         std::move(curr_task_size_predictor),
         0,
         std::future<std::unique_ptr<IMergeTreeReader>>(),
-        std::vector<std::future<std::unique_ptr<IMergeTreeReader>>>(),
-        part.vector_scan_manager);
+        std::vector<std::future<std::unique_ptr<IMergeTreeReader>>>());
 }
 
 Block MergeTreeReadPool::getHeader() const

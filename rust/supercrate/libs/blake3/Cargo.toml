@@ -1,5 +1,5 @@
 [package]
-name = "_ch_rust_blake3"
+name = "blake3"
 version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,5 +9,5 @@ blake3 = "1.2.0"
 libc = "0.2.132"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 

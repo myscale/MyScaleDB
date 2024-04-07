@@ -46,7 +46,6 @@ struct RangesInDataPart
     AlterConversionsPtr alter_conversions;
     size_t part_index_in_query;
     MarkRanges ranges;
-    MergeTreeVectorScanManagerPtr vector_scan_manager;
 
     RangesInDataPart() = default;
 

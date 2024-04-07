@@ -2974,6 +2974,9 @@ void MergeTreeData::dropAllData()
 
             LOG_INFO(log, "dropAllData: removing table directory recursive to cleanup garbage");
             disk->removeRecursive(relative_data_path);
+#if USE_TANTIVY_SEARCH
+            TantivyIndexStoreFactory::instance().remove(relative_data_path);
+#endif
         }
         catch (const fs::filesystem_error & e)
         {
@@ -3121,11 +3124,22 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
                             queryToString(mutation_commands.ast()));
     }
 
+    commands.apply(new_metadata, getContext());
+
     if (commands.hasInvertedIndex(new_metadata) && !settings.allow_experimental_inverted_index)
+    {
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                 "Experimental Inverted Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+    }
 
-    commands.apply(new_metadata, getContext());
+#if USE_TANTIVY_SEARCH
+    if (commands.hasTantivyIndex(new_metadata) && !settings.allow_experimental_inverted_index)
+    {
+        throw Exception(
+            ErrorCodes::SUPPORT_IS_DISABLED,
+            "Experimental Tantivy Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+    }
+#endif
 
     /// Set of columns that shouldn't be altered.
     NameSet columns_alter_type_forbidden;

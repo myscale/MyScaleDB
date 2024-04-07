@@ -23,10 +23,11 @@
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/JSON/Parser.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace Search
 {
-enum class DataType;
+enum class Metric;
 }
 
 namespace DB
@@ -53,5 +54,85 @@ struct VSDescription
 };
 
 using VSDescriptions = std::vector<VSDescription>;
+
+struct VectorScanInfo
+{
+    VSDescriptions vector_scan_descs;
+    bool is_batch;
+
+    VectorScanInfo(const VSDescriptions & vector_scan_descs_)
+        : vector_scan_descs(vector_scan_descs_) {
+        is_batch = !vector_scan_descs.empty() && isBatchDistance(vector_scan_descs[0].column_name);
+    }
+};
+
+using VectorScanInfoPtr = std::shared_ptr<const VectorScanInfo>;
+
+struct TextSearchInfo
+{
+    String text_column_name;        /// text column name with inverted index
+    String query_text;              /// query text for full-text search
+    String function_column_name;    /// What name to use for a column with text search function values
+
+    int topk = -1;          /// topK value extracted from limit N
+    int direction = -1;     /// 1 - ascending, -1 - descending.
+
+    TextSearchInfo(const String text_col_name_, const String query_text_, const String function_column_name_, int topk_, int direction_)
+        : text_column_name(text_col_name_)
+        , query_text(query_text_)
+        , function_column_name(function_column_name_)
+        , topk(topk_)
+        , direction(direction_)
+    {
+    }
+};
+
+using TextSearchInfoPtr = std::shared_ptr<const TextSearchInfo>;
+
+struct HybridSearchInfo
+{
+    VectorScanInfoPtr vector_scan_info;
+    TextSearchInfoPtr text_search_info;
+
+    String function_column_name;    /// What name to use for a column with hybrid search function values
+    int topk = -1;                  /// topK value
+    String fusion_type;             /// Fusion type, Relative Score Fustion(RSF) or Reciprocal Rank Fusion(RRF)
+
+    /// Used for score fusion
+    float fusion_weight = -1;       /// weight of text search
+    Search::Metric metric_type;     /// metric_type in vector index
+
+    /// Used for rank fusion
+    int fusion_k = -1;
+
+    HybridSearchInfo(
+        VectorScanInfoPtr vec_scan_info_,
+        TextSearchInfoPtr text_search_info_,
+        String func_col_name_, int topk_, String fusion_type_, float fusion_weight_, Search::Metric metric_type_)
+        : vector_scan_info(vec_scan_info_)
+        , text_search_info(text_search_info_)
+        , function_column_name(func_col_name_)
+        , topk(topk_)
+        , fusion_type(fusion_type_)
+        , fusion_weight(fusion_weight_)
+        , metric_type(metric_type_)
+    {
+    }
+
+    HybridSearchInfo(
+        VectorScanInfoPtr vec_scan_info_,
+        TextSearchInfoPtr text_search_info_,
+        String func_col_name_, int topk_, String fusion_type_, int fusion_k_)
+        : vector_scan_info(vec_scan_info_)
+        , text_search_info(text_search_info_)
+        , function_column_name(func_col_name_)
+        , topk(topk_)
+        , fusion_type(fusion_type_)
+        , fusion_k(fusion_k_)
+    {
+    }
+};
+
+using HybridSearchInfoPtr = std::shared_ptr<const HybridSearchInfo>;
 
 }

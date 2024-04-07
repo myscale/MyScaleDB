@@ -26,6 +26,15 @@ enum class DataType;
 namespace DB
 {
 
+/// Different search types
+enum class HybridSearchFuncType
+{
+    VECTOR_SCAN = 0,
+    TEXT_SEARCH,
+    HYBRID_SEARCH,
+    UNKNOWN_FUNC
+};
+
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
 
@@ -46,8 +55,39 @@ inline bool isVectorScanFunc(const String & func)
     return isDistance(func) || isBatchDistance(func);
 }
 
+inline bool isTextSearch(const String & func)
+{
+    String func_to_low = Poco::toLower(func);
+    return func_to_low.find("textsearch") == 0;
+}
+
+inline bool isHybridSearch(const String & func)
+{
+    String func_to_low = Poco::toLower(func);
+    return func_to_low.find("hybridsearch") == 0;
+}
+
+inline bool isHybridSearchFunc(const String & func)
+{
+    return isVectorScanFunc(func) || isTextSearch(func) || isHybridSearch(func);
+}
+
+inline bool isRelativeScoreFusion(const String & fusion_type)
+{
+    String type = Poco::toLower(fusion_type);
+    return type.find("rsf") == 0;
+}
+
+inline bool isRankFusion(const String & fusion_type)
+{
+    String type = Poco::toLower(fusion_type);
+    return type.find("rrf") == 0;
+}
+
 Search::DataType getSearchIndexDataType(DataTypePtr &data_type);
 
 void checkVectorDimension(const Search::DataType & search_type, const uint64_t & dim);
+
+void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys);
 
 }

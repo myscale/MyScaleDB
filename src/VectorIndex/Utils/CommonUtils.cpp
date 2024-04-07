@@ -17,6 +17,7 @@
 #include <Core/UUID.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeFixedString.h>
+#include <DataTypes/DataTypeMap.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnFixedString.h>
 #include <Common/logger_useful.h>
@@ -32,6 +33,12 @@ enum class DataType;
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int BAD_ARGUMENTS;
+    extern const int INCORRECT_DATA;
+}
 
 Search::DataType getSearchIndexDataType(DataTypePtr &data_type)
 {
@@ -68,6 +75,44 @@ void checkVectorDimension(const Search::DataType & search_type, const uint64_t &
     else if (search_type == Search::DataType::BinaryVector && dim % 8 != 0)
     {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong dimension for Binary Vector: {}, dimension must be a multiple of 8", dim);
+    }
+}
+
+void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys)
+{
+    switch (data_type->getTypeId())
+    {
+        case TypeIndex::String:
+            break;
+        case TypeIndex::Array:
+        {
+            const DataTypeArray *array_type = typeid_cast<const DataTypeArray *>(data_type.get());
+            if (array_type)
+            {
+                WhichDataType which(array_type->getNestedType());
+                if (!which.isString())
+                    throw Exception(ErrorCodes::INCORRECT_DATA, "The element type inside the array must be `String` for text search column");
+            }
+            else
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Search text column type is incorrect Array type");
+            break;
+        }
+        case TypeIndex::Map:
+        {
+            const DataTypeMap *map_type = typeid_cast<const DataTypeMap *>(data_type.get());
+            if (map_type)
+            {
+                WhichDataType which_key(map_type->getKeyType());
+                WhichDataType which_value(map_type->getValueType());
+                if (!is_mapKeys || !which_key.isString() || !which_value.isString())
+                    throw Exception(ErrorCodes::INCORRECT_DATA, "When the text search column type is map, the key and value must be strings. Additionally, the mapKeys() function must be used to process the map column");
+            }
+            else
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Search text column type is incorrect Map type");
+            break;
+        }
+        default:
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Text search can be used with `String`, `Array(String)` or `Map(String, String)` column");
     }
 }
 

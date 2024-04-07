@@ -227,7 +227,21 @@ String parseVectorScanParameters(const ASTFunction * node, ContextPtr context)
 String parseVectorScanParameters(const ASTFunction * node, ContextPtr context, const String index_type, bool check_parameter)
 {
     Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", context) : Array();
+    return parseVectorScanParameters(parameters, index_type, check_parameter);
+}
 
+/// vector scan parameters from hybrid search
+String parseVectorScanParameters(const std::vector<String> & vector_scan_parameter, const String index_type, bool check_parameter)
+{
+    Array params_row(vector_scan_parameter.size());
+    for (size_t i = 0; i < vector_scan_parameter.size(); ++i)
+        params_row[i] = vector_scan_parameter[i];
+
+    return parseVectorScanParameters(params_row, index_type, check_parameter);
+}
+
+String parseVectorScanParameters(const Array & parameters, const String index_type, bool check_parameter)
+{
     for (const auto & arg : parameters)
         if (arg.getType() != Field::Types::String)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "All parameters to vector scan must be String or JSON String");
@@ -253,7 +267,6 @@ String parseVectorScanParameters(const ASTFunction * node, ContextPtr context, c
         size_t comma_index = 0;
         if ((comma_index = param_str.rfind(',')) != String::npos)
             param_str.erase(comma_index, 1);
-
     }
     return param_str;
 }

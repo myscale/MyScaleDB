@@ -19,6 +19,7 @@
 
 #include <Columns/ColumnsNumber.h>
 
+#include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/SelectQueryInfo.h>
@@ -27,7 +28,7 @@
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Common/VectorDataset.h>
-#include <VectorIndex/Storages/VSResult.h>
+#include <VectorIndex/Storages/HybridSearchResult.h>
 
 #include <SearchIndex/VectorIndex.h>
 
@@ -35,36 +36,26 @@ namespace DB
 {
 
 /// vector scan manager, responsible for vector scan result precompute, and vector scan after read
-class MergeTreeVSManager
+class MergeTreeVSManager : public MergeTreeBaseSearchManager
 {
 public:
-    using ReadRange = MergeTreeRangeReader::ReadResult::ReadRangeInfo;
-    using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
-
     MergeTreeVSManager(
         StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, bool support_two_stage_search_ = false)
-        : metadata(metadata_)
+        : MergeTreeBaseSearchManager{metadata_, context_}
         , vector_scan_info(vector_scan_info_)
-        , context(context_)
         , support_two_stage_search(support_two_stage_search_)
         , enable_brute_force_search(context_->getSettingsRef().enable_brute_force_vector_search)
     {
     }
 
-    void executeBeforeRead(const MergeTreeData::DataPartPtr & data_part);
+    ~MergeTreeVSManager() override = default;
 
-    void executeAfterRead(
-        const MergeTreeData::DataPartPtr & data_part,
-        Columns & pre_result,
-        size_t & read_rows,
-        const ReadRanges & read_ranges,
-        bool has_prewhere = false,
-        const Search::DenseBitmapPtr filter = nullptr);
+    void executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part) override;
 
-    void executeVectorScanWithFilter(
+    void executeSearchWithFilter(
         const MergeTreeData::DataPartPtr & data_part,
         const ReadRanges & read_ranges,
-        const Search::DenseBitmapPtr filter);
+        const Search::DenseBitmapPtr filter) override;
 
     /// Two search search: execute vector scan to get accurate distance values
     /// If part doesn't have vector index or real index type doesn't support, just use passed in values.
@@ -78,21 +69,18 @@ public:
         size_t & read_rows,
         const ReadRanges & read_ranges,
         const Search::DenseBitmapPtr filter = nullptr,
-        const ColumnUInt64 * part_offset = nullptr);
+        const ColumnUInt64 * part_offset = nullptr) override;
 
-    bool preComputed() { return vector_scan_result != nullptr; }
+    bool preComputed() override
+    {
+        return vector_scan_result && vector_scan_result->computed;
+    }
 
-    VectorScanResultPtr getVectorScanResult() { return vector_scan_result; }
-
-    void eraseResult();
-
-    Settings getSettings() { return context->getSettingsRef(); }
+    CommonSearchResultPtr getSearchResult() override { return vector_scan_result; }
 
 private:
 
-    StorageMetadataPtr metadata;
     VectorScanInfoPtr vector_scan_info;
-    ContextPtr context;
     bool support_two_stage_search;  /// True if vector index in metadata support two stage search
 
     /// Whether brute force search is enabled based on query setting
@@ -100,7 +88,6 @@ private:
 
     /// lock vector scan result
     std::mutex mutex;
-
     VectorScanResultPtr vector_scan_result = nullptr;
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeVSManager");
@@ -134,14 +121,6 @@ private:
         const VIMetric & metric);
 
     void mergeBatchVectorScanResult(
-        Columns & pre_result,
-        size_t & read_rows,
-        const ReadRanges & read_ranges = ReadRanges(),
-        VectorScanResultPtr tmp_result = nullptr,
-        const Search::DenseBitmapPtr = nullptr,
-        const ColumnUInt64 * part_offset = nullptr);
-
-    void mergeVectorScanResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),

@@ -94,7 +94,7 @@ add_contrib (protobuf-cmake protobuf)
 add_contrib (openldap-cmake openldap)
 add_contrib (grpc-cmake grpc)
 add_contrib (msgpack-c-cmake msgpack-c)
-
+# rust toolchain
 add_contrib (corrosion-cmake corrosion)
 
 if (ENABLE_FUZZING)

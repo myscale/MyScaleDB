@@ -9,11 +9,16 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Interpreters/addTypeConversionToAST.h>
 #include <Interpreters/ExpressionAnalyzer.h>
-#include <Interpreters/TreeRewriter.h>
-#include <Interpreters/RenameColumnVisitor.h>
 #include <Interpreters/GinFilter.h>
+#include <Interpreters/RenameColumnVisitor.h>
+#include <Interpreters/TreeRewriter.h>
+#include <Interpreters/addTypeConversionToAST.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
+
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTConstraintDeclaration.h>
@@ -22,6 +27,7 @@
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/queryToString.h>
 #include <Storages/AlterCommands.h>
@@ -29,9 +35,9 @@
 #include <Storages/LightweightDeleteDescription.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
-#include <Common/typeid_cast.h>
-#include <Common/randomSeed.h>
 #include <Common/logger_useful.h>
+#include <Common/randomSeed.h>
+#include <Common/typeid_cast.h>
 
 #include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
@@ -1090,6 +1096,18 @@ bool AlterCommands::hasInvertedIndex(const StorageInMemoryMetadata & metadata)
     }
     return false;
 }
+
+#if USE_TANTIVY_SEARCH
+bool AlterCommands::hasTantivyIndex(const StorageInMemoryMetadata & metadata)
+{
+    for (const auto & index : metadata.secondary_indices)
+    {
+        if (index.type == TANTIVY_INDEX_NAME)
+            return true;
+    }
+    return false;
+}
+#endif
 
 std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
 {

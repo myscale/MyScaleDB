@@ -57,7 +57,7 @@ bool RequiredSourceColumnsMatcher::needChildVisit(const ASTPtr & node, const AST
     if (const auto * f = node->as<ASTFunction>())
     {
         /// "lambda" visit children itself.
-        if (f->name == "lambda" || isVectorScanFunc(f->name))
+        if (f->name == "lambda" || isHybridSearchFunc(f->name))
             return false;
     }
 

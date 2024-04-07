@@ -32,18 +32,22 @@
 #include <Storages/WindowView/StorageWindowView.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 
+#include <Interpreters/AddDefaultDatabaseVisitor.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/executeDDLQueryOnCluster.h>
-#include <Interpreters/executeQuery.h>
 #include <Interpreters/DDLTask.h>
 #include <Interpreters/ExpressionAnalyzer.h>
+#include <Interpreters/GinFilter.h>
 #include <Interpreters/InterpreterCreateQuery.h>
-#include <Interpreters/InterpreterSelectWithUnionQuery.h>
-#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/InterpreterInsertQuery.h>
 #include <Interpreters/InterpreterRenameQuery.h>
-#include <Interpreters/AddDefaultDatabaseVisitor.h>
-#include <Interpreters/GinFilter.h>
+#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
+#include <Interpreters/InterpreterSelectWithUnionQuery.h>
+#include <Interpreters/executeDDLQueryOnCluster.h>
+#include <Interpreters/executeQuery.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
 
 #include <Access/Common/AccessRightsElement.h>
 
@@ -751,6 +755,14 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                     throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                             "Experimental Inverted Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
                 }
+#if USE_TANTIVY_SEARCH
+                if (index_desc.type == TANTIVY_INDEX_NAME && !settings.allow_experimental_inverted_index)
+                {
+                    throw Exception(
+                        ErrorCodes::SUPPORT_IS_DISABLED,
+                        "Experimental Tantivy Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                }
+#endif
                 if (index_desc.type == "annoy" && !settings.allow_experimental_annoy_index)
                     throw Exception(ErrorCodes::INCORRECT_QUERY, "Annoy index is disabled. Turn on allow_experimental_annoy_index");
 

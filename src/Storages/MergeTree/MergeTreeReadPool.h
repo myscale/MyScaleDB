@@ -143,7 +143,6 @@ private:
     {
         MergeTreeData::DataPartPtr data_part;
         size_t part_index_in_query;
-        MergeTreeVectorScanManagerPtr vector_scan_manager;
     };
 
     std::vector<Part> parts_with_idx;

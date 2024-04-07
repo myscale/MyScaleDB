@@ -487,9 +487,8 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
 
     writeString(name, ostr);
 
-    /// [VectorScan] not add parameters or arguments for vector scan functions
     /// todo: how to generate unique name for each AST node?
-    if (isVectorScanFunc(name))
+    if (isHybridSearchFunc(name))
     {
         writeString("_func", ostr);
         return;
