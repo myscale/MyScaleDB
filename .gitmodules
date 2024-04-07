@@ -341,3 +341,6 @@
 [submodule "tests/stability"]
 	path = tests/stability
 	url = git@git.moqi.ai:shanfengp/stability-test.git
+[submodule "rust/supercrate/libs/tantivy_search"]
+	path = rust/supercrate/libs/tantivy_search
+	url = git@git.moqi.ai:mqdb/tantivy-search.git

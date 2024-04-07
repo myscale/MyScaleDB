@@ -16,9 +16,11 @@ clickhouse_program_add(local)
 
 target_link_libraries(clickhouse-local-lib PRIVATE clickhouse-server-lib)
 
-if (TARGET ch_rust::skim)
-    target_link_libraries(clickhouse-local-lib PRIVATE ch_rust::skim)
+# Need skim library in supercrate.
+if (TARGET ch_rust::supercrate)
+    target_link_libraries(clickhouse-local-lib PRIVATE ch_rust::supercrate)
 endif()
+
 if (TARGET ch_contrib::azure_sdk)
     target_link_libraries(clickhouse-local-lib PRIVATE ch_contrib::azure_sdk)
 endif()

@@ -1,21 +1,25 @@
 #pragma once
 
-#include <string>
 #include <map>
-#include <unordered_map>
-#include <vector>
 #include <memory>
-#include <utility>
 #include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 #include <Core/Block.h>
-#include <Storages/StorageInMemoryMetadata.h>
+#include <DataTypes/DataTypeLowCardinality.h>
+#include <Interpreters/ExpressionActions.h>
 #include <Storages/MergeTree/GinIndexStore.h>
+#include <Storages/MergeTree/IDataPartStorage.h>
+#include <Storages/MergeTree/MarkRange.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Storages/SelectQueryInfo.h>
-#include <Storages/MergeTree/MarkRange.h>
-#include <Storages/MergeTree/IDataPartStorage.h>
-#include <Interpreters/ExpressionActions.h>
-#include <DataTypes/DataTypeLowCardinality.h>
+#include <Storages/StorageInMemoryMetadata.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#endif
 
 
 constexpr auto INDEX_FILE_PREFIX = "skp_idx_";
@@ -171,6 +175,13 @@ struct IMergeTreeIndex
         return createIndexAggregator();
     }
 
+#if USE_TANTIVY_SEARCH
+    virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] TantivyIndexStorePtr & store) const
+    {
+        return createIndexAggregator();
+    }
+#endif
+
     virtual MergeTreeIndexConditionPtr createIndexCondition(
         const SelectQueryInfo & query_info, ContextPtr context) const = 0;
 
@@ -241,4 +252,8 @@ void annoyIndexValidator(const IndexDescription & index, bool attach);
 MergeTreeIndexPtr invertedIndexCreator(const IndexDescription& index);
 void invertedIndexValidator(const IndexDescription& index, bool attach);
 
+#if USE_TANTIVY_SEARCH
+MergeTreeIndexPtr tantivyIndexCreator(const IndexDescription & index);
+void tantivyIndexValidator(const IndexDescription & index, bool attach);
+#endif
 }

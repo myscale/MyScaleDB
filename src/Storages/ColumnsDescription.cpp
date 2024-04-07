@@ -558,7 +558,7 @@ NamesAndTypesList ColumnsDescription::getByNames(const GetColumnsOptions & optio
             }
         }
         
-        if (isDistance(name))
+        if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
         {
             res.emplace_back(name, std::make_shared<DataTypeUInt32>());
             continue;
