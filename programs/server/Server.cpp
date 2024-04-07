@@ -121,6 +121,10 @@
 #include <VectorIndex/Common/VIBuildMemoryUsageHelper.h>
 #include <VectorIndex/Common/VICommon.h>
 
+#if USE_TANTIVY_SEARCH
+#    include <tantivy_search.h>
+#endif
+
 #include "config.h"
 #include "config_version.h"
 
@@ -424,6 +428,50 @@ void setOOMScore(int value, LoggerRawPtr log)
 }
 #endif
 
+extern "C" void tantivy_log_callback(int level, const char * thread_info, const char * message)
+{
+    Poco::Logger & logger = Poco::Logger::get("TantivyLibrary");
+    switch (level)
+    {
+        case -2: // -2 -> fatal
+            LOG_FATAL(&logger, "{} - {}", thread_info, message);
+            break;
+        case -1: // -1 -> error
+            LOG_ERROR(&logger, "{} - {}", thread_info, message);
+            break;
+        case 0: // 0 -> warning
+            LOG_WARNING(&logger, "{} - {}", thread_info, message);
+            break;
+        case 1: // 1 -> info
+            LOG_INFO(&logger, "{} - {}", thread_info, message);
+            break;
+        case 2: // 2 -> debug
+            LOG_DEBUG(&logger, "{} - {}", thread_info, message);
+            break;
+        case 3: // 3 -> tracing
+            LOG_TRACE(&logger, "{} - {}", thread_info, message);
+            break;
+        default:
+            LOG_DEBUG(&logger, "{} - {}", thread_info, message);
+    }
+}
+
+void tantivy_log_integration(Poco::Util::AbstractConfiguration & config)
+{
+    std::string tantivy_search_log_level = config.getString("logger.tantivy_search_log_level", config.getString("logger.level", "info"));
+
+#if USE_TANTIVY_SEARCH
+    tantivy_search_log4rs_initialize_with_callback(
+        "", // Path for storing the `tantivy-search` log file.
+        tantivy_search_log_level.c_str(), // Sets the log level for `tantivy-search`, defaulting to the same log level as ClickHouse.
+        false, // `tantivy-search` log content will be recorded to a specific log file.
+        false, // Flag to control whether `tantivy-search` log messages are displayed in the console/terminal.
+        true, // If true, logs are exclusively recorded for `tantivy_search` and not for its submodule libraries (e.g., tantivy).
+        tantivy_log_callback // Logging `tantivy_search` logs using POCO LOG.
+    );
+#endif
+}
+
 
 void Server::uninitialize()
 {
@@ -456,7 +504,9 @@ void Server::initialize(Poco::Util::Application & self)
     ConfigProcessor::registerEmbeddedConfig("config.xml", std::string_view(reinterpret_cast<const char *>(gresource_embedded_xmlData), gresource_embedded_xmlSize));
     BaseDaemon::initialize(self);
     logger().information("starting up");
-
+#if USE_TANTIVY_SEARCH
+    tantivy_log_integration(config());
+#endif
     LOG_INFO(&logger(), "OS name: {}, version: {}, architecture: {}",
         Poco::Environment::osName(),
         Poco::Environment::osVersion(),
@@ -2110,6 +2160,14 @@ try
         fs::create_directories(vector_index_cache_path);
     }
 
+    {
+#if USE_TANTIVY_SEARCH
+        std::string tantivy_index_cache_path = config().getString("tantivy_index_cache_path", path / "tantivy_index_cache/");
+        global_context->setTantivyIndexCachePath(tantivy_index_cache_path);
+        fs::create_directories(tantivy_index_cache_path);
+#endif
+    }
+
     /// top_level_domains_lists
     {
         const std::string & top_level_domains_path = config().getString("top_level_domains_path", path / "top_level_domains/");
@@ -2414,6 +2472,9 @@ try
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
             updateLevels(*config, logger());
+#if USE_TANTIVY_SEARCH
+            tantivy_log_integration(*config);
+#endif
             global_context->setClustersConfig(config, has_zookeeper);
             global_context->setMacros(std::make_unique<Macros>(*config, "macros", log));
             global_context->setExternalAuthenticatorsConfig(*config);

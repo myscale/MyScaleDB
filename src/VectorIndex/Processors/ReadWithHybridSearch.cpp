@@ -9,11 +9,14 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeWithVectorScanSource.h>
-#include <VectorIndex/Processors/ReadWithVS.h>
+#include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
+#include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
+#include <VectorIndex/Processors/ReadWithHybridSearch.h>
 #include <VectorIndex/Processors/VSRecomputeTransform.h>
 #include <VectorIndex/Processors/VSSplitTransform.h>
-#include <VectorIndex/Storages/MergeTreeSelectWithVSProcessor.h>
-#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 
 namespace ProfileEvents
@@ -51,7 +54,7 @@ static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_inf
                                  : query_info.prewhere_info;
 }
 
-ReadWithVS::ReadWithVS(
+ReadWithHybridSearch::ReadWithHybridSearch(
     MergeTreeData::DataPartsVector parts_,
     std::vector<AlterConversionsPtr> alter_conversions_,
     Names all_column_names_,
@@ -65,25 +68,20 @@ ReadWithVS::ReadWithVS(
     LoggerPtr log_,
     MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
     bool enable_parallel_reading)
-    : ReadFromMergeTree(parts_,real_column_names_,virt_column_names_,data_,query_info_,storage_snapshot_,context_,
-                        max_block_size_,num_streams_,sample_factor_column_queried_,max_block_numbers_to_read_,
-                        log_,analyzed_result_ptr_,enable_parallel_reading)
-    , reader_settings(getMergeTreeReaderSettings(context_))
-    , prepared_parts(std::move(parts_))
-    , alter_conversions_for_parts(std::move(alter_conversions_))
-    , all_column_names(std::move(all_column_names_))
-    , data(data_)
-    , query_info(query_info_)
-    , prewhere_info(::DB::getPrewhereInfo(query_info))
-    , actions_settings(ExpressionActionsSettings::fromContext(context_))
-    , block_size{
-        .max_block_size_rows = max_block_size_,
-        .preferred_block_size_bytes = context->getSettingsRef().preferred_block_size_bytes,
-        .preferred_max_column_in_block_size_bytes = context->getSettingsRef().preferred_max_column_in_block_size_bytes}
-    , requested_num_streams(num_streams_)
-    , max_block_numbers_to_read(std::move(max_block_numbers_to_read_))
-    , log(log_)
-    , analyzed_result_ptr(analyzed_result_ptr_)
+    : ReadFromMergeTree(
+        parts_,
+        alter_conversions_,
+        all_column_names_,
+        data_,
+        query_info_,
+        storage_snapshot_,
+        context_,
+        max_block_size_,
+        num_streams_,
+        max_block_numbers_to_read_,
+        log_,
+        analyzed_result_ptr_,
+        enable_parallel_reading)
 {
     /// Support multiple vector indices
     auto vector_scan_info_ptr = query_info.vector_scan_info;
@@ -178,15 +176,7 @@ ReadWithVS::ReadWithVS(
     }
 }
 
-ReadFromMergeTree::AnalysisResult ReadWithVS::getAnalysisResult() const
-{
-    if (!analyzed_result_ptr)
-        analyzed_result_ptr = selectRangesToRead();
-
-    return *analyzed_result_ptr;
-}
-
-void ReadWithVS::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
+void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
 {
     /// Referenced from ReadFromMergeTree::initializePipeline(). Add logic for mark range optimization based on where conditions.
     auto result = getAnalysisResult();
@@ -285,7 +275,7 @@ void ReadWithVS::initializePipeline(QueryPipelineBuilder & pipeline, const Build
 
 /// Reference from ReadFromMergeTree::spreadMarkRangesAmongStreams()
 ///
-Pipe ReadWithVS::createReadProcessorsAmongParts(
+Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
     RangesInDataParts && parts_with_ranges,
     size_t num_streams,
     const Names & column_names)
@@ -427,14 +417,14 @@ Pipe ReadWithVS::createReadProcessorsAmongParts(
     return pipe;
 }
 
-Pipe ReadWithVS::readFromParts(
+Pipe ReadWithHybridSearch::readFromParts(
     RangesInDataParts parts_with_ranges,
     Names required_columns,
     bool use_uncompressed_cache)
 {
     Pipes pipes;
-    auto vector_scan_info_ptr = query_info.vector_scan_info;
-    if (!vector_scan_info_ptr)
+
+    if (!query_info.has_hybrid_search)
         return {};
 
     /// Prewhere info should not be changed, because it is shared by parts.
@@ -447,10 +437,22 @@ Pipe ReadWithVS::readFromParts(
 
     for (const auto & part_with_ranges : parts_with_ranges)
     {
-        auto vector_scan_manager =
-            std::make_shared<MergeTreeVSManager>(storage_snapshot->metadata, vector_scan_info_ptr, context, support_two_stage_search);
+        MergeTreeBaseSearchManagerPtr search_manager = nullptr;
+        if (query_info.vector_scan_info)
+        {
+            search_manager = std::make_shared<MergeTreeVSManager>(
+                storage_snapshot->metadata, query_info.vector_scan_info, context, support_two_stage_search);
+        }
+        else if (query_info.text_search_info)
+        {
+            search_manager = std::make_shared<MergeTreeTextSearchManager>(storage_snapshot->metadata, query_info.text_search_info, context);
+        }
+        else if (query_info.hybrid_search_info)
+        {
+            search_manager = std::make_shared<MergeTreeHybridSearchManager>(storage_snapshot->metadata, query_info.hybrid_search_info, context);
+        }
 
-        auto algorithm = std::make_unique<MergeTreeSelectWithVSProcessor>(
+        auto algorithm = std::make_unique<MergeTreeSelectWithHybridSearchProcessor>(
             data,
             storage_snapshot,
             part_with_ranges,
@@ -461,7 +463,7 @@ Pipe ReadWithVS::readFromParts(
             actions_settings,
             block_size,
             reader_settings,
-            vector_scan_manager);
+            search_manager);
 
         auto source = std::make_shared<MergeTreeWithVectorScanSource>(std::move(algorithm), data.getLogName());
 

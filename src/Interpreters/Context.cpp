@@ -259,7 +259,8 @@ struct ContextSharedPart : boost::noncopyable
     String filesystem_cache_user TSA_GUARDED_BY(mutex);
     ConfigurationPtr config TSA_GUARDED_BY(mutex);           /// Global configuration settings.
     String tmp_path TSA_GUARDED_BY(mutex);                   /// Path to the temporary files that occur when processing the request.
-    String vector_index_cache_path;                          /// Path to the directory of vector index cache for MSTG disk mode
+    String vector_index_cache_path;                          /// Path to the directory of vector index cache for MSTG disk mode.
+    String tantivy_index_cache_path;                        /// Path to the directory of tantivy index cache.
 
     /// All temporary files that occur when processing the requests accounted here.
     /// Child scopes for more fine-grained accounting are created per user/query/etc.
@@ -1042,6 +1043,12 @@ String Context::getVectorIndexCachePath() const
     return shared->vector_index_cache_path;
 }
 
+String Context::getTantivyIndexCachePath() const
+{
+    SharedLockGuard lock(shared->mutex);
+    return shared->tantivy_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -1144,6 +1151,9 @@ void Context::setPath(const String & path)
     
     if (shared->vector_index_cache_path.empty())
         shared->vector_index_cache_path = shared->path + "vector_index_cache/";
+
+    if (shared->tantivy_index_cache_path.empty())
+        shared->tantivy_index_cache_path = shared->path + "tantivy_index_cache/";
 }
 
 void Context::setFilesystemCachesPath(const String & path)
@@ -1322,6 +1332,12 @@ void Context::setVectorIndexCachePath(const String & path)
 {
     std::lock_guard lock(shared->mutex);
     shared->vector_index_cache_path = path;
+}
+
+void Context::setTantivyIndexCachePath(const String & path)
+{
+    std::lock_guard lock(shared->mutex);
+    shared->tantivy_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const
@@ -5688,6 +5704,36 @@ void Context::setVecScanDescription(VSDescription & vec_scan_desc) const
 void Context::resetVecScanDescription() const
 {
     vector_scan_description.reset();
+}
+
+TextSearchInfoPtr Context::getTextSearchInfo() const
+{
+    return right_text_search_info;
+}
+
+void Context::setTextSearchInfo(TextSearchInfoPtr text_search_info) const
+{
+    right_text_search_info = text_search_info;
+}
+
+void Context::resetTextSearchInfo() const
+{
+    right_text_search_info = nullptr;
+}
+
+HybridSearchInfoPtr Context::getHybridSearchInfo() const
+{
+    return right_hybrid_search_info;
+}
+
+void Context::setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const
+{
+    right_hybrid_search_info = hybrid_search_info;
+}
+
+void Context::resetHybridSearchInfo() const
+{
+    right_hybrid_search_info = nullptr;
 }
 
 String Context::getInstanceLicenseKeeperPath() const

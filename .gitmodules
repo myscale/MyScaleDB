@@ -378,3 +378,6 @@
 [submodule "tests/stability"]
 	path = tests/stability
 	url = git@git.moqi.ai:shanfengp/stability-test.git
+[submodule "rust/workspace/tantivy_search"]
+	path = rust/workspace/tantivy_search
+	url = git@git.moqi.ai:mqdb/tantivy-search.git

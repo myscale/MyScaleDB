@@ -15,7 +15,6 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Interpreters/addTypeConversionToAST.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/FunctionNameNormalizer.h>
 #include <Interpreters/TreeRewriter.h>
@@ -25,6 +24,11 @@
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/parseColumnsListForTableFunction.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
+
 #include <Storages/StorageView.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTColumnDeclaration.h>
@@ -35,6 +39,7 @@
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTStatisticsDeclaration.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/queryToString.h>
 #include <Storages/AlterCommands.h>
@@ -1346,6 +1351,18 @@ bool AlterCommands::hasLegacyInvertedIndex(const StorageInMemoryMetadata & metad
     }
     return false;
 }
+
+#if USE_TANTIVY_SEARCH
+bool AlterCommands::hasTantivyIndex(const StorageInMemoryMetadata & metadata)
+{
+    for (const auto & index : metadata.secondary_indices)
+    {
+        if (index.type == TANTIVY_INDEX_NAME)
+            return true;
+    }
+    return false;
+}
+#endif
 
 std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
 {

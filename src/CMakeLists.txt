@@ -194,6 +194,12 @@ set (all_modules)
 macro(add_object_library name common_path)
     add_headers_and_sources(dbms ${common_path})
 endmacro()
+macro(remove_specific_files name common_path)
+    remove_specific_headers_and_sources(dbms ${common_path})
+endmacro()
+macro(remove_specific_files name)
+    remove_specific_headers_and_sources(dbms ${ARGN})
+endmacro()
 
 add_object_library(clickhouse_access Access)
 add_object_library(clickhouse_backups Backups)
@@ -211,6 +217,14 @@ add_object_library(clickhouse_analyzer_passes Analyzer/Passes)
 add_object_library(clickhouse_analyzer_passes Analyzer/Resolve)
 add_object_library(clickhouse_planner Planner)
 add_object_library(clickhouse_interpreters Interpreters)
+
+if (NOT ENABLE_RUST)
+    remove_specific_files(clickhouse_interpreters 
+        "Interpreters/TantivyFilter.h"
+        "Interpreters/TantivyFilter.cpp"
+    )
+endif()
+
 add_object_library(clickhouse_interpreters_cache Interpreters/Cache)
 add_object_library(clickhouse_interpreters_hash_join Interpreters/HashJoin)
 add_object_library(clickhouse_interpreters_access Interpreters/Access)
@@ -223,6 +237,16 @@ add_object_library(clickhouse_storages_mysql Storages/MySQL)
 add_object_library(clickhouse_storages_distributed Storages/Distributed)
 add_object_library(clickhouse_storages_mergetree Storages/MergeTree)
 add_object_library(clickhouse_storages_statistics Storages/Statistics)
+
+if (NOT ENABLE_RUST)
+    remove_specific_files(clickhouse_storages_mergetree 
+        "Storages/MergeTree/TantivyIndexStore.h"
+        "Storages/MergeTree/TantivyIndexStore.cpp"
+        "Storages/MergeTree/MergeTreeIndexTantivy.h"
+        "Storages/MergeTree/MergeTreeIndexTantivy.cpp"
+    )
+endif()
+
 add_object_library(clickhouse_storages_liveview Storages/LiveView)
 add_object_library(clickhouse_storages_windowview Storages/WindowView)
 add_object_library(clickhouse_storages_s3queue Storages/ObjectStorageQueue)
@@ -615,6 +639,11 @@ endif()
 if (TARGET ch_rust::skim)
     dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::skim,INTERFACE_INCLUDE_DIRECTORIES>)
     dbms_target_link_libraries(PUBLIC ch_rust::skim)
+endif()
+
+if (TARGET ch_rust::tantivy_search)
+    dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::tantivy_search,INTERFACE_INCLUDE_DIRECTORIES>)
+    dbms_target_link_libraries(PUBLIC ch_rust::tantivy_search)
 endif()
 
 dbms_target_link_libraries(PUBLIC ch_contrib::search_index)

@@ -1,13 +1,8 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Core/NamesAndTypes.h>
 #include <Storages/MergeTree/MergeTreeReadTask.h>
 
-#include <VectorIndex/Storages/VSResult.h>
 #include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB

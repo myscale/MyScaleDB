@@ -107,7 +107,7 @@ NamesAndTypesList StorageSnapshot::getColumnsByNames(const GetColumnsOptions & o
     NamesAndTypesList res;
     for (const auto & name : names)
     {
-        if (isDistance(name))
+        if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
         {
             res.emplace_back(name, std::make_shared<DataTypeUInt32>());
         }
@@ -225,7 +225,7 @@ Block StorageSnapshot::getSampleBlockForColumns(const Names & column_names) cons
             const auto & type = virtual_column->type;
             res.insert({type->createColumn(), type, column_name});
         }
-        else if (isDistance(column_name)) /// allow distance function
+        else if (isDistance(column_name) || isTextSearch(column_name) || isHybridSearch(column_name))
         {
             auto type = std::make_shared<DataTypeFloat32>();
             res.insert({type->createColumn(), type, column_name});
@@ -271,7 +271,7 @@ ColumnsDescription StorageSnapshot::getDescriptionForColumns(const Names & colum
             /// override them.
             res.add({name, virtual_column->type});
         }
-        else if (isDistance(name)) /// allow distance function
+        else if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
         {
             res.add({name, std::make_shared<DataTypeFloat32>()});
         }
