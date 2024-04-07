@@ -1,0 +1,101 @@
+
+======>>>>>>> Test tantivy, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 1]: search tantivy index with ==
+1
+1
+[Test Case 2]: search tantivy index with LIKE
+1
+1
+[Test Case 3]: search tantivy index with hasToken
+2
+1
+
+======>>>>>>> Test tantivy(), index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 4]: search tantivy() index with hasToken
+2
+1
+[Test Case 5]: search tantivy() index with IN operator
+2
+1
+[Test Case 6]: search tantivy() index with multiSearch
+5
+1
+
+======>>>>>>> Test tantivy() on array column, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 7]: search tantivy() index with has
+1
+1
+
+======>>>>>>> Test tantivy on map column, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+doc_map_idx	tantivy
+1
+[Test Case 8]: search tantivy index on map with mapContains
+1
+1
+[Test Case 9]: search tantivy index on map with map key
+1
+1
+
+======>>>>>>> Test tantivy, index_granularity=2, index_granularity_bytes=10Mi, Compact Part, 4 DataParts <<<<<<<======
+text_idx	tantivy
+4
+1
+[Test Case 10]: search tantivy index with hasToken on 4 data parts
+2
+1
+
+======>>>>>>> Test tantivy(\'{"doc":{"tokenizer":{"type":"chinese"}}}\'), index_granularity=2, index_granularity_bytes=10Mi, Compact Part, language Chinese <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 11]: search tantivy(\'{"doc":{"tokenizer":{"type":"chinese"}}}\') index with chinese tokenizer
+0
+1
+
+======>>>>>>> Test tantivy, index_granularity=2, index_granularity_bytes=10Mi, Wide Part, LWD->ALTER_DELETE->OPTIMIZE->INSERT <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 12]: search tantivy index before LWD operation
+2
+1
+[Test Case 13]: search tantivy index after LWD operation
+1
+1
+[Test Case 14]: search tantivy index after OPTIMIZE FINAL
+1
+1
+[Test Case 15]: search tantivy index after ALTER DELETE
+0
+[Test Case 16]: search tantivy index after adding one row in current Wide table.
+1
+1
+
+======>>>>>>> Test tantivy, index_granularity=2, index_granularity_bytes=10Mi, Compact Part, LWD->ALTER_DELETE->OPTIMIZE->INSERT <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 17]: search tantivy index on compact Part before LWD operation
+2
+1
+[Test Case 18]: search tantivy index on compact Part after LWD operation
+1
+1
+[Test Case 19]: search tantivy index on compact Part after OPTIMIZE FINAL
+1
+1
+[Test Case 20]: search tantivy index after ALTER DELETE
+0
+[Test Case 21]: search tantivy index after adding one row in current Wide table.
+1
+1
+
+======>>>>>>> Test tantivy with doc store, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	tantivy
+1
+[Test Case 22]: search tantivy index with LIKE
+1
+1
