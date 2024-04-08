@@ -1,6 +1,6 @@
 #include <VectorIndex/Common/VIMetadata.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Storages/VIInfo.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 
 namespace DB
 {
@@ -10,7 +10,7 @@ VIInfo::VIInfo(
     const String & table_,
     const String & index_name,
     VectorIndex::SegmentId & segment_id,
-    const VectorIndexState & state_,
+    const VIState & state_,
     const String & err_msg_)
     : database(database_)
     , table(table_)
@@ -42,7 +42,7 @@ VIInfo::VIInfo(
     }
     catch (...)
     {
-        state = VectorIndexState::ERROR;
+        state = VIState::ERROR;
         err_msg = getCurrentExceptionMessage(false);
     }
 }
@@ -50,8 +50,8 @@ VIInfo::VIInfo(
 VIInfo::VIInfo(
     const String & database_,
     const String & table_,
-    const MergeTreeDataPartColumnIndex & column_index,
-    const VectorIndexState & state_,
+    const VIWithColumnInPart & column_index,
+    const VIState & state_,
     const String & err_msg_)
     : database(database_)
     , table(table_)
