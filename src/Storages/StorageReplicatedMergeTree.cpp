@@ -3669,7 +3669,7 @@ void StorageReplicatedMergeTree::removeVecIndexBuildStatusForPartsFromZK(zkutil:
                 continue;
             
             auto column_index = column_index_opt.value();
-            if (!(column_index->getVectorIndexState() == VectorIndexState::BUILT) && !(column_index->getVectorIndexState() == VectorIndexState::ERROR))
+            if (!(column_index->getVectorIndexState() == VIState::BUILT) && !(column_index->getVectorIndexState() == VIState::ERROR))
                 continue;
 
             String part_status_path = fs::path(replica_path) / "vidx_build_parts" / vec_index_name / part_name;

@@ -2420,8 +2420,8 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
         /// Here the vector index is valid.
         /// When remove old parts, we can remove it from cache only when it is not used by future part (mutation or merge).
         /// Further check the part status, decouple part or VPart with single vector index
-        if ((is_same_without_mutate && column_index->getVectorIndexState() == VectorIndexState::BUILT)
-            || (!is_same_without_mutate && (is_decouple && column_index->getVectorIndexState() != VectorIndexState::BUILT)))
+        if ((is_same_without_mutate && column_index->getVectorIndexState() == VIState::BUILT)
+            || (!is_same_without_mutate && (is_decouple && column_index->getVectorIndexState() != VIState::BUILT)))
         {
             existed = true;
             break;
@@ -2518,8 +2518,7 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     }
     for (const DataPartPtr & part : parts_to_remove)
     {
-        if (vec_event_log &&
-            part->vector_index.containAnyVectorIndexInReady() &&
+        if (vec_event_log && part->vector_index.containAnyVIInReady() &&
             vec_elem.event_type != VIEventLogElement::DEFAULT)
         {
             vec_elem.part_name = part->name;

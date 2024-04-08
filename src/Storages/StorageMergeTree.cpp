@@ -904,7 +904,7 @@ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadat
 
     /// Check if part contains merged vector index
     for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
+        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
             return false;
 
     return true;

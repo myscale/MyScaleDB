@@ -8,10 +8,10 @@ namespace DB
 {
 
 /// Implement system.vector_index_segments table that contains information of vector indices in each data part
-class StorageSystemVectorIndexSegments : public IStorage, boost::noncopyable
+class StorageSystemVIsWithPart : public IStorage, boost::noncopyable
 {
 public:
-    std::string getName() const override { return "StorageSystemVectorIndexSegments"; }
+    std::string getName() const override { return "StorageSystemVIsWithPart"; }
 
     Pipe read(
         const Names & column_names,
@@ -22,7 +22,7 @@ public:
         size_t max_block_size,
         size_t num_streams) override;
 
-    explicit StorageSystemVectorIndexSegments(const StorageID & table_id_);
+    explicit StorageSystemVIsWithPart(const StorageID & table_id_);
     bool isSystemStorage() const override { return true; }
 };
 

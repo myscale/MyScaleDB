@@ -311,7 +311,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScan(
     String metric_str;
     bool enable_brute_force_for_part = bruteForceSearchEnabled(data_part);
 
-    MergeTreeDataPartColumnIndexPtr column_index;
+    VIWithColumnInPartPtr column_index;
     if (data_part->vector_index.getColumnIndexByColumnName(search_column_name).has_value())
         column_index = data_part->vector_index.getColumnIndexByColumnName(search_column_name).value();
 
@@ -363,7 +363,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScan(
 
             /// Although the vector index type support two stage search, the actual built index may fallback to flat.
             bool first_stage_only = false;
-            if (support_two_stage_search && MergeTreeDataPartColumnIndex::supportTwoStageSearch(index_with_meta))
+            if (support_two_stage_search && VIWithColumnInPart::supportTwoStageSearch(index_with_meta))
                 first_stage_only = true;
 
             LOG_DEBUG(log, "first stage only = {}", first_stage_only);
@@ -458,7 +458,7 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
 
     bool brute_force = false;
 
-    MergeTreeDataPartColumnIndexPtr column_index;
+    VIWithColumnInPartPtr column_index;
     if (data_part->vector_index.getColumnIndexByColumnName(search_column_name).has_value())
         column_index = data_part->vector_index.getColumnIndexByColumnName(search_column_name).value();
 
@@ -513,7 +513,7 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
             {
                 OpenTelemetry::SpanHolder span3("MergeTreeVSManager::executeSecondStageVectorScan()::TransferToOldRowIds()");
                 /// Try to transfer to old part's row ids for decouple part. And skip if no need.
-                real_first_stage_result = MergeTreeDataPartColumnIndex::TransferToOldRowIds(index_with_meta, first_stage_result);
+                real_first_stage_result = VIWithColumnInPart::TransferToOldRowIds(index_with_meta, first_stage_result);
             }
 
             /// No rows needed from this old data part
@@ -523,7 +523,7 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
             std::shared_ptr<Search::SearchResult> search_results;
             {
                 OpenTelemetry::SpanHolder span4("MergeTreeVSManager::executeSecondStageVectorScan()::computeTopDistanceSubset()");
-                if (MergeTreeDataPartColumnIndex::supportTwoStageSearch(index_with_meta))
+                if (VIWithColumnInPart::supportTwoStageSearch(index_with_meta))
                 {
                     search_results = column_index->computeTopDistanceSubset(index_with_meta, vec_data, real_first_stage_result, k);
                 }
@@ -1315,7 +1315,7 @@ void MergeTreeVSManager::searchWrapper(
 
     LOG_TRACE(log, "the base data length:{}", base_data->getVectorNum());
 
-    MergeTreeDataPartColumnIndex::searchWithoutIndex<T>(query_vector, base_data, k + delete_id_num, distance_data, id_data, metric);
+    VIWithColumnInPart::searchWithoutIndex<T>(query_vector, base_data, k + delete_id_num, distance_data, id_data, metric);
 
     if (delete_id_num > 0)
     {

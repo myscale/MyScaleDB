@@ -33,7 +33,7 @@ enum class DataType;
 namespace DB
 {
 struct MergedPartNameAndId;
-struct VectorIndexSegmentMetadata;
+struct VISegmentMetadata;
 class IMergeTreeDataPart;
 using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
 using MergeTreeMutableDataPartPtr = std::shared_ptr<IMergeTreeDataPart>;
@@ -67,15 +67,15 @@ struct VIWithMeta;
 std::vector<SegmentId> getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const String & index_name);
 
 std::vector<SegmentId>
-getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata);
+getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata);
 
 std::vector<SegmentId>
-getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata);
+getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata);
 
 std::vector<SegmentId> getAllSegmentIds(
     const DB::DataPartStoragePtr part_storage,
     const String & current_part_name,
-    const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata);
+    const DB::VISegmentMetadata & vector_index_segment_metadata);
 
 DB::NameSet
 getVectorIndexFileNamesInChecksums(const DB::DataPartStoragePtr & part_storage, const String & index_name, bool need_checksums_file = false);

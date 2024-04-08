@@ -22,8 +22,8 @@
 #include <Storages/MergeTree/MergeTreeIndices.h>
 #include <Storages/MergeTree/MergeTreePartInfo.h>
 #include <Storages/MergeTree/MergeTreePartition.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Storages/VIInfo.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 #include <base/types.h>
 
 
@@ -81,7 +81,7 @@ public:
 
     using uint128 = IPartMetadataManager::uint128;
 
-    friend class MergetreeDataPartVectorIndex;
+    friend class VIWithDataPart;
 
     IMergeTreeDataPart(
         const MergeTreeData & storage_,
@@ -340,7 +340,7 @@ public:
 
     mutable VersionMetadata version;
 
-    mutable MergetreeDataPartVectorIndex vector_index;
+    mutable VIWithDataPart vector_index;
 
     /// For data in RAM ('index')
     UInt64 getIndexSizeInBytes() const;

@@ -7,17 +7,17 @@
 #include <Interpreters/DatabaseCatalog.h>
 #include <Parsers/queryToString.h>
 #include <Processors/ISource.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/System/StorageSystemVectorIndices.h>
-#include <Storages/VirtualColumnUtils.h>
-#include <base/getFQDNOrHostName.h>
-#include <Common/logger_useful.h>
-#include <Common/escapeForFileName.h>
 #include <QueryPipeline/Pipe.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/VirtualColumnUtils.h>
+#include <VectorIndex/Storages/StorageSystemVIs.h>
+#include <base/getFQDNOrHostName.h>
+#include <Common/escapeForFileName.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
-StorageSystemVectorIndices::StorageSystemVectorIndices(const StorageID & table_id_)
+StorageSystemVIs::StorageSystemVIs(const StorageID & table_id_)
     : IStorage(table_id_)
 {
     StorageInMemoryMetadata storage_metadata;
@@ -67,7 +67,7 @@ protected:
             if (column_index_opt.has_value())
             {
                 auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VectorIndexState::BUILT)
+                if (column_index->getVectorIndexState() == VIState::BUILT)
                     ++built_parts;
             }
         }
@@ -84,7 +84,7 @@ protected:
             if (column_index_opt.has_value())
             {
                 auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VectorIndexState::SMALL_PART)
+                if (column_index->getVectorIndexState() == VIState::SMALL_PART)
                     ++small_parts;
             }
         }
@@ -231,7 +231,7 @@ private:
     DatabaseTablesIteratorPtr tables_it;
 };
 
-Pipe StorageSystemVectorIndices::read(
+Pipe StorageSystemVIs::read(
     const Names & column_names,
     const StorageSnapshotPtr & storage_snapshot,
     SelectQueryInfo & query_info,

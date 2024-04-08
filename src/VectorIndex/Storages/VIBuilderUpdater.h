@@ -26,9 +26,9 @@
 #include <Common/logger_useful.h>
 #include <Common/ActionBlocker.h>
 
+#include <VectorIndex/Common/VICommands.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Common/VectorDataset.h>
-#include <VectorIndex/Storages/VICommands.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 
 namespace DB
 {

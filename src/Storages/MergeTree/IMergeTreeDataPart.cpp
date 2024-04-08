@@ -1842,7 +1842,7 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
 
     /// Support multiple vector indices. We may need to update specified vector index after build finished.
     bool update_all_indices = index_name.empty() ? true : false;
-    if ((update_all_indices && !vector_index.containAnyVectorIndexInReady()) || (!update_all_indices && !vector_index.containDecoupleOrVPartIndexInReady(index_name)))
+    if ((update_all_indices && !vector_index.containAnyVIInReady()) || (!update_all_indices && !vector_index.containDecoupleOrVPartIndexInReady(index_name)))
         return;
 
     /// Store deleted row ids

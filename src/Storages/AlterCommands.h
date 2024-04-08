@@ -8,7 +8,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Common/SettingsChanges.h>
 
-#include <VectorIndex/Storages/VICommands.h>
+#include <VectorIndex/Common/VICommands.h>
 
 namespace DB
 {

@@ -33,7 +33,7 @@
 #include <Storages/MergeTree/MergeTreeSequentialSource.h>
 #include <Storages/MergeTree/MergeTreeSource.h>
 #include <VectorIndex/Cache/VICacheManager.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Utils/VIUtils.h>
 #include <Common/ActionBlocker.h>
 #include <Common/logger_useful.h>
@@ -338,7 +338,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
                 if (!column_index_opt.has_value())
                     continue;
                 auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VectorIndexState::BUILT)
+                if (column_index->getVectorIndexState() == VIState::BUILT)
                     num_parts_with_vector_index++;
                 
                 if (part->rows_count == 0)

@@ -682,7 +682,7 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
 
     /// Special handling for merge one single VPart. If new part has vector index, expire the index cache for old part.
     /// TODO: Can use old part's index cache, just update cache key to avoid load it for new part?
-    if (new_part->vector_index.containAnyVectorIndexInReady() && old_parts.size() == 1)
+    if (new_part->vector_index.containAnyVIInReady() && old_parts.size() == 1)
     {
         auto old_part = old_parts[0];
         for (const auto & vec_index : new_vector_indices)

@@ -34,11 +34,11 @@ struct SegmentId;
 
 namespace DB
 {
-class MergeTreeDataPartColumnIndex;
+class VIWithColumnInPart;
 
 using Float64 = double;
 
-enum VectorIndexState
+enum VIState
 {
     SMALL_PART,             // rows_count = 0
     PENDING,                // part without index, wait build index
@@ -59,14 +59,14 @@ public:
         const String & table_,
         const String & index_name,
         VectorIndex::SegmentId & segment_id,
-        const VectorIndexState & status_ = BUILT,
+        const VIState & status_ = BUILT,
         const String & err_msg_ = "");
 
     VIInfo(
         const String & database_,
         const String & table_,
-        const MergeTreeDataPartColumnIndex & column_index,
-        const VectorIndexState & status_ = BUILT,
+        const VIWithColumnInPart & column_index,
+        const VIState & status_ = BUILT,
         const String & err_msg_ = "");
 
     String database;
@@ -90,7 +90,7 @@ public:
     // Size of vector index on disk
     UInt64 disk_usage_bytes = 0;
 
-    VectorIndexState state;
+    VIState state;
     String err_msg;
 
     double elapsed = 0;
@@ -105,7 +105,7 @@ private:
     CurrentMetrics::Increment vector_memory_size_metric{CurrentMetrics::AllVectorIndexMemorySize, 0};
 };
 
-using VectorIndexInfoPtr = std::shared_ptr<VIInfo>;
-using VectorIndexInfoPtrList = std::vector<VectorIndexInfoPtr>;
+using VIInfoPtr = std::shared_ptr<VIInfo>;
+using VIInfoPtrList = std::vector<VIInfoPtr>;
 
 }

@@ -275,7 +275,7 @@ VIEntryPtr VIBuilderUpdater::selectPartToBuildVI(const StorageMetadataPtr & meta
 
             auto status = column_index->getVectorIndexState();
 
-            if ((status != VectorIndexState::PENDING)
+            if ((status != VIState::PENDING)
                 || (column_index->isDecoupleIndexFile() && data.getSettings()->disable_rebuild_for_decouple))
                 continue;
 
@@ -448,7 +448,7 @@ VIBuiltStatus VIBuilderUpdater::buildVI(const VIContextPtr ctx)
     try
     {
         LOG_INFO(log, "Build vector index {} for part {} start.", ctx->vector_index_name, ctx->source_part->name);
-        if (ctx->source_column_index->getVectorIndexState() == VectorIndexState::BUILT)
+        if (ctx->source_column_index->getVectorIndexState() == VIState::BUILT)
         {
             LOG_WARNING(log, "Vector index has been created successfully and does not need to be built again. it's a bug.");
             return VIBuiltStatus{VIBuiltStatus::BUILD_SKIPPED};
@@ -458,7 +458,7 @@ VIBuiltStatus VIBuilderUpdater::buildVI(const VIContextPtr ctx)
         if (future_part)
         {
             auto future_column_index_opt = future_part->vector_index.getColumnIndex(ctx->vector_index_name);
-            if (future_column_index_opt.has_value() && future_column_index_opt.value()->getVectorIndexState() == VectorIndexState::BUILT)
+            if (future_column_index_opt.has_value() && future_column_index_opt.value()->getVectorIndexState() == VIState::BUILT)
             {
                 LOG_WARNING(log, "Vector index has been created successfully in part {} and does not need to be built again for part {}.", future_part->name, ctx->source_part->name);
                 return VIBuiltStatus{VIBuiltStatus::BUILD_SKIPPED};
@@ -746,7 +746,7 @@ VIBuiltStatus VIBuilderUpdater::TryMoveVIFiles(const VIContextPtr ctx)
             return VIBuiltStatus{VIBuiltStatus::BUILD_RETRY};
         }
 
-        if (ctx->source_column_index->getVectorIndexState() == VectorIndexState::BUILT)
+        if (ctx->source_column_index->getVectorIndexState() == VIState::BUILT)
             return VIBuiltStatus{VIBuiltStatus::BUILD_SKIPPED};
 
         return VIBuiltStatus{VIBuiltStatus::BUILD_FAIL, e.code(), e.message()};
@@ -842,8 +842,8 @@ void VIBuilderUpdater::moveVIFilesToFuturePartAndCache(
         throw Exception(ErrorCodes::INCORRECT_DATA, "Vector index file does not exists when move vector index.");
     }
 
-    VectorIndexSegmentMetadata vector_index_segment_metadata
-        = VectorIndexSegmentMetadata(true, false, vec_index_desc.name, vec_index_desc.column, {});
+    VISegmentMetadata vector_index_segment_metadata
+        = VISegmentMetadata(true, false, vec_index_desc.name, vec_index_desc.column, {});
 
     auto column_index = dest_part->vector_index.getColumnIndex(vec_index_desc.name).value();
     auto old_index_segment_metadata = column_index->getIndexSegmentMetadata();

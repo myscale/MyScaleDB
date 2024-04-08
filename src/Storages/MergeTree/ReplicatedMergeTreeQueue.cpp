@@ -2583,7 +2583,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     /// Check if two parts contain vector index files.
     /// Two parts can be merged when both have built vector index or both not.
     for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
+        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
         {
             if (out_reason)
                 *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";

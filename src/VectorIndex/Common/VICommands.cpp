@@ -31,8 +31,8 @@
 #include <Parsers/queryToString.h>
 #include <Common/logger_useful.h>
 
+#include <VectorIndex/Common/VICommands.h>
 #include <VectorIndex/Parsers/ASTVIDeclaration.h>
-#include <VectorIndex/Storages/VICommands.h>
 
 namespace DB
 {

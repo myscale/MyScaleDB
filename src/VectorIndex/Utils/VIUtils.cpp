@@ -37,8 +37,8 @@
 
 #include <VectorIndex/Common/SegmentId.h>
 #include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 #include <VectorIndex/Storages/VSDescription.h>
 #include <VectorIndex/Utils/VIUtils.h>
 
@@ -209,13 +209,13 @@ getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const String & inde
 }
 
 std::vector<SegmentId>
-getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata)
+getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata)
 {
     return getAllSegmentIds(data_part->getDataPartStoragePtr(), data_part->name, vector_index_segment_metadata);
 }
 
 std::vector<SegmentId>
-getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata)
+getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata)
 {
     return getAllSegmentIds(data_part.getDataPartStoragePtr(), data_part.name, vector_index_segment_metadata);
 }
@@ -223,7 +223,7 @@ getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VectorIndex
 std::vector<SegmentId> getAllSegmentIds(
     const DB::DataPartStoragePtr part_storage,
     const String & current_part_name,
-    const DB::VectorIndexSegmentMetadata & vector_index_segment_metadata)
+    const DB::VISegmentMetadata & vector_index_segment_metadata)
 {
     std::vector<SegmentId> segment_ids;
 

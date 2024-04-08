@@ -1359,7 +1359,7 @@ private:
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         /// Reuse vector index when no rows are deleted
-        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVectorIndexInReady())
+        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVIInReady())
         {
             /// get current decouple index set
             [[maybe_unused]] bool vector_files_found = false;

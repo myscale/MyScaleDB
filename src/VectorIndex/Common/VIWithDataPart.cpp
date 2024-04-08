@@ -31,10 +31,10 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Common/VIMetadata.h>
 #include <VectorIndex/Common/VIPartReader.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Common/VectorDataset.h>
 #include <VectorIndex/Common/VectorIndexIO.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 #include <VectorIndex/Utils/VIUtils.h>
 
 namespace DB
@@ -49,10 +49,10 @@ namespace ErrorCodes
     extern const int DEADLOCK_AVOIDED;
 }
 
-std::once_flag MergeTreeDataPartColumnIndex::once;
-int MergeTreeDataPartColumnIndex::max_threads = getNumberOfPhysicalCPUCores() * 2;
+std::once_flag VIWithColumnInPart::once;
+int VIWithColumnInPart::max_threads = getNumberOfPhysicalCPUCores() * 2;
 
-void MergeTreeDataPartColumnIndex::transferToNewRowIds(const VIWithMeta & index_with_meta, SearchResultPtr result)
+void VIWithColumnInPart::transferToNewRowIds(const VIWithMeta & index_with_meta, SearchResultPtr result)
 {
     if (!index_with_meta.row_ids_map || index_with_meta.row_ids_map->empty())
         return;
@@ -65,7 +65,7 @@ void MergeTreeDataPartColumnIndex::transferToNewRowIds(const VIWithMeta & index_
     }
 }
 
-SearchResultPtr MergeTreeDataPartColumnIndex::TransferToOldRowIds(const VIWithMeta & index_with_meta, const SearchResultPtr result)
+SearchResultPtr VIWithColumnInPart::TransferToOldRowIds(const VIWithMeta & index_with_meta, const SearchResultPtr result)
 {
     if (!index_with_meta.inverted_row_ids_map || index_with_meta.inverted_row_ids_map->empty())
         return result;
@@ -124,15 +124,15 @@ SearchResultPtr MergeTreeDataPartColumnIndex::TransferToOldRowIds(const VIWithMe
     return real_search_result;
 }
 
-bool MergeTreeDataPartColumnIndex::supportTwoStageSearch(const VIWithMeta & index_with_meta)
+bool VIWithColumnInPart::supportTwoStageSearch(const VIWithMeta & index_with_meta)
 {
     bool isSupport = false;
     std::visit([&](auto && index) { isSupport = index->supportTwoStageSearch(); }, index_with_meta.index);
     return isSupport;
 }
 
-MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(const IMergeTreeDataPart & part, const VIDescription & vec_desc)
-    : MergeTreeDataPartColumnIndex(
+VIWithColumnInPart::VIWithColumnInPart(const IMergeTreeDataPart & part, const VIDescription & vec_desc)
+    : VIWithColumnInPart(
         part.storage.getStorageID(),
         part.name,
         vec_desc,
@@ -143,7 +143,7 @@ MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(const IMergeTreeDataP
 {
 }
 
-MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(
+VIWithColumnInPart::VIWithColumnInPart(
     const StorageID & storage_id_,
     const String & current_part_name_,
     const VIDescription & vec_desc,
@@ -158,7 +158,7 @@ MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(
     , total_vec(rows_count_)
     , vector_search_type(vec_desc.vector_search_type)
     , part_storage(part_storage_)
-    , build_index_info(std::make_shared<VectorIndexBuildInfo>())
+    , build_index_info(std::make_shared<VIBuildInfo>())
 {
     dimension = getVectorDimension(vec_desc.vector_search_type, *metadata_snapshot, vec_desc.column);
 
@@ -174,7 +174,7 @@ MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(
     }
 
     vector_index_segment_metadata.set(
-        std::make_unique<VectorIndexSegmentMetadata>(false, false, vec_desc.name, vec_desc.column, std::vector<MergedPartNameAndId>()));
+        std::make_unique<VISegmentMetadata>(false, false, vec_desc.name, vec_desc.column, std::vector<MergedPartNameAndId>()));
 
     if (vec_desc.parameters && vec_desc.parameters->has("metric_type"))
         metric_str = vec_desc.parameters->getValue<String>("metric_type");
@@ -191,14 +191,14 @@ MergeTreeDataPartColumnIndex::MergeTreeDataPartColumnIndex(
     des.erase("metric_type");
 }
 
-void MergeTreeDataPartColumnIndex::onBuildStart()
+void VIWithColumnInPart::onBuildStart()
 {
     std::lock_guard lock(build_index_info->build_info_mutex);
-    build_index_info->state = VectorIndexState::BUILDING;
+    build_index_info->state = VIState::BUILDING;
     build_index_info->watch = std::make_unique<Stopwatch>();
 }
 
-void MergeTreeDataPartColumnIndex::onBuildFinish(bool is_success, const String & err_msg_)
+void VIWithColumnInPart::onBuildFinish(bool is_success, const String & err_msg_)
 {
     std::lock_guard lock(build_index_info->build_info_mutex);
     if (build_index_info->watch != nullptr)
@@ -206,35 +206,35 @@ void MergeTreeDataPartColumnIndex::onBuildFinish(bool is_success, const String &
 
     if (is_success)
     {
-        build_index_info->state = VectorIndexState::BUILT;
+        build_index_info->state = VIState::BUILT;
         build_index_info->err_msg = "";
     }
     else
     {
-        build_index_info->state = VectorIndexState::ERROR;
+        build_index_info->state = VIState::ERROR;
         build_index_info->err_msg = err_msg_;
     }
 }
 
-double MergeTreeDataPartColumnIndex::getBuildElapsed()
+double VIWithColumnInPart::getBuildElapsed()
 {
     std::lock_guard lock(build_index_info->build_info_mutex);
     return build_index_info->watch == nullptr ? 0 : build_index_info->watch->elapsedSeconds();
 }
 
-VectorIndexState MergeTreeDataPartColumnIndex::getVectorIndexState()
+VIState VIWithColumnInPart::getVectorIndexState()
 {
     std::lock_guard lock(build_index_info->build_info_mutex);
     return build_index_info->state;
 }
 
-const String MergeTreeDataPartColumnIndex::getLastBuildErrMsg()
+const String VIWithColumnInPart::getLastBuildErrMsg()
 {
     std::lock_guard lock(build_index_info->build_info_mutex);
     return build_index_info->err_msg;
 }
 
-void MergeTreeDataPartColumnIndex::shutdown()
+void VIWithColumnInPart::shutdown()
 {
     if (is_shutdown.load())
         return;
@@ -242,7 +242,7 @@ void MergeTreeDataPartColumnIndex::shutdown()
 
     cancelBuild();
 
-    auto * vector_index_segment = const_cast<VectorIndexSegmentMetadata *>(getIndexSegmentMetadata().get());
+    auto * vector_index_segment = const_cast<VISegmentMetadata *>(getIndexSegmentMetadata().get());
     auto segment_ids = getAllSegmentIds(part_storage, current_part_name, *vector_index_segment);
     vector_index_segment->is_ready.store(false);
 
@@ -254,9 +254,9 @@ void MergeTreeDataPartColumnIndex::shutdown()
     }
 }
 
-VectorIndexInfoPtrList MergeTreeDataPartColumnIndex::getVectorIndexInfos()
+VIInfoPtrList VIWithColumnInPart::getVectorIndexInfos()
 {
-    VectorIndexInfoPtrList res;
+    VIInfoPtrList res;
     {
         std::lock_guard lock(vector_info_mutex);
         if (vector_infos.empty())
@@ -270,32 +270,32 @@ VectorIndexInfoPtrList MergeTreeDataPartColumnIndex::getVectorIndexInfos()
     return res;
 }
 
-void MergeTreeDataPartColumnIndex::removeDecoupleIndexInfos()
+void VIWithColumnInPart::removeDecoupleIndexInfos()
 {
     std::lock_guard lock(vector_info_mutex);
     if (!vector_infos.empty())
         vector_infos.erase(vector_infos.begin() + 1, vector_infos.end());
 }
 
-void MergeTreeDataPartColumnIndex::removeAllIndexInfos()
+void VIWithColumnInPart::removeAllIndexInfos()
 {
     std::lock_guard lock(vector_info_mutex);
     vector_infos.clear();
 }
 
-void MergeTreeDataPartColumnIndex::updateIndexBuildInfo(VectorIndexBuildInfoPtr build_index_info_)
+void VIWithColumnInPart::updateIndexBuildInfo(VIBuildInfoPtr build_index_info_)
 {
     std::atomic_store(&build_index_info, build_index_info_);
 }
 
-void MergeTreeDataPartColumnIndex::initVectorIndexInfo(bool is_small_part)
+void VIWithColumnInPart::initVectorIndexInfo(bool is_small_part)
 {
     auto segment_ids = getAllSegmentIds(part_storage, current_part_name, *getIndexSegmentMetadata());
     if (!segment_ids.empty() && !segment_ids[0].fromMergedParts())
     {
         /// vpart initialize index info
         std::lock_guard lock(vector_info_mutex);
-        build_index_info->state = VectorIndexState::BUILT;
+        build_index_info->state = VIState::BUILT;
         vector_infos.emplace_back(std::make_shared<VIInfo>(
             storage_id.database_name, storage_id.table_name, index_name, segment_ids[0], build_index_info->state));
     }
@@ -304,20 +304,20 @@ void MergeTreeDataPartColumnIndex::initVectorIndexInfo(bool is_small_part)
         /// Both "dpart" and "part," when lacking a single index, require the addition of pending state index information,
         /// as they both necessitate the rebuilding of vector indices. 
         /// However, "dpart" additionally requires the initialization of other vector index information (merged source parts index).
-        build_index_info->state = is_small_part ? VectorIndexState::SMALL_PART : VectorIndexState::PENDING;
+        build_index_info->state = is_small_part ? VIState::SMALL_PART : VIState::PENDING;
         vector_infos.emplace_back(
             std::make_shared<VIInfo>(storage_id.database_name, storage_id.table_name, *this, build_index_info->state));
         for (auto & segment_id : segment_ids)
         {
             std::lock_guard lock(vector_info_mutex);
             auto vector_index_info = std::make_shared<VIInfo>(
-                storage_id.database_name, storage_id.table_name, index_name, segment_id, VectorIndexState::BUILT);
+                storage_id.database_name, storage_id.table_name, index_name, segment_id, VIState::BUILT);
             vector_infos.emplace_back(vector_index_info);
         }
     }
 }
 
-bool MergeTreeDataPartColumnIndex::canMergeForColumnIndex(const MergeTreeDataPartPtr & left, const MergeTreeDataPartPtr & right, const String & vec_index_name)
+bool VIWithColumnInPart::canMergeForColumnIndex(const MergeTreeDataPartPtr & left, const MergeTreeDataPartPtr & right, const String & vec_index_name)
 {
     auto left_column_index_opt = left->vector_index.getColumnIndex(vec_index_name);
     auto right_column_index_opt = right->vector_index.getColumnIndex(vec_index_name);
@@ -333,25 +333,25 @@ bool MergeTreeDataPartColumnIndex::canMergeForColumnIndex(const MergeTreeDataPar
     auto left_index_status = left_column_index->getVectorIndexState();
     auto right_index_status = right_column_index->getVectorIndexState();
 
-    if (left_index_status <= VectorIndexState::PENDING && right_index_status <= VectorIndexState::PENDING)
+    if (left_index_status <= VIState::PENDING && right_index_status <= VIState::PENDING)
         return true;
     else if (
-        (left_index_status <= VectorIndexState::PENDING && right_index_status == VectorIndexState::ERROR)
-        || (right_index_status <= VectorIndexState::PENDING && left_index_status == VectorIndexState::ERROR))
+        (left_index_status <= VIState::PENDING && right_index_status == VIState::ERROR)
+        || (right_index_status <= VIState::PENDING && left_index_status == VIState::ERROR))
         return true;
-    else if (left_index_status == VectorIndexState::BUILT && right_index_status == VectorIndexState::BUILT)
+    else if (left_index_status == VIState::BUILT && right_index_status == VIState::BUILT)
         return true;
-    else if (left_index_status == VectorIndexState::ERROR && right_index_status == VectorIndexState::ERROR)
+    else if (left_index_status == VIState::ERROR && right_index_status == VIState::ERROR)
         return true;
     else if (
-        (left_index_status == VectorIndexState::SMALL_PART && right_index_status == VectorIndexState::BUILT)
-        || (right_index_status == VectorIndexState::SMALL_PART && left_index_status == VectorIndexState::BUILT))
+        (left_index_status == VIState::SMALL_PART && right_index_status == VIState::BUILT)
+        || (right_index_status == VIState::SMALL_PART && left_index_status == VIState::BUILT))
         return true;
 
     return false;
 }
 
-size_t MergeTreeDataPartColumnIndex::getMemoryUsage() const
+size_t VIWithColumnInPart::getMemoryUsage() const
 {
     VIVariantPtr index_variant;
     try
@@ -368,7 +368,7 @@ size_t MergeTreeDataPartColumnIndex::getMemoryUsage() const
     return memory_usage;
 }
 
-size_t MergeTreeDataPartColumnIndex::getDiskUsage() const
+size_t VIWithColumnInPart::getDiskUsage() const
 {
     VIVariantPtr index_variant;
     try
@@ -385,13 +385,13 @@ size_t MergeTreeDataPartColumnIndex::getDiskUsage() const
     return disk_usage;
 }
 
-void MergeTreeDataPartColumnIndex::cancelBuild()
+void VIWithColumnInPart::cancelBuild()
 {
     if (!build_index_info->cancel_build.load())
         build_index_info->cancel_build.store(true);
 }
 
-VIVariantPtr MergeTreeDataPartColumnIndex::createIndex() const
+VIVariantPtr VIWithColumnInPart::createIndex() const
 {
     auto metric = Search::getMetricType(metric_str, vector_search_type);
     VIVariantPtr index_variant;
@@ -435,14 +435,14 @@ VIVariantPtr MergeTreeDataPartColumnIndex::createIndex() const
 }
 
 #ifdef ENABLE_SCANN
-std::shared_ptr<DiskIOManager> MergeTreeDataPartColumnIndex::getDiskIOManager() const
+std::shared_ptr<DiskIOManager> VIWithColumnInPart::getDiskIOManager() const
 {
     return nullptr;
 
 }
 #endif
 
-void MergeTreeDataPartColumnIndex::serialize(
+void VIWithColumnInPart::serialize(
     VIVariantPtr & index,
     DiskPtr disk,
     const String & serialize_local_folder,
@@ -518,7 +518,7 @@ void MergeTreeDataPartColumnIndex::serialize(
     out_checksums->finalize();
 }
 
-IndexWithMetaHolderPtr MergeTreeDataPartColumnIndex::loadDecoupleCache(SegmentId & segment_id)
+IndexWithMetaHolderPtr VIWithColumnInPart::loadDecoupleCache(SegmentId & segment_id)
 {
     if (!segment_id.fromMergedParts())
         return nullptr;
@@ -569,9 +569,9 @@ IndexWithMetaHolderPtr MergeTreeDataPartColumnIndex::loadDecoupleCache(SegmentId
 }
 
 /// cancel load vector index implement
-IndexWithMetaHolderPtr MergeTreeDataPartColumnIndex::load(SegmentId & segment_id, bool is_active, const String & nvme_cache_path_uuid)
+IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_active, const String & nvme_cache_path_uuid)
 {
-    OpenTelemetry::SpanHolder span("MergeTreeDataPartColumnIndex::load");
+    OpenTelemetry::SpanHolder span("VIWithColumnInPart::load");
     VICacheManager * mgr = VICacheManager::getInstance();
     CacheKey cache_key = segment_id.getCacheKey();
     const String cache_key_str = cache_key.toString();
@@ -743,7 +743,7 @@ IndexWithMetaHolderPtr MergeTreeDataPartColumnIndex::load(SegmentId & segment_id
     return index_holder;
 }
 
-bool MergeTreeDataPartColumnIndex::cache(VIVariantPtr index)
+bool VIWithColumnInPart::cache(VIVariantPtr index)
 {
     auto segment_id = getCurrentFakeSegmentId();
     bool isNullptr = true;
@@ -778,7 +778,7 @@ bool MergeTreeDataPartColumnIndex::cache(VIVariantPtr index)
 }
 
 
-std::vector<IndexWithMetaHolderPtr> MergeTreeDataPartColumnIndex::getIndexHolders(bool is_active)
+std::vector<IndexWithMetaHolderPtr> VIWithColumnInPart::getIndexHolders(bool is_active)
 {
     std::vector<IndexWithMetaHolderPtr> ret;
     std::vector<SegmentId> segment_ids;
@@ -815,7 +815,7 @@ std::vector<IndexWithMetaHolderPtr> MergeTreeDataPartColumnIndex::getIndexHolder
     return ret;
 }
 
-SearchResultPtr MergeTreeDataPartColumnIndex::computeTopDistanceSubset(
+SearchResultPtr VIWithColumnInPart::computeTopDistanceSubset(
     const VIWithMeta & index_with_meta, VectorDatasetVariantPtr queries, SearchResultPtr first_stage_result, int32_t top_k)
 {
     auto index_variant = index_with_meta.index;
@@ -835,7 +835,7 @@ SearchResultPtr MergeTreeDataPartColumnIndex::computeTopDistanceSubset(
     return ret;
 }
 
-SearchResultPtr MergeTreeDataPartColumnIndex::search(
+SearchResultPtr VIWithColumnInPart::search(
     const VIWithMeta & index_with_meta,
     VectorDatasetVariantPtr queries,
     int32_t k,
@@ -895,7 +895,7 @@ SearchResultPtr MergeTreeDataPartColumnIndex::search(
         SearchResultPtr ret;
 
         {
-            OpenTelemetry::SpanHolder span_search("MergeTreeDataPartColumnIndex::performSearch()::search");
+            OpenTelemetry::SpanHolder span_search("VIWithColumnInPart::performSearch()::search");
             if (vector_search_type == Search::DataType::FloatVector)
             {
                 Float32VectorDatasetPtr & float_query_dataset = std::get<Float32VectorDatasetPtr>(queries);
@@ -919,7 +919,7 @@ SearchResultPtr MergeTreeDataPartColumnIndex::search(
         // Transfer the results to newRowIds
         /// if (!first_stage_only) Use new row ids for decouple part
         {
-            OpenTelemetry::SpanHolder span_transfer_id("MergeTreeDataPartColumnIndex::performSearch()::transferToNewRowIds");
+            OpenTelemetry::SpanHolder span_transfer_id("VIWithColumnInPart::performSearch()::transferToNewRowIds");
             transferToNewRowIds(index_with_meta, ret);
         }
 
@@ -936,7 +936,7 @@ SearchResultPtr MergeTreeDataPartColumnIndex::search(
     }
 }
 
-bool MergetreeDataPartVectorIndex::isBuildCancelled(const String & index_name)
+bool VIWithDataPart::isBuildCancelled(const String & index_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     if (auto it = vector_indices.find(index_name); it != vector_indices.end())
@@ -944,14 +944,14 @@ bool MergetreeDataPartVectorIndex::isBuildCancelled(const String & index_name)
     return true;
 }
 
-void MergetreeDataPartVectorIndex::cancelIndexBuild(const String & index_name)
+void VIWithDataPart::cancelIndexBuild(const String & index_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     if (auto it = vector_indices.find(index_name); it != vector_indices.end())
         it->second->cancelBuild();
 }
 
-void MergetreeDataPartVectorIndex::cancelAllIndexBuild()
+void VIWithDataPart::cancelAllIndexBuild()
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
@@ -959,7 +959,7 @@ void MergetreeDataPartVectorIndex::cancelAllIndexBuild()
 }
 
 /// revert according std::optional
-std::optional<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::getColumnIndex(const String & index_name)
+std::optional<VIWithColumnInPartPtr> VIWithDataPart::getColumnIndex(const String & index_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     if (auto it = vector_indices.find(index_name); it != vector_indices.end())
@@ -967,7 +967,7 @@ std::optional<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::get
     return std::nullopt;
 }
 
-std::optional<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::getColumnIndexByColumnName(const String & column_name)
+std::optional<VIWithColumnInPartPtr> VIWithDataPart::getColumnIndexByColumnName(const String & column_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
@@ -979,9 +979,9 @@ std::optional<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::get
 }
 
 
-void MergetreeDataPartVectorIndex::addVectorIndex(const VIDescription & vec_desc)
+void VIWithDataPart::addVectorIndex(const VIDescription & vec_desc)
 {
-    MergeTreeDataPartColumnIndexPtr column_index = std::make_shared<MergeTreeDataPartColumnIndex>(part, vec_desc);
+    VIWithColumnInPartPtr column_index = std::make_shared<VIWithColumnInPart>(part, vec_desc);
     {
         std::unique_lock<std::shared_mutex> lock(vector_indices_mutex);
         if (auto it = vector_indices.find(vec_desc.name); it != vector_indices.end())
@@ -992,7 +992,7 @@ void MergetreeDataPartVectorIndex::addVectorIndex(const VIDescription & vec_desc
 }
 
 /// [TODO] Behavior definition for adding the same index multiple times
-void MergetreeDataPartVectorIndex::addVectorIndex(const String & index_name, MergeTreeDataPartColumnIndexPtr column_index)
+void VIWithDataPart::addVectorIndex(const String & index_name, VIWithColumnInPartPtr column_index)
 {
     std::unique_lock<std::shared_mutex> lock(vector_indices_mutex);
     if (!vector_indices.try_emplace(index_name, column_index).second)
@@ -1005,7 +1005,7 @@ void MergetreeDataPartVectorIndex::addVectorIndex(const String & index_name, Mer
     vector_indices[index_name]->initVectorIndexInfo(part.isSmallPart());
 }
 
-void MergetreeDataPartVectorIndex::removeVectorIndex(const String & index_name)
+void VIWithDataPart::removeVectorIndex(const String & index_name)
 {
     std::unique_lock<std::shared_mutex> lock(vector_indices_mutex);
     if (auto it = vector_indices.find(index_name); it != vector_indices.end())
@@ -1026,7 +1026,7 @@ void MergetreeDataPartVectorIndex::removeVectorIndex(const String & index_name)
     vector_indices.erase(index_name);
 }
 
-void MergetreeDataPartVectorIndex::convertIndexFileForUpgrade()
+void VIWithDataPart::convertIndexFileForUpgrade()
 {
     IDataPartStorage & part_storage = const_cast<IDataPartStorage &>(part.getDataPartStorage());
 
@@ -1220,7 +1220,7 @@ void MergetreeDataPartVectorIndex::convertIndexFileForUpgrade()
 }
 
 /// Incomplete files should be deleted at this stage, [TODO] behavioral confirmation
-void MergetreeDataPartVectorIndex::loadVectorIndexFromLocalFile(bool need_convert_index_file)
+void VIWithDataPart::loadVectorIndexFromLocalFile(bool need_convert_index_file)
 {
     auto metadata_snapshot = part.storage.getInMemoryMetadataPtr();
     if (!metadata_snapshot->hasVectorIndices())
@@ -1275,12 +1275,12 @@ void MergetreeDataPartVectorIndex::loadVectorIndexFromLocalFile(bool need_conver
 
                 auto storage_id = part.storage.getStorageID();
 
-                MergeTreeDataPartColumnIndexPtr column_index = std::make_shared<MergeTreeDataPartColumnIndex>(part, vec_index_desc);
+                VIWithColumnInPartPtr column_index = std::make_shared<VIWithColumnInPart>(part, vec_index_desc);
 
                 std::vector<MergedPartNameAndId> decouple_merge_source_parts = is_decouple ? merged_source_parts : std::vector<MergedPartNameAndId>{};
 
                 /// Update part metadata, will generate
-                auto vector_index_segment = VectorIndexSegmentMetadata(
+                auto vector_index_segment = VISegmentMetadata(
                     /*ready*/ true, is_decouple, vector_index_name, vec_index_desc.column, decouple_merge_source_parts);
 
                 column_index->setIndexSegmentMetadata(vector_index_segment);
@@ -1298,8 +1298,8 @@ void MergetreeDataPartVectorIndex::loadVectorIndexFromLocalFile(bool need_conver
     removeIncompleteMovedVectorIndexFiles(part);
 }
 
-void MergetreeDataPartVectorIndex::inheritVectorIndexStatus(
-    MergetreeDataPartVectorIndex & other_vector_index, const StorageMetadataPtr metadata_snapshot, const NameSet & need_rebuild_index)
+void VIWithDataPart::inheritVectorIndexStatus(
+    VIWithDataPart & other_vector_index, const StorageMetadataPtr metadata_snapshot, const NameSet & need_rebuild_index)
 {
     if (!metadata_snapshot->hasVectorIndices())
         return;
@@ -1314,11 +1314,11 @@ void MergetreeDataPartVectorIndex::inheritVectorIndexStatus(
     }
 }
 
-std::vector<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::getInvalidVectorIndexHolder(StorageMetadataPtr metadata_snapshot)
+std::vector<VIWithColumnInPartPtr> VIWithDataPart::getInvalidVectorIndexHolder(StorageMetadataPtr metadata_snapshot)
 {
     if (!metadata_snapshot)
         LOG_ERROR(log, "Get invalid column index error, metadata snapshot is nullptr.");
-    std::vector<MergeTreeDataPartColumnIndexPtr> expire_index_holder;
+    std::vector<VIWithColumnInPartPtr> expire_index_holder;
     {
         std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
         for (auto it : vector_indices)
@@ -1328,12 +1328,12 @@ std::vector<MergeTreeDataPartColumnIndexPtr> MergetreeDataPartVectorIndex::getIn
     return expire_index_holder;
 }
 
-void MergetreeDataPartVectorIndex::decoupleIndexOffline(VectorIndexSegmentMetadataPtr index_segment_metadata, NameSet old_files_set)
+void VIWithDataPart::decoupleIndexOffline(VISegmentMetadataPtr index_segment_metadata, NameSet old_files_set)
 {
     /// force index file expire
     auto & part_storage = const_cast<IDataPartStorage &>(part.getDataPartStorage());
 
-    auto & segment_metadata = const_cast<VectorIndexSegmentMetadata &>(*index_segment_metadata);
+    auto & segment_metadata = const_cast<VISegmentMetadata &>(*index_segment_metadata);
 
     auto segment_ids = VectorIndex::getAllSegmentIds(part, segment_metadata);
 
@@ -1370,7 +1370,7 @@ void MergetreeDataPartVectorIndex::decoupleIndexOffline(VectorIndexSegmentMetada
     }
 }
 
-bool MergetreeDataPartVectorIndex::containDecoupleIndex()
+bool VIWithDataPart::containDecoupleIndex()
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
@@ -1379,8 +1379,7 @@ bool MergetreeDataPartVectorIndex::containDecoupleIndex()
     return false;
 }
 
-RWLockImpl::LockHolder
-MergetreeDataPartVectorIndex::tryLockTimed(RWLockImpl::Type type, const std::chrono::milliseconds & acquire_timeout) const
+RWLockImpl::LockHolder VIWithDataPart::tryLockTimed(RWLockImpl::Type type, const std::chrono::milliseconds & acquire_timeout) const
 {
     auto lock_holder = move_lock->getLock(type, "", acquire_timeout);
     if (!lock_holder)
@@ -1396,7 +1395,7 @@ MergetreeDataPartVectorIndex::tryLockTimed(RWLockImpl::Type type, const std::chr
     return lock_holder;
 }
 
-void MergetreeDataPartVectorIndex::removeAllVectorIndexInfo()
+void VIWithDataPart::removeAllVectorIndexInfo()
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
