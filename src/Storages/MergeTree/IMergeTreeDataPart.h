@@ -29,8 +29,8 @@
 #include <Interpreters/TransactionVersionMetadata.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <Storages/MergeTree/IPartMetadataManager.h>
+#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Storages/VIInfo.h>
-#include <VectorIndex/Storages/VIWithDataPart.h>
 
 
 namespace zkutil
@@ -90,7 +90,7 @@ public:
 
     using uint128 = IPartMetadataManager::uint128;
 
-    friend class MergetreeDataPartVectorIndex;
+    friend class VIWithDataPart;
 
     IMergeTreeDataPart(
         const MergeTreeData & storage_,
@@ -398,7 +398,7 @@ public:
     void unloadIndex();
     bool isIndexLoaded() const;
 
-    mutable MergetreeDataPartVectorIndex vector_index;
+    mutable VIWithDataPart vector_index;
 
     /// For data in RAM ('index')
     UInt64 getIndexSizeInBytes() const;
