@@ -11,7 +11,7 @@ namespace DB
 class IVolume;
 using VolumePtr = std::shared_ptr<IVolume>;
 class VIBuilderUpdater;
-class MergetreeDataPartVectorIndex;
+class VIWithDataPart;
 class IMergeTreeDataPart;
 using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
 using MergeTreeMutableDataPartPtr = std::shared_ptr<IMergeTreeDataPart>;
@@ -104,7 +104,7 @@ protected:
     friend class VIBuilderUpdater;
     friend class MergeTreeVSManager;
     friend class IMergeTreeDataPart;
-    friend class MergetreeDataPartVectorIndex;
+    friend class VIWithDataPart;
     friend VolumePtr getVolumeFromPartStorage(const DataPartStorageOnDiskBase & storage);
     friend MergeTreeDataPartChecksums moveVectorIndexFiles(
         const bool decouple,
