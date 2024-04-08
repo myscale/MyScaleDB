@@ -1,4 +1,4 @@
-#include "StorageSystemVectorIndexSegments.h"
+#include "StorageSystemVIsWithPart.h"
 #include <mutex>
 #include <set>
 
@@ -21,7 +21,7 @@
 namespace DB
 {
 
-StorageSystemVectorIndexSegments::StorageSystemVectorIndexSegments(const StorageID & table_id_) : IStorage(table_id_)
+StorageSystemVIsWithPart::StorageSystemVIsWithPart(const StorageID & table_id_) : IStorage(table_id_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(ColumnsDescription({
@@ -63,7 +63,7 @@ public:
 protected:
     void getVectorIndexInfo(
         const VIDescription & index,
-        const VectorIndexInfoPtr & vec_info,
+        const VIInfoPtr & vec_info,
         const std::string & table_name,
         const MergeTreeData::DataPartPtr & part,
         const std::set<std::string> & cached_indices,
@@ -133,11 +133,11 @@ protected:
         if (column_mask[src_index++])
         {
             if (cached_indices.contains(segment_id.getCacheKey().toString()))
-                res_columns[res_index++]->insert(Search::enumToString(VectorIndexState::LOADED));
+                res_columns[res_index++]->insert(Search::enumToString(VIState::LOADED));
             else if (vec_info)
                 res_columns[res_index++]->insert(vec_info->statusString());
             else
-                res_columns[res_index++]->insert(Search::enumToString(VectorIndexState::PENDING));
+                res_columns[res_index++]->insert(Search::enumToString(VIState::PENDING));
         }
         /// 'total_vectors' column
         if (column_mask[src_index++])
@@ -282,7 +282,7 @@ private:
     DatabaseTablesIteratorPtr tables_it;
 };
 
-Pipe StorageSystemVectorIndexSegments::read(
+Pipe StorageSystemVIsWithPart::read(
     const Names & column_names,
     const StorageSnapshotPtr & storage_snapshot,
     SelectQueryInfo & query_info,

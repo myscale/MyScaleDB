@@ -11,8 +11,8 @@ namespace DB
 {
 
 struct VIDescription;
-class MergeTreeDataPartColumnIndex;
-using MergeTreeDataPartColumnIndexPtr = std::shared_ptr<MergeTreeDataPartColumnIndex>;
+class VIWithColumnInPart;
+using VIWithColumnInPartPtr = std::shared_ptr<VIWithColumnInPart>;
 
 
 struct VIContext
@@ -20,7 +20,7 @@ struct VIContext
     StorageMetadataPtr metadata_snapshot;
     VIDescription vec_index_desc{VIDescription()};
     MergeTreeData::DataPartPtr source_part;
-    MergeTreeDataPartColumnIndexPtr source_column_index;
+    VIWithColumnInPartPtr source_column_index;
     VIVariantPtr build_index;
     ActionBlocker * builds_blocker;
     String part_name;
