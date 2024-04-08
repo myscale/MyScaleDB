@@ -16,7 +16,6 @@
 #include <Storages/System/StorageSystemColumns.h>
 #include <Storages/System/StorageSystemDatabases.h>
 #include <Storages/System/StorageSystemDataSkippingIndices.h>
-#include <Storages/System/StorageSystemVectorIndices.h>
 #include <Storages/System/StorageSystemDataTypeFamilies.h>
 #include <Storages/System/StorageSystemDetachedParts.h>
 #include <Storages/System/StorageSystemDetachedTables.h>
@@ -95,7 +94,8 @@
 #include <Storages/System/StorageSystemDashboards.h>
 #include <Storages/System/StorageSystemViewRefreshes.h>
 #include <Storages/System/StorageSystemDNSCache.h>
-#include <Storages/System/StorageSystemVectorIndexSegments.h>
+#include <VectorIndex/Storages/StorageSystemVIs.h>
+#include <VectorIndex/Storages/StorageSystemVIsWithPart.h>
 
 #if defined(__ELF__) && !defined(OS_FREEBSD)
 #include <Storages/System/StorageSystemSymbols.h>
@@ -176,8 +176,8 @@ void attachSystemTablesServer(ContextPtr context, IDatabase & system_database, b
     attachNoDescription<StorageSystemDroppedTablesParts>(context, system_database, "dropped_tables_parts", "Contains parts of system.dropped_tables tables ");
     attach<StorageSystemScheduler>(context, system_database, "scheduler", "Contains information and status for scheduling nodes residing on the local server.");
     attach<StorageSystemDNSCache>(context, system_database, "dns_cache", "Contains information about cached DNS records.");
-    attach<StorageSystemVectorIndices>(context, system_database, "vector_indices", "Contains a list of all vector indices defined on tables");
-    attach<StorageSystemVectorIndexSegments>(context, system_database, "vector_index_segments", "Contains information for vector index segments");
+    attach<StorageSystemVIs>(context, system_database, "vector_indices", "Contains a list of all vector indices defined on tables");
+    attach<StorageSystemVIsWithPart>(context, system_database, "vector_index_segments", "Contains information for vector index segments");
 #if defined(__ELF__) && !defined(OS_FREEBSD)
     attachNoDescription<StorageSystemSymbols>(context, system_database, "symbols", "Contains information for introspection of ClickHouse binary. This table is only useful for C++ experts and ClickHouse engineers.");
 #endif
