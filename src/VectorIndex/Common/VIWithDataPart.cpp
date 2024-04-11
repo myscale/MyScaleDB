@@ -1054,6 +1054,20 @@ void VIWithDataPart::convertIndexFileForUpgrade()
     if (part_storage.exists(current_checksums_file_name))
     {
         from_checksums = true;
+        /// remove other incomplate index files based on checksums
+        auto exclude_index_file = getVectorIndexFileNamesInChecksums(part.getDataPartStoragePtr(), vector_index_desc.name, true);
+        for (auto it = part_storage.iterate(); it->isValid(); it->next())
+        {
+            if ((!endsWith(it->name(), VECTOR_INDEX_FILE_SUFFIX) && !endsWith(it->name(), VECTOR_INDEX_FILE_OLD_SUFFIX))
+                || exclude_index_file.count(it->name()) != 0)
+                continue;
+
+            if (!startsWith(it->name(), vector_index_desc.name + "-"))
+                continue;
+
+            part_storage.removeFileIfExists(it->name());
+        }
+
         if (part_storage.exists(new_description_file_name))
         {
             /// The current version file already exists locally, no need to convert
@@ -1154,11 +1168,11 @@ void VIWithDataPart::convertIndexFileForUpgrade()
             if (!from_checksums && endsWith(new_file_name, VECTOR_INDEX_FILE_OLD_SUFFIX))
                 new_file_name = fs::path(new_file_name).replace_extension(VECTOR_INDEX_FILE_SUFFIX).string();
 
-            /// for faiss index file, contain "<index_name>-<index_name>" file, replcace "<index_name>-<index_name>" to "<index_name>-data_bin"
-            std::vector<String> tokens;
-            boost::split(tokens, new_file_name, boost::is_any_of("-"));
-            if (tokens.size() == 2 && tokens[0] + VECTOR_INDEX_FILE_SUFFIX == tokens[1])
-                new_file_name = tokens[0] + "-data_bin" + VECTOR_INDEX_FILE_SUFFIX;
+            /// for faiss index file, contain "<index_name>-<index_name>.vidx3" file, replcace "<index_name>-<index_name>.vidx3" to "<index_name>-data_bin.vidx3"
+            String faiss_index_old_suffix = vector_index_desc.name + VECTOR_INDEX_FILE_SUFFIX;
+            String faiss_index_new_suffix = String("data_bin") + VECTOR_INDEX_FILE_SUFFIX;
+            if (new_file_name.find(faiss_index_old_suffix) != std::string::npos)
+                new_file_name =  std::regex_replace(new_file_name, std::regex(faiss_index_old_suffix), faiss_index_new_suffix);
 
             converted_files_map[file_name] = new_file_name;
         }
