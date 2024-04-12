@@ -458,29 +458,36 @@ void setOOMScore(int value, Poco::Logger * log)
 
 extern "C" void tantivy_log_callback(int level, const char * thread_info, const char * message)
 {
+#if defined(MEMORY_SANITIZER)
+    __msan_unpoison_string(thread_info);
+    __msan_unpoison_string(message);
+#endif
+    // Ensure that null pointers are replaced with empty strings
+    const char * safe_thread_info = thread_info ? thread_info : "";
+    const char * safe_message = message ? message : "";
     Poco::Logger & logger = Poco::Logger::get("TantivyLibrary");
     switch (level)
     {
         case -2: // -2 -> fatal
-            LOG_FATAL(&logger, "{} - {}", thread_info, message);
+            LOG_FATAL(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         case -1: // -1 -> error
-            LOG_ERROR(&logger, "{} - {}", thread_info, message);
+            LOG_ERROR(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         case 0: // 0 -> warning
-            LOG_WARNING(&logger, "{} - {}", thread_info, message);
+            LOG_WARNING(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         case 1: // 1 -> info
-            LOG_INFO(&logger, "{} - {}", thread_info, message);
+            LOG_INFO(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         case 2: // 2 -> debug
-            LOG_DEBUG(&logger, "{} - {}", thread_info, message);
+            LOG_DEBUG(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         case 3: // 3 -> tracing
-            LOG_TRACE(&logger, "{} - {}", thread_info, message);
+            LOG_TRACE(&logger, "{} - {}", safe_thread_info, safe_message);
             break;
         default:
-            LOG_DEBUG(&logger, "{} - {}", thread_info, message);
+            LOG_DEBUG(&logger, "{} - {}", safe_thread_info, safe_message);
     }
 }
 

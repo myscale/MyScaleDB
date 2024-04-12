@@ -1,3 +1,5 @@
+-- Tags: no-tsan, no-msan
+
 SET allow_experimental_inverted_index = 1;
 SET log_queries = 1;
 SET mutations_sync = 1;

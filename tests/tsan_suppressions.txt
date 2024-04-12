@@ -1,5 +1,1 @@
 # We have no suppressions!
-src:*/TantivyIndexStoreStorages/MergeTree/TantivyIndexStore.cpp*
-src:*/tantivy_search/*
-func:__interceptor_memmove
-func:memcpy
