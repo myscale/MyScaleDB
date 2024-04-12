@@ -72,8 +72,10 @@ The simplest way to use MyScaleDB is to create an instance on MyScale Cloud serv
 To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
 
 ```bash
-docker run --name myscaledb myscale/myscaledb:1.4
+docker run --name myscaledb --net=host myscale/myscaledb:1.4
 ```
+
+>Note: Myscale's default configuration only allows localhost ip access. For the docker run startup method, you need to specify `--net=host` to access services deployed in docker mode on the current node.
 
 This will start a MyScaleDB instance with default user `default` and no password. You can then connect to the database using `clickhouse-client`:
 
@@ -86,12 +88,15 @@ docker exec -it myscaledb clickhouse-client
 1. Use the following recommended directory structure and the location of the `docker-compose.yaml` file:
 
 ```bash
-❯ tree myscaledb
-
+> tree myscaledb
 myscaledb
 ├── docker-compose.yaml
 └── volumes
-    1 directory, 1 file
+    └── config
+        └── users.d
+            └── custom_users_config.xml
+
+3 directories, 2 files
 ```
 
 2. Define the configuration for your deployment. We recommend starting with the following configuration in your `docker-compose.yaml` file, which you can adjust based on your specific requirements:
@@ -109,17 +114,48 @@ services:
       - '8998:8998'
       - '9363:9363'
       - '9116:9116'
+    networks:
+      myscaledb_network:
+        ipv4_address: 10.0.0.2
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/data:/var/lib/clickhouse
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/log:/var/log/clickhouse-server
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config/users.d/custom_users_config.xml:/etc/clickhouse-server/users.d/custom_users_config.xml
     deploy:
       resources:
         limits:
           cpus: "16.00"
           memory: 32Gb
+networks:
+  myscaledb_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.0.0.0/24
 ```
 
-> Note: You can also customize the configuration file of MyScaleDB. Copy the `/etc/clickhouse-server` directory from your `myscaledb` container to your local drive, modify the configuration, and add a directory mapping to the `docker-compose.yaml` file to make the configuration take effect:
+custom_users_config.xml
+```xml
+<clickhouse>
+  <users>
+      <default>
+          <password></password>
+          <networks>
+              <ip>::1</ip>
+              <ip>127.0.0.1</ip>
+              <ip>10.0.0.0/24</ip>
+          </networks>
+          <profile>default</profile>
+          <quota>default</quota>
+          <access_management>1</access_management>
+      </default>
+  </users>
+</clickhouse>
+```
+
+> Note: The custom_users_config configuration allows you to use the default user to access the database on the node where the database service is deployed using docker compose. If you want to access the database service on other nodes, it is recommended to create a user that can be accessed through other IPs. For detailed settings, see: [MyScaleDB Create User](https://myscale.com/docs/en/sql-reference/create-queries/#create-user). 
+> You can also customize the configuration file of MyScaleDB. Copy the `/etc/clickhouse-server` directory from your `myscaledb` container to your local drive, modify the configuration, and add a directory mapping to the `docker-compose.yaml` file to make the configuration take effect:
 >
 > ```yaml
 > - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/config:/etc/clickhouse-server
