@@ -35,7 +35,7 @@
 #include <Common/checkStackSize.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeFixedString.h>
-#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace Search
 {

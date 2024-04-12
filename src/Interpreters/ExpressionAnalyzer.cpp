@@ -159,12 +159,11 @@ inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage
 
 std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadataPtr & metadata_snapshot, ContextPtr context, String & search_column_name)
 {
-    auto log = getLogger();
     String index_type = "";
     /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
     std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
     bool use_parameter_check = storage_settings->vector_index_parameter_check;
-    LOG_TRACE(log, "vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
+    LOG_TRACE(getLogger(), "vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
 
     /// Obtain the type of the vector index recorded in the meta_data.
     if (metadata_snapshot)
@@ -176,7 +175,7 @@ std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadat
             if (vec_index_desc.column == search_column_name)
             {
                 index_type = vec_index_desc.type;
-                LOG_TRACE(log, "The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+                LOG_TRACE(getLogger(), "The vector index type used for the query is `{}`", Poco::toUpper(index_type));
 
                 break;
             }
@@ -197,7 +196,7 @@ std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadat
             {
                 use_parameter_check = new_value.get<bool>();
                 LOG_TRACE(
-                    log, "vector_index_parameter_check value in sql definition: {}", use_parameter_check);
+                    getLogger(), "vector_index_parameter_check value in sql definition: {}", use_parameter_check);
                 break;
             }
         }
@@ -565,7 +564,7 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeVectorScan] Get vector scan function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeVectorScan] Get vector scan function from right table");
             /// vector search column exists in right joined table
             vector_scan_descriptions.emplace_back(*vec_scan_desc);
             has_vector_scan = true;
@@ -588,7 +587,7 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeTextSearch] Get text search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeTextSearch] Get text search function from right table");
             text_search_info = right_text_search_info;
             has_text_search = true;
         }
@@ -607,7 +606,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeHybridSearch] Get hybrid search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeHybridSearch] Get hybrid search function from right table");
             hybrid_search_info = right_hybrid_search_info;
             has_hybrid_search = true;
         }
@@ -933,7 +932,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     vector_scan_desc.query_column_name = query_vector->getColumnName();
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeVectorScanDescription] search_column: {}, query_column: {}",
         vector_scan_desc.search_column_name,
         vector_scan_desc.query_column_name);
@@ -970,7 +969,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
         vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
-        LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
@@ -1040,7 +1039,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     }
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeTextSearchInfo] text search_column: {}, query_column: {}",
         text_column_name,
         query_text->getColumnName());
@@ -1068,7 +1067,7 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
         getRootActionsNoMakeSet(arguments[1], actions);
 
         auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1]);
-        LOG_DEBUG(log, "[makeTextSearchInfo] create text search function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
