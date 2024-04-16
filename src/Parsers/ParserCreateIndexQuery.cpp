@@ -27,11 +27,19 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
     if (!column_p.parse(pos, column, expected))
         return false;
 
-    if (!s_type.ignore(pos, expected))
-        return false;
-
-    if (!data_type_p.parse(pos, type, expected))
-        return false;
+    if (s_type.ignore(pos, expected))
+    {
+        if (!data_type_p.parse(pos, type, expected))
+            return false;
+    }
+    else
+    {
+        /// The "TYPE typename(args)" field in "CREATE VECTOR INDEX" query is omitted, creating a default vector index
+        auto function_node = std::make_shared<ASTFunction>();
+        function_node->name = "DEFAULT";
+        function_node->no_empty_args = true;
+        type = function_node;
+    }
 
     auto index = std::make_shared<ASTVIDeclaration>();
     index->std_create = true;

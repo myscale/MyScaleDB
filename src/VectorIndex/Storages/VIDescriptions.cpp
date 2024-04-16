@@ -38,6 +38,7 @@
 namespace Search
 {
 enum class DataType;
+std::string getDefaultIndexType(const DataType & search_type);
 }
 namespace DB
 {
@@ -129,7 +130,12 @@ VIDescription VIDescription::getVectorIndexFromAST(
     result.name = vec_index_definition->name;
     result.column = vec_index_definition->column;
     result.data_type = columns.get(result.column).type;
-    result.type = vec_index_definition->type->name;
+    result.vector_search_type = getSearchIndexDataType(result.data_type);
+    result.type = Poco::toUpper(vec_index_definition->type->name) == "DEFAULT" ? Search::getDefaultIndexType(result.vector_search_type)
+                                                                               : vec_index_definition->type->name;
+
+    /// check the validity of vector column type
+    Search::getVectorIndexType(result.type, result.vector_search_type);
 
     /// currently not used
     const auto & definition_arguments = vec_index_definition->type->arguments;
@@ -139,13 +145,10 @@ VIDescription VIDescription::getVectorIndexFromAST(
         {
             const auto * argument = definition_arguments->children[i]->as<ASTLiteral>();
             if (!argument)
-                throw Exception(ErrorCodes::INCORRECT_QUERY, "Only literals can be skip index arguments");
+                throw Exception(ErrorCodes::INCORRECT_QUERY, "Only literals can be search index arguments");
             result.arguments.emplace_back(argument->value);
         }
     }
-
-    result.vector_search_type = getSearchIndexDataType(result.data_type);
-    Search::getVectorIndexType(result.type, result.vector_search_type);
 
     if (result.vector_search_type == Search::DataType::FloatVector && !constraints.empty())
     {
