@@ -186,6 +186,10 @@ endif()
 
 target_link_libraries (clickhouse_common_io PUBLIC ch_contrib::sparsehash ch_contrib::incbin)
 
+if (TARGET ch_rust::tantivy_search)
+    target_link_libraries (clickhouse_common_io PRIVATE ch_rust::tantivy_search)
+endif()
+
 add_subdirectory(Access/Common)
 add_subdirectory(Common/ZooKeeper)
 add_subdirectory(Common/Config)
