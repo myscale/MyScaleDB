@@ -215,6 +215,10 @@ if (TARGET ch_contrib::jemalloc)
     target_link_libraries (clickhouse_common_io PRIVATE ch_contrib::jemalloc)
 endif()
 
+if (TARGET ch_rust::supercrate)
+    target_link_libraries (clickhouse_common_io PRIVATE ch_rust::supercrate)
+endif()
+
 add_subdirectory(Access/Common)
 add_subdirectory(Common/ZooKeeper)
 add_subdirectory(Common/Config)

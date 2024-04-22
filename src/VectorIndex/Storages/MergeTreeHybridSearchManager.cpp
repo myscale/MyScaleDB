@@ -112,6 +112,7 @@ HybridSearchResultPtr MergeTreeHybridSearchManager::hybridSearch()
     int count = 0;
     for (const auto & [fusion_score, label_id] : sorted_fusion_scores_with_label)
     {
+        LOG_TRACE(log, "Label: {}, score in hybrid search: {}", label_id, fusion_score);
         label_column->insert(label_id);
         score_column->insert(fusion_score);
         count++;

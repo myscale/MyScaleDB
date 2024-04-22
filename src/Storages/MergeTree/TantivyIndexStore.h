@@ -111,9 +111,17 @@ public:
     rust::cxxbridge1::Vec<std::uint8_t> termsQueryBitmap(String column_name, std::vector<String> terms);
 
     /// For BM25Search and HybridSearch
-    rust::cxxbridge1::Vec<RowIdWithScore> bm25Search(String sentence, size_t topk);
+    /// New version
+    rust::cxxbridge1::Vec<RowIdWithScore> bm25Search(String sentence, Statistics & statistics, size_t topk);
+    rust::cxxbridge1::Vec<RowIdWithScore>
+    bm25SearchWithFilter(String sentence, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap);
 
-    rust::cxxbridge1::Vec<RowIdWithScore> bm25SearchWithFilter(String sentence, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap);
+    /// Get current part sentence doc_freq, sentence will be tokenized by tokenizer with each indexed column.
+    rust::cxxbridge1::Vec<DocWithFreq> getDocFreq(String sentence);
+    /// Get current part total_num_docs, each column will have same total_num_docs.
+    UInt64 getTotalNumDocs();
+    /// Get current part total_num_tokens, each column will have it's own total_num_tokens.
+    UInt64 getTotalNumTokens();
 
     /// Get the number of documents stored in the index file.
     UInt64 getIndexedDocsNum();

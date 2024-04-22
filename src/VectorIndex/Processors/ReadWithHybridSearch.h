@@ -19,6 +19,10 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <VectorIndex/Utils/VSUtils.h>
 
+#if USE_TANTIVY_SEARCH
+#include <tantivy_search.h>
+#endif
+
 namespace DB
 {
 
@@ -61,6 +65,13 @@ private:
         const RangesInDataParts & parts,
         Names required_columns,
         bool use_uncompressed_cache);
+
+#if USE_TANTIVY_SEARCH
+    void getStatisticForTextSearch();
+
+    Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
+#endif
+
 };
 
 }

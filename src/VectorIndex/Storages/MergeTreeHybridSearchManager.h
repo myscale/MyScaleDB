@@ -15,6 +15,10 @@
 
 #include <Common/logger_useful.h>
 
+#if USE_TANTIVY_SEARCH
+#include <tantivy_search.h>
+#endif
+
 namespace DB
 {
 
@@ -58,6 +62,14 @@ public:
     }
 
     CommonSearchResultPtr getSearchResult() override { return hybrid_search_result; }
+
+#if USE_TANTIVY_SEARCH
+    void setBM25Stats(const Statistics & bm25_stats_in_table_)
+    {
+        if (text_search_manager)
+            text_search_manager->setBM25Stats(bm25_stats_in_table_);
+    }
+#endif
 
 private:
 

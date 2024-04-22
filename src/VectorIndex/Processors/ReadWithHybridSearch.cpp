@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+#include <Common/CurrentMetrics.h>
+#include <Common/CurrentThread.h>
+#include <Common/scope_guard_safe.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Processors/Merges/MergingSortedTransform.h>
@@ -32,12 +35,23 @@
 #include <VectorIndex/Processors/VSRecomputeTransform.h>
 #include <VectorIndex/Processors/VSSplitTransform.h>
 
+#if USE_TANTIVY_SEARCH
+#include <VectorIndex/Common/BM25InfoInDataParts.h>
+#include <Storages/MergeTree/TantivyIndexStore.h>
+#include <Interpreters/TantivyFilter.h>
+#endif
 
 namespace ProfileEvents
 {
     extern const Event SelectedParts;
     extern const Event SelectedRanges;
     extern const Event SelectedMarks;
+}
+
+namespace CurrentMetrics
+{
+    extern const Metric MergeTreeDataSelectBM25CollectThreads;
+    extern const Metric MergeTreeDataSelectBM25CollectThreadsActive;
 }
 
 namespace DB
@@ -59,6 +73,111 @@ static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_inf
     return query_info.projection ? query_info.projection->prewhere_info
                                  : query_info.prewhere_info;
 }
+#if USE_TANTIVY_SEARCH
+void ReadWithHybridSearch::getStatisticForTextSearch()
+{
+    BM25InfoInDataParts parts_with_bm25_info;
+
+    /// Find inverted index desc on the search column from metadata
+    TextSearchInfoPtr text_search_info = nullptr;
+    if (query_info.text_search_info)
+        text_search_info = query_info.text_search_info;
+    else
+        text_search_info = query_info.hybrid_search_info->text_search_info;
+
+    if (!text_search_info)
+    {
+        LOG_INFO(log, "Failed to get text search info, unable to collect statistics");
+        return;
+    }
+
+    String tantivy_index_file_name;
+    String search_column_name = text_search_info->text_column_name;
+    String query_text = text_search_info->query_text;
+
+    for (const auto & index_desc : metadata_for_reading->getSecondaryIndices())
+    {
+        if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 &&
+            index_desc.column_names[0] == search_column_name)
+        {
+            tantivy_index_file_name = INDEX_FILE_PREFIX + index_desc.name;
+            break;
+        }
+    }
+
+    if (tantivy_index_file_name.empty())
+    {
+        LOG_INFO(log, "Failed to get index name, unable to collect statistics");
+        return;
+    }
+
+    parts_with_bm25_info.resize(prepared_parts.size());
+
+    /// Get info from tantivy index in this part
+    auto process_part = [&](size_t part_index)
+    {
+        auto & part = prepared_parts[part_index];
+
+        /// Check if index files exist in part
+        if (!part->getDataPartStorage().exists(tantivy_index_file_name + ".idx"))
+        {
+            LOG_DEBUG(log, "File ({}.idx) for tantivy index does not exists in part {}. Skipping it",
+                tantivy_index_file_name, part->name);
+            return;
+        }
+
+        auto tantivy_store = TantivyIndexStoreFactory::instance().get(tantivy_index_file_name, part->getDataPartStoragePtr());
+
+        if (tantivy_store)
+        {
+            auto total_docs = tantivy_store->getTotalNumDocs();
+            auto total_num_tokens = tantivy_store->getTotalNumTokens();
+            auto term_with_doc_nums = tantivy_store->getDocFreq(query_text);
+
+            BM25InfoInDataPart bm_info(total_docs, total_num_tokens, term_with_doc_nums);
+            parts_with_bm25_info[part_index] = std::move(bm_info);
+        }
+    };
+
+    size_t num_threads = std::min<size_t>(requested_num_streams, prepared_parts.size());
+
+    if (num_threads <= 1)
+    {
+        for (size_t part_index = 0; part_index < prepared_parts.size(); ++part_index)
+            process_part(part_index);
+    }
+    else
+    {
+        /// Parallel loading of data parts.
+        ThreadPool pool(
+            CurrentMetrics::MergeTreeDataSelectBM25CollectThreads,
+            CurrentMetrics::MergeTreeDataSelectBM25CollectThreadsActive,
+            num_threads);
+
+        for (size_t part_index = 0; part_index < prepared_parts.size(); ++part_index)
+            pool.scheduleOrThrowOnError([&, part_index, thread_group = CurrentThread::getGroup()]
+            {
+                SCOPE_EXIT_SAFE(
+                    if (thread_group)
+                        CurrentThread::detachFromGroupIfNotDetached();
+                );
+                if (thread_group)
+                    CurrentThread::attachToGroupIfDetached(thread_group);
+
+                process_part(part_index);
+            });
+
+        pool.wait();
+    }
+
+    /// Sum the bm25 info from all parts
+    bm25_stats_in_table.total_num_docs = parts_with_bm25_info.getTotalDocsCountAllParts();
+    bm25_stats_in_table.total_num_tokens = parts_with_bm25_info.getTotalNumTokensAllParts();
+    bm25_stats_in_table.docs_freq = parts_with_bm25_info.getTermWithDocNumsAllParts();
+
+    return;
+}
+#endif
 
 ReadWithHybridSearch::ReadWithHybridSearch(
     MergeTreeData::DataPartsVector parts_,
@@ -107,6 +226,12 @@ ReadWithHybridSearch::ReadWithHybridSearch(
 
 void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
 {
+#if USE_TANTIVY_SEARCH
+    /// Collect additional stastics info for bm25 when parts > 1
+    if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
+        getStatisticForTextSearch();
+#endif
+
     /// Referenced from ReadFromMergeTree::initializePipeline(). Add logic for mark range optimization based on where conditions.
     auto result = getAnalysisResult();
     LOG_DEBUG(
@@ -392,11 +517,19 @@ Pipe ReadWithHybridSearch::readFromParts(
         }
         else if (query_info.text_search_info)
         {
-            search_manager = std::make_shared<MergeTreeTextSearchManager>(metadata_for_reading, query_info.text_search_info, context);
+            auto text_search_manager = std::make_shared<MergeTreeTextSearchManager>(metadata_for_reading, query_info.text_search_info, context);
+#if USE_TANTIVY_SEARCH
+            text_search_manager->setBM25Stats(bm25_stats_in_table);
+#endif
+            search_manager = text_search_manager;
         }
         else if (query_info.hybrid_search_info)
         {
-            search_manager = std::make_shared<MergeTreeHybridSearchManager>(metadata_for_reading, query_info.hybrid_search_info, context);
+            auto hybrid_search_manager = std::make_shared<MergeTreeHybridSearchManager>(metadata_for_reading, query_info.hybrid_search_info, context);
+#if USE_TANTIVY_SEARCH
+            hybrid_search_manager->setBM25Stats(bm25_stats_in_table);
+#endif
+            search_manager = hybrid_search_manager;
         }
 
         auto algorithm = std::make_unique<MergeTreeSelectWithHybridSearchProcessor>(

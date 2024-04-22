@@ -15,3 +15,10 @@ target_link_libraries(clickhouse_vector_index
     PRIVATE
 	ch_contrib::search_index
 )
+
+if (TARGET ch_rust::supercrate)
+    target_link_libraries(clickhouse_vector_index
+        PRIVATE
+        ch_rust::supercrate
+    )
+endif()

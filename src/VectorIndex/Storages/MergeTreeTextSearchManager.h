@@ -13,6 +13,10 @@
 
 #include <Common/logger_useful.h>
 
+#if USE_TANTIVY_SEARCH
+#include <tantivy_search.h>
+#endif
+
 namespace DB
 {
 
@@ -50,9 +54,20 @@ public:
 
     CommonSearchResultPtr getSearchResult() override { return text_search_result; }
 
+#if USE_TANTIVY_SEARCH
+    void setBM25Stats(const Statistics & bm25_stats_in_table_)
+    {
+        bm25_stats_in_table = bm25_stats_in_table_;
+    }
+#endif
+
 private:
 
     TextSearchInfoPtr text_search_info;
+
+#if USE_TANTIVY_SEARCH
+    Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
+#endif
 
     /// lock text search result
     std::mutex mutex;

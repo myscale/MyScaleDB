@@ -126,7 +126,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             filter_bitmap_vector.emplace_back(bitmap[i]);
 
         search_results = tantivy_store->bm25SearchWithFilter(
-            text_search_info->query_text, k, filter_bitmap_vector);
+            text_search_info->query_text, bm25_stats_in_table, k, filter_bitmap_vector);
     }
     else if (data_part->hasLightweightDelete())
     {
@@ -177,23 +177,24 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         /// Get non empty delete bitmap (from store or data part) OR fail to get delete bitmap from part
         if (u8_delete_bitmap_vec.empty())
         {
-            search_results = tantivy_store->bm25Search(text_search_info->query_text, k);
+            search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
         }
         else
         {
             search_results = tantivy_store->bm25SearchWithFilter(
-                                text_search_info->query_text, k, u8_delete_bitmap_vec);
+                                text_search_info->query_text, bm25_stats_in_table, k, u8_delete_bitmap_vec);
         }
     }
     else
     {
         OpenTelemetry::SpanHolder span3("MergeTreeTextSearchManager::textSearch()::data_part_generate_results_no_filter");
         LOG_DEBUG(log, "Text search no filter");
-        search_results = tantivy_store->bm25Search(text_search_info->query_text, k);
+        search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
     }
 
     for (size_t i = 0; i < search_results.size(); i++)
     {
+        LOG_TRACE(log, "Label: {}, score in text search: {}", search_results[i].row_id, search_results[i].score);
         label_column->insert(search_results[i].row_id);
         score_column->insert(search_results[i].score);
     }
