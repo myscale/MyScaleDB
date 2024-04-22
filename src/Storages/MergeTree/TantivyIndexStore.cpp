@@ -507,22 +507,44 @@ rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::termsQueryBitmap(String c
 
     return ffi_query_terms_bitmap(index_files_cache_path, column_name, terms);
 }
-rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, size_t topk)
+
+rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, Statistics & statistics, size_t topk)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
     std::vector<uint8_t> u8_alived_bitmap;
-    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, false);
+    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, false, statistics);
 }
 
-rust::cxxbridge1::Vec<RowIdWithScore>
-TantivyIndexStore::bm25SearchWithFilter(String sentence, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
+rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25SearchWithFilter(
+    String sentence, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, true);
+    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, true, statistics);
+}
+
+rust::cxxbridge1::Vec<DocWithFreq> TantivyIndexStore::getDocFreq(String sentence)
+{
+    if (!index_reader_status)
+        getTantivyIndexReader();
+    return ffi_get_doc_freq(index_files_cache_path, sentence);
+}
+
+UInt64 TantivyIndexStore::getTotalNumDocs()
+{
+    if (!index_reader_status)
+        getTantivyIndexReader();
+    return ffi_get_total_num_docs(index_files_cache_path);
+}
+
+UInt64 TantivyIndexStore::getTotalNumTokens()
+{
+    if (!index_reader_status)
+        getTantivyIndexReader();
+    return ffi_get_total_num_tokens(index_files_cache_path);
 }
 
 UInt64 TantivyIndexStore::getIndexedDocsNum()
