@@ -35,7 +35,7 @@ struct TantivyIndexFileMeta
 {
     TantivyIndexFileMeta() { }
 
-    TantivyIndexFileMeta(const String & file_name_, UInt32 offset_begin_, UInt32 offset_end_)
+    TantivyIndexFileMeta(const String & file_name_, UInt64 offset_begin_, UInt64 offset_end_)
     {
         strcpy(file_name, file_name_.c_str());
         offset_begin = offset_begin_;
@@ -43,9 +43,9 @@ struct TantivyIndexFileMeta
     }
 
     /// The length of file_name should not exceed 128.
-    char file_name[128] = {};
-    UInt32 offset_begin = 0;
-    UInt32 offset_end = 0;
+    char file_name[512] = {};
+    UInt64 offset_begin = 0;
+    UInt64 offset_end = 0;
 };
 
 using TantivyIndexFileMetas = std::vector<TantivyIndexFileMeta>;
