@@ -176,7 +176,7 @@ ChecksumPairs TantivyIndexStore::serialize()
     initFileWriteStreams();
 
     TantivyIndexFileMetas metas;
-    size_t written_bytes = 0;
+    UInt64 written_bytes = 0;
     /// index_data_write_stream -> data_hashing_uncompressed_stream
     auto data_hashing_uncompressed_stream = std::make_unique<HashingWriteBuffer>(*index_data_write_stream);
     /// meta_data_write_stream -> meta_hashing_uncompressed_stream
@@ -194,11 +194,16 @@ ChecksumPairs TantivyIndexStore::serialize()
         {
             std::unique_ptr<ReadBufferFromFileBase> temp_file_read_stream
                 = temp_data_on_disk->readFile(entry.path(), {}, std::nullopt, std::nullopt);
-            size_t file_size = temp_file_read_stream->getFileSize();
+            UInt64 file_size = static_cast<DB::UInt64>(temp_file_read_stream->getFileSize());
             copyData(*temp_file_read_stream, *data_hashing_uncompressed_stream);
-            metas.emplace_back(
-                entry.path().filename(), static_cast<DB::UInt32>(written_bytes), static_cast<DB::UInt32>(written_bytes + file_size));
+            metas.emplace_back(entry.path().filename(), written_bytes, written_bytes + file_size);
             written_bytes += file_size;
+            LOG_TRACE(
+                log,
+                "[serialize] tantivy index file: {}, file size: {}, written_bytes: {}",
+                entry.path().filename(),
+                file_size,
+                written_bytes);
         }
         else
         {
@@ -270,7 +275,7 @@ void TantivyIndexStore::deserialize()
     {
         try
         {
-            size_t file_size = metas[i].offset_end - metas[i].offset_begin;
+            UInt64 file_size = metas[i].offset_end - metas[i].offset_begin;
             index_data_read_stream->seek(metas[i].offset_begin, SEEK_SET);
             std::unique_ptr<WriteBufferFromFileBase> temp_data_write_stream = temp_data_on_disk->writeFile(
                 index_files_cache_path + metas[i].file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Append, {});
@@ -279,6 +284,13 @@ void TantivyIndexStore::deserialize()
             temp_data_write_stream->write(buffer, file_size);
             temp_data_write_stream->finalize();
             delete[] buffer;
+            LOG_TRACE(
+                log,
+                "[deserialize] tantivy index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                i,
+                metas[i].file_name,
+                storage->getRelativePath(),
+                index_files_cache_path);
         }
         catch (...)
         {
