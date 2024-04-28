@@ -9,7 +9,7 @@ CREATE TABLE t_vector_invert_subquery
     id UInt64,
     vector Array(Float32),
     doc String,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 )
 ENGINE = MergeTree
