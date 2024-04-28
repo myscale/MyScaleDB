@@ -77,7 +77,7 @@ MergeTreeIndexGranuleTantivy::granuleRowIdRangesHitted(roaring::Roaring64Map & t
 void MergeTreeIndexGranuleTantivy::serializeBinary(WriteBuffer & ostr) const
 {
     if (empty())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Attempt to write empty tantivy granule idx {}.", backQuote(index_name));
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Attempt to write empty fts granule idx {}.", backQuote(index_name));
 
     const auto & size_type = std::make_shared<DataTypeUInt32>();
     auto size_serialization = size_type->getDefaultSerialization();
@@ -207,7 +207,7 @@ void MergeTreeIndexAggregatorTantivy::update(const Block & block, size_t * pos, 
         {
             throw Exception(
                 ErrorCodes::TANTIVY_BUILD_INDEX_INTERNAL_ERROR,
-                "Generating `column_names`(size:{}) and `docs`(size:{}) may be wrong when index tantivy docs.",
+                "Generating `column_names`(size:{}) and `docs`(size:{}) may be wrong when index fts docs.",
                 column_names.size(),
                 docs.size());
         }
@@ -784,9 +784,8 @@ bool MergeTreeIndexTantivy::mayBenefitFromIndexForIn(const ASTPtr & node) const
         != std::cend(index.column_names);
 }
 
-MergeTreeIndexPtr tantivyIndexCreator(const IndexDescription & index)
+MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index)
 {
-    // 初始版本仅有一个参数, 后续新增功能可能会添加别的参数
     String tantivy_index_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
     TantivyFilterParameters params(tantivy_index_parameter);
 
@@ -836,7 +835,7 @@ std::pair<String, std::vector<String>> parseTokenizerString(const String & token
     }
 }
 
-void tantivyIndexValidator(const IndexDescription & index, bool /*attach*/)
+void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
 {
     for (const auto & index_data_type : index.data_types)
     {
@@ -856,19 +855,19 @@ void tantivyIndexValidator(const IndexDescription & index, bool /*attach*/)
         if (!data_type.isString() && !data_type.isFixedString())
             throw Exception(
                 ErrorCodes::INCORRECT_QUERY,
-                "Tantivy index can be used only with `String`, `FixedString`,"
+                "Fts index can be used only with `String`, `FixedString`,"
                 "`LowCardinality(String)`, `LowCardinality(FixedString)` "
                 "column or Array with `String` or `FixedString` values column.");
     }
 
     if (index.arguments.size() > 1)
     {
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Tantivy index must have less than one arguments.");
+        throw Exception(ErrorCodes::INCORRECT_QUERY, "Fts index must have less than one arguments.");
     }
 
     if (!index.arguments.empty() && index.arguments[0].getType() != Field::Types::String)
     {
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Tantivy index argument must be string.");
+        throw Exception(ErrorCodes::INCORRECT_QUERY, "Fts index argument must be string.");
     }
 
     /// Just validate
@@ -879,12 +878,12 @@ void tantivyIndexValidator(const IndexDescription & index, bool /*attach*/)
 
     if (!json_valid)
     {
-        LOG_ERROR(&Poco::Logger::get("MergeTreeIndexTantivy"), "[tantivyIndexValidator] bad json arguments");
+        LOG_ERROR(&Poco::Logger::get("MergeTreeIndexFts"), "[ftsIndexValidator] bad json arguments");
         throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Json parameter may be error");
     }
 
     TantivyFilterParameters params(index_json_parameter);
-    LOG_DEBUG(&Poco::Logger::get("MergeTreeIndexTantivy"), "[tantivyIndexValidator] OK.");
+    LOG_DEBUG(&Poco::Logger::get("MergeTreeIndexFts"), "[ftsIndexValidator] OK.");
 }
 
 }

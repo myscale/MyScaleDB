@@ -846,7 +846,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
 
 #if USE_TANTIVY_SEARCH
                 if (index_desc.type == TANTIVY_INDEX_NAME && !settings.allow_experimental_inverted_index)
-                    throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "Experimental Tantivy Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                    throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "Experimental fts Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
 #endif
                 properties.indices.push_back(index_desc);
             }

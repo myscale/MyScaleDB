@@ -3516,7 +3516,7 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
 #if USE_TANTIVY_SEARCH
     if (AlterCommands::hasTantivyIndex(new_metadata) && !settings.allow_experimental_inverted_index)
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-            "Experimental Tantivy Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+            "Experimental Fts Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
 #endif
 
     for (const auto & disk : getDisks())
