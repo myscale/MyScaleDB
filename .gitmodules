@@ -340,4 +340,4 @@
 	url = https://github.com/myscale/search-index.git
 [submodule "rust/supercrate/libs/tantivy_search"]
 	path = rust/supercrate/libs/tantivy_search
-	url = git@git.moqi.ai:mqdb/tantivy-search.git
+	url = https://github.com/myscale/tantivy-search.git
