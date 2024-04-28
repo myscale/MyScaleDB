@@ -121,7 +121,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
         /// Check if index files exist in part
         if (!part->getDataPartStorage().exists(tantivy_index_file_name + ".idx"))
         {
-            LOG_DEBUG(log, "File ({}.idx) for tantivy index does not exists in part {}. Skipping it",
+            LOG_DEBUG(log, "File ({}.idx) for fts index does not exists in part {}. Skipping it",
                 tantivy_index_file_name, part->name);
             return;
         }

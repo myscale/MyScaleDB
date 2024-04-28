@@ -760,7 +760,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 {
                     throw Exception(
                         ErrorCodes::SUPPORT_IS_DISABLED,
-                        "Experimental Tantivy Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                        "Experimental fts Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
                 }
 #endif
                 if (index_desc.type == "annoy" && !settings.allow_experimental_annoy_index)

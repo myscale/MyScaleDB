@@ -465,7 +465,7 @@ extern "C" void tantivy_log_callback(int level, const char * thread_info, const 
     // Ensure that null pointers are replaced with empty strings
     const char * safe_thread_info = thread_info ? thread_info : "";
     const char * safe_message = message ? message : "";
-    Poco::Logger & logger = Poco::Logger::get("TantivyLibrary");
+    Poco::Logger & logger = Poco::Logger::get("FtsLibrary");
     switch (level)
     {
         case -2: // -2 -> fatal

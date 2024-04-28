@@ -3136,7 +3136,7 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
     {
         throw Exception(
             ErrorCodes::SUPPORT_IS_DISABLED,
-            "Experimental Tantivy Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+            "Experimental Fts Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
     }
 #endif
 

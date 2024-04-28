@@ -9,7 +9,7 @@ namespace DB
 {
 
 
-static inline constexpr auto TANTIVY_INDEX_NAME = "tantivy";
+static inline constexpr auto TANTIVY_INDEX_NAME = "fts";
 
 struct TantivyFilterParameters
 {

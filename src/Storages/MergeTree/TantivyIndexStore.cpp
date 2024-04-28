@@ -69,7 +69,7 @@ void TantivyIndexStore::initStore()
     }
     else
     {
-        throw DB::Exception(DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "Can't get tantivy index files cache prefix.");
+        throw DB::Exception(DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "Can't get fts index files cache prefix.");
     }
 }
 
@@ -101,7 +101,7 @@ void TantivyIndexStore::removeTantivyIndexCache(DiskPtr tmp_disk_, std::string i
             String part_cache_path = fs::path(index_files_path).parent_path().parent_path();
             if (tmp_disk_->isDirectoryEmpty(part_cache_path))
             {
-                /// Multiple tantivy indexes in a part share the same data part directory.
+                /// Multiple fts indexes in a part share the same data part directory.
                 tmp_disk_->removeDirectory(part_cache_path);
                 LOG_DEBUG(&Poco::Logger::get("TantivyIndexStore"), "[removeTantivyIndexCache] parent data part directory [{}] has been removed", part_cache_path);
             }
@@ -184,7 +184,7 @@ ChecksumPairs TantivyIndexStore::serialize()
 
     LOG_DEBUG(
         log,
-        "[serialize] Try serializing tantivy index files from index_cache:{} to data_part:{}.",
+        "[serialize] Try serializing fts index files from index_cache:{} to data_part:{}.",
         index_files_cache_path,
         storage->getRelativePath());
 
@@ -209,14 +209,14 @@ ChecksumPairs TantivyIndexStore::serialize()
         {
             LOG_ERROR(
                 log,
-                "[serialize] Can't serialize tantivy index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
+                "[serialize] Can't serialize fts index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
                 written_bytes,
                 entry.path(),
                 index_files_cache_path,
                 storage->getRelativePath());
             throw DB::Exception(
                 DB::ErrorCodes::TANTIVY_INDEX_FILES_SERIALIZE_ERROR,
-                "Can't serialize tantivy index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
+                "Can't serialize fts index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
                 written_bytes,
                 entry.path(),
                 index_files_cache_path,
@@ -233,7 +233,7 @@ ChecksumPairs TantivyIndexStore::serialize()
 
     LOG_DEBUG(
         log,
-        "[serialize] Finish serialized [{}] tantivy index files from index_cache:{} to data_part:{}, total bytes: {}",
+        "[serialize] Finish serialized [{}] fts index files from index_cache:{} to data_part:{}, total bytes: {}",
         metas_size,
         index_files_cache_path,
         storage->getRelativePath(),
@@ -261,7 +261,7 @@ void TantivyIndexStore::deserialize()
 
     LOG_DEBUG(
         log,
-        "[deserialize] Trying deserialize [{}] tantivy index files from data_part:{} to index_cache:{}",
+        "[deserialize] Trying deserialize [{}] fts index files from data_part:{} to index_cache:{}",
         metas_size,
         storage->getRelativePath(),
         index_files_cache_path);
@@ -296,14 +296,14 @@ void TantivyIndexStore::deserialize()
         {
             LOG_ERROR(
                 log,
-                "[deserialize] Can't deserialize tantivy index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                "[deserialize] Can't deserialize fts index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
                 i,
                 metas[i].file_name,
                 storage->getRelativePath(),
                 index_files_cache_path);
             throw DB::Exception(
                 DB::ErrorCodes::TANTIVY_INDEX_FILES_DESERIALIZE_ERROR,
-                "Can't deserialize tantivy index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                "Can't deserialize fts index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
                 i,
                 metas[i].file_name,
                 storage->getRelativePath(),
@@ -312,7 +312,7 @@ void TantivyIndexStore::deserialize()
     }
     LOG_DEBUG(
         log,
-        "[deserialize] Finish deserialized [{}] tantivy index files from data_part:{} to index_cache:{}",
+        "[deserialize] Finish deserialized [{}] fts index files from data_part:{} to index_cache:{}",
         metas_size,
         storage->getRelativePath(),
         index_files_cache_path);
@@ -368,11 +368,11 @@ bool TantivyIndexStore::getTantivyIndexWriter()
     {
         LOG_ERROR(
             log,
-            "[getTantivyIndexWriter] Error happend when create tantivy index under index_cache:{}",
+            "[getTantivyIndexWriter] Error happend when create fts index under index_cache:{}",
             index_files_cache_path);
         throw DB::Exception(
             ErrorCodes::TANTIVY_BUILD_INDEX_INTERNAL_ERROR,
-            "Error happend when create tantivy index under index_cache:{}",
+            "Error happend when create fts index under index_cache:{}",
             index_files_cache_path);
     }
 
@@ -431,17 +431,17 @@ bool TantivyIndexStore::commitTantivyIndex()
 {
     if (!getIndexWriterStatus())
     {
-        // LOG_ERROR(log, "[commitTantivyIndex] Tantivy index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
-        // throw DB::Exception(ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "Tantivy index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
+        // LOG_ERROR(log, "[commitTantivyIndex] fts index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
+        // throw DB::Exception(ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "fts index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
         return true;
     }
 
     if (!ffi_index_writer_commit(index_files_cache_path))
     {
-        LOG_ERROR(log, "[commitTantivyIndex] Error happened when committing tantivy index, index_cache:{}", index_files_cache_path);
+        LOG_ERROR(log, "[commitTantivyIndex] Error happened when committing fts index, index_cache:{}", index_files_cache_path);
         throw DB::Exception(
             ErrorCodes::TANTIVY_BUILD_INDEX_INTERNAL_ERROR,
-            "Error happened when committing tantivy index, index_cache:{}",
+            "Error happened when committing fts index, index_cache:{}",
             index_files_cache_path);
     }
 
@@ -593,7 +593,7 @@ TantivyIndexStorePtr TantivyIndexStoreFactory::get(const String & name, DataPart
 
         LOG_INFO(
             &Poco::Logger::get("TantivyIndexStoreFactory"),
-            "[get] Generate tantivy index store with key [{}], stores size increased from {} to {}",
+            "[get] Generate fts index store with key [{}], stores size increased from {} to {}",
             store_key,
             stores_size,
             stores.size());
@@ -623,7 +623,7 @@ void TantivyIndexStoreFactory::remove(const String & part_path)
             it = stores.erase(it);
 
             LOG_DEBUG(log,
-            "[remove] Tantivy index store has been removed, stores size decreased from {} to {}",
+            "[remove] Fts index store has been removed, stores size decreased from {} to {}",
             stores_size, stores.size());
         }
         else
@@ -641,7 +641,7 @@ void TantivyIndexStoreFactory::remove(const String & part_path)
         }
         catch (Exception & e)
         {
-            LOG_ERROR(log, "[remove] Error happend when remove tantivy index_cache path for part {}: {}", part_path, e.what());
+            LOG_ERROR(log, "[remove] Error happend when remove fts index_cache path for part {}: {}", part_path, e.what());
         }
     }
 }

@@ -153,7 +153,7 @@ inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage
 #endif
     if (!find_tantivy_index)
     {
-        throw Exception(ErrorCodes::ILLEGAL_TEXT_SEARCH, "The column {} has no tantivy index for text search", text_column_name);
+        throw Exception(ErrorCodes::ILLEGAL_TEXT_SEARCH, "The column {} has no fts index for text search", text_column_name);
     }
 }
 
@@ -593,7 +593,7 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
         }
     }
 
-    /// text search cannot be performed when no tantivy index exists
+    /// text search cannot be performed when no fts index exists
     if (has_text_search)
         checkTantivyIndex(syntax->storage_snapshot, text_search_info->text_column_name);
 }
@@ -614,7 +614,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAGPtr & temp_actions)
 
     if (has_hybrid_search && hybrid_search_info)
     {
-        /// check tantivy index
+        /// check fts index
         if (hybrid_search_info->text_search_info)
             checkTantivyIndex(syntax->storage_snapshot, hybrid_search_info->text_search_info->text_column_name);
 

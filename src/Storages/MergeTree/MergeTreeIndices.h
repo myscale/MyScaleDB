@@ -253,7 +253,7 @@ MergeTreeIndexPtr invertedIndexCreator(const IndexDescription& index);
 void invertedIndexValidator(const IndexDescription& index, bool attach);
 
 #if USE_TANTIVY_SEARCH
-MergeTreeIndexPtr tantivyIndexCreator(const IndexDescription & index);
-void tantivyIndexValidator(const IndexDescription & index, bool attach);
+MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index);
+void ftsIndexValidator(const IndexDescription & index, bool attach);
 #endif
 }
