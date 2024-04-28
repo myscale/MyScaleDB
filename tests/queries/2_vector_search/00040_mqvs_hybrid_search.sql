@@ -6,7 +6,7 @@ CREATE TABLE t_vector_invert(
     id UInt64,
     vector Array(Float32),
     doc String,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 ) ENGINE = MergeTree ORDER BY id settings index_granularity=2;
 
@@ -47,7 +47,7 @@ CREATE TABLE t_vector_invert(
     id UInt64,
     vector Array(Float32),
     doc String,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 ) ENGINE = MergeTree ORDER BY id settings index_granularity=2, enable_primary_key_cache=true;
 
@@ -66,7 +66,7 @@ CREATE TABLE t_vector_invert_array(
     id UInt64,
     vector Array(Float32),
     docs Array(String),
-    INDEX inv_idx(docs) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(docs) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 ) ENGINE = MergeTree ORDER BY id settings index_granularity=2;
 
@@ -82,7 +82,7 @@ CREATE TABLE t_vector_invert_map(
     id UInt64,
     vector Array(Float32),
     doc_map Map(String,String),
-    INDEX doc_map_idx(mapKeys(doc_map)) TYPE tantivy GRANULARITY 1,
+    INDEX doc_map_idx(mapKeys(doc_map)) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 ) ENGINE = MergeTree ORDER BY id settings index_granularity=2;
 
@@ -100,8 +100,8 @@ CREATE TABLE t_vector_invert_multi
     vector Array(Float32),
     doc String,
     doc2 String,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
-    INDEX inv_idx2(doc2) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
+    INDEX inv_idx2(doc2) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 )
 ENGINE = MergeTree ORDER BY id settings index_granularity=2;
@@ -122,7 +122,7 @@ CREATE TABLE t_vector_invert_binary
     id UInt64,
     vector FixedString(3),
     doc String,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 )
 ENGINE = MergeTree ORDER BY id settings index_granularity=2;
@@ -145,7 +145,7 @@ CREATE TABLE t_vector_invert_json
     id UInt64,
     vector Array(Float32),
     doc JSON,
-    INDEX inv_idx(doc) TYPE tantivy GRANULARITY 1,
+    INDEX inv_idx(doc) TYPE fts GRANULARITY 1,
     CONSTRAINT vector_len CHECK length(vector) = 3
 )
 ENGINE = MergeTree ORDER BY id settings index_granularity=2; -- { serverError INCORRECT_QUERY }

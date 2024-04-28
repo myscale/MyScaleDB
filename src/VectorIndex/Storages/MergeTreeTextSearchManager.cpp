@@ -84,7 +84,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             auto index_helper = MergeTreeIndexFactory::instance().get(index_desc);
             if (!index_helper->getDeserializedFormat(data_part->getDataPartStorage(), index_helper->getFileName()))
             {
-                LOG_DEBUG(log, "File for tantivy index {} does not exist ({}.*). Skipping it.", backQuote(index_helper->index.name),
+                LOG_DEBUG(log, "File for fts index {} does not exist ({}.*). Skipping it.", backQuote(index_helper->index.name),
                     (fs::path(data_part->getDataPartStorage().getFullPath()) / index_helper->getFileName()).string());
 
                 break;
@@ -96,7 +96,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             if (tantivy_store)
             {
                 find_index = true;
-                LOG_DEBUG(log, "Find tantivy index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
+                LOG_DEBUG(log, "Find fts index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
 
                 break;
             }
@@ -106,7 +106,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     if (!find_index)
     {
         /// No tantivy index available
-        LOG_DEBUG(log, "Failed to find tantivy index for column {} in part {}", search_column_name, data_part->name);
+        LOG_DEBUG(log, "Failed to find fts index for column {} in part {}", search_column_name, data_part->name);
         tmp_text_search_result->computed = false;
         return tmp_text_search_result;
     }

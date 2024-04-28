@@ -155,8 +155,8 @@ MergeTreeIndexFactory::MergeTreeIndexFactory()
     /// ------
 
 #if USE_TANTIVY_SEARCH
-    registerCreator("tantivy", tantivyIndexCreator);
-    registerValidator("tantivy", tantivyIndexValidator);
+    registerCreator("fts", ftsIndexCreator);
+    registerValidator("fts", ftsIndexValidator);
 #endif
 }
 
