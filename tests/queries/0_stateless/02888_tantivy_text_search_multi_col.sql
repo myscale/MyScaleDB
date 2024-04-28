@@ -34,7 +34,7 @@ INSERT INTO tb VALUES (0,'An apple a day keeps','The early bird catches worm','A
 --     }
 --   }
 -- }
-ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE tantivy('{ "col1": { "tokenizer": { "type": "stem", "stop_word_filters": ["english", "french"], "stem_languages": ["german", "english"], "length_limit": 60} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
+ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE fts('{ "col1": { "tokenizer": { "type": "stem", "stop_word_filters": ["english", "french"], "stem_languages": ["german", "english"], "length_limit": 60} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
 ALTER TABLE tb MATERIALIZE INDEX multi_idx;
 
 SELECT '[Test Case 1]: function equals / notEquals / == / !=';
@@ -150,7 +150,7 @@ SELECT read_rows==2 from system.query_log
 SELECT '[Test Case 3]: function like / not like';
 
 ALTER TABLE tb DROP INDEX multi_idx;
-ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE tantivy('{ "col1": { "tokenizer": { "type": "raw" } }, "col2": { "tokenizer": {"type": "raw"} }, "col3": { "tokenizer": {"type": "raw"} } }') GRANULARITY 1;
+ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE fts('{ "col1": { "tokenizer": { "type": "raw" } }, "col2": { "tokenizer": {"type": "raw"} }, "col3": { "tokenizer": {"type": "raw"} } }') GRANULARITY 1;
 ALTER TABLE tb MATERIALIZE INDEX multi_idx;
 
 SELECT count(*) FROM tb WHERE col1 like '%ll%yo%';
@@ -228,7 +228,7 @@ SELECT read_rows==2 from system.query_log
 SELECT '[Test Case 5]: function multiSearchAny / not multiSearchAny';
 
 ALTER TABLE tb DROP INDEX multi_idx;
-ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE tantivy GRANULARITY 1;
+ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE fts GRANULARITY 1;
 ALTER TABLE tb MATERIALIZE INDEX multi_idx;
 
 SELECT count(*) FROM tb WHERE multiSearchAny(col1, ['grass', 'eggs']);
@@ -275,7 +275,7 @@ SELECT '[Test Case 6]: function mapContains';
 CREATE TABLE tbm (id UInt64, col1 Map(String,String), col2 String) ENGINE = MergeTree() ORDER BY id SETTINGS index_granularity = 2, index_granularity_bytes = '10Mi';
 INSERT INTO tbm VALUES(0,{'fruit cat':'An apple a day keeps', 'idiom':'The early bird catches worm'}, 'Actions speak louder than words'),(1,{'time':'Better late than never ever', 'life':'Easy come easy go always'}, 'Strike while the iron hot'),(2,{'cooking':'Too many cooks spoil broth', 'sewing':'A stitch in time saves'}, 'Dont count your chickens before'),(3,{'animal life':'Every dog has its day', 'advice':'Let sleeping dogs lie peacefully'}, 'When in Rome do as'),(4,{'nature pic':'The grass is always greener', 'virtue':'Honesty is the best policy'}, 'Practice makes perfect every time'),(5,{'caution':'Dont put all your eggs', 'art':'A picture paints 1000 words'}, 'Judge not by its cover'),(6,{'appearance':'All that glitters isnt gold', 'optimism':'Every cloud has silver lining'}, 'Hope for best prepare worst'),(7,{'writing adder':'The pen is mightier than', 'patience':'Rome wasnt built in day'}, 'Theres no place like home'),(8,{'question':'What is grease means oo', 'relationship':'Birds of feather flock together'}, 'A watched pot never boils'),(9,{'persistence':'The squeaky wheel gets grease', 'time':'Never put off till tomorrow'}, 'Absence makes the heart fonder');
 
-ALTER TABLE tbm ADD INDEX multi_idx (mapKeys(col1), col2) TYPE tantivy('{ "mapKeys(col1)": { "tokenizer": { "type": "stem", "stop_word_filters": ["english"], "stem_languages": ["english"]} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
+ALTER TABLE tbm ADD INDEX multi_idx (mapKeys(col1), col2) TYPE fts('{ "mapKeys(col1)": { "tokenizer": { "type": "stem", "stop_word_filters": ["english"], "stem_languages": ["english"]} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
 ALTER TABLE tbm MATERIALIZE INDEX multi_idx;
 
 SELECT count(*) FROM tbm WHERE mapContains(col1, 'nature pic');
@@ -310,7 +310,7 @@ CREATE TABLE tba(`id` UInt64, `col1` Array(String), `col2` String) ENGINE = Merg
 
 INSERT INTO tba VALUES(0, ['The squeaky wheel gets grease', 'Never put off till tomorrow'], 'Absence makes the heart fonder'),(1, ['An apple a day keeps', 'The early bird catches worm'], 'Actions speak louder than words'),(2, ['Better late than never ever', 'Easy come easy go always'], 'Strike while the iron hot'),(3, ['Too many cooks spoil broth', 'A stitch in time saves'], 'Dont count your chickens before'),(4, ['Every dog has its day', 'Let sleeping dogs lie peacefully'], 'When in Rome do as'),(5, ['The grass is always greener', 'Honesty is the best policy'], 'Practice makes perfect every time'),(6, ['Dont put all your eggs', 'A picture paints 1000 words'], 'Judge not by its cover'),(7, ['All that glitters isnt gold', 'Every cloud has silver lining'], 'Hope for best prepare worst'),(8, ['The pen is mightier than', 'Rome wasnt built in day'], 'Theres no place like home'),(9, ['What is grease means oo', 'Birds of feather flock together'], 'A watched pot never boils');
 
-ALTER TABLE tba ADD INDEX multi_idx (col1, col2) TYPE tantivy('{ "col1": { "tokenizer": { "type": "stem", "stop_word_filters": ["english"], "stem_languages": ["english"]} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
+ALTER TABLE tba ADD INDEX multi_idx (col1, col2) TYPE fts('{ "col1": { "tokenizer": { "type": "stem", "stop_word_filters": ["english"], "stem_languages": ["english"]} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
 ALTER TABLE tba MATERIALIZE INDEX multi_idx;
 
 SELECT count(*) FROM tba WHERE has(col1, 'An apple a day keeps');
