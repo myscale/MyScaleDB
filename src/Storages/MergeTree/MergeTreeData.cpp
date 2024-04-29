@@ -8539,23 +8539,6 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 
     size_t dim = 0;
 
-    std::unordered_map<String, std::vector<String>> index_nvme_cache_uuid_map;
-    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
-    if (fs::exists(vector_nvme_cache_folder))
-    {
-        for (const auto & entry : fs::directory_iterator(vector_nvme_cache_folder))
-        {
-            if (fs::is_directory(entry.status()))
-            {
-                auto [part_index_name, path_uuid] = VectorIndex::getPartNameUUIDFromNvmeCachePath(entry.path().filename());
-                if (part_index_name.empty())
-                    continue;
-
-                index_nvme_cache_uuid_map[part_index_name].emplace_back(path_uuid);
-            }
-        }
-    }
-
     for (const auto & data_part : getDataPartsVectorForInternalUsage())
     {
         String part_name = data_part->info.getPartNameWithoutMutation();
@@ -8625,29 +8608,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
             /// load vector index into cache
             for (auto & segment_id : VectorIndex::getAllSegmentIds(data_part, v_index.name))
             {
-                IndexWithMetaHolderPtr index_holder;
-                String part_with_index_name = segment_id.getCacheKey().part_name_no_mutation + "-" + v_index.name;
-                if (auto it = index_nvme_cache_uuid_map.find(part_with_index_name); it != index_nvme_cache_uuid_map.end())
-                {
-                    String uuid_path = "";
-                    if (it->second.size() >= 1)
-                        uuid_path = it->second[0];
-                    LOG_INFO(log, "Start loading vector index {} in {}, reuse nvme cache uuid {}", v_index.name, data_part->name, uuid_path);
-                    if (!reuse_path.insert(String(part_with_index_name + "-" + uuid_path)).second)
-                    {
-                        LOG_ERROR(log, "Another Cache item reuse this nvme cache path {}", part_with_index_name + "-" + uuid_path);
-                        uuid_path = "";
-                    }
-                    else
-                        it->second.erase(it->second.begin());
-
-                    index_holder = column_index->load(segment_id, true, uuid_path);
-                }
-                else
-                {
-                    LOG_INFO(log, "Start loading vector index {} in {}, no nvme cache exists.", v_index.name, data_part->name);
-                    index_holder = column_index->load(segment_id);
-                }
+                auto index_holder = column_index->load(segment_id);
 
                 if (index_holder)
                 {
@@ -8662,20 +8623,6 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
                         v_index.name,
                         data_part->name);
                 }
-            }
-        }
-    }
-
-    /// remove other nvme cache accord index_nvme_cache_uuid_map
-    for (const auto & it : index_nvme_cache_uuid_map)
-    {
-        for (const String & uuid_path : it.second)
-        {
-            auto nvme_path = fs::path(vector_nvme_cache_folder) / String(it.first + "-" + uuid_path);
-            if (fs::exists(nvme_path))
-            {
-                LOG_DEBUG(log, "Remove unused nvme cache folder {}", nvme_path);
-                fs::remove_all(nvme_path);
             }
         }
     }

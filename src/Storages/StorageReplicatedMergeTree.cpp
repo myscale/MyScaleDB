@@ -4894,7 +4894,7 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         /// clear nvme cache
         /// no need clear nvme cache in this field, reload vector index will reuse this cache.
-        // clearVectorNvmeCache();
+        clearVectorNvmeCache();
 
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
