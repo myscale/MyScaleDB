@@ -1,0 +1,27 @@
+Create default vector indices when creating table
+vec_ind_1	MSTG	vec_ind_1 vector_1 TYPE DEFAULT
+vec_ind_2	MSTG	vec_ind_2 vector_2 TYPE default(\'metric_type=IP\')
+vec_ind_7	BinaryMSTG	vec_ind_7 vector_7 TYPE DEFAULT
+vec_ind_8	BinaryMSTG	vec_ind_8 vector_8 TYPE default(\'metric_type=Jaccard\')
+Create default vector indices in ALTER TABLE ADD VECTOR INDEX query
+vec_ind_1	MSTG	vec_ind_1 vector_1 TYPE DEFAULT
+vec_ind_2	MSTG	vec_ind_2 vector_2 TYPE default(\'metric_type=IP\')
+vec_ind_7	BinaryMSTG	vec_ind_7 vector_7 TYPE DEFAULT
+vec_ind_8	BinaryMSTG	vec_ind_8 vector_8 TYPE default(\'metric_type=Jaccard\')
+vec_ind_3	MSTG	vec_ind_3 vector_3 TYPE DEFAULT
+vec_ind_4	MSTG	vec_ind_4 vector_4 TYPE default
+vec_ind_9	BinaryMSTG	vec_ind_9 vector_9 TYPE DEFAULT
+vec_ind_10	BinaryMSTG	vec_ind_10 vector_10 TYPE default
+Create default vector indices in CREATE VECTOR INDEX query
+vec_ind_1	MSTG	vec_ind_1 vector_1 TYPE DEFAULT
+vec_ind_2	MSTG	vec_ind_2 vector_2 TYPE default(\'metric_type=IP\')
+vec_ind_7	BinaryMSTG	vec_ind_7 vector_7 TYPE DEFAULT
+vec_ind_8	BinaryMSTG	vec_ind_8 vector_8 TYPE default(\'metric_type=Jaccard\')
+vec_ind_3	MSTG	vec_ind_3 vector_3 TYPE DEFAULT
+vec_ind_4	MSTG	vec_ind_4 vector_4 TYPE default
+vec_ind_9	BinaryMSTG	vec_ind_9 vector_9 TYPE DEFAULT
+vec_ind_10	BinaryMSTG	vec_ind_10 vector_10 TYPE default
+vec_ind_5	MSTG	vec_ind_5 vector_5 TYPE DEFAULT
+vec_ind_6	MSTG	vec_ind_6 vector_6 TYPE default
+vec_ind_11	BinaryMSTG	vec_ind_11 vector_11 TYPE DEFAULT
+vec_ind_12	BinaryMSTG	vec_ind_12 vector_12 TYPE default

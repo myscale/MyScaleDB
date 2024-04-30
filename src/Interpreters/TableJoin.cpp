@@ -129,7 +129,7 @@ void TableJoin::resetCollected()
     renames.clear();
     left_type_map.clear();
     right_type_map.clear();
-    vector_scan_description.reset();
+    right_vector_scan_description.reset();
 }
 
 void TableJoin::addUsingKey(const ASTPtr & ast)
@@ -743,14 +743,34 @@ void TableJoin::resetToCross()
     this->table_join.kind = JoinKind::Cross;
 }
 
-std::optional<VectorScanDescription> TableJoin::getVecScanDescription() const
+std::optional<VSDescription> TableJoin::getVecScanDescription() const
 {
-    return vector_scan_description;
+    return right_vector_scan_description;
 }
 
-void TableJoin::setVecScanDescription(VectorScanDescription & vec_scan_desc) const
+void TableJoin::setVecScanDescription(VSDescription & vec_scan_desc) const
 {
-    vector_scan_description = vec_scan_desc;
+    right_vector_scan_description = vec_scan_desc;
+}
+
+TextSearchInfoPtr TableJoin::getTextSearchInfoPtr() const
+{
+    return right_text_search_info;
+}
+
+void TableJoin::setTextSearchInfoPtr(TextSearchInfoPtr text_search_info) const
+{
+    right_text_search_info = text_search_info;
+}
+
+HybridSearchInfoPtr TableJoin::getHybridSearchInfoPtr() const
+{
+    return right_hybrid_search_info;
+}
+
+void TableJoin::setHybridSearchInfoPtr(HybridSearchInfoPtr hybrid_search_info) const
+{
+    right_hybrid_search_info = hybrid_search_info;
 }
 
 bool TableJoin::allowParallelHashJoin() const

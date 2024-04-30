@@ -34,8 +34,7 @@ public:
         MergeTreeInOrderReadPoolParallelReplicasPtr pool_,
         const Names & virt_column_names = {},
         size_t part_index_in_query_ = 0,
-        bool has_limit_below_one_block_ = false,
-        MergeTreeVectorScanManagerPtr vector_scan_mamanger_ = nullptr);
+        bool has_limit_below_one_block_ = false);
 
     ~MergeTreeSelectAlgorithm() override;
 
@@ -74,8 +73,6 @@ protected:
     MergeTreeInOrderReadPoolParallelReplicasPtr pool;
 
     size_t total_rows = 0;
-
-    MergeTreeVectorScanManagerPtr vector_scan_manager = nullptr;
 };
 
 }

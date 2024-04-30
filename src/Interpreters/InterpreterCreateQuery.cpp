@@ -32,18 +32,22 @@
 #include <Storages/WindowView/StorageWindowView.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 
+#include <Interpreters/AddDefaultDatabaseVisitor.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/executeDDLQueryOnCluster.h>
-#include <Interpreters/executeQuery.h>
 #include <Interpreters/DDLTask.h>
 #include <Interpreters/ExpressionAnalyzer.h>
+#include <Interpreters/GinFilter.h>
 #include <Interpreters/InterpreterCreateQuery.h>
-#include <Interpreters/InterpreterSelectWithUnionQuery.h>
-#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/InterpreterInsertQuery.h>
 #include <Interpreters/InterpreterRenameQuery.h>
-#include <Interpreters/AddDefaultDatabaseVisitor.h>
-#include <Interpreters/GinFilter.h>
+#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
+#include <Interpreters/InterpreterSelectWithUnionQuery.h>
+#include <Interpreters/executeDDLQueryOnCluster.h>
+#include <Interpreters/executeQuery.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
 
 #include <Access/Common/AccessRightsElement.h>
 
@@ -78,7 +82,7 @@
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionVisitor.h>
 
-#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 namespace Search
 {
@@ -494,7 +498,7 @@ ASTPtr InterpreterCreateQuery::formatIndices(const IndicesDescription & indices)
     return res;
 }
 
-ASTPtr InterpreterCreateQuery::formatVectorIndices(const VectorIndicesDescription & vec_indices)
+ASTPtr InterpreterCreateQuery::formatVectorIndices(const VIDescriptions & vec_indices)
 {
     auto res = std::make_shared<ASTExpressionList>();
 
@@ -751,6 +755,14 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                     throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                             "Experimental Inverted Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
                 }
+#if USE_TANTIVY_SEARCH
+                if (index_desc.type == TANTIVY_INDEX_NAME && !settings.allow_experimental_inverted_index)
+                {
+                    throw Exception(
+                        ErrorCodes::SUPPORT_IS_DISABLED,
+                        "Experimental fts Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                }
+#endif
                 if (index_desc.type == "annoy" && !settings.allow_experimental_annoy_index)
                     throw Exception(ErrorCodes::INCORRECT_QUERY, "Annoy index is disabled. Turn on allow_experimental_annoy_index");
 
@@ -760,7 +772,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
         if (create.columns_list->vec_indices)
             for (const auto & vec_index : create.columns_list->vec_indices->children)
             {
-                const auto * vec_index_definition = vec_index->as<ASTVectorIndexDeclaration>();
+                const auto * vec_index_definition = vec_index->as<ASTVIDeclaration>();
                 std::optional<NameAndTypePair> vector_column = properties.columns.tryGetPhysical(vec_index_definition->column);
                 if(!vector_column)
                     throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vec_index_definition->column);
@@ -782,7 +794,7 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                 }
 
                 properties.vec_indices.push_back(
-                        VectorIndexDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
+                    VIDescription::getVectorIndexFromAST(vec_index->clone(), properties.columns, properties.constraints, 0));
             }
 
         if (create.columns_list->projections)

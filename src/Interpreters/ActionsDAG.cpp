@@ -1251,7 +1251,7 @@ ActionsDAGPtr ActionsDAG::makeConvertingActions(
                     const auto * res_const = typeid_cast<const ColumnConst *>(res_elem.column.get());
                     if (ignore_constant_values && res_const)
                         src_node = dst_node = &actions_dag->addColumn(res_elem);
-                    else if (isVectorScanFunc(res_elem.name))
+                    else if (isHybridSearchFunc(res_elem.name))
                         src_node = dst_node = &actions_dag->addInput(res_elem);
                     else
                         throw Exception(ErrorCodes::THERE_IS_NO_COLUMN,

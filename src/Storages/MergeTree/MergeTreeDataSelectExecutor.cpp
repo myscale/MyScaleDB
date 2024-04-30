@@ -2,37 +2,41 @@
 #include <optional>
 #include <unordered_set>
 
-#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
-#include <Storages/MergeTree/MergeTreeReadPool.h>
-#include <Storages/MergeTree/MergeTreeIndices.h>
-#include <Storages/MergeTree/MergeTreeIndexReader.h>
-#include <Storages/MergeTree/KeyCondition.h>
-#include <Storages/MergeTree/MergeTreeDataPartUUID.h>
-#include <Storages/MergeTree/StorageFromMergeTreeDataPart.h>
-#include <Storages/MergeTree/MergeTreeIndexInverted.h>
-#include <Storages/ReadInOrderOptimizer.h>
-#include <Storages/VirtualColumnUtils.h>
-#include <Parsers/ASTIdentifier.h>
-#include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTFunction.h>
-#include <Parsers/ASTSampleRatio.h>
-#include <Parsers/parseIdentifierOrStringLiteral.h>
+#include <Interpreters/Context.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/InterpreterSelectQuery.h>
-#include <Interpreters/Context.h>
+#include <Parsers/ASTFunction.h>
+#include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTSampleRatio.h>
+#include <Parsers/parseIdentifierOrStringLiteral.h>
 #include <Processors/ConcatProcessor.h>
-#include <Processors/QueryPlan/QueryPlan.h>
-#include <Processors/QueryPlan/CreatingSetsStep.h>
-#include <Processors/QueryPlan/FilterStep.h>
-#include <Processors/QueryPlan/ExpressionStep.h>
-#include <Processors/QueryPlan/ReadFromPreparedSource.h>
-#include <Processors/QueryPlan/ReadFromMergeTree.h>
-#include <Processors/QueryPlan/UnionStep.h>
-#include <Processors/QueryPlan/QueryIdHolder.h>
 #include <Processors/QueryPlan/AggregatingStep.h>
+#include <Processors/QueryPlan/CreatingSetsStep.h>
+#include <Processors/QueryPlan/ExpressionStep.h>
+#include <Processors/QueryPlan/FilterStep.h>
+#include <Processors/QueryPlan/QueryIdHolder.h>
+#include <Processors/QueryPlan/QueryPlan.h>
+#include <Processors/QueryPlan/ReadFromMergeTree.h>
+#include <Processors/QueryPlan/ReadFromPreparedSource.h>
+#include <VectorIndex/Processors/ReadWithHybridSearch.h>
 #include <Processors/QueryPlan/SortingStep.h>
+#include <Processors/QueryPlan/UnionStep.h>
 #include <Processors/Sources/SourceFromSingleChunk.h>
 #include <Processors/Transforms/AggregatingTransform.h>
+#include <Storages/MergeTree/KeyCondition.h>
+#include <Storages/MergeTree/MergeTreeDataPartUUID.h>
+#include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
+#include <Storages/MergeTree/MergeTreeIndexInverted.h>
+#include <Storages/MergeTree/MergeTreeIndices.h>
+#include <Storages/MergeTree/MergeTreeReadPool.h>
+#include <Storages/MergeTree/StorageFromMergeTreeDataPart.h>
+#include <Storages/ReadInOrderOptimizer.h>
+#include <Storages/VirtualColumnUtils.h>
+
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
+#endif
 
 #include <Core/UUID.h>
 #include <Common/CurrentMetrics.h>
@@ -46,8 +50,6 @@
 #include <IO/WriteBufferFromOStream.h>
 
 #include <Storages/MergeTree/CommonANNIndexes.h>
-
-#include <VectorIndex/Processors/ReadWithVectorScan.h>
 
 namespace CurrentMetrics
 {
@@ -1020,6 +1022,12 @@ RangesInDataParts MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipInd
                 ? alter_conversions[part_index]
                 : std::make_shared<AlterConversions>();
 
+            LOG_DEBUG(
+                log,
+                "[MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipIndexes] [lambda - process_part] init ranges for part: {}, "
+                "part index is: {}",
+                part->getNameWithState(),
+                part_index);
             RangesInDataPart ranges(part, alter_conversions_for_part, part_index);
 
             size_t total_marks_count = part->index_granularity.getMarksCountWithoutFinal();
@@ -1354,9 +1362,9 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
 
     selectColumnNames(column_names_to_return, data, real_column_names, virt_column_names, sample_factor_column_queried);
 
-    if (query_info.vector_scan_info)
+    if (query_info.has_hybrid_search)
     {
-        return std::make_unique<ReadWithVectorScan>(
+        return std::make_unique<ReadWithHybridSearch>(
             std::move(parts),
             std::move(alter_conversions),
             real_column_names,
@@ -1637,6 +1645,151 @@ MarkRanges MergeTreeDataSelectExecutor::markRangesFromPKRange(
     return res;
 }
 
+#if USE_TANTIVY_SEARCH
+MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
+    MergeTreeIndexPtr index_helper,
+    MergeTreeIndexConditionPtr condition,
+    MergeTreeData::DataPartPtr part,
+    MergeTreeIndexGranulePtr granule,
+    MergeTreeIndexReader & reader,
+    const MarkRanges & index_ranges,
+    const MarkRanges & ranges,
+    const size_t & min_marks_for_seek,
+    size_t & granules_dropped,
+    size_t & total_granules,
+    Poco::Logger * log)
+{
+    MarkRanges res;
+    size_t last_index_mark = 0;
+
+    // Record bitmap result searched from `tantivy_search`
+    bool already_searched_from_tantivy = false;
+    // Get indexed docs number from tantivy index files.
+    UInt64 indexed_doc_nums = 0;
+    // If need use roaring 64 bitmap.
+    bool use_roaring_u64 = false;
+
+    // Boundary
+    const auto * tantivy_filter_condition = dynamic_cast<const MergeTreeConditionTantivy *>(&*condition);
+    if (tantivy_filter_condition == nullptr)
+    {
+        return index_ranges;
+    }
+
+    TantivyIndexStorePtr tantivy_store = nullptr;
+    if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
+    {
+        tantivy_store = TantivyIndexStoreFactory::instance().get(index_helper->getFileName(), part->getDataPartStoragePtr());
+        indexed_doc_nums = tantivy_store->getIndexedDocsNum();
+        if (indexed_doc_nums > std::numeric_limits<uint32_t>::max())
+        {
+            use_roaring_u64 = true;
+        }
+    }
+    else
+    {
+        return index_ranges;
+    }
+
+    if (index_ranges.size() != ranges.size())
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "`index_ranges` size must be equal with `ranges` size.");
+    }
+    // `Granularity` size
+    auto index_granularity = index_helper->index.granularity;
+    // Initialize roaring bitmap for u32 and u64.
+    roaring::Roaring searched_row_ids_roaring_32;
+    roaring::Roaring64Map searched_row_ids_roaring_64;
+
+    // Keep logical same with MergeTreeDataSelectExecutor::filterMarksUsingIndex
+    for (size_t i = 0; i < ranges.size(); i++)
+    {
+        const MarkRange & index_range = index_ranges[i];
+        if (last_index_mark != index_range.begin || !granule)
+        {
+            reader.seek(index_range.begin);
+        }
+        total_granules += index_range.end - index_range.begin;
+        for (size_t index_mark = index_range.begin; index_mark < index_range.end; ++index_mark)
+        {
+            if (index_mark != index_range.begin || !granule || last_index_mark != index_range.begin)
+            {
+                granule = reader.read();
+            }
+
+            std::shared_ptr<MergeTreeIndexGranuleTantivy> granule_tantivy
+                = std::dynamic_pointer_cast<MergeTreeIndexGranuleTantivy>(granule);
+
+            if (granule_tantivy == nullptr)
+            {
+                continue;
+            }
+            bool granule_hitted = false;
+
+            if (tantivy_store == nullptr)
+            {
+                granule_hitted = true;
+            }
+            else
+            {
+                if (use_roaring_u64)
+                {
+                    if (!already_searched_from_tantivy)
+                    {
+                        searched_row_ids_roaring_64 = tantivy_filter_condition->calculateRowIdsRoaringTemplate<roaring::Roaring64Map>(
+                            granule_tantivy, *tantivy_store, indexed_doc_nums);
+                        already_searched_from_tantivy = true;
+                    }
+                    roaring::Roaring64Map granule_row_ids_roaring_64
+                        = granule_tantivy->granuleRowIdRangesToRoaring<roaring::Roaring64Map>();
+                    roaring::Roaring64Map intersect = granule_row_ids_roaring_64 & searched_row_ids_roaring_64;
+                    if (intersect.cardinality() > 0)
+                    {
+                        granule_hitted = true;
+                    }
+                }
+                else
+                {
+                    if (!already_searched_from_tantivy)
+                    {
+                        searched_row_ids_roaring_32 = tantivy_filter_condition->calculateRowIdsRoaringTemplate<roaring::Roaring>(
+                            granule_tantivy, *tantivy_store, indexed_doc_nums);
+                        already_searched_from_tantivy = true;
+                    }
+                    roaring::Roaring granule_row_ids_roaring_32 = granule_tantivy->granuleRowIdRangesToRoaring<roaring::Roaring>();
+                    roaring::Roaring intersect = granule_row_ids_roaring_32 & searched_row_ids_roaring_32;
+                    if (intersect.cardinality() > 0)
+                    {
+                        granule_hitted = true;
+                    }
+                }
+            }
+
+            // Generate mark range.
+            if (granule_hitted)
+            {
+                // Granule can't be skipped.
+                auto mark_left = std::max(ranges[i].begin, index_mark * index_granularity);
+                auto mark_right = std::min(ranges[i].end, (index_mark + 1) * index_granularity);
+                MarkRange data_range(mark_left, mark_right);
+                if (res.empty() || res.back().end - data_range.begin > min_marks_for_seek)
+                    res.push_back(data_range);
+                else
+                    res.back().end = data_range.end;
+            }
+            else
+            {
+                // Granule needs to be skipped.
+                granules_dropped++;
+            }
+        }
+        last_index_mark = index_range.end - 1;
+    }
+    LOG_DEBUG(log, "generated mark ranges size is:{}", res.size());
+    return res;
+}
+#endif
+
 
 MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
     MergeTreeIndexPtr index_helper,
@@ -1697,8 +1850,34 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
     PostingsCacheForStore cache_in_store;
 
     if (dynamic_cast<const MergeTreeIndexInverted *>(&*index_helper) != nullptr)
+    {
         cache_in_store.store = GinIndexStoreFactory::instance().get(index_helper->getFileName(), part->getDataPartStoragePtr());
+        LOG_DEBUG(
+            log,
+            "[filterMarksUsingIndex] init (GinIndexStore) cache_in_store.store, file_name:{}, part:{}",
+            index_helper->getFileName(),
+            part->getNameWithState());
+    }
 
+    DB::OpenTelemetry::SpanHolder span("MergeTreeDataSelectExecutor::skip_granule");
+
+#if USE_TANTIVY_SEARCH
+    if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
+    {
+        return generateMarkRangesFromTantivy(
+            index_helper,
+            condition,
+            part,
+            granule,
+            reader,
+            index_ranges,
+            ranges,
+            min_marks_for_seek,
+            granules_dropped,
+            total_granules,
+            log);
+    }
+#endif
     for (size_t i = 0; i < ranges.size(); ++i)
     {
         const MarkRange & index_range = index_ranges[i];
@@ -1740,20 +1919,25 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
             }
 
             bool result = false;
-            if (!gin_filter_condition)
-                result = condition->mayBeTrueOnGranule(granule);
-            else
+            if (gin_filter_condition)
+            {
                 result = cache_in_store.store ? gin_filter_condition->mayBeTrueOnGranuleInPart(granule, cache_in_store) : true;
+                LOG_TRACE(log, "[MergeTreeDataSelectExecutor::filterMarksUsingIndex] GinIndex, mayBeTrueOnGranuleInPart is {}", result);
+            }
+            else
+            {
+                result = condition->mayBeTrueOnGranule(granule);
+            }
 
             if (!result)
             {
                 ++granules_dropped;
+                LOG_TRACE(log, "[MergeTreeDataSelectExecutor::filterMarksUsingIndex] granules_dropped++ {}", granules_dropped);
                 continue;
             }
 
             MarkRange data_range(
-                    std::max(ranges[i].begin, index_mark * index_granularity),
-                    std::min(ranges[i].end, (index_mark + 1) * index_granularity));
+                std::max(ranges[i].begin, index_mark * index_granularity), std::min(ranges[i].end, (index_mark + 1) * index_granularity));
 
             if (res.empty() || res.back().end - data_range.begin > min_marks_for_seek)
                 res.push_back(data_range);

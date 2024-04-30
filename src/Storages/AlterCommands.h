@@ -8,7 +8,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Common/SettingsChanges.h>
 
-#include <VectorIndex/Storages/VectorIndexCommands.h>
+#include <VectorIndex/Common/VICommands.h>
 
 namespace DB
 {
@@ -186,7 +186,7 @@ struct AlterCommand
     /// metadata changes.
     std::optional<MutationCommand> tryConvertToMutationCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
 
-    std::optional<VectorIndexCommand> tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
+    std::optional<VICommand> tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const;
 };
 
 class Context;
@@ -233,7 +233,12 @@ public:
     /// Check if commands have any inverted index
     static bool hasInvertedIndex(const StorageInMemoryMetadata & metadata);
 
-    VectorIndexCommands getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
+    /// Check if commands have any tantivy index
+#if USE_TANTIVY_SEARCH
+    static bool hasTantivyIndex(const StorageInMemoryMetadata & metadata);
+#endif
+
+    VICommands getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const;
 };
 
 }

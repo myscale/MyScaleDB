@@ -9,7 +9,7 @@
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTInterpolateElement.h>
 
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 #include <Common/logger_useful.h>
 
@@ -57,7 +57,7 @@ bool RequiredSourceColumnsMatcher::needChildVisit(const ASTPtr & node, const AST
     if (const auto * f = node->as<ASTFunction>())
     {
         /// "lambda" visit children itself.
-        if (f->name == "lambda" || isVectorScanFunc(f->name))
+        if (f->name == "lambda" || isHybridSearchFunc(f->name))
             return false;
     }
 

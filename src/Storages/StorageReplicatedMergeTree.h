@@ -39,8 +39,8 @@
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
 
-#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
-#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
+#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIStrategyPicker.h>
+#include <VectorIndex/Storages/VIBuilderUpdater.h>
 
 
 namespace DB
@@ -365,9 +365,9 @@ private:
     friend class MergeFromLogEntryTask;
     friend class MutateFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
-    friend class VectorIndexBuilderUpdater;
-    friend class ReplicatedVectorIndexTask;
-    friend class ReplicatedMergeTreeBuildVIndexStrategyPicker;
+    friend class VIBuilderUpdater;
+    friend class ReplicatedVITask;
+    friend class ReplicatedMergeTreeBuildVIStrategyPicker;
 
     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
     using LogEntry = ReplicatedMergeTreeLogEntry;
@@ -419,8 +419,8 @@ private:
 
     MergeStrategyPicker merge_strategy_picker;
 
-    VectorIndexBuilderUpdater vec_index_builder_updater;
-    ReplicatedMergeTreeBuildVIndexStrategyPicker build_vindex_strategy_picker;
+    VIBuilderUpdater vec_index_builder_updater;
+    ReplicatedMergeTreeBuildVIStrategyPicker build_vindex_strategy_picker;
 
     /** The queue of what needs to be done on this replica to catch up with everyone. It is taken from ZooKeeper (/replicas/me/queue/).
      * In ZK entries in chronological order. Here it is not necessary.
@@ -949,7 +949,7 @@ private:
     void cleanupVectorIndexBuildStatusFromZK(const String & index_name);
 
     /// In create and drop vector index cases, do some operations.
-    void startVectorIndexJob(const VectorIndicesDescription & old_vec_indices, const VectorIndicesDescription & new_vec_indices);
+    void startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices);
 
     /// Get cached vector index info from zookeeper and load into cache.
     void loadVectorIndexFromZookeeper();

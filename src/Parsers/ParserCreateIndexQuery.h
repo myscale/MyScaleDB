@@ -7,7 +7,7 @@ namespace DB
 
 /** Query like this:
   * CREATE INDEX [IF NOT EXISTS] name ON [db].name (expression) TYPE type GRANULARITY value
-  * CREATE VECTOR INDEX [IF NOT EXISTS] name on [db].name column TYPE typename(args)
+  * CREATE VECTOR INDEX [IF NOT EXISTS] name on [db].name column [TYPE typename(args)]
   */
 
 class ParserCreateIndexQuery : public IParserBase

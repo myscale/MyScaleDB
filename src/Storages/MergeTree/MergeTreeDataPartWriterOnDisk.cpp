@@ -1,9 +1,12 @@
+#include <utility>
 #include <Storages/MergeTree/MergeTreeDataPartWriterOnDisk.h>
 #include <Storages/MergeTree/MergeTreeIndexInverted.h>
 #include <Common/MemoryTrackerBlockerInThread.h>
-#include <utility>
 #include "IO/WriteBufferFromFileDecorator.h"
 
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
+#endif
 namespace DB
 {
 namespace ErrorCodes
@@ -221,13 +224,30 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
                         marks_compression_codec, settings.marks_compress_block_size,
                         settings.query_write_settings));
 
-        GinIndexStorePtr store = nullptr;
         if (typeid_cast<const MergeTreeIndexInverted *>(&*skip_index) != nullptr)
         {
-            store = std::make_shared<GinIndexStore>(stream_name, data_part->getDataPartStoragePtr(), data_part->getDataPartStoragePtr(), storage.getSettings()->max_digestion_size_per_segment);
+            GinIndexStorePtr store = std::make_shared<GinIndexStore>(
+                stream_name,
+                data_part->getDataPartStoragePtr(),
+                data_part->getDataPartStoragePtr(),
+                storage.getSettings()->max_digestion_size_per_segment);
             gin_index_stores[stream_name] = store;
+            skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(store));
         }
-        skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(store));
+#if USE_TANTIVY_SEARCH
+        else if (typeid_cast<const MergeTreeIndexTantivy *>(&*skip_index) != nullptr)
+        {
+            TantivyIndexStorePtr store
+                = std::make_shared<TantivyIndexStore>(stream_name, data_part->getDataPartStoragePtr(), data_part->getDataPartStoragePtr());
+            tantivy_index_stores[stream_name] = store;
+            skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(store));
+        }
+#endif
+        else
+        {
+            skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(nullptr));
+        }
+
         skip_index_accumulated_marks.push_back(0);
     }
 }
@@ -283,15 +303,6 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
         auto & stream = *skip_indices_streams[i];
         WriteBuffer & marks_out = stream.compress_marks ? stream.marks_compressed_hashing : stream.marks_hashing;
 
-        GinIndexStorePtr store;
-        if (typeid_cast<const MergeTreeIndexInverted *>(&*index_helper) != nullptr)
-        {
-            String stream_name = index_helper->getFileName();
-            auto it = gin_index_stores.find(stream_name);
-            if (it == gin_index_stores.end())
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Index '{}' does not exist", stream_name);
-            store = it->second;
-        }
 
         for (const auto & granule : granules_to_write)
         {
@@ -303,7 +314,32 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
 
             if (skip_indices_aggregators[i]->empty() && granule.mark_on_start)
             {
-                skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(store);
+                if (typeid_cast<const MergeTreeIndexInverted *>(&*index_helper) != nullptr)
+                {
+                    GinIndexStorePtr store;
+                    String stream_name = index_helper->getFileName();
+                    auto it = gin_index_stores.find(stream_name);
+                    if (it == gin_index_stores.end())
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Index '{}' does not exist", stream_name);
+                    store = it->second;
+                    skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(store);
+                }
+#if USE_TANTIVY_SEARCH
+                else if (typeid_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
+                {
+                    TantivyIndexStorePtr store = nullptr;
+                    String stream_name = index_helper->getFileName();
+                    auto it = tantivy_index_stores.find(stream_name);
+                    if (it == tantivy_index_stores.end())
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Index '{}' does not exist", stream_name);
+                    store = it->second;
+                    skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(store);
+                }
+#endif
+                else
+                {
+                    skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(nullptr);
+                }
 
                 if (stream.compressed_hashing.offset() >= settings.min_compress_block_size)
                     stream.compressed_hashing.next();
@@ -402,6 +438,21 @@ void MergeTreeDataPartWriterOnDisk::fillSkipIndicesChecksums(MergeTreeData::Data
         }
     }
 
+#if USE_TANTIVY_SEARCH
+    /// Serialize and calculate checksums for tantivy index files.
+    for (auto & store : tantivy_index_stores)
+    {
+        store.second->finalizeTantivyIndex();
+        ChecksumPairs tantivy_checksums = store.second->serialize();
+        for (const auto & checksum_pair : tantivy_checksums)
+        {
+            checksums.files[checksum_pair.first] = checksum_pair.second;
+        }
+        store.second->removeTantivyIndexCache();
+    }
+    tantivy_index_stores.clear();
+#endif
+
     for (auto & stream : skip_indices_streams)
     {
         stream->preFinalize();
@@ -420,6 +471,7 @@ void MergeTreeDataPartWriterOnDisk::finishSkipIndicesSerialization(bool sync)
     for (auto & store: gin_index_stores)
         store.second->finalize();
     gin_index_stores.clear();
+
     skip_indices_streams.clear();
     skip_indices_aggregators.clear();
     skip_index_accumulated_marks.clear();

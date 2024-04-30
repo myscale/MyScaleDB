@@ -21,8 +21,8 @@
 #include <base/types.h>
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Common/VectorIndexCacheObject.h>
+#include <VectorIndex/Cache/VICacheObject.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace fs = std::filesystem;
 
@@ -52,8 +52,8 @@ namespace VectorIndex
 {
 String cutMutVer(const String & part_name);
 
-struct VectorIndexWithMeta;
-using VectorIndexWithMetaPtr = std::shared_ptr<VectorIndexWithMeta>;
+struct VIWithMeta;
+using VectorIndexWithMetaPtr = std::shared_ptr<VIWithMeta>;
 
 struct SegmentId
 {

@@ -26,7 +26,7 @@ namespace ErrorCodes
 ReplicatedMergeTreeQueue::ReplicatedMergeTreeQueue(
     StorageReplicatedMergeTree & storage_,
     ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker_,
-    ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker_)
+    ReplicatedMergeTreeBuildVIStrategyPicker & build_vindex_strategy_picker_)
     : storage(storage_)
     , merge_strategy_picker(merge_strategy_picker_)
     , build_vindex_strategy_picker(build_vindex_strategy_picker_)
@@ -2583,7 +2583,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     /// Check if two parts contain vector index files.
     /// Two parts can be merged when both have built vector index or both not.
     for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
+        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
         {
             if (out_reason)
                 *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";

@@ -598,7 +598,7 @@ static StoragePtr create(const StorageFactory::Arguments & args)
         if (args.query.columns_list && args.query.columns_list->vec_indices)
         {
             for (auto & vec_index : args.query.columns_list->vec_indices->children)
-                metadata.vec_indices.push_back(VectorIndexDescription::getVectorIndexFromAST(
+                metadata.vec_indices.push_back(VIDescription::getVectorIndexFromAST(
                     vec_index, args.columns, metadata.constraints, storage_settings->vector_index_parameter_check && !args.attach));
         }
 

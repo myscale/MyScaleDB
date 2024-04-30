@@ -71,6 +71,10 @@
 #include <Interpreters/JoinUtils.h>
 #include <Interpreters/misc.h>
 
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
+
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
 
@@ -81,10 +85,11 @@
 
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/Common/VectorIndexCommon.h>
-#include <VectorIndex/Common/VectorIndexUtils.h>
-#include <VectorIndex/Interpreters/GetVectorScanVisitor.h>
-#include <VectorIndex/Interpreters/parseVectorScanParameters.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
+#include <VectorIndex/Interpreters/parseVSParameters.h>
+#include <VectorIndex/Utils/VIUtils.h>
+#include <AggregateFunctions/parseAggregateFunctionParameters.h>
 
 namespace DB
 {
@@ -126,6 +131,113 @@ bool allowEarlyConstantFolding(const ActionsDAG & actions, const Settings & sett
 }
 
 Poco::Logger * getLogger() { return &Poco::Logger::get("ExpressionAnalyzer"); }
+
+inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage_snapshot, [[maybe_unused]]const String & text_column_name)
+{
+    bool find_tantivy_index = false;
+#if USE_TANTIVY_SEARCH
+    if (storage_snapshot && storage_snapshot->metadata)
+    {
+        auto metadata_snapshot = storage_snapshot->metadata;
+
+        for (const auto & index_desc : metadata_snapshot->getSecondaryIndices())
+        {
+            /// Find tantivy inverted index on the search column
+            if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 && index_desc.column_names[0] == text_column_name)
+            {
+                find_tantivy_index = true;
+                break;
+            }
+        }
+    }
+#endif
+    if (!find_tantivy_index)
+    {
+        throw Exception(ErrorCodes::ILLEGAL_TEXT_SEARCH, "The column {} has no fts index for text search", text_column_name);
+    }
+}
+
+std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadataPtr & metadata_snapshot, ContextPtr context, String & search_column_name)
+{
+    String index_type = "";
+    /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
+    std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
+    bool use_parameter_check = storage_settings->vector_index_parameter_check;
+    LOG_TRACE(getLogger(), "vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
+
+    /// Obtain the type of the vector index recorded in the meta_data.
+    if (metadata_snapshot)
+    {
+        /// Support multiple vector indices
+        /// Find vector index description in metadata based on search column name.
+        for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+        {
+            if (vec_index_desc.column == search_column_name)
+            {
+                index_type = vec_index_desc.type;
+                LOG_TRACE(getLogger(), "The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+
+                break;
+            }
+        }
+
+        /// If not found, brute force search will be used.
+    }
+
+    /// Use the user-defined `vector_index_parameter_check`.
+    if (metadata_snapshot && metadata_snapshot->hasSettingsChanges())
+    {
+        const auto current_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+        for (const auto & changed_setting : current_changes)
+        {
+            const auto & setting_name = changed_setting.name;
+            const auto & new_value = changed_setting.value;
+            if (setting_name == "vector_index_parameter_check")
+            {
+                use_parameter_check = new_value.get<bool>();
+                LOG_TRACE(
+                    getLogger(), "vector_index_parameter_check value in sql definition: {}", use_parameter_check);
+                break;
+            }
+        }
+    }
+
+    return std::make_pair(index_type, use_parameter_check);
+}
+
+/// Fill in dim and recognize VectorSearchType from metadata
+void getAndCheckVectorScanInfoFromMetadata(
+    const StorageSnapshotPtr & storage_snapshot,
+    VSDescription & vector_scan_desc,
+    ContextPtr context)
+{
+    auto metadata_snapshot = storage_snapshot ? storage_snapshot->metadata : nullptr;
+
+    if (metadata_snapshot)
+    {
+        /// vector column dim
+        vector_scan_desc.search_column_dim = VectorIndex::getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
+        checkVectorDimension(vector_scan_desc.vector_search_type, vector_scan_desc.search_column_dim);
+
+        /// Parameter check
+        std::pair<String, bool> res = getVectorIndexTypeAndParameterCheck(metadata_snapshot, context, vector_scan_desc.search_column_name);
+
+        /// parse vector scan's params, such as: top_k, n_probe ...
+        String param_str = parseVectorScanParameters(vector_scan_desc.parameters, Poco::toUpper(res.first), res.second);
+        if (!param_str.empty())
+        {
+            try
+            {
+                Poco::JSON::Parser json_parser;
+                vector_scan_desc.vector_parameters = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
+            }
+            catch ([[maybe_unused]] const std::exception & e)
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal");
+            }
+        }
+    }
+}
 
 }
 
@@ -198,7 +310,9 @@ ExpressionAnalyzer::ExpressionAnalyzer(
     /// will contain out-of-date information, which will lead to an error when the query is executed.
     analyzeAggregation(temp_actions);
 
+    analyzeHybridSearch(temp_actions);
     analyzeVectorScan(temp_actions);
+    analyzeTextSearch(temp_actions);
 }
 
 NamesAndTypesList ExpressionAnalyzer::getColumnsAfterArrayJoin(ActionsDAGPtr & actions, const NamesAndTypesList & src_columns)
@@ -435,9 +549,7 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAGPtr & temp_actions)
         has_const_aggregation_keys = select_query->group_by_with_constant_keys;
     }
     else
-    {
         aggregated_columns = temp_actions->getNamesAndTypesList();
-    }
 
     for (const auto & desc : aggregate_descriptions)
         aggregated_columns.emplace_back(desc.column_name, desc.function->getResultType());
@@ -446,28 +558,79 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAGPtr & temp_actions)
 /// put vector scan ops column name into aggregated_columns
 void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
 {
-    if (!syntax->vector_scan_funcs.empty())
+    if (syntax->search_func_type == HybridSearchFuncType::VECTOR_SCAN && !syntax->hybrid_search_funcs.empty())
         has_vector_scan = makeVectorScanDescriptions(temp_actions);
     else if (auto vec_scan_desc = getContext()->getVecScanDescription())
     {
-        vector_scan_descriptions.emplace_back(*vec_scan_desc);
-        has_vector_scan = true;
+        if (syntax->storage_snapshot)
+        {
+            LOG_DEBUG(getLogger(), "[analyzeVectorScan] Get vector scan function from right table");
+            /// vector search column exists in right joined table
+            vector_scan_descriptions.emplace_back(*vec_scan_desc);
+            has_vector_scan = true;
+        }
     }
 
     if (has_vector_scan)
     {
-        if (syntax->storage_snapshot && syntax->storage_snapshot->metadata)
-        {
-            auto & vector_scan_desc = vector_scan_descriptions[0];
-            auto &metadata_snapshot = syntax->storage_snapshot->metadata;
-            std::optional<NameAndTypePair> search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vector_scan_desc.search_column_name);
-            if (!search_column_type)
-                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "search column name: {}, type is not exist", vector_scan_desc.search_column_name);
+        getAndCheckVectorScanInfoFromMetadata(syntax->storage_snapshot, vector_scan_descriptions[0], getContext());
+    }
+}
 
-            vector_scan_desc.vector_search_type = getSearchIndexDataType(search_column_type->type);
-            vector_scan_desc.search_column_dim = VectorIndex::getVectorDimension(vector_scan_desc.vector_search_type, *metadata_snapshot, vector_scan_desc.search_column_name);
-            checkVectorDimension(vector_scan_desc.vector_search_type, vector_scan_desc.search_column_dim);
+void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
+{
+    if (syntax->search_func_type == HybridSearchFuncType::TEXT_SEARCH && !syntax->hybrid_search_funcs.empty())
+    {
+        has_text_search = makeTextSearchInfo(temp_actions);
+    }
+    else if (auto right_text_search_info = getContext()->getTextSearchInfo())
+    {
+        if (syntax->storage_snapshot)
+        {
+            LOG_DEBUG(getLogger(), "[analyzeTextSearch] Get text search function from right table");
+            text_search_info = right_text_search_info;
+            has_text_search = true;
         }
+    }
+
+    /// text search cannot be performed when no fts index exists
+    if (has_text_search)
+        checkTantivyIndex(syntax->storage_snapshot, text_search_info->text_column_name);
+}
+
+void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAGPtr & temp_actions)
+{
+    if (syntax->search_func_type == HybridSearchFuncType::HYBRID_SEARCH && !syntax->hybrid_search_funcs.empty())
+        has_hybrid_search = makeHybridSearchInfo(temp_actions);
+    else if (auto right_hybrid_search_info = getContext()->getHybridSearchInfo())
+    {
+        if (syntax->storage_snapshot)
+        {
+            LOG_DEBUG(getLogger(), "[analyzeHybridSearch] Get hybrid search function from right table");
+            hybrid_search_info = right_hybrid_search_info;
+            has_hybrid_search = true;
+        }
+    }
+
+    if (has_hybrid_search && hybrid_search_info)
+    {
+        /// check fts index
+        if (hybrid_search_info->text_search_info)
+            checkTantivyIndex(syntax->storage_snapshot, hybrid_search_info->text_search_info->text_column_name);
+
+        /// Get vector search type and dim from metadata, check paramaters in vector scan and add to vector_paramters
+        VSDescription & vec_scan_desc =
+                const_cast<VSDescription &>(hybrid_search_info->vector_scan_info->vector_scan_descs[0]);
+
+        getAndCheckVectorScanInfoFromMetadata(syntax->storage_snapshot, vec_scan_desc, getContext());
+
+/*        /// Initialize metric type in hybrid search info
+        if (isRelativeScoreFusion(hybrid_search_info->fusion_type))
+        {
+            auto & mutable_metric_type = const_cast<Search::Metric &>(hybrid_search_info->metric_type);
+            mutable_metric_type = Search::getMetricType(vector_scan_metric_type, vec_scan_desc.vector_search_type);
+        }
+*/
     }
 }
 
@@ -706,134 +869,109 @@ void ExpressionAnalyzer::makeAggregateDescriptions(ActionsDAGPtr & actions, Aggr
     }
 }
 
+/// create vector scan description, used by HybridSearch and VectorScan
+VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
+    ActionsDAGPtr & actions,
+    const String & function_col_name,
+    ASTPtr query_column,
+    ASTPtr query_vector)
+{
+    VSDescription vector_scan_desc;
+    vector_scan_desc.column_name = function_col_name;
+
+    /// Save short column name in VSDescription, exclude database name and table name if exists.
+    if (auto * identifier = query_column->as<ASTIdentifier>())
+        vector_scan_desc.search_column_name = identifier->shortName();
+    else
+        vector_scan_desc.search_column_name = query_column->getColumnName();
+    /// Not initialize dim here
+
+    const auto * dag_node = actions->tryFindInOutputs(query_vector->getColumnName());
+    if (!dag_node)
+    {
+        throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
+            "Unknown identifier '{}' in distance function", query_vector->getColumnName());
+    }
+
+    if (dag_node->column)
+    {
+        if (!isColumnConst(*dag_node->column))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query vector type for argument {} in distance function", query_vector->getColumnName());
+        // query_column means the specific vector content.
+        vector_scan_desc.query_column = dag_node->column;
+    }
+    else if (dag_node->function && dag_node->function->getName() == "identity")
+    {
+        // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
+    }
+    else if (query_vector->as<ASTFunction>())
+    {
+        // In cases with lambda function, non-const columns require execution.
+        Block temp_block = {{DataTypeUInt8().createColumnConst(1, 0), std::make_shared<DataTypeUInt8>(), "_dummy"}};
+        ColumnWithTypeAndName * new_query_column;
+        try
+        {
+            auto function_ast = query_vector->clone();
+            auto syntax_result = TreeRewriter(getContext()).analyze(function_ast, {{"_dummy", std::make_shared <DataTypeUInt8>()}});
+            auto tmp_actions = ExpressionAnalyzer(function_ast, syntax_result, getContext()).getActions(false);
+
+            tmp_actions->execute(temp_block, false);
+            new_query_column = temp_block.findByName(query_vector->getColumnName());
+        }
+        catch(...)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "An exception occurred while executing the argument {} in distance function", query_vector->getColumnName());
+        }
+        if(!new_query_column->column || !checkColumn<ColumnArray>(*new_query_column->column))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", query_vector->getColumnName());
+        vector_scan_desc.query_column = new_query_column->column;
+    }
+    else
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", query_vector->getColumnName());
+
+    vector_scan_desc.query_column_name = query_vector->getColumnName();
+
+    LOG_DEBUG(
+        getLogger(),
+        "[commonMakeVectorScanDescription] search_column: {}, query_column: {}",
+        vector_scan_desc.search_column_name,
+        vector_scan_desc.query_column_name);
+
+    /// vector search type from syntax result
+    vector_scan_desc.vector_search_type = syntax->vector_search_type;
+
+    /// top_k is get from limit N
+    vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
+
+    /// Pass the correct direction to vector_scan_desc according to metric_type
+    vector_scan_desc.direction = Poco::toUpper(syntax->vector_scan_metric_type) == "IP" ? -1 : 1;
+
+    return vector_scan_desc;
+}
+
 /// create vector scan descriptions, mainly record the column name and parameters
 bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 {
-    for (const ASTFunction * node : vector_scan_funcs())
+    for (const ASTFunction * node : hybrid_search_funcs())
     {
         if (node->arguments)
             getRootActionsNoMakeSet(node->arguments, actions);
-        VectorScanDescription vector_scan_desc;
-        vector_scan_desc.column_name = node->getColumnName();
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
 
+        // arguments 0 indicates the vector name; arguments 1 indicates the specific vector content.
         if (arguments.size() != 2)
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
                     "wrong argument number in distance function");
         }
 
-        /// Save short column name in VectorScanDescription, exclude database name and table name if exists.
-        if (auto * identifier = arguments[0]->as<ASTIdentifier>())
-            vector_scan_desc.search_column_name = identifier->shortName();
-        else
-            vector_scan_desc.search_column_name = arguments[0]->getColumnName();
-        /// Not initialize dim here
+        auto vector_scan_desc = commonMakeVectorScanDescription(actions, node->getColumnName(), arguments[0], arguments[1]);
 
-        const auto * dag_node = actions->tryFindInOutputs(arguments[1]->getColumnName());
-        if (!dag_node)
-        {
-            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER,
-                "Unknown identifier '{}' in distance function", arguments[1]->getColumnName());
-        }
+        /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
+        vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
+        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
-        if (dag_node->column)
-        {
-            if (!isColumnConst(*dag_node->column))
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query vector type for argument {} in distance function", arguments[1]->getColumnName());
-            vector_scan_desc.query_column = dag_node->column;
-        }
-        else if (dag_node->function && dag_node->function->getName() == "identity")
-        {
-            // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
-            continue;
-        }
-        else if (arguments[1]->as<ASTFunction>())
-        {
-            // In cases with lambda function, non-const columns require execution.
-            Block temp_block = {{DataTypeUInt8().createColumnConst(1, 0), std::make_shared<DataTypeUInt8>(), "_dummy"}};
-            ColumnWithTypeAndName * new_query_column;
-            try
-            {
-                auto function_ast = arguments[1]->clone();
-                auto syntax_result = TreeRewriter(getContext()).analyze(function_ast, {{"_dummy", std::make_shared <DataTypeUInt8>()}});
-                auto tmp_actions = ExpressionAnalyzer(function_ast, syntax_result, getContext()).getActions(false);
-
-                tmp_actions->execute(temp_block, false);
-                new_query_column = temp_block.findByName(arguments[1]->getColumnName());
-            }
-            catch(...)
-            {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "An exception occurred while executing the argument {} in distance function", arguments[1]->getColumnName());
-            }
-            if(!new_query_column->column || !checkColumn<ColumnArray>(*new_query_column->column))
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
-            vector_scan_desc.query_column = new_query_column->column;
-        }
-        else
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type for argument {} in distance function", arguments[1]->getColumnName());
-
-        vector_scan_desc.query_column_name = arguments[1]->getColumnName();
-
-        auto metadata_snapshot = storage() ? storage()->getInMemoryMetadataPtr() : nullptr;
-        String index_type = "";
-        /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
-        std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(getContext()->getMergeTreeSettings());
-        bool use_parameter_check = storage_settings->vector_index_parameter_check;
-
-        /// Obtain the type of the vector index recorded in the meta_data.
-        if (metadata_snapshot)
-        {
-            /// Find vector index description in metadata based on search column name.
-            for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
-            {
-                if (vec_index_desc.column == vector_scan_desc.search_column_name)
-                {
-                    index_type = vec_index_desc.type;
-                    break;
-                }
-            }
-
-            /// If not found, brute force search will be used.
-        }
-
-        /// Use the user-defined `vector_index_parameter_check`.
-        if (metadata_snapshot && metadata_snapshot->hasSettingsChanges())
-        {
-            const auto current_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
-            for (const auto & changed_setting : current_changes)
-            {
-                const auto & setting_name = changed_setting.name;
-                const auto & new_value = changed_setting.value;
-                if (setting_name == "vector_index_parameter_check")
-                {
-                    use_parameter_check = new_value.get<bool>();
-                    break;
-                }
-            }
-        }
-
-        /// parse vector scan's params, such as: top_k, n_probe ...
-        String param_str = parseVectorScanParameters(node, getContext(), Poco::toUpper(index_type), use_parameter_check);
-        if (!param_str.empty())
-        {
-            try
-            {
-                Poco::JSON::Parser json_parser;
-                vector_scan_desc.vector_parameters = json_parser.parse(param_str).extract<Poco::JSON::Object::Ptr>();
-                vector_scan_desc.vector_parameters->set("metric_type", syntax->vector_scan_metric_type);
-            }
-            catch ([[maybe_unused]] const std::exception & e)
-            {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "The input JSON's format is illegal ");
-            }
-        }
-
-        /// top_k is get from limit N
-        vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
-        vector_scan_desc.direction = syntax->direction;
-
-        if (syntax->vector_from_right_table)
+        if (syntax->hybrid_search_from_right_table)
         {
             analyzedJoin().setVecScanDescription(vector_scan_desc);
         }
@@ -842,6 +980,238 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
     }
 
     return !vector_scan_descriptions.empty();
+}
+
+/// create text search info, used by HybridSearch and TextSearch
+TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
+    ActionsDAGPtr & actions,
+    const String & function_col_name,
+    ASTPtr query_column,
+    ASTPtr query_text)
+{
+    String text_column_name;
+    if (auto * identifier = query_column->as<ASTIdentifier>())
+        text_column_name = identifier->shortName();
+    else
+        text_column_name = query_column->getColumnName();
+
+    String query_text_value;
+    const auto * dag_node_query_text = actions->tryFindInOutputs(query_text->getColumnName());
+    if (!dag_node_query_text)
+    {
+        throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "Unknown identifier '{}' in Search function", query_text->getColumnName());
+    }
+
+    if (dag_node_query_text->column)
+    {
+        if (!isColumnConst(*dag_node_query_text->column))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query text type for argument {} in search function", query_text->getColumnName());
+
+        /// const column's data column type maybe Nullable(String) or String
+        const ColumnConst * query_text_column_const = assert_cast<const ColumnConst *>(dag_node_query_text->column.get());
+        const ColumnPtr column_nested = query_text_column_const->getDataColumnPtr();
+
+        if (!typeid_cast<const ColumnString *>(column_nested.get()))
+        {
+            const ColumnNullable * column_nested_nullable = checkAndGetColumn<ColumnNullable>(*column_nested);
+            if (!column_nested_nullable || !typeid_cast<const ColumnString *>(&column_nested_nullable->getNestedColumn()))
+            {
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                                "Illegal const query text type {} for argument {} in search function. Must be String or Nullable(String)",
+                                column_nested->getName(), query_text->getColumnName());
+            }
+        }
+
+        query_text_value = query_text_column_const->getValue<String>();
+    }
+    else if (dag_node_query_text->function && dag_node_query_text->function->getName() == "identity")
+    {
+        // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
+        return nullptr;
+    }
+    // else if (argument_query_text->as<ASTFunction>())
+    // {
+    //     // In cases with lambda function, non-const columns require execution.
+    // }
+    else
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query text type for argument {} in search function", query_text->getColumnName());
+    }
+
+    LOG_DEBUG(
+        getLogger(),
+        "[commonMakeTextSearchInfo] text search_column: {}, query_column: {}",
+        text_column_name,
+        query_text->getColumnName());
+
+    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, static_cast<int>(syntax->limit_length), syntax->direction);
+}
+
+bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
+{
+    if (hybrid_search_funcs().size() == 1 && hybrid_search_funcs()[0])
+    {
+        const ASTFunction * node = hybrid_search_funcs()[0];
+        if (node->parameters)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "textsearch function does not need to specify parameters");
+        }
+
+        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
+        if (arguments.size() != 2)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in textsearch function: expected 2, got {}", arguments.size());
+        }
+
+        /// Only need actions for the second argument, the first argument is used for search index.
+        getRootActionsNoMakeSet(arguments[1], actions);
+
+        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1]);
+        LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
+
+        if (syntax->hybrid_search_from_right_table)
+        {
+            analyzedJoin().setTextSearchInfoPtr(tmp_text_search_info);
+        }
+        else
+            text_search_info = tmp_text_search_info;
+    }
+
+    return text_search_info != nullptr;
+}
+
+/// create hybrid search info, mainly record the column name and parameters
+bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAGPtr & actions)
+{
+    if (hybrid_search_funcs().size() == 1 && hybrid_search_funcs()[0])
+    {
+        const ASTFunction * node = hybrid_search_funcs()[0];
+
+        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
+        if (arguments.size() != 4)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong parameter number in HybridSearch function: expected 4, got {}", arguments.size());
+        }
+
+        Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
+        std::unordered_map<String, String> hybrid_parameters_map;
+        std::vector<String> vector_scan_parameter;
+        for (const auto & arg : parameters)
+        {
+            if (arg.getType() != Field::Types::String)
+            {
+                throw Exception(ErrorCodes::ILLEGAL_HYBRID_SEARCH, "All parameters inside HybridSearch function must be key-value format string, separated by `=`.");
+            }
+
+            String param_str = arg.get<String>();
+            auto pos = param_str.find('=');
+            if (pos == std::string::npos || pos == 0 || pos == param_str.length())
+                throw Exception(ErrorCodes::ILLEGAL_HYBRID_SEARCH, "The parameter {} inside HybridSearch function should be key-value format string, separated by `=`.", param_str);
+
+            String param_key = param_str.substr(0, pos);
+            String param_value = param_str.substr(pos + 1);
+
+            if (param_key == "fusion_type" || param_key == "fusion_weight" || param_key == "fusion_k")
+            {
+                if (hybrid_parameters_map.count(param_key) > 0)
+                {
+                    throw Exception(ErrorCodes::ILLEGAL_HYBRID_SEARCH, "Multiple {} parameters in the HybridSearch function.", param_key);
+                }
+                hybrid_parameters_map[param_key] = param_value;
+            }
+            else if (param_key.find(vector_scan_parameter_prefix) == 0)
+            {
+                vector_scan_parameter.push_back(param_str.substr(std::strlen(vector_scan_parameter_prefix)));
+            }
+            else
+            {
+                throw Exception(ErrorCodes::ILLEGAL_HYBRID_SEARCH, "Unknown parameter {} in the HybridSearch function.", param_key);
+            }
+        }
+
+        /// make VSDescription for HybridSearchInfo
+        {
+            getRootActionsNoMakeSet(arguments[2], actions);
+            auto vector_scan_desc = commonMakeVectorScanDescription(actions, "distance_func", arguments[0], arguments[2]);
+
+            /// Save vector_scan_parameter to vector_scan_desc's parameters
+            if (!vector_scan_parameter.empty())
+            {
+                Array params_array(vector_scan_parameter.size());
+                for (size_t i = 0; i < vector_scan_parameter.size(); ++i)
+                    params_array[i] = vector_scan_parameter[i];
+
+                vector_scan_desc.parameters = params_array;
+            }
+
+            vector_scan_descriptions.push_back(vector_scan_desc);
+        }
+
+        /// make TextSearchInfo for HybridSearchInfo
+        getRootActionsNoMakeSet(arguments[3], actions);
+        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, "textsearch_func", arguments[1], arguments[3]);
+
+        String hybrid_fusion_type = hybrid_parameters_map["fusion_type"];
+        String function_column_name = node->getColumnName();
+        const auto & settings = getContext()->getSettingsRef();
+
+        if (isRelativeScoreFusion(hybrid_fusion_type))
+        {
+            float hybrid_fusion_weight = static_cast<float>(settings.hybrid_search_fusion_weight);
+            if (hybrid_parameters_map.count("fusion_weight") > 0)
+            {
+                std::stringstream fusion_weight_ss(hybrid_parameters_map["fusion_weight"]);
+                fusion_weight_ss >> hybrid_fusion_weight;
+                if (fusion_weight_ss.fail())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "HybridSearch parameter `fusion_weight` value should be float");
+            }
+
+            if (hybrid_fusion_weight < 0 || hybrid_fusion_weight > 1)
+            {
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "Wrong HybridSearch parameter for Relative Score Fusion(RSF), valid value is in interval [0.0f, 1.0f]");
+            }
+
+            auto metric = Search::getMetricType(syntax->vector_scan_metric_type, vector_scan_descriptions[0].vector_search_type);
+            hybrid_search_info = std::make_shared<HybridSearchInfo>(
+                std::make_shared<VectorScanInfo>(vector_scan_descriptions),
+                tmp_text_search_info,
+                function_column_name, static_cast<int>(syntax->limit_length), hybrid_fusion_type, hybrid_fusion_weight, metric);
+        }
+        else if (isRankFusion(hybrid_fusion_type))
+        {
+            int hybrid_fusion_k = static_cast<int>(settings.hybrid_search_fusion_k);
+            if (hybrid_parameters_map.count("fusion_k") > 0)
+            {
+                std::stringstream fusion_k_ss(hybrid_parameters_map["fusion_k"]);
+                fusion_k_ss >> hybrid_fusion_k;
+                if (fusion_k_ss.fail())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "HybridSearch parameter `fusion_k` value should be int");
+            }
+
+            if (hybrid_fusion_k < 0)
+            {
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "Wrong HybridSearch parameter for Reciprocal Rank Fusion(RRF), `fusion_k` is less than 0");
+            }
+            hybrid_search_info = std::make_shared<HybridSearchInfo>(
+                std::make_shared<VectorScanInfo>(vector_scan_descriptions),
+                tmp_text_search_info,
+                function_column_name, static_cast<int>(syntax->limit_length), hybrid_fusion_type, hybrid_fusion_k);
+        }
+        else
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong or missing HybridSearch function parameter `fusion_type`. Valid values: 'RSF' and 'RRF'");
+        }
+
+        if (syntax->hybrid_search_from_right_table)
+        {
+            analyzedJoin().setHybridSearchInfoPtr(std::move(hybrid_search_info));
+        }
+    }
+    return hybrid_search_info != nullptr;
 }
 
 void ExpressionAnalyzer::makeWindowDescriptionFromAST(const Context & context_,
@@ -1295,6 +1665,22 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
         context->setVecScanDescription(*vec_scan_desc);
     }
 
+    /// Add text search info to Context for subquery of joined table
+    bool has_text_search = false;
+    if (auto text_search_info = analyzed_join.getTextSearchInfoPtr())
+    {
+        has_text_search = true;
+        context->setTextSearchInfo(text_search_info);
+    }
+
+    /// Add hybrid search info to Context for subquery of joined table
+    bool has_hybrid_search = false;
+    if (auto hybrid_search_info = analyzed_join.getHybridSearchInfoPtr())
+    {
+        has_hybrid_search = true;
+       context->setHybridSearchInfo(hybrid_search_info);
+    }
+
     /// Actions which need to be calculated on joined block.
     auto joined_block_actions = createJoinedBlockActions(context, analyzed_join);
     NamesWithAliases required_columns_with_aliases = analyzed_join.getRequiredColumns(
@@ -1342,6 +1728,10 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
     /// Reset vector scan description
     if (has_vector_scan)
         context->resetVecScanDescription();
+    else if (has_text_search)
+        context->resetTextSearchInfo();
+    else if (has_hybrid_search)
+        context->resetHybridSearchInfo();
 
     return joined_plan;
 }
@@ -2038,6 +2428,8 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
     , second_stage(second_stage_)
     , need_aggregate(query_analyzer.hasAggregation())
     , need_vector_scan(query_analyzer.hasVectorScan())
+    , need_text_search(query_analyzer.hasTextSearch())
+    , need_hybrid_search(query_analyzer.hasHybridSearch())
     , has_window(query_analyzer.hasWindow())
     , use_grouping_set_key(query_analyzer.useGroupingSetKey())
 {
