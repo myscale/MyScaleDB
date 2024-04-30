@@ -338,3 +338,6 @@
 [submodule "contrib/search-index"]
 	path = contrib/search-index
 	url = https://github.com/myscale/search-index.git
+[submodule "rust/supercrate/libs/tantivy_search"]
+	path = rust/supercrate/libs/tantivy_search
+	url = https://github.com/myscale/tantivy-search.git

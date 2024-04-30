@@ -35,10 +35,10 @@
 #include <Common/StringUtils/StringUtils.h>
 #include <Common/escapeForFileName.h>
 
-#include <VectorIndex/Common/Metadata.h>
+#include <VectorIndex/Cache/PKCacheManager.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
-#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
+#include <VectorIndex/Common/VIMetadata.h>
+#include <VectorIndex/Interpreters/VIEventLog.h>
 
 
 namespace CurrentMetrics
@@ -1842,7 +1842,7 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
 
     /// Support multiple vector indices. We may need to update specified vector index after build finished.
     bool update_all_indices = index_name.empty() ? true : false;
-    if ((update_all_indices && !vector_index.containAnyVectorIndexInReady()) || (!update_all_indices && !vector_index.containDecoupleOrVPartIndexInReady(index_name)))
+    if ((update_all_indices && !vector_index.containAnyVIInReady()) || (!update_all_indices && !vector_index.containDecoupleOrVPartIndexInReady(index_name)))
         return;
 
     /// Store deleted row ids
@@ -1863,7 +1863,7 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
         for (auto & segment_id : segmentIds)
         {
             /// Update vector index deleted bitmap in cache if exists.
-            CacheManager * mgr = CacheManager::getInstance();
+            VICacheManager * mgr = VICacheManager::getInstance();
             IndexWithMetaHolderPtr index_holder = mgr->get(segment_id.getCacheKey());
 
             if (index_holder)
@@ -2225,6 +2225,10 @@ void IMergeTreeDataPart::remove()
     metadata_manager->assertAllDeleted(false);
 
     GinIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
+
+#if USE_TANTIVY_SEARCH
+    TantivyIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
+#endif
 
     std::list<IDataPartStorage::ProjectionChecksums> projection_checksums;
 

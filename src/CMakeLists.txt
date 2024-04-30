@@ -215,6 +215,10 @@ if (TARGET ch_contrib::jemalloc)
     target_link_libraries (clickhouse_common_io PRIVATE ch_contrib::jemalloc)
 endif()
 
+if (TARGET ch_rust::supercrate)
+    target_link_libraries (clickhouse_common_io PRIVATE ch_rust::supercrate)
+endif()
+
 add_subdirectory(Access/Common)
 add_subdirectory(Common/ZooKeeper)
 add_subdirectory(Common/Config)
@@ -222,6 +226,12 @@ add_subdirectory(Common/Config)
 set (all_modules)
 macro(add_object_library name common_path)
     add_headers_and_sources(dbms ${common_path})
+endmacro()
+macro(remove_specific_files name common_path)
+    remove_specific_headers_and_sources(dbms ${common_path})
+endmacro()
+macro(remove_specific_files name)
+    remove_specific_headers_and_sources(dbms ${ARGN})
 endmacro()
 
 add_object_library(clickhouse_access Access)
@@ -239,6 +249,14 @@ add_object_library(clickhouse_analyzer Analyzer)
 add_object_library(clickhouse_analyzer_passes Analyzer/Passes)
 add_object_library(clickhouse_planner Planner)
 add_object_library(clickhouse_interpreters Interpreters)
+
+if (NOT ENABLE_RUST)
+    remove_specific_files(clickhouse_interpreters 
+        "Interpreters/TantivyFilter.h"
+        "Interpreters/TantivyFilter.cpp"
+    )
+endif()
+
 add_object_library(clickhouse_interpreters_cache Interpreters/Cache)
 add_object_library(clickhouse_interpreters_access Interpreters/Access)
 add_object_library(clickhouse_interpreters_mysql Interpreters/MySQL)
@@ -249,6 +267,16 @@ add_object_library(clickhouse_storages Storages)
 add_object_library(clickhouse_storages_mysql Storages/MySQL)
 add_object_library(clickhouse_storages_distributed Storages/Distributed)
 add_object_library(clickhouse_storages_mergetree Storages/MergeTree)
+
+if (NOT ENABLE_RUST)
+    remove_specific_files(clickhouse_storages_mergetree 
+        "Storages/MergeTree/TantivyIndexStore.h"
+        "Storages/MergeTree/TantivyIndexStore.cpp"
+        "Storages/MergeTree/MergeTreeIndexTantivy.h"
+        "Storages/MergeTree/MergeTreeIndexTantivy.cpp"
+    )
+endif()
+
 add_object_library(clickhouse_storages_liveview Storages/LiveView)
 add_object_library(clickhouse_storages_windowview Storages/WindowView)
 add_object_library(clickhouse_client Client)
@@ -367,6 +395,7 @@ endif()
 if (TARGET ch_contrib::crc32-vpmsum)
     target_link_libraries(clickhouse_common_io PUBLIC ch_contrib::crc32-vpmsum)
  endif()
+
 
 dbms_target_link_libraries(PUBLIC ch_contrib::abseil_swiss_tables)
 target_link_libraries (clickhouse_common_io PUBLIC ch_contrib::abseil_swiss_tables)
@@ -580,9 +609,10 @@ if (TARGET ch_contrib::annoy)
     dbms_target_link_libraries(PUBLIC ch_contrib::annoy)
 endif()
 
-if (TARGET ch_rust::skim)
-    dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::skim,INTERFACE_INCLUDE_DIRECTORIES>)
-    dbms_target_link_libraries(PUBLIC ch_rust::skim)
+# Need skim and tantivy_search library in supercrate.
+if (TARGET ch_rust::supercrate)
+    dbms_target_include_directories(PRIVATE $<TARGET_PROPERTY:ch_rust::supercrate,INTERFACE_INCLUDE_DIRECTORIES>)
+    dbms_target_link_libraries(PUBLIC ch_rust::supercrate)
 endif()
 
 dbms_target_link_libraries(PUBLIC ch_contrib::search_index)
@@ -629,6 +659,11 @@ if (ENABLE_TESTS)
 
     if (TARGET ch_contrib::parquet)
         target_link_libraries(unit_tests_dbms PRIVATE ch_contrib::parquet)
+    endif()
+
+    # need tantivy_search rust library
+    if (TARGET ch_rust::supercrate)
+        target_link_libraries(unit_tests_dbms PRIVATE ch_rust::supercrate)
     endif()
 
     add_check(unit_tests_dbms)

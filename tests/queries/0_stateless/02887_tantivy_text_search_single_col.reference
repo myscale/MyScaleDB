@@ -1,0 +1,101 @@
+
+======>>>>>>> Test fts, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	fts
+1
+[Test Case 1]: search fts index with ==
+1
+1
+[Test Case 2]: search fts index with LIKE
+1
+1
+[Test Case 3]: search fts index with hasToken
+2
+1
+
+======>>>>>>> Test fts(), index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	fts
+1
+[Test Case 4]: search fts() index with hasToken
+2
+1
+[Test Case 5]: search fts() index with IN operator
+2
+1
+[Test Case 6]: search fts() index with multiSearch
+5
+1
+
+======>>>>>>> Test fts() on array column, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	fts
+1
+[Test Case 7]: search fts() index with has
+1
+1
+
+======>>>>>>> Test fts on map column, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+doc_map_idx	fts
+1
+[Test Case 8]: search fts index on map with mapContains
+1
+1
+[Test Case 9]: search fts index on map with map key
+1
+1
+
+======>>>>>>> Test fts, index_granularity=2, index_granularity_bytes=10Mi, Compact Part, 4 DataParts <<<<<<<======
+text_idx	fts
+4
+1
+[Test Case 10]: search fts index with hasToken on 4 data parts
+2
+1
+
+======>>>>>>> Test fts(\'{"doc":{"tokenizer":{"type":"chinese"}}}\'), index_granularity=2, index_granularity_bytes=10Mi, Compact Part, language Chinese <<<<<<<======
+text_idx	fts
+1
+[Test Case 11]: search fts(\'{"doc":{"tokenizer":{"type":"chinese"}}}\') index with chinese tokenizer
+0
+1
+
+======>>>>>>> Test fts, index_granularity=2, index_granularity_bytes=10Mi, Wide Part, LWD->ALTER_DELETE->OPTIMIZE->INSERT <<<<<<<======
+text_idx	fts
+1
+[Test Case 12]: search fts index before LWD operation
+2
+1
+[Test Case 13]: search fts index after LWD operation
+1
+1
+[Test Case 14]: search fts index after OPTIMIZE FINAL
+1
+1
+[Test Case 15]: search fts index after ALTER DELETE
+0
+[Test Case 16]: search fts index after adding one row in current Wide table.
+1
+1
+
+======>>>>>>> Test fts, index_granularity=2, index_granularity_bytes=10Mi, Compact Part, LWD->ALTER_DELETE->OPTIMIZE->INSERT <<<<<<<======
+text_idx	fts
+1
+[Test Case 17]: search fts index on compact Part before LWD operation
+2
+1
+[Test Case 18]: search fts index on compact Part after LWD operation
+1
+1
+[Test Case 19]: search fts index on compact Part after OPTIMIZE FINAL
+1
+1
+[Test Case 20]: search fts index after ALTER DELETE
+0
+[Test Case 21]: search fts index after adding one row in current Wide table.
+1
+1
+
+======>>>>>>> Test fts with doc store, index_granularity=2, index_granularity_bytes=10Mi, Compact Part <<<<<<<======
+text_idx	fts
+1
+[Test Case 22]: search fts index with LIKE
+1
+1

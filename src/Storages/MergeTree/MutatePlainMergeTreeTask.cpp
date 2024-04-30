@@ -105,7 +105,7 @@ bool MutatePlainMergeTreeTask::executeStep()
                 /// resulting in insufficient topk returned during subsequent searches.
                 if (new_part->lightweight_delete_mask_updated)
                 {
-                   if (new_part->vector_index.containAnyVectorIndexInReady())
+                   if (new_part->vector_index.containAnyVIInReady())
                        new_part->onLightweightDelete();
                 }
 

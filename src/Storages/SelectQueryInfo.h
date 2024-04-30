@@ -9,10 +9,9 @@
 #include <Interpreters/PreparedSets.h>
 #include <Planner/PlannerContext.h>
 #include <QueryPipeline/StreamLocalLimits.h>
-#include <Storages/ProjectionsDescription.h>
 #include <Storages/MergeTree/ParallelReplicasReadingCoordinator.h>
-#include <VectorIndex/Storages/VectorScanDescription.h>
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <Storages/ProjectionsDescription.h>
+#include <VectorIndex/Storages/VSDescription.h>
 
 #include <memory>
 
@@ -39,6 +38,12 @@ using InputOrderInfoPtr = std::shared_ptr<const InputOrderInfo>;
 
 struct VectorScanInfo;
 using VectorScanInfoPtr = std::shared_ptr<const VectorScanInfo>;
+
+struct TextSearchInfo;
+using TextSearchInfoPtr = std::shared_ptr<const TextSearchInfo>;
+
+struct HybridSearchInfo;
+using HybridSearchInfoPtr = std::shared_ptr<const HybridSearchInfo>;
 
 struct TreeRewriterResult;
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;
@@ -146,17 +151,6 @@ struct InputOrderInfo
     bool operator==(const InputOrderInfo &) const = default;
 };
 
-struct VectorScanInfo
-{
-    VectorScanDescriptions vector_scan_descs;
-    bool is_batch;
-
-    VectorScanInfo(const VectorScanDescriptions & vector_scan_descs_) 
-        : vector_scan_descs(vector_scan_descs_) {
-        is_batch = !vector_scan_descs.empty() && isBatchDistance(vector_scan_descs[0].column_name);
-    }
-};
-
 class IMergeTreeDataPart;
 
 using ManyExpressionActions = std::vector<ExpressionActionsPtr>;
@@ -249,6 +243,11 @@ struct SelectQueryInfo
     InputOrderInfoPtr input_order_info;
 
     VectorScanInfoPtr vector_scan_info;
+    TextSearchInfoPtr text_search_info;
+    HybridSearchInfoPtr hybrid_search_info;
+
+    /// If query has one of text search, vector scan and hybrid search functions
+    bool has_hybrid_search = false;
 
     /// Prepared sets are used for indices by storage engine.
     /// Example: x IN (1, 2, 3)

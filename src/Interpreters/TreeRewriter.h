@@ -7,6 +7,7 @@
 #include <Interpreters/DatabaseAndTableWithAlias.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Storages/IStorage_fwd.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {
@@ -50,12 +51,17 @@ struct TreeRewriterResult
     std::vector<const ASTFunction *> window_function_asts;
 
     std::vector<const ASTFunction *> expressions_with_window_function;
-    std::vector<const ASTFunction *> vector_scan_funcs;
+    std::vector<const ASTFunction *> hybrid_search_funcs;
+    HybridSearchFuncType search_func_type = HybridSearchFuncType::UNKNOWN_FUNC;
 
+    /// Save vector scan metric_type
     String vector_scan_metric_type;
+    Search::DataType vector_search_type;
     UInt64 limit_length = 0;
-    bool vector_from_right_table = false;
     int direction = 1;
+
+    /// True if hybrid search function is from right table
+    bool hybrid_search_from_right_table = false;
 
     /// Which column is needed to be ARRAY-JOIN'ed to get the specified.
     /// For example, for `SELECT s.v ... ARRAY JOIN a AS s` will get "s.v" -> "a.v".
@@ -110,6 +116,18 @@ struct TreeRewriterResult
         ASTSelectQuery * select_query,
         const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
         ContextPtr context);
+
+    /// Special handings for text search funcs: get limit_length, cases when TextSearch func in right joined table
+    void collectForTextSearchFunctions(
+            ASTSelectQuery * select_query,
+            const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
+            ContextPtr context);
+
+    /// Special handings for hybrid search funcs: get limit_length, cases when HybridSearch func in right joined table
+    void collectForHybridSearchFunctions(
+            ASTSelectQuery * select_query,
+            const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
+            ContextPtr context);
 };
 
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;

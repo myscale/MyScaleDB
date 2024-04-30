@@ -13,7 +13,7 @@
 #include <IO/ReadHelpers.h>
 #include <IO/Operators.h>
 
-#include <VectorIndex/Common/VectorScanUtils.h>
+#include <VectorIndex/Utils/CommonUtils.h>
 
 
 namespace DB
@@ -95,7 +95,7 @@ void StorageInMemoryMetadata::setSecondaryIndices(IndicesDescription secondary_i
     secondary_indices = std::move(secondary_indices_);
 }
 
-void StorageInMemoryMetadata::setVectorIndices(VectorIndicesDescription vec_indices_)
+void StorageInMemoryMetadata::setVectorIndices(VIDescriptions vec_indices_)
 {
     vec_indices = std::move(vec_indices_);
 }
@@ -148,7 +148,7 @@ bool StorageInMemoryMetadata::hasSecondaryIndices() const
     return !secondary_indices.empty();
 }
 
-const VectorIndicesDescription & StorageInMemoryMetadata::getVectorIndices() const
+const VIDescriptions & StorageInMemoryMetadata::getVectorIndices() const
 {
     return vec_indices;
 }

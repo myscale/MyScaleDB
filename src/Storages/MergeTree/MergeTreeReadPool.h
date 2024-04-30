@@ -11,7 +11,7 @@
 #include <Storages/MergeTree/AlterConversions.h>
 #include <Interpreters/Context_fwd.h>
 
-#include <VectorIndex/Storages/MergeTreeVectorScanManager.h>
+#include <VectorIndex/Storages/MergeTreeVSManager.h>
 
 #include <mutex>
 
@@ -143,7 +143,6 @@ private:
     {
         MergeTreeData::DataPartPtr data_part;
         size_t part_index_in_query;
-        MergeTreeVectorScanManagerPtr vector_scan_manager;
     };
 
     std::vector<Part> parts_with_idx;

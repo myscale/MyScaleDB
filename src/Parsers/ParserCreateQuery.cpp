@@ -25,7 +25,7 @@
 #include <Common/typeid_cast.h>
 #include <Parsers/ASTColumnDeclaration.h>
 
-#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 
 namespace DB
@@ -171,13 +171,28 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
     if (!column_p.parse(pos, column, expected))
         return false;
 
-    if (!s_type.ignore(pos, expected))
-        return false;
+    if (s_type.ignore(pos, expected))
+    {
+        if (!data_type_p.parse(pos, type, expected))
+            return false;
+    }
+    else
+    {
+        /// The "TYPE typename(args)" field in "ADD VECTOR INDEX" query is omitted, creating a default vector index
+        auto function_node = std::make_shared<ASTFunction>();
+        function_node->name = "DEFAULT";
+        function_node->no_empty_args = true;
+        type = function_node;
+    }
 
-    if (!data_type_p.parse(pos, type, expected))
-        return false;
 
-    auto index = std::make_shared<ASTVectorIndexDeclaration>();
+    // if (!s_granularity.ignore(pos, expected))
+    //     return false;
+
+    // if (!granularity_p.parse(pos, granularity, expected))
+    //     return false;
+
+    auto index = std::make_shared<ASTVIDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();
     index->set(index->type, type);
@@ -350,7 +365,7 @@ bool ParserTablePropertiesDeclarationList::parseImpl(Pos & pos, ASTPtr & node, E
             columns->children.push_back(elem);
         else if (elem->as<ASTIndexDeclaration>())
             indices->children.push_back(elem);
-        else if (elem->as<ASTVectorIndexDeclaration>())
+        else if (elem->as<ASTVIDeclaration>())
             vec_indices->children.push_back(elem);
         else if (elem->as<ASTConstraintDeclaration>())
             constraints->children.push_back(elem);

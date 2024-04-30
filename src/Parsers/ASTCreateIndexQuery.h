@@ -9,7 +9,7 @@ namespace DB
 {
 
 /** CREATE INDEX [IF NOT EXISTS] name ON [db].name (expression) TYPE type GRANULARITY value
- * CREATE VECTOR INDEX [IF NOT EXISTS] name on [db].name column TYPE typename(args)
+ * CREATE VECTOR INDEX [IF NOT EXISTS] name on [db].name column [TYPE typename(args)]
  */
 
 class ASTCreateIndexQuery : public ASTQueryWithTableAndOutput, public ASTQueryWithOnCluster
