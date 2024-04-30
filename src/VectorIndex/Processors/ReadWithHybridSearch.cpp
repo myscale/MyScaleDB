@@ -212,16 +212,6 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         analyzed_result_ptr_,
         enable_parallel_reading)
 {
-    if (sample_factor_column_queried)
-    {
-        /// Only _sample_factor virtual column is added by ReadFromMergeTree
-        /// Other virtual columns are added by MergeTreeBaseSelectProcessor.
-        auto type = std::make_shared<DataTypeFloat64>();
-        output_stream->header.insert({type->createColumn(), type, "_sample_factor"});
-    }
-
-    if (enable_parallel_reading)
-        read_task_callback = context->getMergeTreeReadTaskCallback();
 }
 
 void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
