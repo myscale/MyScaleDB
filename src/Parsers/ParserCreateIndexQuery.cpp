@@ -7,10 +7,10 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/CommonParsers.h>
 #include <Parsers/ExpressionListParsers.h>
-#include <Parsers/ParserCreateQuery.h>
 #include <Parsers/ParserDataType.h>
 #include <Parsers/parseDatabaseAndTableName.h>
-#include <VectorIndex/Parsers/ASTVIDeclaration.h>
+#include <Parsers/ParserCreateQuery.h>
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 namespace DB
 {
 
@@ -27,21 +27,13 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
     if (!column_p.parse(pos, column, expected))
         return false;
 
-    if (s_type.ignore(pos, expected))
-    {
-        if (!data_type_p.parse(pos, type, expected))
-            return false;
-    }
-    else
-    {
-        /// The "TYPE typename(args)" field in "CREATE VECTOR INDEX" query is omitted, creating a default vector index
-        auto function_node = std::make_shared<ASTFunction>();
-        function_node->name = "DEFAULT";
-        function_node->no_empty_args = true;
-        type = function_node;
-    }
+    if (!s_type.ignore(pos, expected))
+        return false;
 
-    auto index = std::make_shared<ASTVIDeclaration>();
+    if (!data_type_p.parse(pos, type, expected))
+        return false;
+
+    auto index = std::make_shared<ASTVectorIndexDeclaration>();
     index->std_create = true;
     index->column = column->as<ASTIdentifier &>().name();
     index->set(index->type, type);
@@ -144,7 +136,7 @@ bool ParserCreateIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expect
     {
         if (!parser_create_vec_idx_decl.parse(pos, index_decl, expected))
             return false;
-        auto & ast_vec_index_decl = index_decl->as<ASTVIDeclaration &>();
+        auto & ast_vec_index_decl = index_decl->as<ASTVectorIndexDeclaration &>();
         ast_vec_index_decl.name = index_name->as<ASTIdentifier &>().name();
     }
     else

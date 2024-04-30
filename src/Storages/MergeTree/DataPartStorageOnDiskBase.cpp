@@ -1,15 +1,15 @@
-#include <Backups/BackupEntryFromImmutableFile.h>
-#include <Backups/BackupEntryFromSmallFile.h>
-#include <Disks/SingleDiskVolume.h>
-#include <Disks/TemporaryFileOnDisk.h>
-#include <IO/ReadBufferFromString.h>
-#include <IO/ReadHelpers.h>
-#include <IO/WriteBufferFromFileBase.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
-#include <Storages/MergeTree/localBackup.h>
-#include <VectorIndex/Common/VICommon.h>
+#include <Disks/TemporaryFileOnDisk.h>
+#include <IO/WriteBufferFromFileBase.h>
+#include <IO/ReadBufferFromString.h>
+#include <IO/ReadHelpers.h>
 #include <Common/logger_useful.h>
+#include <Storages/MergeTree/localBackup.h>
+#include <Backups/BackupEntryFromSmallFile.h>
+#include <Backups/BackupEntryFromImmutableFile.h>
+#include <Disks/SingleDiskVolume.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
 
 namespace DB
 {

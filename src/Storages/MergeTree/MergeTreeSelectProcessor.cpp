@@ -25,7 +25,8 @@ MergeTreeSelectAlgorithm::MergeTreeSelectAlgorithm(
     MergeTreeInOrderReadPoolParallelReplicasPtr pool_,
     const Names & virt_column_names_,
     size_t part_index_in_query_,
-    bool has_limit_below_one_block_)
+    bool has_limit_below_one_block_,
+    MergeTreeVectorScanManagerPtr vector_scan_manager_)
     : IMergeTreeSelectAlgorithm{
         storage_snapshot_->getSampleBlockForColumns(required_columns_),
         storage_, storage_snapshot_, prewhere_info_, actions_settings_, max_block_size_rows_,
@@ -39,7 +40,8 @@ MergeTreeSelectAlgorithm::MergeTreeSelectAlgorithm(
     part_index_in_query(part_index_in_query_),
     has_limit_below_one_block(has_limit_below_one_block_),
     pool(pool_),
-    total_rows(data_part->index_granularity.getRowsCountInRanges(all_mark_ranges))
+    total_rows(data_part->index_granularity.getRowsCountInRanges(all_mark_ranges)),
+    vector_scan_manager(vector_scan_manager_)
 {
     ordered_names = header_without_const_virtual_columns.getNames();
 }

@@ -23,7 +23,7 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
 
-#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
 
 
 namespace CurrentMetrics
@@ -614,40 +614,16 @@ static NameToNameVector collectFilesForRenames(
     {
         if (command.type == MutationCommand::Type::DROP_INDEX)
         {
-            static const std::vector<String> suffixes = {".idx2", ".idx"};
-            static const std::vector<String> gin_suffixes = {".gin_dict", ".gin_post", ".gin_seg", ".gin_sid"}; // .gin_* is inverted index
-#if USE_TANTIVY_SEARCH
-            static const std::vector<String> tantivy_suffixes
-                = {TANTIVY_INDEX_OFFSET_FILE_TYPE, TANTIVY_INDEX_DATA_FILE_TYPE}; // tantivy index files
-#endif
-
-            for (const auto & suffix : suffixes)
+            if (source_part->checksums.has(INDEX_FILE_PREFIX + command.column_name + ".idx2"))
             {
-                const String filename = INDEX_FILE_PREFIX + command.column_name + suffix;
-                const String filename_mrk = INDEX_FILE_PREFIX + command.column_name + mrk_extension;
-
-                if (source_part->checksums.has(filename))
-                {
-                    rename_vector.emplace_back(filename, "");
-                    rename_vector.emplace_back(filename_mrk, "");
-                }
+                rename_vector.emplace_back(INDEX_FILE_PREFIX + command.column_name + ".idx2", "");
+                rename_vector.emplace_back(INDEX_FILE_PREFIX + command.column_name + mrk_extension, "");
             }
-
-            for (const auto & gin_suffix : gin_suffixes)
+            else if (source_part->checksums.has(INDEX_FILE_PREFIX + command.column_name + ".idx"))
             {
-                const String filename = INDEX_FILE_PREFIX + command.column_name + gin_suffix;
-                if (source_part->checksums.has(filename))
-                    rename_vector.emplace_back(filename, "");
+                rename_vector.emplace_back(INDEX_FILE_PREFIX + command.column_name + ".idx", "");
+                rename_vector.emplace_back(INDEX_FILE_PREFIX + command.column_name + mrk_extension, "");
             }
-
-#if USE_TANTIVY_SEARCH
-            for (const auto & tantivy_suffix : tantivy_suffixes)
-            {
-                const String filename = INDEX_FILE_PREFIX + command.column_name + tantivy_suffix;
-                if (source_part->checksums.has(filename))
-                    rename_vector.emplace_back(filename, "");
-            }
-#endif
         }
         else if (command.type == MutationCommand::Type::DROP_PROJECTION)
         {
@@ -1359,7 +1335,7 @@ private:
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         /// Reuse vector index when no rows are deleted
-        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVIInReady())
+        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVectorIndexInReady())
         {
             /// get current decouple index set
             [[maybe_unused]] bool vector_files_found = false;

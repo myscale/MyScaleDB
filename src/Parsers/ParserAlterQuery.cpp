@@ -13,7 +13,7 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/parseDatabaseAndTableName.h>
 
-#include <VectorIndex/Parsers/ASTVIDeclaration.h>
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 
 namespace DB

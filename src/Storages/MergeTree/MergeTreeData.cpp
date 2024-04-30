@@ -91,11 +91,11 @@
 #include <fmt/format.h>
 #include <Poco/Logger.h>
 
-#include <VectorIndex/Cache/PKCacheManager.h>
-#include <VectorIndex/Cache/VICacheManager.h>
+#include <VectorIndex/Common/CacheManager.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Interpreters/VIEventLog.h>
-#include <VectorIndex/Utils/VIUtils.h>
+#include <VectorIndex/Common/VectorIndexUtils.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
+#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
 
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
@@ -2337,7 +2337,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
 
                 if (force)
                 {
-                    VectorIndex::VICacheManager::removeFromCache(cache_key);
+                    VectorIndex::CacheManager::removeFromCache(cache_key);
                 }
                 else
                 {
@@ -2357,7 +2357,7 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
                         auto [clear_cache, _] = needClearVectorIndexCacheAndFile(active_part, meta_snapshot, cache_key);
                         if (clear_cache)
                         {
-                            VectorIndex::VICacheManager::removeFromCache(cache_key);
+                            VectorIndex::CacheManager::removeFromCache(cache_key);
                         }
                     }
                 }
@@ -2420,8 +2420,8 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
         /// Here the vector index is valid.
         /// When remove old parts, we can remove it from cache only when it is not used by future part (mutation or merge).
         /// Further check the part status, decouple part or VPart with single vector index
-        if ((is_same_without_mutate && column_index->getVectorIndexState() == VIState::BUILT)
-            || (!is_same_without_mutate && (is_decouple && column_index->getVectorIndexState() != VIState::BUILT)))
+        if ((is_same_without_mutate && column_index->getVectorIndexState() == VectorIndexState::BUILT)
+            || (!is_same_without_mutate && (is_decouple && column_index->getVectorIndexState() != VectorIndexState::BUILT)))
         {
             existed = true;
             break;
@@ -2434,7 +2434,7 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
     return std::make_pair(!existed, is_same);
 }
 
-void MergeTreeData::clearPKCache(const DataPartsVector & parts)
+void MergeTreeData::clearPrimaryKeyCache(const DataPartsVector & parts)
 {
     if (!canUsePrimaryKeyCache())
         return;
@@ -2446,7 +2446,7 @@ void MergeTreeData::clearPKCache(const DataPartsVector & parts)
             continue;
 
         const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
-        PKCacheManager::getMgr().removeFromPKCache(cache_key);
+        PrimaryKeyCacheManager::getMgr().removeFromPKCache(cache_key);
     }
 }
 
@@ -2500,16 +2500,16 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     if (parts_to_remove.empty())
         return;
 
-    clearPKCache(parts_to_remove);
+    clearPrimaryKeyCache(parts_to_remove);
     clearCachedVectorIndex(parts_to_remove, false);
 
     auto table_id = getStorageID();
-    VIEventLogElement vec_elem;
+    VectorIndexEventLogElement vec_elem;
     bool detach = getContext()->isDetachQuery();
     auto vec_event_log = getContext()->getVectorIndexEventLog(table_id.database_name);
     if (vec_event_log && !detach)
     {
-        vec_elem.event_type = VIEventLogElement::CLEARED;
+        vec_elem.event_type = VectorIndexEventLogElement::CLEARED;
         const auto time_now = std::chrono::system_clock::now();
         vec_elem.event_time = timeInSeconds(time_now);
         vec_elem.event_time_microseconds = timeInMicroseconds(time_now);
@@ -2518,8 +2518,9 @@ void MergeTreeData::clearPartsFromFilesystemImpl(const DataPartsVector & parts_t
     }
     for (const DataPartPtr & part : parts_to_remove)
     {
-        if (vec_event_log && part->vector_index.containAnyVIInReady() &&
-            vec_elem.event_type != VIEventLogElement::DEFAULT)
+        if (vec_event_log &&
+            part->vector_index.containAnyVectorIndexInReady() &&
+            vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
         {
             vec_elem.part_name = part->name;
             vec_elem.partition_id = part->info.partition_id;
@@ -2973,9 +2974,6 @@ void MergeTreeData::dropAllData()
 
             LOG_INFO(log, "dropAllData: removing table directory recursive to cleanup garbage");
             disk->removeRecursive(relative_data_path);
-#if USE_TANTIVY_SEARCH
-            TantivyIndexStoreFactory::instance().remove(relative_data_path);
-#endif
         }
         catch (const fs::filesystem_error & e)
         {
@@ -3123,22 +3121,11 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
                             queryToString(mutation_commands.ast()));
     }
 
-    commands.apply(new_metadata, getContext());
-
     if (commands.hasInvertedIndex(new_metadata) && !settings.allow_experimental_inverted_index)
-    {
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                 "Experimental Inverted Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
-    }
 
-#if USE_TANTIVY_SEARCH
-    if (commands.hasTantivyIndex(new_metadata) && !settings.allow_experimental_inverted_index)
-    {
-        throw Exception(
-            ErrorCodes::SUPPORT_IS_DISABLED,
-            "Experimental Fts Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
-    }
-#endif
+    commands.apply(new_metadata, getContext());
 
     /// Set of columns that shouldn't be altered.
     NameSet columns_alter_type_forbidden;
@@ -8526,7 +8513,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 {
     auto metadata = getInMemoryMetadata();
 
-    std::unordered_map<String, VIDescription> v_index_map;
+    std::unordered_map<String, VectorIndexDescription> v_index_map;
     for (const auto & v_index : metadata.getVectorIndices())
     {
         v_index_map.try_emplace(v_index.name, v_index);
@@ -8538,6 +8525,23 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
     std::vector<VectorIndex::CacheKey> loaded_keys;
 
     size_t dim = 0;
+
+    std::unordered_map<String, std::vector<String>> index_nvme_cache_uuid_map;
+    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
+    if (fs::exists(vector_nvme_cache_folder))
+    {
+        for (const auto & entry : fs::directory_iterator(vector_nvme_cache_folder))
+        {
+            if (fs::is_directory(entry.status()))
+            {
+                auto [part_index_name, path_uuid] = VectorIndex::getPartNameUUIDFromNvmeCachePath(entry.path().filename());
+                if (part_index_name.empty())
+                    continue;
+
+                index_nvme_cache_uuid_map[part_index_name].emplace_back(path_uuid);
+            }
+        }
+    }
 
     for (const auto & data_part : getDataPartsVectorForInternalUsage())
     {
@@ -8608,7 +8612,29 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
             /// load vector index into cache
             for (auto & segment_id : VectorIndex::getAllSegmentIds(data_part, v_index.name))
             {
-                auto index_holder = column_index->load(segment_id);
+                IndexWithMetaHolderPtr index_holder;
+                String part_with_index_name = segment_id.getCacheKey().part_name_no_mutation + "-" + v_index.name;
+                if (auto it = index_nvme_cache_uuid_map.find(part_with_index_name); it != index_nvme_cache_uuid_map.end())
+                {
+                    String uuid_path = "";
+                    if (it->second.size() >= 1)
+                        uuid_path = it->second[0];
+                    LOG_INFO(log, "Start loading vector index {} in {}, reuse nvme cache uuid {}", v_index.name, data_part->name, uuid_path);
+                    if (!reuse_path.insert(String(part_with_index_name + "-" + uuid_path)).second)
+                    {
+                        LOG_ERROR(log, "Another Cache item reuse this nvme cache path {}", part_with_index_name + "-" + uuid_path);
+                        uuid_path = "";
+                    }
+                    else
+                        it->second.erase(it->second.begin());
+
+                    index_holder = column_index->load(segment_id, true, uuid_path);
+                }
+                else
+                {
+                    LOG_INFO(log, "Start loading vector index {} in {}, no nvme cache exists.", v_index.name, data_part->name);
+                    index_holder = column_index->load(segment_id);
+                }
 
                 if (index_holder)
                 {
@@ -8627,6 +8653,20 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
         }
     }
 
+    /// remove other nvme cache accord index_nvme_cache_uuid_map
+    for (const auto & it : index_nvme_cache_uuid_map)
+    {
+        for (const String & uuid_path : it.second)
+        {
+            auto nvme_path = fs::path(vector_nvme_cache_folder) / String(it.first + "-" + uuid_path);
+            if (fs::exists(nvme_path))
+            {
+                LOG_DEBUG(log, "Remove unused nvme cache folder {}", nvme_path);
+                fs::remove_all(nvme_path);
+            }
+        }
+    }
+
     if (isShutdown())
         abortLoadVectorIndex(loaded_keys);
 }
@@ -8634,7 +8674,7 @@ void MergeTreeData::loadVectorIndices(std::unordered_map<String, std::unordered_
 void MergeTreeData::abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys)
 {
     for (const auto & key : loaded_keys)
-        VectorIndex::VICacheManager::removeFromCache(key);
+        VectorIndex::CacheManager::removeFromCache(key);
 }
 
 CurrentlySubmergingEmergingTagger::~CurrentlySubmergingEmergingTagger()

@@ -16,8 +16,8 @@
 #pragma once
 #include <faiss/utils/distances.h>
 
-#include <VectorIndex/Common/VICommon.h>
-#include <VectorIndex/Storages/VSDescription.h>
+#include <VectorIndex/Storages/VectorScanDescription.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -69,18 +69,18 @@ namespace VectorIndex
             size_t ny,
             int64_t * result_id,
             float * distance,
-            const VIMetric & metric_type)
+            const VectorIndexMetric & metric_type)
     {
         Poco::Logger * log = &Poco::Logger::get("BruteForce");
         if constexpr (T == Search::DataType::FloatVector)
         {
-            if (metric_type == VIMetric::IP)
+            if (metric_type == VectorIndexMetric::IP)
             {
                 LOG_DEBUG(log, "Metric is IP");
                 faiss::float_minheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
                 faiss::knn_inner_product(x, y, d, nx, ny, &res, nullptr);
             }
-            else if (metric_type == VIMetric::L2)
+            else if (metric_type == VectorIndexMetric::L2)
             {
                 LOG_DEBUG(log, "Metric is L2");
                 faiss::float_maxheap_array_t res = {size_t(nx), size_t(k), result_id, distance};
@@ -93,12 +93,12 @@ namespace VectorIndex
         }
         else if constexpr (T == Search::DataType::BinaryVector)
         {
-            if (metric_type == VIMetric::Hamming)
+            if (metric_type == VectorIndexMetric::Hamming)
             {
                 LOG_DEBUG(log, "Metric is Hamming");
                 faiss::hammings_knn_mc(x, y, nx, ny, k, d / 8, reinterpret_cast<int32_t*>(distance), result_id, nullptr);
             }
-            else if (metric_type == VIMetric::Jaccard)
+            else if (metric_type == VectorIndexMetric::Jaccard)
             {
                 LOG_DEBUG(log, "Metric is Jaccard");
                 jaccard_knn(x, y, nx, ny, k, d / 8, distance, result_id, nullptr);

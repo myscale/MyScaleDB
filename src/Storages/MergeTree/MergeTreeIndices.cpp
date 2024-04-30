@@ -135,10 +135,6 @@ MergeTreeIndexFactory::MergeTreeIndexFactory()
     registerCreator("inverted", invertedIndexCreator);
     registerValidator("inverted", invertedIndexValidator);
 
-#if USE_TANTIVY_SEARCH
-    registerCreator("fts", ftsIndexCreator);
-    registerValidator("fts", ftsIndexValidator);
-#endif
 }
 
 MergeTreeIndexFactory & MergeTreeIndexFactory::instance()

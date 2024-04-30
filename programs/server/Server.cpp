@@ -95,12 +95,8 @@
 #include <filesystem>
 #include <unordered_set>
 
-#include <VectorIndex/Common/VIBuildMemoryUsageHelper.h>
-#include <VectorIndex/Common/VICommon.h>
-
-#if USE_TANTIVY_SEARCH
-#    include <tantivy_search.h>
-#endif
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/IndexBuildMemoryUsageHelper.h>
 
 #include "config.h"
 #include "config_version.h"
@@ -456,57 +452,6 @@ void setOOMScore(int value, Poco::Logger * log)
 }
 #endif
 
-extern "C" void tantivy_log_callback(int level, const char * thread_info, const char * message)
-{
-#if defined(MEMORY_SANITIZER)
-    __msan_unpoison_string(thread_info);
-    __msan_unpoison_string(message);
-#endif
-    // Ensure that null pointers are replaced with empty strings
-    const char * safe_thread_info = thread_info ? thread_info : "";
-    const char * safe_message = message ? message : "";
-    Poco::Logger & logger = Poco::Logger::get("FtsLibrary");
-    switch (level)
-    {
-        case -2: // -2 -> fatal
-            LOG_FATAL(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        case -1: // -1 -> error
-            LOG_ERROR(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        case 0: // 0 -> warning
-            LOG_WARNING(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        case 1: // 1 -> info
-            LOG_INFO(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        case 2: // 2 -> debug
-            LOG_DEBUG(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        case 3: // 3 -> tracing
-            LOG_TRACE(&logger, "{} - {}", safe_thread_info, safe_message);
-            break;
-        default:
-            LOG_DEBUG(&logger, "{} - {}", safe_thread_info, safe_message);
-    }
-}
-
-void tantivy_log_integration(Poco::Util::AbstractConfiguration & config)
-{
-    std::string tantivy_search_log_level = config.getString("logger.tantivy_search_log_level", config.getString("logger.level", "info"));
-
-#if USE_TANTIVY_SEARCH
-    tantivy_search_log4rs_initialize_with_callback(
-        "", // Path for storing the `tantivy-search` log file.
-        tantivy_search_log_level.c_str(), // Sets the log level for `tantivy-search`, defaulting to the same log level as ClickHouse.
-        false, // `tantivy-search` log content will be recorded to a specific log file.
-        false, // Flag to control whether `tantivy-search` log messages are displayed in the console/terminal.
-        true, // If true, logs are exclusively recorded for `tantivy_search` and not for its submodule libraries (e.g., tantivy).
-        tantivy_log_callback // Logging `tantivy_search` logs using POCO LOG.
-    );
-#endif
-}
-
 
 void Server::uninitialize()
 {
@@ -538,9 +483,7 @@ void Server::initialize(Poco::Util::Application & self)
 {
     BaseDaemon::initialize(self);
     logger().information("starting up");
-#if USE_TANTIVY_SEARCH
-    tantivy_log_integration(config());
-#endif
+
     LOG_INFO(&logger(), "OS name: {}, version: {}, architecture: {}",
         Poco::Environment::osName(),
         Poco::Environment::osVersion(),
@@ -1157,14 +1100,6 @@ try
         fs::create_directories(vector_index_cache_path);
     }
 
-    {
-#if USE_TANTIVY_SEARCH
-        std::string tantivy_index_cache_path = config().getString("tantivy_index_cache_path", path / "tantivy_index_cache/");
-        global_context->setTantivyIndexCachePath(tantivy_index_cache_path);
-        fs::create_directories(tantivy_index_cache_path);
-#endif
-    }
-
     /// top_level_domains_lists
     {
         const std::string & top_level_domains_path = config().getString("top_level_domains_path", path / "top_level_domains/");
@@ -1319,7 +1254,7 @@ try
             const size_t vector_index_cache_max_size = static_cast<size_t>(max_memory_usage * vector_index_cache_ratio);
             LOG_INFO(log, "vector_index_cache_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_cache_max_size));
 
-            VectorIndex::VIBuildMemoryUsageHelper::setCacheManagerSizeInBytes(vector_index_cache_max_size);
+            VectorIndex::IndexBuildMemoryUsageHelper::setCacheManagerSizeInBytes(vector_index_cache_max_size);
 
             /// Set vector index build memory limit
             float vector_index_build_ratio = server_settings.vector_index_build_size_ratio_of_memory;
@@ -1332,15 +1267,12 @@ try
             const size_t vector_index_build_max_size = static_cast<size_t>(max_memory_usage * vector_index_build_ratio);
             LOG_INFO(log, "vector_index_build_max_size = {}", formatReadableSizeWithBinarySuffix(vector_index_build_max_size));
 
-            VectorIndex::VIBuildMemoryUsageHelper::setBuildMemorySizeInBytes(vector_index_build_max_size);
+            VectorIndex::IndexBuildMemoryUsageHelper::setBuildMemorySizeInBytes(vector_index_build_max_size);
 
             // FIXME logging-related things need synchronization -- see the 'Logger * log' saved
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
             updateLevels(*config, logger());
-#if USE_TANTIVY_SEARCH
-            tantivy_log_integration(*config);
-#endif
             global_context->setClustersConfig(config, has_zookeeper);
             global_context->setMacros(std::make_unique<Macros>(*config, "macros", log));
             global_context->setExternalAuthenticatorsConfig(*config);
@@ -1607,7 +1539,7 @@ try
         LOG_INFO(log, "Primary key cache size was lowered to {} because the system has low amount of memory",
             formatReadableSizeWithBinarySuffix(mark_cache_size));
     }
-    global_context->setPKCacheSize(primary_key_cache_size);
+    global_context->setPrimaryKeyCacheSize(primary_key_cache_size);
 
     if (server_settings.mmap_cache_size)
         global_context->setMMappedFileCache(server_settings.mmap_cache_size);

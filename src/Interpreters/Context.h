@@ -24,7 +24,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/IStorage_fwd.h>
 
-#include <VectorIndex/Storages/VSDescription.h>
+#include <VectorIndex/Storages/VectorScanDescription.h>
 
 #include "config.h"
 
@@ -100,7 +100,7 @@ class ProcessorsProfileLog;
 class FilesystemCacheLog;
 class FilesystemReadPrefetchesLog;
 class AsynchronousInsertLog;
-class VIEventLog;
+class VectorIndexEventLog;
 class IAsynchronousReader;
 struct MergeTreeSettings;
 struct InitialAllRangesAnnouncement;
@@ -406,12 +406,7 @@ private:
     /// Temporary data for query execution accounting.
     TemporaryDataOnDiskScopePtr temp_data_on_disk;
 
-    /// TODO: will be enhanced similar as scalars.
-    /// Used when vector scan func exists in right joined table
-    mutable std::optional<VSDescription> vector_scan_description;
-
-    mutable TextSearchInfoPtr right_text_search_info;
-    mutable HybridSearchInfoPtr right_hybrid_search_info;
+    mutable std::optional<VectorScanDescription> vector_scan_description;
 
 public:
     /// Some counters for current query execution.
@@ -486,7 +481,6 @@ public:
     String getDictionariesLibPath() const;
     String getUserScriptsPath() const;
     String getVectorIndexCachePath() const;
-    String getTantivyIndexCachePath() const;
 
     /// A list of warnings about server configuration to place in `system.warnings` table.
     Strings getWarnings() const;
@@ -502,7 +496,6 @@ public:
     void setDictionariesLibPath(const String & path);
     void setUserScriptsPath(const String & path);
     void setVectorIndexCachePath(const String & path);
-    void setTantivyIndexCachePath(const String & path);
 
     void addWarningMessage(const String & msg) const;
 
@@ -901,8 +894,8 @@ public:
     void dropIndexUncompressedCache() const;
 
     /// Primary key cache size limit.
-    void setPKCacheSize(size_t max_size_in_bytes);
-    size_t getPKCacheSize() const;
+    void setPrimaryKeyCacheSize(size_t max_size_in_bytes);
+    size_t getPrimaryKeyCacheSize() const;
 
     /// Create a cache of index marks of specified size. This can be done only once.
     void setIndexMarkCache(size_t cache_size_in_bytes);
@@ -988,7 +981,7 @@ public:
     std::shared_ptr<FilesystemCacheLog> getFilesystemCacheLog() const;
     std::shared_ptr<FilesystemReadPrefetchesLog> getFilesystemReadPrefetchesLog() const;
     std::shared_ptr<AsynchronousInsertLog> getAsynchronousInsertLog() const;
-    std::shared_ptr<VIEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
+    std::shared_ptr<VectorIndexEventLog> getVectorIndexEventLog(const String & part_database = {}) const;
 
     /// Returns an object used to log operations with parts if it possible.
     /// Provide table name to make required checks.
@@ -1159,20 +1152,10 @@ public:
 
     ParallelReplicasMode getParallelReplicasMode() const;
 
-    /// Used for vector scan functions
-    std::optional<VSDescription> getVecScanDescription() const;
-    void setVecScanDescription(VSDescription & vec_scan_desc) const;
+    std::optional<VectorScanDescription> getVecScanDescription() const;
+    void setVecScanDescription(VectorScanDescription & vec_scan_desc) const;
     void resetVecScanDescription() const;
 
-    /// Used for text search functions
-    TextSearchInfoPtr getTextSearchInfo() const;
-    void setTextSearchInfo(TextSearchInfoPtr text_search_info) const;
-    void resetTextSearchInfo() const;
-
-    /// Used for text search functions
-    HybridSearchInfoPtr getHybridSearchInfo() const;
-    void setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const;
-    void resetHybridSearchInfo() const;
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;
 

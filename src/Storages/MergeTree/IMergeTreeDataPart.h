@@ -1,30 +1,30 @@
 #pragma once
 
-#include <Core/Block.h>
-#include <Core/NamesAndTypes.h>
-#include <DataTypes/Serializations/SerializationInfo.h>
 #include <IO/WriteSettings.h>
-#include <Interpreters/TransactionVersionMetadata.h>
-#include <Storages/ColumnsDescription.h>
+#include <Core/Block.h>
+#include <base/types.h>
+#include <Core/NamesAndTypes.h>
 #include <Storages/IStorage.h>
 #include <Storages/LightweightDeleteDescription.h>
 #include <Storages/MergeTree/AlterConversions.h>
 #include <Storages/MergeTree/IDataPartStorage.h>
-#include <Storages/MergeTree/IPartMetadataManager.h>
-#include <Storages/MergeTree/KeyCondition.h>
-#include <Storages/MergeTree/MergeTreeDataPartBuilder.h>
-#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 #include <Storages/MergeTree/MergeTreeDataPartState.h>
-#include <Storages/MergeTree/MergeTreeDataPartTTLInfo.h>
-#include <Storages/MergeTree/MergeTreeIOSettings.h>
 #include <Storages/MergeTree/MergeTreeIndexGranularity.h>
 #include <Storages/MergeTree/MergeTreeIndexGranularityInfo.h>
 #include <Storages/MergeTree/MergeTreeIndices.h>
 #include <Storages/MergeTree/MergeTreePartInfo.h>
 #include <Storages/MergeTree/MergeTreePartition.h>
-#include <VectorIndex/Common/VIWithDataPart.h>
-#include <VectorIndex/Storages/VIInfo.h>
-#include <base/types.h>
+#include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
+#include <Storages/MergeTree/MergeTreeDataPartTTLInfo.h>
+#include <Storages/MergeTree/MergeTreeIOSettings.h>
+#include <Storages/MergeTree/KeyCondition.h>
+#include <Storages/MergeTree/MergeTreeDataPartBuilder.h>
+#include <VectorIndex/Storages/MergeTreeDataPartVectorIndex.h>
+#include <Storages/ColumnsDescription.h>
+#include <VectorIndex/Storages/VectorIndexInfo.h>
+#include <Interpreters/TransactionVersionMetadata.h>
+#include <DataTypes/Serializations/SerializationInfo.h>
+#include <Storages/MergeTree/IPartMetadataManager.h>
 
 
 namespace zkutil
@@ -81,7 +81,7 @@ public:
 
     using uint128 = IPartMetadataManager::uint128;
 
-    friend class VIWithDataPart;
+    friend class MergetreeDataPartVectorIndex;
 
     IMergeTreeDataPart(
         const MergeTreeData & storage_,
@@ -340,7 +340,7 @@ public:
 
     mutable VersionMetadata version;
 
-    mutable VIWithDataPart vector_index;
+    mutable MergetreeDataPartVectorIndex vector_index;
 
     /// For data in RAM ('index')
     UInt64 getIndexSizeInBytes() const;

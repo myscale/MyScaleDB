@@ -4,46 +4,46 @@
 
 #include <optional>
 
+#include <base/sort.h>
 #include <Backups/BackupEntriesCollector.h>
 #include <Databases/IDatabase.h>
-#include <IO/copyData.h>
-#include <Interpreters/ClusterProxy/SelectStreamFactory.h>
-#include <Interpreters/ClusterProxy/executeQuery.h>
-#include <Interpreters/Context.h>
+#include <Common/escapeForFileName.h>
+#include <Common/ProfileEventsScope.h>
+#include <Common/typeid_cast.h>
+#include <Common/ThreadPool.h>
 #include <Interpreters/InterpreterAlterQuery.h>
-#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
-#include <Interpreters/MutationsInterpreter.h>
 #include <Interpreters/PartLog.h>
+#include <Interpreters/MutationsInterpreter.h>
+#include <Interpreters/Context.h>
 #include <Interpreters/TransactionLog.h>
+#include <Interpreters/ClusterProxy/executeQuery.h>
+#include <Interpreters/ClusterProxy/SelectStreamFactory.h>
+#include <Interpreters/InterpreterSelectQueryAnalyzer.h>
+#include <IO/copyData.h>
 #include <Parsers/ASTCheckQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTPartition.h>
 #include <Parsers/ASTSetQuery.h>
-#include <Parsers/formatAST.h>
 #include <Parsers/queryToString.h>
+#include <Parsers/formatAST.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/ActiveDataPartSet.h>
+#include <Storages/AlterCommands.h>
+#include <Storages/PartitionCommands.h>
+#include <Storages/MergeTree/MergeTreeSink.h>
+#include <Storages/MergeTree/MergeTreeDataPartInMemory.h>
+#include <Storages/MergeTree/MergePlainMergeTreeTask.h>
+#include <Storages/MergeTree/PartitionPruner.h>
+#include <Storages/MergeTree/MergeList.h>
+#include <Storages/MergeTree/checkDataPart.h>
+#include <QueryPipeline/Pipe.h>
+#include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
-#include <Processors/QueryPlan/QueryPlan.h>
-#include <QueryPipeline/Pipe.h>
-#include <Storages/AlterCommands.h>
-#include <Storages/MergeTree/ActiveDataPartSet.h>
-#include <Storages/MergeTree/MergeList.h>
-#include <Storages/MergeTree/MergePlainMergeTreeTask.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/MergeTreeDataPartInMemory.h>
-#include <Storages/MergeTree/MergeTreeSink.h>
-#include <Storages/MergeTree/PartitionPruner.h>
-#include <Storages/MergeTree/checkDataPart.h>
-#include <Storages/PartitionCommands.h>
-#include <VectorIndex/Common/VICommon.h>
-#include <VectorIndex/Storages/VITask.h>
-#include <VectorIndex/Utils/VIUtils.h>
-#include <base/sort.h>
-#include <Common/ProfileEventsScope.h>
-#include <Common/ThreadPool.h>
-#include <Common/escapeForFileName.h>
-#include <Common/typeid_cast.h>
+#include <VectorIndex/Storages/VectorIndexTask.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
+#include <VectorIndex/Common/VectorIndexUtils.h>
 
 namespace DB
 {
@@ -217,7 +217,7 @@ void StorageMergeTree::shutdown()
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 
         /// Clear primary key cache if exists.
-        clearPKCache(getDataPartsVectorForInternalUsage());
+        clearPrimaryKeyCache(getDataPartsVectorForInternalUsage());
     }
     catch (...)
     {
@@ -346,7 +346,7 @@ void StorageMergeTree::alter(
     auto maybe_mutation_commands = commands.getMutationCommands(new_metadata, local_context->getSettingsRef().materialize_ttl_after_modify, local_context);
     Int64 mutation_version = -1;
     /// get vector index commands
-    auto maybe_vec_index_commands = commands.getVICommands(new_metadata, local_context);
+    auto maybe_vec_index_commands = commands.getVectorIndexCommands(new_metadata, local_context);
     /// Apply alter commands and update new_metadata
     commands.apply(new_metadata, local_context);
 
@@ -512,7 +512,7 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
     return version;
 }
 
-void StorageMergeTree::startVectorIndexJob(const VICommands & vector_index_commands)
+void StorageMergeTree::startVectorIndexJob(const VectorIndexCommands & vector_index_commands)
 {
     /// Handle multiple index commands case
     for (auto & vec_index_command : vector_index_commands)
@@ -904,7 +904,7 @@ bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadat
 
     /// Check if part contains merged vector index
     for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
+        if (!MergeTreeDataPartColumnIndex::canMergeForColumnIndex(left, right, vec_desc.name))
             return false;
 
     return true;
@@ -1315,8 +1315,8 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
     auto metadata_snapshot = getInMemoryMetadataPtr();
     MergeMutateSelectedEntryPtr merge_entry, mutate_entry;
-    std::shared_ptr<VIEntry> slow_mode_vector_index_entry;
-    std::shared_ptr<VIEntry> vector_index_entry;
+    std::shared_ptr<VectorIndexEntry> slow_mode_vector_index_entry;
+    std::shared_ptr<VectorIndexEntry> vector_index_entry;
 
     auto shared_lock = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
 
@@ -1346,7 +1346,7 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
         }
 
         /// Consider vector index building when no merge or mutate.
-        /// TODO: Add selectPartToBuildVI to do some checks, including memory limit/pool size.
+        /// TODO: Add selectPartToBuildVectorIndex to do some checks, including memory limit/pool size.
         if (!merge_entry && !mutate_entry)
         {
             if (vec_index_builder_updater.builds_blocker.isCancelled())
@@ -1354,9 +1354,9 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
             /// first for new data parts, then for merged data parts   
             /// only select one part for each build
-            vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, false);
+            vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, false);
             if (!vector_index_entry)
-                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, true);
+                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVectorIndex(metadata_snapshot, true);
         }
     }
 
@@ -1379,14 +1379,14 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     }
     if (vector_index_entry)
     {
-        std::shared_ptr<VITask> task = std::make_shared<VITask>(
+        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
             *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
         assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (slow_mode_vector_index_entry)
     {
-        std::shared_ptr<VITask> task = std::make_shared<VITask>(
+        std::shared_ptr<VectorIndexTask> task = std::make_shared<VectorIndexTask>(
             *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
         assignee.scheduleSlowModeVectorIndexTask(task);
         return true;

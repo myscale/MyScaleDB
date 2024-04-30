@@ -32,7 +32,7 @@
 #include <Interpreters/FunctionNameNormalizer.h>
 
 #include <DataTypes/DataTypesNumber.h>
-#include <VectorIndex/Utils/CommonUtils.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 #include <Common/logger_useful.h>
 
@@ -554,7 +554,7 @@ NamesAndTypesList ColumnsDescription::getByNames(const GetColumnsOptions & optio
             }
         }
         
-        if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
+        if (isDistance(name))
         {
             res.emplace_back(name, std::make_shared<DataTypeUInt32>());
             continue;

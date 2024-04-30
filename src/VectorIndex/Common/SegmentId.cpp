@@ -15,13 +15,13 @@
 
 #include <filesystem>
 #include <memory>
-#include <Compression/CompressedReadBufferFromFile.h>
 #include <Disks/IDisk.h>
 #include <IO/ReadHelpers.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+#include <Compression/CompressedReadBufferFromFile.h>
 #include <Storages/MergeTree/IDataPartStorage.h>
+#include <VectorIndex/Common/VectorIndexCommon.h>
 #include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Common/VICommon.h>
 #include <base/types.h>
 #include <Common/logger_useful.h>
 

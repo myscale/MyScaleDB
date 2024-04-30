@@ -6,83 +6,83 @@
 
 #include <Interpreters/Context.h>
 #include <Storages/System/StorageSystemAggregateFunctionCombinators.h>
-#include <Storages/System/StorageSystemAsynchronousInserts.h>
 #include <Storages/System/StorageSystemAsynchronousMetrics.h>
 #include <Storages/System/StorageSystemBackups.h>
 #include <Storages/System/StorageSystemBuildOptions.h>
-#include <Storages/System/StorageSystemCertificates.h>
-#include <Storages/System/StorageSystemClusters.h>
 #include <Storages/System/StorageSystemCollations.h>
+#include <Storages/System/StorageSystemClusters.h>
 #include <Storages/System/StorageSystemColumns.h>
-#include <Storages/System/StorageSystemConnections.h>
-#include <Storages/System/StorageSystemContributors.h>
-#include <Storages/System/StorageSystemCurrentRoles.h>
-#include <Storages/System/StorageSystemDDLWorkerQueue.h>
-#include <Storages/System/StorageSystemDataSkippingIndices.h>
-#include <Storages/System/StorageSystemDataTypeFamilies.h>
 #include <Storages/System/StorageSystemDatabases.h>
+#include <Storages/System/StorageSystemDataSkippingIndices.h>
+#include <Storages/System/StorageSystemVectorIndices.h>
+#include <Storages/System/StorageSystemDataTypeFamilies.h>
 #include <Storages/System/StorageSystemDetachedParts.h>
 #include <Storages/System/StorageSystemDictionaries.h>
-#include <Storages/System/StorageSystemDisks.h>
-#include <Storages/System/StorageSystemDistributionQueue.h>
-#include <Storages/System/StorageSystemDroppedTables.h>
-#include <Storages/System/StorageSystemEnabledRoles.h>
-#include <Storages/System/StorageSystemErrors.h>
 #include <Storages/System/StorageSystemEvents.h>
-#include <Storages/System/StorageSystemFilesystemCache.h>
 #include <Storages/System/StorageSystemFormats.h>
 #include <Storages/System/StorageSystemFunctions.h>
-#include <Storages/System/StorageSystemGrants.h>
 #include <Storages/System/StorageSystemGraphite.h>
-#include <Storages/System/StorageSystemLicenses.h>
 #include <Storages/System/StorageSystemMacros.h>
-#include <Storages/System/StorageSystemMergeTreeSettings.h>
 #include <Storages/System/StorageSystemMerges.h>
+#include <Storages/System/StorageSystemMoves.h>
+#include <Storages/System/StorageSystemReplicatedFetches.h>
 #include <Storages/System/StorageSystemMetrics.h>
 #include <Storages/System/StorageSystemModels.h>
-#include <Storages/System/StorageSystemMoves.h>
 #include <Storages/System/StorageSystemMutations.h>
-#include <Storages/System/StorageSystemNamedCollections.h>
 #include <Storages/System/StorageSystemNumbers.h>
 #include <Storages/System/StorageSystemOne.h>
 #include <Storages/System/StorageSystemPartMovesBetweenShards.h>
 #include <Storages/System/StorageSystemParts.h>
-#include <Storages/System/StorageSystemPartsColumns.h>
-#include <Storages/System/StorageSystemPrivileges.h>
-#include <Storages/System/StorageSystemProcesses.h>
 #include <Storages/System/StorageSystemProjectionParts.h>
+#include <Storages/System/StorageSystemPartsColumns.h>
 #include <Storages/System/StorageSystemProjectionPartsColumns.h>
-#include <Storages/System/StorageSystemQueryCache.h>
-#include <Storages/System/StorageSystemQuotaLimits.h>
-#include <Storages/System/StorageSystemQuotaUsage.h>
-#include <Storages/System/StorageSystemQuotas.h>
-#include <Storages/System/StorageSystemQuotasUsage.h>
-#include <Storages/System/StorageSystemRemoteDataPaths.h>
+#include <Storages/System/StorageSystemProcesses.h>
 #include <Storages/System/StorageSystemReplicas.h>
-#include <Storages/System/StorageSystemReplicatedFetches.h>
 #include <Storages/System/StorageSystemReplicationQueue.h>
-#include <Storages/System/StorageSystemRoleGrants.h>
-#include <Storages/System/StorageSystemRoles.h>
-#include <Storages/System/StorageSystemRowPolicies.h>
-#include <Storages/System/StorageSystemSchemaInferenceCache.h>
+#include <Storages/System/StorageSystemDistributionQueue.h>
 #include <Storages/System/StorageSystemServerSettings.h>
 #include <Storages/System/StorageSystemSettings.h>
 #include <Storages/System/StorageSystemSettingsChanges.h>
-#include <Storages/System/StorageSystemSettingsProfileElements.h>
-#include <Storages/System/StorageSystemSettingsProfiles.h>
-#include <Storages/System/StorageSystemStoragePolicies.h>
+#include <Storages/System/StorageSystemMergeTreeSettings.h>
 #include <Storages/System/StorageSystemTableEngines.h>
 #include <Storages/System/StorageSystemTableFunctions.h>
 #include <Storages/System/StorageSystemTables.h>
-#include <Storages/System/StorageSystemTimeZones.h>
-#include <Storages/System/StorageSystemTransactions.h>
-#include <Storages/System/StorageSystemUserDirectories.h>
-#include <Storages/System/StorageSystemUsers.h>
-#include <Storages/System/StorageSystemWarnings.h>
-#include <Storages/System/StorageSystemZeros.h>
 #include <Storages/System/StorageSystemZooKeeper.h>
-#include <VectorIndex/Storages/StorageSystemVIs.h>
-#include <VectorIndex/Storages/StorageSystemVIsWithPart.h>
+#include <Storages/System/StorageSystemContributors.h>
+#include <Storages/System/StorageSystemErrors.h>
+#include <Storages/System/StorageSystemWarnings.h>
+#include <Storages/System/StorageSystemDDLWorkerQueue.h>
+#include <Storages/System/StorageSystemLicenses.h>
+#include <Storages/System/StorageSystemTimeZones.h>
+#include <Storages/System/StorageSystemDisks.h>
+#include <Storages/System/StorageSystemStoragePolicies.h>
+#include <Storages/System/StorageSystemZeros.h>
+#include <Storages/System/StorageSystemUsers.h>
+#include <Storages/System/StorageSystemRoles.h>
+#include <Storages/System/StorageSystemGrants.h>
+#include <Storages/System/StorageSystemRoleGrants.h>
+#include <Storages/System/StorageSystemCurrentRoles.h>
+#include <Storages/System/StorageSystemEnabledRoles.h>
+#include <Storages/System/StorageSystemSettingsProfiles.h>
+#include <Storages/System/StorageSystemSettingsProfileElements.h>
+#include <Storages/System/StorageSystemRowPolicies.h>
+#include <Storages/System/StorageSystemQuotas.h>
+#include <Storages/System/StorageSystemQuotaLimits.h>
+#include <Storages/System/StorageSystemQuotaUsage.h>
+#include <Storages/System/StorageSystemQuotasUsage.h>
+#include <Storages/System/StorageSystemConnections.h>
+#include <Storages/System/StorageSystemUserDirectories.h>
+#include <Storages/System/StorageSystemPrivileges.h>
+#include <Storages/System/StorageSystemAsynchronousInserts.h>
+#include <Storages/System/StorageSystemTransactions.h>
+#include <Storages/System/StorageSystemFilesystemCache.h>
+#include <Storages/System/StorageSystemQueryCache.h>
+#include <Storages/System/StorageSystemNamedCollections.h>
+#include <Storages/System/StorageSystemRemoteDataPaths.h>
+#include <Storages/System/StorageSystemCertificates.h>
+#include <Storages/System/StorageSystemSchemaInferenceCache.h>
+#include <Storages/System/StorageSystemDroppedTables.h>
+#include <Storages/System/StorageSystemVectorIndexSegments.h>
 
 #ifdef OS_LINUX
 #include <Storages/System/StorageSystemStackTrace.h>
@@ -141,8 +141,8 @@ void attachSystemTablesLocal(ContextPtr context, IDatabase & system_database)
     attach<StorageSystemErrors>(context, system_database, "errors");
     attach<StorageSystemWarnings>(context, system_database, "warnings");
     attach<StorageSystemDataSkippingIndices>(context, system_database, "data_skipping_indices");
-    attach<StorageSystemVIs>(context, system_database, "vector_indices");
-    attach<StorageSystemVIsWithPart>(context, system_database, "vector_index_segments");
+    attach<StorageSystemVectorIndices>(context, system_database, "vector_indices");
+    attach<StorageSystemVectorIndexSegments>(context, system_database, "vector_index_segments");
     attach<StorageSystemLicenses>(context, system_database, "licenses");
     attach<StorageSystemTimeZones>(context, system_database, "time_zones");
     attach<StorageSystemBackups>(context, system_database, "backups");

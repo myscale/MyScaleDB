@@ -1,21 +1,21 @@
-#include <DataTypes/NestedUtils.h>
-#include <Interpreters/ActionsDAG.h>
+#include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/KeyCondition.h>
 #include <Interpreters/IdentifierSemantic.h>
 #include <Interpreters/TreeRewriter.h>
-#include <Interpreters/misc.h>
-#include <Parsers/ASTExpressionList.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTSelectQuery.h>
+#include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/formatAST.h>
-#include <Storages/MergeTree/KeyCondition.h>
-#include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
-#include <VectorIndex/Utils/CommonUtils.h>
-#include <base/map.h>
+#include <Interpreters/misc.h>
 #include <Common/typeid_cast.h>
+#include <DataTypes/NestedUtils.h>
+#include <Interpreters/ActionsDAG.h>
+#include <base/map.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 namespace DB
 {
@@ -65,7 +65,7 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.is_final = select.final();
 
     /// Move as much as possible where conditions to prewhere for vector search
-    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->hybrid_search_funcs.empty())
+    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->vector_scan_funcs.empty())
         has_vector_func = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
@@ -221,7 +221,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 
         cond.columns_size = getColumnsSize(cond.table_columns);
 
-        auto containHybridSearchFunc = [&]()
+        auto containVectorScanFunc = [&]()
         {
             if (function_node_optional.has_value() && function_node_optional->getASTNode()
                 && function_node_optional->getASTNode()->as<ASTFunction>())
@@ -231,7 +231,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
                 {
                     for (auto & argu : func->arguments->children)
                     {
-                        if (isHybridSearchFunc(argu->getColumnName()))
+                        if (isVectorScanFunc(argu->getColumnName()))
                         {
                             return true;
                         }
@@ -252,7 +252,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 //            }
 //        }
 
-        LOG_DEBUG(log, "containHybridSearchFunc(cond.node): {}", containHybridSearchFunc());
+        LOG_DEBUG(log, "containVectorScanFunc(cond.node): {}", containVectorScanFunc());
 
         cond.viable =
             !has_invalid_column &&
@@ -266,7 +266,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             && columnsSupportPrewhere(cond.table_columns)
             /// Do not move conditions involving all queried columns.
             && cond.table_columns.size() < queried_columns.size()
-            && !containHybridSearchFunc();
+            && !containVectorScanFunc();
 
         if (cond.viable)
             cond.good = isConditionGood(node, table_columns);

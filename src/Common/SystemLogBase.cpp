@@ -1,21 +1,21 @@
-#include <Interpreters/AsynchronousInsertLog.h>
 #include <Interpreters/AsynchronousMetricLog.h>
 #include <Interpreters/CrashLog.h>
-#include <Interpreters/FilesystemCacheLog.h>
-#include <Interpreters/FilesystemReadPrefetchesLog.h>
 #include <Interpreters/MetricLog.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Interpreters/PartLog.h>
-#include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/QueryLog.h>
 #include <Interpreters/QueryThreadLog.h>
 #include <Interpreters/QueryViewsLog.h>
 #include <Interpreters/SessionLog.h>
 #include <Interpreters/TextLog.h>
 #include <Interpreters/TraceLog.h>
-#include <Interpreters/TransactionsInfoLog.h>
+#include <Interpreters/FilesystemCacheLog.h>
+#include <Interpreters/FilesystemReadPrefetchesLog.h>
+#include <Interpreters/ProcessorsProfileLog.h>
 #include <Interpreters/ZooKeeperLog.h>
-#include <VectorIndex/Interpreters/VIEventLog.h>
+#include <Interpreters/TransactionsInfoLog.h>
+#include <Interpreters/AsynchronousInsertLog.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 #include <Common/MemoryTrackerBlockerInThread.h>
 #include <Common/SystemLogBase.h>

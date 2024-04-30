@@ -163,11 +163,6 @@ protected:
     size_t current_mark = 0;
 
     GinIndexStoreFactory::GinIndexStores gin_index_stores;
-
-#if USE_TANTIVY_SEARCH
-    TantivyIndexStores tantivy_index_stores;
-#endif
-
 private:
     void initSkipIndices();
     void initPrimaryIndex();

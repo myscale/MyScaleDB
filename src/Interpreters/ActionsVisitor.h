@@ -9,7 +9,7 @@
 #include <Core/ColumnNumbers.h>
 #include <Core/ColumnWithTypeAndName.h>
 
-#include <VectorIndex/Utils/CommonUtils.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 
 namespace DB

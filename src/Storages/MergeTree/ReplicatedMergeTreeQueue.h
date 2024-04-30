@@ -15,7 +15,7 @@
 
 #include <Common/ZooKeeper/ZooKeeper.h>
 
-#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIStrategyPicker.h>
+#include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIndexStrategyPicker.h>
 
 namespace DB
 {
@@ -35,7 +35,7 @@ private:
     friend class ReplicatedMergeTreeMergePredicate;
     friend class MergeFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
-    friend class ReplicatedVITask;
+    friend class ReplicatedVectorIndexTask;
 
     using LogEntry = ReplicatedMergeTreeLogEntry;
     using LogEntryPtr = LogEntry::Ptr;
@@ -67,7 +67,7 @@ private:
 
     StorageReplicatedMergeTree & storage;
     ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker;
-    ReplicatedMergeTreeBuildVIStrategyPicker & build_vindex_strategy_picker;
+    ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker;
     MergeTreeDataFormatVersion format_version;
 
     String zookeeper_path;
@@ -294,7 +294,7 @@ public:
     ReplicatedMergeTreeQueue(
         StorageReplicatedMergeTree & storage_,
         ReplicatedMergeTreeMergeStrategyPicker & merge_strategy_picker_,
-        ReplicatedMergeTreeBuildVIStrategyPicker & build_vindex_strategy_picker_);
+        ReplicatedMergeTreeBuildVIndexStrategyPicker & build_vindex_strategy_picker_);
     ~ReplicatedMergeTreeQueue();
 
     /// Clears queue state

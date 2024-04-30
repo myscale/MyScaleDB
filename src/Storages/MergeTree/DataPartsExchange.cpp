@@ -198,12 +198,12 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             }
 
             auto column_index = column_index_opt.value();
-            if (column_index->isBuildCancelled() || column_index->getVectorIndexState() == VIState::ERROR)
+            if (column_index->isBuildCancelled() || column_index->getVectorIndexState() == VectorIndexState::ERROR)
             {
                 LOG_DEBUG(log, "The vector index {} build in part {} was cancelled or failed with error, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "fail"});
             }
-            else if (column_index->getVectorIndexState() <= VIState::BUILDING)
+            else if (column_index->getVectorIndexState() <= VectorIndexState::BUILDING)
             {
                 LOG_WARNING(log, "The vector index {} in part {} was not ready, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "not_ready"});
@@ -399,7 +399,7 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
     bool include_vector_indices = true;
 
     /// Add the part name to currently_sending_vector_index_parts
-    if (part->vector_index.containAnyVIInReady())
+    if (part->vector_index.containAnyVectorIndexInReady())
     {
         std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
         if (!data.currently_sending_vector_index_parts.insert(part->name).second)
@@ -410,7 +410,7 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
 
     SCOPE_EXIT_MEMORY
     ({
-        if (part->vector_index.containAnyVIInReady())
+        if (part->vector_index.containAnyVectorIndexInReady())
         {
             std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
             data.currently_sending_vector_index_parts.erase(part->name);
@@ -999,7 +999,7 @@ String Fetcher::fetchVectorIndex(
     if (build_status == "fail")
     {
         LOG_DEBUG(log, "Unable to fetch vector index {} in part {} due to build status is fail", vec_index_name, future_part_name);
-        future_part->vector_index.onVIBuildError(vec_index_name, "Another replica failed to build the vector index.");
+        future_part->vector_index.onVectorIndexBuildError(vec_index_name, "Another replica failed to build the vector index.");
         return {};
     }
     else if (build_status == "no_need")

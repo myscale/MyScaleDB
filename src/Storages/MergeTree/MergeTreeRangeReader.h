@@ -209,10 +209,8 @@ public:
         /// Only MergeTreeRangeReader is supposed to access ReadResult internals.
         friend class MergeTreeRangeReader;
         friend class IMergeTreeSelectAlgorithm;
-        friend class MergeTreeBaseSearchManager;
-        friend class MergeTreeVSManager;
-        friend class MergeTreeTextSearchManager;
-        friend class MergeTreeSelectWithHybridSearchProcessor;
+        friend class MergeTreeVectorScanManager;
+        friend class MergeTreeSelectWithVectorScanProcessor;
 
         using NumRows = std::vector<size_t>;
 

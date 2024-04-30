@@ -2402,20 +2402,11 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
 
         bool optimize_read_in_order = analysis_result.optimize_read_in_order;
         bool optimize_aggregation_in_order = analysis_result.optimize_aggregation_in_order && !query_analyzer->useGroupingSetKey();
-        if (analysis_result.need_vector_scan)
+         if (analysis_result.need_vector_scan)
         {
-            query_info.vector_scan_info = std::make_shared<VectorScanInfo>(query_analyzer->vectorScanDescs());
-            query_info.has_hybrid_search = true;
-        }
-        if (analysis_result.need_text_search)
-        {
-            query_info.text_search_info = query_analyzer->textSearchInfoPtr();
-            query_info.has_hybrid_search = true;
-        }
-        if (analysis_result.need_hybrid_search)
-        {
-            query_info.hybrid_search_info = query_analyzer->hybridSearchInfoPtr();
-            query_info.has_hybrid_search = true;
+            query_info.vector_scan_info
+                = std::make_shared<VectorScanInfo>(
+                    query_analyzer->vectorScanDescs());
         }
 
         /// Create optimizer with prepared actions.

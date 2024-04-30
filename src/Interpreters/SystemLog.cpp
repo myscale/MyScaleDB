@@ -37,7 +37,7 @@
 #include <Common/logger_useful.h>
 #include <Common/setThreadName.h>
 
-#include <VectorIndex/Interpreters/VIEventLog.h>
+#include <VectorIndex/Interpreters/VectorIndexEventLog.h>
 
 
 namespace DB
@@ -221,7 +221,7 @@ SystemLogs::SystemLogs(ContextPtr global_context, const Poco::Util::AbstractConf
         global_context, "system", "transactions_info_log", config, "transactions_info_log");
     processors_profile_log = createSystemLog<ProcessorsProfileLog>(global_context, "system", "processors_profile_log", config, "processors_profile_log");
     asynchronous_insert_log = createSystemLog<AsynchronousInsertLog>(global_context, "system", "asynchronous_insert_log", config, "asynchronous_insert_log");
-    vector_index_event_log = createSystemLog<VIEventLog>(
+    vector_index_event_log = createSystemLog<VectorIndexEventLog>(
         global_context, "system", "vector_index_event_log", config, "vector_index_event_log");
 
     if (query_log)

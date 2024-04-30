@@ -32,10 +32,9 @@ list (APPEND PRIVATE_LIBS
         ch_contrib::xxHash
 )
 
-# Need blake3 library in supercrate.
-if (TARGET ch_rust::supercrate)
+if (TARGET ch_rust::blake3)
     list (APPEND PUBLIC_LIBS
-        ch_rust::supercrate
+        ch_rust::blake3
     )
 endif()
 

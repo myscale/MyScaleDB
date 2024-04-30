@@ -13,9 +13,8 @@ set (CLICKHOUSE_CLIENT_LINK
         string_utils
 )
 
-# Need skim library in supercrate.
-if (TARGET ch_rust::supercrate)
-    list(APPEND CLICKHOUSE_CLIENT_LINK PRIVATE ch_rust::supercrate)
+if (TARGET ch_rust::skim)
+    list(APPEND CLICKHOUSE_CLIENT_LINK PRIVATE ch_rust::skim)
 endif()
 
 # Always use internal readpassphrase

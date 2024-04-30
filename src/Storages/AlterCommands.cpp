@@ -9,16 +9,11 @@
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Interpreters/ExpressionAnalyzer.h>
-#include <Interpreters/GinFilter.h>
-#include <Interpreters/RenameColumnVisitor.h>
-#include <Interpreters/TreeRewriter.h>
 #include <Interpreters/addTypeConversionToAST.h>
-
-#if USE_TANTIVY_SEARCH
-#    include <Interpreters/TantivyFilter.h>
-#endif
-
+#include <Interpreters/ExpressionAnalyzer.h>
+#include <Interpreters/TreeRewriter.h>
+#include <Interpreters/RenameColumnVisitor.h>
+#include <Interpreters/GinFilter.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTConstraintDeclaration.h>
@@ -27,7 +22,6 @@
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/queryToString.h>
 #include <Storages/AlterCommands.h>
@@ -35,11 +29,11 @@
 #include <Storages/LightweightDeleteDescription.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
-#include <Common/logger_useful.h>
-#include <Common/randomSeed.h>
 #include <Common/typeid_cast.h>
+#include <Common/randomSeed.h>
+#include <Common/logger_useful.h>
 
-#include <VectorIndex/Parsers/ASTVIDeclaration.h>
+#include <VectorIndex/Parsers/ASTVectorIndexDeclaration.h>
 
 namespace DB
 {
@@ -437,7 +431,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         command.vec_index_decl = command_ast->vec_index_decl;
         command.type = AlterCommand::ADD_VECTOR_INDEX;
 
-        const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVIDeclaration &>();
+        const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVectorIndexDeclaration &>();
 
         command.vec_index_name = ast_vec_index_decl.name;
         command.column_name = ast_vec_index_decl.column;
@@ -841,7 +835,7 @@ void AlterCommand::apply(StorageInMemoryMetadata & metadata, ContextPtr context)
 
         metadata.vec_indices.emplace(
             insert_it,
-            VIDescription::getVectorIndexFromAST(
+            VectorIndexDescription::getVectorIndexFromAST(
                 vec_index_decl, metadata.columns, metadata.constraints, getParameterCheckStatus(metadata, context)));
     }
     else if (type == DROP_VECTOR_INDEX)
@@ -1097,27 +1091,15 @@ bool AlterCommands::hasInvertedIndex(const StorageInMemoryMetadata & metadata)
     return false;
 }
 
-#if USE_TANTIVY_SEARCH
-bool AlterCommands::hasTantivyIndex(const StorageInMemoryMetadata & metadata)
+std::optional<VectorIndexCommand> AlterCommand::tryConvertToVectorIndexCommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
 {
-    for (const auto & index : metadata.secondary_indices)
-    {
-        if (index.type == TANTIVY_INDEX_NAME)
-            return true;
-    }
-    return false;
-}
-#endif
-
-std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const
-{
-    VICommand result;
+    VectorIndexCommand result;
     if (type == ADD_VECTOR_INDEX)
     {
         result.drop_command = false;
         result.column_name = column_name;
         result.index_name = vec_index_name;
-        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVIDeclaration>()->type->name);
+        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVectorIndexDeclaration>()->type->name);
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
         LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
     } 
@@ -1194,7 +1176,7 @@ void AlterCommands::apply(StorageInMemoryMetadata & metadata, ContextPtr context
     {
         try
         {
-            vec_index = VIDescription::getVectorIndexFromAST(
+            vec_index = VectorIndexDescription::getVectorIndexFromAST(
                 vec_index.definition_ast,
                 metadata_copy.columns,
                 metadata_copy.getConstraints(),
@@ -1647,11 +1629,11 @@ MutationCommands AlterCommands::getMutationCommands(StorageInMemoryMetadata meta
     return result;
 }
 /// currently only support one add vector index command in one alter query
-VICommands AlterCommands::getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const
+VectorIndexCommands AlterCommands::getVectorIndexCommands(StorageInMemoryMetadata metadata, ContextPtr context) const
 {
-    VICommands result;
+    VectorIndexCommands result;
     for (const auto & alter_cmd : *this)
-        if (auto vec_index_cmd = alter_cmd.tryConvertToVICommand(metadata, context); vec_index_cmd)
+        if (auto vec_index_cmd = alter_cmd.tryConvertToVectorIndexCommand(metadata, context); vec_index_cmd)
             result.push_back(*vec_index_cmd);
 
     return result;

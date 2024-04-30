@@ -30,7 +30,7 @@
     M(FilesystemCacheLogElement) \
     M(FilesystemReadPrefetchesLogElement) \
     M(AsynchronousInsertLogElement) \
-    M(VIEventLogElement)
+    M(VectorIndexEventLogElement)
 
 namespace Poco
 {

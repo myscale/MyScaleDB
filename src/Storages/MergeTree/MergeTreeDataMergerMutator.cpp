@@ -40,8 +40,8 @@
 #include <ctime>
 #include <numeric>
 
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
 #include <boost/algorithm/string/replace.hpp>
+#include <VectorIndex/Storages/VectorIndexBuilderUpdater.h>
 
 
 namespace CurrentMetrics
@@ -682,7 +682,7 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
 
     /// Special handling for merge one single VPart. If new part has vector index, expire the index cache for old part.
     /// TODO: Can use old part's index cache, just update cache key to avoid load it for new part?
-    if (new_part->vector_index.containAnyVIInReady() && old_parts.size() == 1)
+    if (new_part->vector_index.containAnyVectorIndexInReady() && old_parts.size() == 1)
     {
         auto old_part = old_parts[0];
         for (const auto & vec_index : new_vector_indices)
@@ -694,7 +694,7 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
                 for (auto & segment_id : segment_ids)
                 {
                     LOG_DEBUG(log, "Remove vector index {} for old part {} from cache", vec_index.name, old_part->name);
-                    VectorIndex::VICacheManager::removeFromCache(segment_id.getCacheKey());
+                    VectorIndex::CacheManager::removeFromCache(segment_id.getCacheKey());
                 }
             }
         }

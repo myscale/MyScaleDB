@@ -80,8 +80,6 @@
     M(LocalThreadActive, "Number of threads in local thread pools running a task.") \
     M(MergeTreeDataSelectExecutorThreads, "Number of threads in the MergeTreeDataSelectExecutor thread pool.") \
     M(MergeTreeDataSelectExecutorThreadsActive, "Number of threads in the MergeTreeDataSelectExecutor thread pool running a task.") \
-    M(MergeTreeDataSelectBM25CollectThreads, "Number of threads in the thread pool for collecting statistics for text search.") \
-    M(MergeTreeDataSelectBM25CollectThreadsActive, "Number of threads in the thread pool for collecting statistics for text search running a task.") \
     M(BackupsThreads, "Number of threads in the thread pool for BACKUP.") \
     M(BackupsThreadsActive, "Number of threads in thread pool for BACKUP running a task.") \
     M(RestoreThreads, "Number of threads in the thread pool for RESTORE.") \

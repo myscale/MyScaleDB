@@ -5,13 +5,13 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/ConstraintsDescription.h>
 #include <Storages/IndicesDescription.h>
-#include <Storages/KeyDescription.h>
 #include <Storages/ProjectionsDescription.h>
+#include <Storages/KeyDescription.h>
 #include <Storages/SelectQueryDescription.h>
 #include <Storages/TTLDescription.h>
-#include <VectorIndex/Storages/VIDescriptions.h>
-#include <VectorIndex/Utils/CommonUtils.h>
 #include <Common/MultiVersion.h>
+#include <VectorIndex/Storages/VectorIndicesDescription.h>
+#include <VectorIndex/Common/VectorScanUtils.h>
 
 namespace DB
 {
@@ -26,7 +26,7 @@ struct StorageInMemoryMetadata
     /// Table indices. Currently supported for MergeTree only.
     IndicesDescription secondary_indices;
     /// Vector indices.
-    VIDescriptions vec_indices;
+    VectorIndicesDescription vec_indices;
     /// Table constraints. Currently supported for MergeTree only.
     ConstraintsDescription constraints;
     /// Table projections. Currently supported for MergeTree only.
@@ -74,7 +74,7 @@ struct StorageInMemoryMetadata
     /// Sets secondary indices
     void setSecondaryIndices(IndicesDescription secondary_indices_);
 
-    void setVectorIndices(VIDescriptions vec_indices_);
+    void setVectorIndices(VectorIndicesDescription vec_indices_);
 
     /// Sets constraints
     void setConstraints(ConstraintsDescription constraints_);
@@ -105,7 +105,7 @@ struct StorageInMemoryMetadata
     bool hasSecondaryIndices() const;
 
     /// Returns vector indices
-    const VIDescriptions & getVectorIndices() const;
+    const VectorIndicesDescription & getVectorIndices() const;
 
     /// Has at least one vector index
     bool hasVectorIndices() const;

@@ -6,7 +6,7 @@
 #include <Storages/MergeTree/RequestResponse.h>
 #include <Processors/Chunk.h>
 
-#include <VectorIndex/Cache/PKCacheManager.h>
+#include <VectorIndex/Storages/PrimaryKeyCacheManager.h>
 
 
 namespace DB
@@ -104,6 +104,8 @@ protected:
 
     BlockAndProgress readFromPartImpl();
 
+    bool readPrimaryKeyBin(Columns & out_columns);
+
     /// Used for filling header with no rows as well as block with data
     static void
     injectVirtualColumns(Block & block, size_t row_count, MergeTreeReadTask * task, const DataTypePtr & partition_value_type, const Names & virtual_columns);
@@ -147,6 +149,7 @@ protected:
     PrewhereInfoPtr prewhere_info;
     ExpressionActionsSettings actions_settings;
     std::unique_ptr<PrewhereExprInfo> prewhere_actions;
+    VectorScanInfoPtr vector_scan_info;
 
     UInt64 max_block_size_rows;
     UInt64 preferred_block_size_bytes;
@@ -207,6 +210,15 @@ private:
         const ReadBufferFromFileBase::ProfileCallback & profile_callback);
 
     static Block applyPrewhereActions(Block block, const PrewhereInfoPtr & prewhere_info);
+
+    /// used in vector scan;
+    ColumnPtr tmp_filter;
+
+    /// True if _part_offset column is added for vector scan, but should not exist in select result.
+    bool need_remove_part_offset = false;
+
+    /// Logic row id for rows, used for vector index scan.
+    const ColumnUInt64 * part_offset = nullptr;
 };
 
 using MergeTreeSelectAlgorithmPtr = std::unique_ptr<IMergeTreeSelectAlgorithm>;
