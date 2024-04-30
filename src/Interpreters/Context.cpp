@@ -4196,17 +4196,6 @@ void Context::resetHybridSearchInfo() const
     right_hybrid_search_info = nullptr;
 }
 
-String Context::getInstanceLicenseKeeperPath() const
-{
-    return shared->instance_license_keeper_path;
-}
-
-void Context::setInstanceLicenseKeeperPath(const String & path)
-{
-    if (shared->instance_license_keeper_path.empty())
-        shared->instance_license_keeper_path = path;
-}
-
 WriteSettings Context::getWriteSettings() const
 {
     WriteSettings res;
