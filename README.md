@@ -30,7 +30,7 @@ Key benefits of using MyScaleDB include:
   * Use SQL with vector-related functions to interact with MyScaleDB. No need to learn complex new tools or frameworks – stick with what you know and love.
 * **Production-Ready for AI applications**
   * A unified and time-tested platform to manage and process structured data, text, vector, JSON, geospatial, time-series data, and more. See [supported data types and functions](https://myscale.com/docs/en/functions/)
-  * Improved RAG accuracy by combining vectors with rich metadata and performing high-precision, high-efficiency filtered search at any ratio[^1].
+  * Improved RAG accuracy by combining vectors with rich metadata, [full-text search](https://myscale.com/docs/en/text-search/), and performing high-precision, high-efficiency filtered search at any ratio[^1].
 * **Unmatched performance and scalability**
   * MyScaleDB leverages cutting-edge OLAP database architecture and advanced vector algorithms for lightning-fast vector operations.
   * Scale your applications effortlessly and cost-effectively as your data grows.
@@ -44,10 +44,11 @@ Key benefits of using MyScaleDB include:
 ## Why MyScaleDB
 
 * Fully SQL compatible
-* Unified structured and vectorized data management
+* [Unified structured and vectorized data management](https://myscale.com/docs/en/joint-queries/)
 * Millisecond search on billion-scale vectors
 * Highly reliable & linearly scalable
-* Hybrid search & complex SQL vector queries
+* Powerful [text-search](https://myscale.com/docs/en/text-search/) and text/vector [hybrid search](https://myscale.com/docs/en/hybrid-search/) functions
+* Complex SQL vector queries
 
 See our [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
@@ -135,7 +136,8 @@ networks:
         - subnet: 10.0.0.0/24
 ```
 
-custom_users_config.xml
+`custom_users_config.xml`:
+
 ```xml
 <clickhouse>
   <users>
@@ -242,9 +244,11 @@ We're committed to continuously improving and evolving MyScaleDB to meet the eve
 
 ## Roadmap
 
+* [x] Inverted index & performant keyword/vector hybrid search ([supported since 1.5](https://myscale.com/blog/text-search-and-hybrid-search-in-myscale/))
 * [ ] Support more storage engines, e.g. `ReplacingMergeTree`
 * [ ] LLM observability with MyScaleDB
 * [ ] Data-centric LLM
+* [ ] Automatic data science with MyScaleDB
 
 ## License
 
@@ -254,7 +258,8 @@ MyScaleDB is licensed under the Apache License, Version 2.0. View a copy of the 
 
 We give special thanks for these open-source projects, upon which we have developed MyScaleDB:
 
-- [ClickHouse](https://github.com/ClickHouse/ClickHouse) - A free analytics DBMS for big data.
-- [Faiss](https://github.com/facebookresearch/faiss) - A library for efficient similarity search and clustering of dense vectors, by Meta's Fundamental AI Research.
-- [hnswlib](https://github.com/nmslib/hnswlib) - Header-only C++/python library for fast approximate nearest neighbors.
-- [ScaNN](https://github.com/google-research/google-research/tree/master/scann) - Scalable Nearest Neighbors library by Google Research.
+* [ClickHouse](https://github.com/ClickHouse/ClickHouse) - A free analytics DBMS for big data.
+* [Faiss](https://github.com/facebookresearch/faiss) - A library for efficient similarity search and clustering of dense vectors, by Meta's Fundamental AI Research.
+* [hnswlib](https://github.com/nmslib/hnswlib) - Header-only C++/python library for fast approximate nearest neighbors.
+* [ScaNN](https://github.com/google-research/google-research/tree/master/scann) - Scalable Nearest Neighbors library by Google Research.
+* [Tantivy](https://github.com/quickwit-oss/tantivy) - A full-text search engine library inspired by Apache Lucene and written in Rust.
