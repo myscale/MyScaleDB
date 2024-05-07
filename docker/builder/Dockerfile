@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.0.0 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.0.0 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.0.0 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.0.1 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.0.1 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.0.1 bash
 
 FROM ubuntu:20.04
 
@@ -33,7 +33,7 @@ RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list ; fi \
     && apt update \
     && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
-    && apt install git build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
+    && apt install git git-lfs build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
     && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu libblas-dev liblapack-dev --yes --verbose-versions \
     && apt install \
     llvm-${LLVM_VERSION} \
