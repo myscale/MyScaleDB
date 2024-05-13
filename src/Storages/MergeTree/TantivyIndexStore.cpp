@@ -240,12 +240,11 @@ ChecksumPairs TantivyIndexStore::serialize()
         written_bytes);
 
     ChecksumPairs checksums;
-    checksums.emplace_back(
-        index_data_file_name,
-        DB::MergeTreeDataPartChecksums::Checksum(data_hashing_uncompressed_stream->count(), data_hashing_uncompressed_stream->getHash()));
-    checksums.emplace_back(
-        index_meta_file_name,
-        DB::MergeTreeDataPartChecksums::Checksum(meta_hashing_uncompressed_stream->count(), meta_hashing_uncompressed_stream->getHash()));
+    // To prevent inconsistency issues with FTS index file checksums across multiple replicas, an empty checksum is generated here.
+    checksums.emplace_back(index_data_file_name, DB::MergeTreeDataPartChecksums::Checksum());
+    // DB::MergeTreeDataPartChecksums::Checksum(data_hashing_uncompressed_stream->count(), data_hashing_uncompressed_stream->getHash()));
+    checksums.emplace_back(index_meta_file_name, DB::MergeTreeDataPartChecksums::Checksum());
+    // DB::MergeTreeDataPartChecksums::Checksum(meta_hashing_uncompressed_stream->count(), meta_hashing_uncompressed_stream->getHash()));
 
     return checksums;
 }
