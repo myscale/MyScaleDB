@@ -65,6 +65,9 @@ void MergeTreeDataPartChecksum::checkSize(const IDataPartStorage & storage, cons
     if (isGinFile(name))
         return;
 
+    if (name.ends_with(".data") || name.ends_with(".meta"))
+        return;
+
     if (!storage.exists(name))
         throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "{} doesn't exist", fs::path(storage.getRelativePath()) / name);
 
@@ -90,6 +93,10 @@ void MergeTreeDataPartChecksums::checkEqual(const MergeTreeDataPartChecksums & r
     {
         /// Exclude files written by full-text index from check. No correct checksums are available for them currently.
         if (name.ends_with(".gin_dict") || name.ends_with(".gin_post") || name.ends_with(".gin_seg") || name.ends_with(".gin_sid"))
+            continue;
+
+        /// Exclude files written by fts index from check. No correct checksums are available for them currently.
+        if (name.ends_with(".meta") || name.ends_with(".data"))
             continue;
 
         auto it = rhs.files.find(name);
