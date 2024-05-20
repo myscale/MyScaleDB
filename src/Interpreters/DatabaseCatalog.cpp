@@ -1384,6 +1384,22 @@ void DatabaseCatalog::dropTableFinally(const TableMarkedAsDropped & table)
     LOG_INFO(log, "Removing metadata {} of dropped table {}", table.metadata_path, table.table_id.getNameForLogs());
     fs::remove(fs::path(table.metadata_path));
 
+    try
+    {
+        auto vector_index_cache_path = fs::path(getContext()->getVectorIndexCachePath() + "/" + "store/" + getPathForUUID(table.table_id.uuid));
+        LOG_INFO(log, "Removing vector index cache directory {} of dropped table {}", vector_index_cache_path, table.table_id.getNameForLogs());
+        /// The vector index cache path consists of two directories: e53/e53aab13-92d0-462f-bc51-22b0585675fc/.
+        /// To remove the cache, first remove the e53aab13-92d0-462f-bc51-22b0585675fc/ directory, 
+        /// then remove the e53/ directory. 
+        /// It is important not to use remove_all as it may remove other index caches in the e53/ directory.
+        fs::remove(vector_index_cache_path);
+        fs::remove(vector_index_cache_path.parent_path().parent_path());
+    }
+    catch (const fs::filesystem_error & e)
+    {
+        LOG_WARNING(log, "Cannot remove vector index cache directory {} of dropped table {}. Reason: {}", table.metadata_path, table.table_id.getNameForLogs(), e.what());
+    }
+
     removeUUIDMappingFinally(table.table_id.uuid);
     CurrentMetrics::sub(CurrentMetrics::TablesToDropQueueSize, 1);
 }
