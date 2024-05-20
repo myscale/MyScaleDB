@@ -97,11 +97,10 @@ VIBitmapPtr getRealBitmap(
 std::vector<DB::MergedPartNameAndId>
 getMergedSourcePartsFromFileName(const String & index_name, const DB::MergeTreeDataPartChecksums vector_index_checksums);
 
-String getUniqueVectorIndexCachePrefix(
+String getVectorIndexCachePrefix(
     const String & table_relative_path,
     const String & part_name,
-    const String & index_name,
-    const String & path_uuid = "");
+    const String & index_name);
 
 /// part name, nvme_cache_path uuid
 std::pair<String, String> getPartNameUUIDFromNvmeCachePath(const String & path_with_uuid);
