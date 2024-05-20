@@ -11,6 +11,7 @@
 #include <Processors/QueryPlan/SourceStepWithFilter.h>
 #include <QueryPipeline/Pipe.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <Common/logger_useful.h>
 
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Utils/VSUtils.h>
@@ -693,13 +694,13 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
         }
     }
 
-    Columns result_columns;
-    result_columns.assign(
+    Columns tmp_result_columns;
+    tmp_result_columns.assign(
         std::make_move_iterator(result_pk_cols.begin()),
         std::make_move_iterator(result_pk_cols.end())
         );
 
-    LOG_DEBUG(log, "Fetch from primary key cache size = {}", result_columns[0]->size());
+    LOG_DEBUG(log, "Fetch from primary key cache size = {}", tmp_result_columns[0]->size());
 
     /// Get _part_offset if exists.
     if (mutable_part_offset_col)
@@ -707,8 +708,8 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
         /// _part_offset column exists in original select columns
         if (!need_remove_part_offset)
         {
-            result_columns.emplace_back(std::move(mutable_part_offset_col));
-            part_offset = typeid_cast<const ColumnUInt64 *>(result_columns.back().get());
+            tmp_result_columns.emplace_back(std::move(mutable_part_offset_col));
+            part_offset = typeid_cast<const ColumnUInt64 *>(tmp_result_columns.back().get());
         }
         else
             part_offset = typeid_cast<const ColumnUInt64 *>(mutable_part_offset_col.get());
@@ -719,11 +720,21 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
         size_t result_row_num = 0;
 
         base_search_manager->mergeResult(
-            result_columns, /// _Inout_
+            tmp_result_columns, /// _Inout_
             result_row_num, /// _Out_
             read_ranges,
             nullptr,
             part_offset);
+
+        Columns result_columns;
+
+        if(!need_remove_part_offset){
+            result_columns = tmp_result_columns;
+        }else{
+            result_columns.emplace_back(tmp_result_columns[0]);
+            result_columns.emplace_back(tmp_result_columns.back());
+        }
+
 
         task->mark_ranges.clear();
         if (result_row_num > 0)
