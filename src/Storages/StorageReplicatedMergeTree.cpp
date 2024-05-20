@@ -5744,7 +5744,8 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         /// clear nvme cache
         /// no need clear nvme cache in this field, reload vector index will reuse this cache.
-        clearVectorNvmeCache();
+        auto preload_indices = getPreloadVectorIndicesFromZK();
+        clearVectorNvmeCache(preload_indices);
 
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
@@ -11238,7 +11239,7 @@ void StorageReplicatedMergeTree::attachRestoredParts(MutableDataPartsVector && p
         sink->writeExistingPart(part);
 }
 
-void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
+std::unordered_map<String, std::unordered_set<String>> StorageReplicatedMergeTree::getPreloadVectorIndicesFromZK()
 {
     auto zookeeper = getZooKeeper();
 
@@ -11272,7 +11273,7 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
     if (vector_index_info.empty())
     {
         LOG_INFO(log, "No vector index info found on zookeeper for table {}", getStorageID().getFullTableName());
-        return;
+        return {};
     }
 
     ReadBufferFromString in(vector_index_info);
@@ -11293,6 +11294,14 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
             vector_indices.try_emplace(part_name, set);
         }
     }
+
+    return vector_indices;
+}
+
+void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
+{
+    
+    std::unordered_map<String, std::unordered_set<String>> vector_indices = getPreloadVectorIndicesFromZK();
 
     LOG_INFO(log, "Load {} vector indices from keeper", vector_indices.size());
 
