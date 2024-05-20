@@ -2455,13 +2455,59 @@ void MergeTreeData::clearPKCache(const DataPartsVector & parts)
     }
 }
 
-void MergeTreeData::clearVectorNvmeCache() const
+void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices) const
 {
     auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
+    std::vector<String> will_remove_cache_folder;
     if (fs::exists(vector_nvme_cache_folder))
     {
-        LOG_INFO(log, "Remove nvme cache folder: {}", vector_nvme_cache_folder);
-        fs::remove_all(vector_nvme_cache_folder);
+        try
+        {
+            for (const auto& entry : fs::directory_iterator(vector_nvme_cache_folder))
+            {
+                if (entry.is_directory())
+                {
+                    String cache_folder = entry.path().filename();
+                    std::vector<String> tokens;
+                    boost::split(tokens, cache_folder, boost::is_any_of("-"));
+                    if (tokens.size() != 2)
+                    {
+                        LOG_DEBUG(log, "Remove Illegal nvme cache folder: {}", cache_folder);
+                        will_remove_cache_folder.emplace_back(cache_folder);
+                        continue;
+                    }
+                    
+                    String part_name = tokens[0];
+                    String index_name = tokens[1];
+                    if (!preload_indices.contains(part_name) || !preload_indices[part_name].contains(index_name))
+                    {
+                        /// This cache not in proload indices set, will remove
+                        LOG_DEBUG(log, "Cache folder {} isn't in proload indices set, will remove", cache_folder);
+                        will_remove_cache_folder.emplace_back(cache_folder);
+                        continue;
+                    }
+                }
+                else
+                {
+                    LOG_DEBUG(log, "Remove Illegal nvme cache folder: {}", entry.path().filename());
+                    will_remove_cache_folder.emplace_back(entry.path().filename());
+                    continue;
+                }
+            }
+        } 
+        catch (...) 
+        {
+            LOG_ERROR(log, "Clear Nvme Cache error, Will Clear all cache.");
+            fs::remove_all(vector_nvme_cache_folder);
+            return;
+        }
+    }
+
+    for (const auto & remove_file : will_remove_cache_folder)
+    {
+        auto path = fs::path(vector_nvme_cache_folder) / remove_file;
+        LOG_DEBUG(log, "Remove Index Cache Path: {}", path);
+        fs::remove_all(path);
     }
 }
 
