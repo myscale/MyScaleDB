@@ -201,7 +201,7 @@ public:
         std::shared_ptr<MergeTreeDataPartChecksums> & vector_index_checksum,
         VIBuildMemoryUsageHelper & build_memory_lock);
 
-    IndexWithMetaHolderPtr load(SegmentId & segment_id, bool is_active = true, const String & nvme_cache_path_uuid = "");
+    IndexWithMetaHolderPtr load(SegmentId & segment_id, bool is_active = true);
 
     IndexWithMetaHolderPtr loadDecoupleCache(SegmentId & segment_id);
 
@@ -240,7 +240,7 @@ public:
     static bool canMergeForColumnIndex(const MergeTreeDataPartPtr & left, const MergeTreeDataPartPtr & right, const String & vec_index_name);
 
 private:
-    VIVariantPtr createIndex() const;
+    VIVariantPtr createIndex(bool is_dummy = true) const;
 
 #ifdef ENABLE_SCANN
     std::shared_ptr<DiskIOManager> getDiskIOManager() const;
@@ -296,7 +296,7 @@ void VIWithColumnInPart::buildIndex(
     if (num_threads == 0)
         num_threads = 1;
 
-    index_variant = createIndex();
+    index_variant = createIndex(false);
     typename SearchIndexDataTypeMap<T>::VectorIndexPtr index_ptr;
     if constexpr (T == Search::DataType::FloatVector)
     {
