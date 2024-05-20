@@ -339,32 +339,53 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
         return;
     }
 
-/*
+
     if(isFinal(query_info))
     {
-        std::vector<String> add_columns = metadata_for_reading->getColumnsRequiredForSortingKey();
-        column_names_to_read.insert(column_names_to_read.end(), add_columns.begin(), add_columns.end());
+        std::set<String> add_columns;
+        add_columns.insert(column_names_to_read.begin(),column_names_to_read.end());
+
+        for(auto temp_name : metadata_for_reading->getColumnsRequiredForSortingKey())
+        {
+            if(!add_columns.contains(temp_name))
+            {
+                column_names_to_read.push_back(temp_name);
+                add_columns.insert(temp_name);
+            }
+        }
 
         if (!data.merging_params.is_deleted_column.empty())
         {
-            column_names_to_read.push_back(data.merging_params.is_deleted_column);
+            if(!add_columns.contains(data.merging_params.is_deleted_column))
+            {
+                column_names_to_read.push_back(data.merging_params.is_deleted_column);
+                add_columns.insert(data.merging_params.is_deleted_column);
+            }
+
             LOG_DEBUG(log, "merging_params.is_deleted_column is : {}", data.merging_params.is_deleted_column);
         }
         if (!data.merging_params.sign_column.empty())
         {
-            column_names_to_read.push_back(data.merging_params.sign_column);
+            if(!add_columns.contains(data.merging_params.sign_column))
+            {
+                column_names_to_read.push_back(data.merging_params.sign_column);
+                add_columns.insert(data.merging_params.sign_column);
+            }
+
             LOG_DEBUG(log, "merging_params.sign_column is : {}", data.merging_params.sign_column);
         }
         if (!data.merging_params.version_column.empty())
         {
-            column_names_to_read.push_back(data.merging_params.version_column);
+            if(!add_columns.contains(data.merging_params.version_column))
+            {
+                column_names_to_read.push_back(data.merging_params.version_column);
+                add_columns.insert(data.merging_params.version_column);
+            }
             LOG_DEBUG(log, "merging_params.version_column is : {}", data.merging_params.version_column);
         }
 
-        ::sort(column_names_to_read.begin(), column_names_to_read.end());
-        column_names_to_read.erase(std::unique(column_names_to_read.begin(), column_names_to_read.end()), column_names_to_read.end());
     }
-*/
+
 
     /// Reference spreadMarkRangesAmongStreams()
     pipe = createReadProcessorsAmongParts(
@@ -515,7 +536,7 @@ Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
         });
     }
 
-/*
+
     if(isFinal(query_info))
     {
         /// Add generating sorting key processor
@@ -550,7 +571,7 @@ Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
             max_block_size);
 
     }
-*/
+
 
     return pipe;
 }
