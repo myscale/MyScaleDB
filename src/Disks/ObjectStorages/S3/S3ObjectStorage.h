@@ -50,7 +50,8 @@ private:
         String version_id_,
         const S3Capabilities & s3_capabilities_,
         String bucket_,
-        String connection_string)
+        String connection_string,
+        ContextPtr context = nullptr)
         : bucket(bucket_)
         , client(std::move(client_))
         , s3_settings(std::move(s3_settings_))
@@ -61,6 +62,8 @@ private:
         data_source_description.description = connection_string;
         data_source_description.is_cached = false;
         data_source_description.is_encrypted = false;
+        if (context)
+            applyRemoteThrottlingSettings(context);
 
         log = &Poco::Logger::get(logger_name);
     }
