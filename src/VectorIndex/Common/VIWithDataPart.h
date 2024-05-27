@@ -22,6 +22,7 @@
 #include <Common/RWLock.h>
 
 
+#define WAIT_BUILD_INDEX_TIMEOUT 10 * 1000 /// 10s
 namespace VectorIndex
 {
 
@@ -221,6 +222,8 @@ public:
         bool first_stage_only);
 
     bool hasUsableVectorIndex();
+
+    void waitBuildFinish(const size_t timeout = WAIT_BUILD_INDEX_TIMEOUT);
 
     static void transferToNewRowIds(const VIWithMeta & index_with_meta, SearchResultPtr result);
 
@@ -436,6 +439,8 @@ public:
     void cancelIndexBuild(const String & index_name);
 
     void cancelAllIndexBuild();
+
+    void waitAllIndexFinish();
 
     void convertIndexFileForUpgrade();
 

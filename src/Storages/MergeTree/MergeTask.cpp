@@ -1453,6 +1453,13 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         /// has no vector index, but should init index from local metadata.
         global_ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
 
+    /// Cancel source part build vector index
+    for (auto & old_part : global_ctx->future_part->parts)
+    {
+        old_part->vector_index.cancelAllIndexBuild();
+        old_part->vector_index.waitAllIndexFinish();
+    }
+
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
     global_ctx->promise.set_value(global_ctx->new_data_part);
 
