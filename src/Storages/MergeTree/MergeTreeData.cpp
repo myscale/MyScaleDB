@@ -2831,34 +2831,60 @@ void MergeTreeData::clearPKCache(const DataPartsVector & parts)
 
 void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices) const
 {
-    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
+    auto vector_nvme_cache_folder
+        = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
     std::vector<String> will_remove_cache_folder;
     if (fs::exists(vector_nvme_cache_folder))
     {
         try
         {
-            for (const auto& entry : fs::directory_iterator(vector_nvme_cache_folder))
+            for (const auto & entry : fs::directory_iterator(vector_nvme_cache_folder))
             {
                 if (entry.is_directory())
                 {
                     String cache_folder = entry.path().filename();
                     std::vector<String> tokens;
                     boost::split(tokens, cache_folder, boost::is_any_of("-"));
-                    if (tokens.size() != 2)
+                    if (tokens.size() != 2 && tokens.size() != 3)
                     {
                         LOG_DEBUG(log, "Remove Illegal nvme cache folder: {}", cache_folder);
                         will_remove_cache_folder.emplace_back(cache_folder);
                         continue;
                     }
-                    
+
                     String part_name = tokens[0];
                     String index_name = tokens[1];
-                    if (!preload_indices.contains(part_name) || !preload_indices[part_name].contains(index_name))
+                    auto part = getActiveContainingPart(part_name);
+                    String active_part_name = part->info.getPartNameWithoutMutation();
+                    if (!preload_indices.contains(active_part_name) || !preload_indices[active_part_name].contains(index_name))
                     {
                         /// This cache not in proload indices set, will remove
                         LOG_DEBUG(log, "Cache folder {} isn't in proload indices set, will remove", cache_folder);
                         will_remove_cache_folder.emplace_back(cache_folder);
                         continue;
+                    }
+
+                    if (active_part_name != part_name)
+                    {
+                        auto column_index = part->vector_index.getColumnIndex(index_name);
+                        if (!column_index.has_value() || column_index.value()->getVectorIndexState() == VIState::BUILT)
+                        {
+                            LOG_DEBUG(
+                                log,
+                                "Active contain part {} already has single vector index, will remove cache folder {}",
+                                part->name,
+                                cache_folder);
+                            will_remove_cache_folder.emplace_back(cache_folder);
+                            continue;
+                        }
+                        if (tokens.size() == 2)
+                        {
+                            LOG_DEBUG(log, "Decouple index, will add '-decouple' suffix to cache folder: {}", cache_folder);
+                            String final_cache_folder = cache_folder + "-decouple";
+                            String source_path = fs::path(vector_nvme_cache_folder) / cache_folder;
+                            String dest_path = fs::path(vector_nvme_cache_folder) / final_cache_folder;
+                            fs::rename(source_path, dest_path);
+                        }
                     }
                 }
                 else
@@ -2868,8 +2894,8 @@ void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unorder
                     continue;
                 }
             }
-        } 
-        catch (...) 
+        }
+        catch (...)
         {
             LOG_ERROR(log, "Clear Nvme Cache error, Will Clear all cache.");
             fs::remove_all(vector_nvme_cache_folder);
