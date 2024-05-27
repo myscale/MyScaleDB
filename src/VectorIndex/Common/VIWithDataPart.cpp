@@ -667,6 +667,10 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
 
             String vector_index_cache_prefix = getVectorIndexCachePrefix(
                 part_storage->getRelativePath(), segment_id.getCacheKey().part_name_no_mutation, index_name);
+            
+            if (segment_id.fromMergedParts())
+                vector_index_cache_prefix = fs::path(vector_index_cache_prefix).parent_path().string() + String("-decouple/");
+
             VIVariantPtr index_variant;
 
             if (vector_search_type == Search::DataType::FloatVector)
@@ -987,6 +991,21 @@ SearchResultPtr VIWithColumnInPart::search(
     }
 }
 
+void VIWithColumnInPart::waitBuildFinish(const size_t timeout)
+{
+    auto timeout_duration = std::chrono::milliseconds(timeout);
+    std::chrono::steady_clock::time_point end_of_timeout
+        = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout_duration);
+    while (std::chrono::steady_clock::now() < end_of_timeout)
+    {
+        if (build_index_info->state != VIState::BUILDING)
+            return;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    LOG_WARNING(log, "Wait index build finish timeout.");
+}
+
+
 bool VIWithDataPart::isBuildCancelled(const String & index_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
@@ -1007,6 +1026,13 @@ void VIWithDataPart::cancelAllIndexBuild()
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
         it.second->cancelBuild();
+}
+
+void VIWithDataPart::waitAllIndexFinish()
+{
+    std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
+    for (auto it : vector_indices)
+        it.second->waitBuildFinish();
 }
 
 /// revert according std::optional
