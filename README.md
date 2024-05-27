@@ -49,6 +49,13 @@ Key benefits of using MyScaleDB include:
 * Highly reliable & linearly scalable
 * Powerful [text-search](https://myscale.com/docs/en/text-search/) and text/vector [hybrid search](https://myscale.com/docs/en/hybrid-search/) functions
 * Complex SQL vector queries
+* LLM observability with [MyScale Telemetry](https://github.com/myscale/myscale-telemetry)
+
+MyScale unifies three systems: SQL database/data warehouse, vector database, as well as full-text search engine into one system in a highly efficient manner. It not only saves infrastructure and maintenance costs, but enables joint data queries and analytics as well.
+
+<p align="center">
+<img src="docs/assets/myscale-all-in-one.png" width=500 alt="MyScale Architecture">
+</p>
 
 See our [documentation](https://myscale.com/docs/en/) and [blogs](https://myscale.com/blog/) for more about MyScale’s unique features and advantages. Our [open-source benchmark](https://myscale.github.io/benchmark/) provides detailed comparison with other vector database products.
 
@@ -246,7 +253,7 @@ We're committed to continuously improving and evolving MyScaleDB to meet the eve
 
 * [x] Inverted index & performant keyword/vector hybrid search ([supported since 1.5](https://myscale.com/blog/text-search-and-hybrid-search-in-myscale/))
 * [ ] Support more storage engines, e.g. `ReplacingMergeTree`
-* [ ] LLM observability with MyScaleDB
+* [x] LLM observability with MyScaleDB and [MyScale Telemetry](https://github.com/myscale/myscale-telemetry)
 * [ ] Data-centric LLM
 * [ ] Automatic data science with MyScaleDB
 
