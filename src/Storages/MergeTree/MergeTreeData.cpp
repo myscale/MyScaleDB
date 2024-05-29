@@ -2481,6 +2481,13 @@ void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unorder
                     String part_name = tokens[0];
                     String index_name = tokens[1];
                     auto part = getActiveContainingPart(part_name);
+                    if (!part)
+                    {
+                        LOG_DEBUG(log, "Does not has active part contain old part {}, Remove Illegal nvme cache folder: {}", part_name, cache_folder);
+                        will_remove_cache_folder.emplace_back(cache_folder);
+                        continue;
+                    }
+
                     String active_part_name = part->info.getPartNameWithoutMutation();
                     if (!preload_indices.contains(active_part_name) || !preload_indices[active_part_name].contains(index_name))
                     {
