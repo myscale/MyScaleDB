@@ -809,11 +809,10 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                 int i = 0;
                 while (old_row_id < partRowNum)
                 {
+                    UInt64 new_row_id = -1;
                     if (parts_new_row_ids[source_num].count(old_row_id) > 0)
                     {
-                        UInt64 new_row_id = parts_new_row_ids[source_num][old_row_id];
-                        writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                        writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+                        new_row_id = parts_new_row_ids[source_num][old_row_id];
                     }
                     else
                     {
@@ -821,6 +820,8 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                         deleteRowIds[i] = static_cast<UInt64>(old_row_id);
                         i++;
                     }
+                    writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+                    writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
                     ++old_row_id;
                 }
 
