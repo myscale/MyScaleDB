@@ -9,6 +9,7 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <base/types.h>
 #include <Common/logger_useful.h>
+#include <Processors/Transforms/ColumnGathererTransform.h>
 
 namespace fs = std::filesystem;
 
@@ -77,6 +78,12 @@ std::tuple<std::shared_ptr<RowIds>, std::shared_ptr<RowIds>, std::shared_ptr<Row
 
         while (row_source_pos < row_sources_end)
         {
+            if (*row_source_pos & DB::RowSourcePart::MASK_FLAG)
+            {
+                ++row_source_pos;
+                continue;
+            }
+
             inverted_row_sources_map->push_back(*row_source_pos);
             ++row_source_pos;
         }
@@ -99,7 +106,6 @@ std::tuple<std::shared_ptr<RowIds>, std::shared_ptr<RowIds>, std::shared_ptr<Row
         inverted_row_ids_map_buf->ignore();
         inverted_row_ids_map->push_back(row_id);
     }
-
     return std::make_tuple(
         row_ids_map, inverted_row_ids_map, inverted_row_sources_map);
 }
