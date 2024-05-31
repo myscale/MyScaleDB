@@ -47,7 +47,8 @@ public:
         ContextPtr context,
         const Names & key_column_names,
         const ExpressionActionsPtr & key_expr,
-        bool single_point_ = false);
+        bool single_point_ = false,
+        bool unknown_false_ = false);
 
     /// Whether the condition and its negation are feasible in the direct product of single column ranges specified by `hyperrectangle`.
     BoolMask checkInHyperrectangle(
@@ -421,6 +422,10 @@ private:
     /// example, the `match` function can produce a FUNCTION_IN_RANGE atom based
     /// on a given regular expression, which is relaxed for simplicity.
     bool relaxed = false;
+
+    /// If true, FUCTION_UNKNOWN will be [false, true] in checkInHyperrectangle().
+    /// Used for vector scan search to confirm if performPrefilter() is needed.
+    bool unknown_false;
 };
 
 String extractFixedPrefixFromLikePattern(std::string_view like_pattern, bool requires_perfect_prefix);
