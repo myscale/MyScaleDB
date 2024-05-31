@@ -736,12 +736,14 @@ KeyCondition::KeyCondition(
     const ExpressionActionsPtr & key_expr_,
     NameSet array_joined_column_names_,
     bool single_point_,
-    bool strict_)
+    bool strict_,
+    bool unknown_false_)
     : key_expr(key_expr_)
     , key_subexpr_names(getAllSubexpressionNames(*key_expr))
     , array_joined_column_names(std::move(array_joined_column_names_))
     , single_point(single_point_)
     , strict(strict_)
+    , unknown_false(unknown_false_)
 {
     for (const auto & name : key_column_names)
         if (!key_columns.contains(name))
@@ -779,7 +781,8 @@ KeyCondition::KeyCondition(
     const Names & key_column_names,
     const ExpressionActionsPtr & key_expr_,
     bool single_point_,
-    bool strict_)
+    bool strict_,
+    bool unknown_false_)
     : KeyCondition(
         query_info.query,
         query_info.filter_asts,
@@ -790,7 +793,8 @@ KeyCondition::KeyCondition(
         key_expr_,
         query_info.syntax_analyzer_result ? query_info.syntax_analyzer_result->getArrayJoinSourceNameSet() : NameSet{},
         single_point_,
-        strict_)
+        strict_,
+        unknown_false_)
 {
 }
 
@@ -801,12 +805,14 @@ KeyCondition::KeyCondition(
     const ExpressionActionsPtr & key_expr_,
     NameSet array_joined_column_names_,
     bool single_point_,
-    bool strict_)
+    bool strict_,
+    bool unknown_false_)
     : key_expr(key_expr_)
     , key_subexpr_names(getAllSubexpressionNames(*key_expr))
     , array_joined_column_names(std::move(array_joined_column_names_))
     , single_point(single_point_)
     , strict(strict_)
+    , unknown_false(unknown_false_)
 {
     for (const auto & name : key_column_names)
         if (!key_columns.contains(name))
@@ -2219,7 +2225,10 @@ BoolMask KeyCondition::checkInHyperrectangle(
     {
         if (element.function == RPNElement::FUNCTION_UNKNOWN)
         {
-            rpn_stack.emplace_back(true, true);
+            if (unknown_false)
+                rpn_stack.emplace_back(false, true);
+            else
+                rpn_stack.emplace_back(true, true);
         }
         else if (element.function == RPNElement::FUNCTION_IN_RANGE
             || element.function == RPNElement::FUNCTION_NOT_IN_RANGE)

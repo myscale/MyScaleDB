@@ -228,7 +228,8 @@ public:
         const ExpressionActionsPtr & key_expr,
         NameSet array_joined_column_names,
         bool single_point_ = false,
-        bool strict_ = false);
+        bool strict_ = false,
+        bool unknown_false_ = false);
 
     /** Construct key condition from AST SELECT query WHERE, PREWHERE and additional filters.
       * Select query, additional filters, prepared sets are initialized using query info.
@@ -239,7 +240,8 @@ public:
         const Names & key_column_names,
         const ExpressionActionsPtr & key_expr_,
         bool single_point_ = false,
-        bool strict_ = false);
+        bool strict_ = false,
+        bool unknown_false_ = false);
 
     /// Construct key condition from ActionsDAG nodes
     KeyCondition(
@@ -249,7 +251,8 @@ public:
         const ExpressionActionsPtr & key_expr,
         NameSet array_joined_column_names,
         bool single_point_ = false,
-        bool strict_ = false);
+        bool strict_ = false,
+        bool unknown_false_ = false);
 
     /// Whether the condition and its negation are feasible in the direct product of single column ranges specified by `hyperrectangle`.
     BoolMask checkInHyperrectangle(
@@ -491,6 +494,10 @@ private:
 
     // If true, do not use always_monotonic information to transform constants
     bool strict;
+
+    /// If true, FUCTION_UNKNOWN will be [false, true] in checkInHyperrectangle().
+    /// Used for vector scan search to confirm if performPrefilter() is needed.
+    bool unknown_false;
 };
 
 String extractFixedPrefixFromLikePattern(std::string_view like_pattern, bool requires_perfect_prefix);

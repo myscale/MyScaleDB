@@ -1,0 +1,18 @@
+Select with optimize_prefilter_in_search enabled
+0
+2
+4
+6
+8
+Select with optimize_prefilter_in_search enabled and OR condition
+1
+0
+2
+4
+6
+Select with optimize_prefilter_in_search disabled
+0
+2
+4
+6
+8
