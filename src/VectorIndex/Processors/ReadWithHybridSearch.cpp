@@ -586,14 +586,6 @@ Pipe ReadWithHybridSearch::readFromParts(
     if (!query_info.has_hybrid_search)
         return {};
 
-    /// Prewhere info should not be changed, because it is shared by parts.
-    if (prewhere_info)
-    {
-        /// need_filter is false when both prewhere and where exist, prewhere will be delayed, all read rows with a prehwere_column returned.
-        /// In this case, we need only rows statisfied prewhere conditions.
-        prewhere_info->need_filter = true;
-    }
-
     for (const auto & part : parts)
     {
         MergeTreeBaseSearchManagerPtr search_manager = nullptr;
@@ -621,6 +613,8 @@ Pipe ReadWithHybridSearch::readFromParts(
 
         auto algorithm = std::make_unique<MergeTreeSelectWithHybridSearchProcessor>(
             search_manager,
+            context,
+            requested_num_streams,
             data,
             storage_snapshot,
             part.data_part,
