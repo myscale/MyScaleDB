@@ -802,10 +802,12 @@ KeyCondition::KeyCondition(
     ContextPtr context,
     const Names & key_column_names,
     const ExpressionActionsPtr & key_expr_,
-    bool single_point_)
+    bool single_point_,
+    bool unknown_false_)
     : key_expr(key_expr_)
     , key_subexpr_names(getAllSubexpressionNames(*key_expr))
     , single_point(single_point_)
+    , unknown_false(unknown_false_)
 {
     size_t key_index = 0;
     for (const auto & name : key_column_names)
@@ -2860,7 +2862,10 @@ BoolMask KeyCondition::checkInHyperrectangle(
         }
         else if (element.function == RPNElement::FUNCTION_UNKNOWN)
         {
-            rpn_stack.emplace_back(true, true);
+            if (unknown_false)
+                rpn_stack.emplace_back(false, true);
+            else
+                rpn_stack.emplace_back(true, true);
         }
         else if (element.function == RPNElement::FUNCTION_IN_RANGE
             || element.function == RPNElement::FUNCTION_NOT_IN_RANGE)
