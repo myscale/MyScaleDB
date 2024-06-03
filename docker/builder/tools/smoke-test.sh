@@ -3,14 +3,14 @@ set -e
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_smoke
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_smoke
 SHA_TO_TEST=${2:-run_for_test}
 
 if [[ $1 == "clean" ]];
 then
-    rm -rf $PROJECT_PATH/docker/test/mqdb_test_stress/tests/*;
-    rm -rf $PROJECT_PATH/docker/test/mqdb_test_stress/packages/*;
-    rm -rf $PROJECT_PATH/docker/test/mqdb_test_stress/test_output/*;
+    rm -rf $PROJECT_PATH/docker/test/myscale_test_stress/tests/*;
+    rm -rf $PROJECT_PATH/docker/test/myscale_test_stress/packages/*;
+    rm -rf $PROJECT_PATH/docker/test/myscale_test_stress/test_output/*;
     exit 0;
 fi
 

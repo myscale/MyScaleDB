@@ -218,7 +218,7 @@ protected:
                     throw DB::Exception(DB::ErrorCodes::INCORRECT_DATA, "Vector column data length does not meet constraint in part {}", part->name);
                 if (vec_start_offset != vec_end_offset)
                 {
-                    /// this is a valid vector, copy it to the result
+                    /// Legal vector, copy it to the result
                     for (size_t i = 0; i < dimension && i < vec_end_offset - vec_start_offset; ++i)
                     {
                         vector_raw_data[row * dimension + i] = src_vec[vec_start_offset + i];
@@ -226,7 +226,7 @@ protected:
                     ids[row] = current_round_start_row + row;
                 } else
                 {
-                    /// this is an empty vector
+                    /// Illegal vector
                     empty_ids.emplace_back(current_round_start_row + row);
                 }
             }

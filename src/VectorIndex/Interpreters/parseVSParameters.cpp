@@ -11,6 +11,9 @@
 #pragma clang diagnostic ignored "-Wimplicit-fallthrough"
 #pragma clang diagnostic ignored "-Wfloat-conversion"
 #pragma clang diagnostic ignored "-Wimplicit-float-conversion"
+#pragma clang diagnostic ignored "-Wcovered-switch-default"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wunused-function"
 #include <SearchIndex/VectorSearch.h>
 #pragma clang diagnostic pop
 #endif
@@ -197,7 +200,6 @@ String parse_arg(String & input, const String index_type, bool check_parameter)
         }
     }
 
-    // LOG_DEBUG(&Poco::Logger::get("parse arg"), "{}:{} {}", key, value, check_);
     if (check_)
         return "\"" + key + "\":" + value + ", ";
     return "\"" + key + "\":\"" + value + "\", ";

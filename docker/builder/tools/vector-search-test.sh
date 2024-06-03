@@ -9,27 +9,27 @@ fi
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stateless
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_stateless
 
 THREAD_SANITIZER_TEST=${1:-false}
 if [ $THREAD_SANITIZER_TEST == "true" ]; then
-    sed -i 's?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.3?' docker/test/mqdb_run_stateless/Dockerfile
+    sed -i 's?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.2?FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.3?' docker/test/myscale_run_stateless/Dockerfile
 fi
 
-mkdir docker/test/mqdb_run_stateless/tests/queries
-cp -rfv artifacts/clickhouse-*.deb docker/test/mqdb_run_stateless/packages
-cp -rfv docker/test/mqdb_test_script/clickhouse-test docker/test/mqdb_run_stateless/clickhouse-test
-cp -rfv tests/queries/2_vector_search docker/test/mqdb_run_stateless/tests/queries/
-cp -rfv tests/performance docker/test/mqdb_run_stateless/tests/
-cp -rfv tests/config docker/test/mqdb_run_stateless/tests/
-cp -rfv tests/clickhouse-test docker/test/mqdb_run_stateless/
+mkdir docker/test/myscale_run_stateless/tests/queries
+cp -rfv artifacts/clickhouse-*.deb docker/test/myscale_run_stateless/packages
+cp -rfv docker/test/myscale_test_script/clickhouse-test docker/test/myscale_run_stateless/clickhouse-test
+cp -rfv tests/queries/2_vector_search docker/test/myscale_run_stateless/tests/queries/
+cp -rfv tests/performance docker/test/myscale_run_stateless/tests/
+cp -rfv tests/config docker/test/myscale_run_stateless/tests/
+cp -rfv tests/clickhouse-test docker/test/myscale_run_stateless/
 
 ADDITIONAL_OPTIONS="--hung-check --print-time --no-stateless --no-stateful $FORCE_RETRY"
 
 if [ $ADDRESS_SANITIZER_TEST == "true" ]; then
     # use docker-in-docker for asan test, because it requires SYS_PTRACE capability
     docker rm -f stateless-test >/dev/null 2>&1 || true
-    docker build --rm=true -t run-stateless-test docker/test/mqdb_run_stateless
+    docker build --rm=true -t run-stateless-test docker/test/myscale_run_stateless
 
     docker run --rm --user root \
       --volume=$WORKPATH/test_output:/test_output \

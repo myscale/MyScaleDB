@@ -48,7 +48,6 @@ MergeTreeDataPartChecksums moveVectorIndexFiles(
 {
     LOG_DEBUG(&Poco::Logger::get("VIUtils"), "Create hard link for vector index {} file From {} to {}.", vec_index_name, old_data_part->name, new_data_part->name);
     const auto & old_storage = old_data_part->getDataPartStorage();
-    // auto & mutable_old_storage = const_cast<DB::IDataPartStorage &>(old_storage);
     auto & new_storage = new_data_part->getDataPartStorage();
 
     bool both_on_disk = !old_storage.isStoredOnRemoteDisk() && !new_storage.isStoredOnRemoteDisk();

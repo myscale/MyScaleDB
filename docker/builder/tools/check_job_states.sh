@@ -101,24 +101,24 @@ function check_integration
     echo "don't support"
 }
 
-if [[ "$TEST_NAME" == "mqdb_run_stateful" ]]; then
+if [[ "$TEST_NAME" == "myscale_run_stateful" ]]; then
     check_stateful
-elif [[ "$TEST_NAME" == "mqdb_run_stateless" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_stateless" ]]; then
     if [ -n "$WITH_SANITIZER" ]; then
         check_stateles_sanitizer_test
     else
         check_stateless
     fi
-elif [[ "$TEST_NAME" == "mqdb_run_fuzzer" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_fuzzer" ]]; then
     check_fuzzer
-elif [[ "$TEST_NAME" == "mqdb_run_smoke" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_smoke" ]]; then
     check_smoke
-elif [[ "$TEST_NAME" == "mqdb_run_stress" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_stress" ]]; then
     # check_stress
     check_stress_temporary
-elif [[ "$TEST_NAME" == "mqdb_run_performance" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_performance" ]]; then
     check_performance
-elif [[ "$TEST_NAME" == "mqdb_run_integration" ]]; then
+elif [[ "$TEST_NAME" == "myscale_run_integration" ]]; then
     check_integration
 else
     echo "please entry the correct test name"

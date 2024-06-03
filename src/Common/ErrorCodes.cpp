@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <chrono>
@@ -629,7 +625,7 @@
     \
     M(900, DISTRIBUTED_CACHE_ERROR) \
     M(901, CANNOT_USE_DISTRIBUTED_CACHE) \
-    M(902, LICENSE_ERROR) \
+    M(902, LICENSE_ERROR) /*MYSCALE_OSS_DELETE_LINE*/ \
     M(903, UNKNOWN_EXCEPTION) \
     \
     M(999, KEEPER_EXCEPTION) \

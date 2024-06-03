@@ -738,7 +738,6 @@ VIBuiltStatus VIBuilderUpdater::TryMoveVIFiles(const VIContextPtr ctx)
         if (ctx->source_column_index->getVectorIndexState() == VIState::BUILT)
             return VIBuiltStatus{VIBuiltStatus::BUILD_SKIPPED};
 
-        // ctx->write_event_log(VIEventLogElement::BUILD_ERROR, e.code(), e.message());
         return VIBuiltStatus{VIBuiltStatus::BUILD_FAIL, e.code(), e.message()};
     }
 

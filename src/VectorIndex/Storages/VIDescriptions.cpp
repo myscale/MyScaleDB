@@ -72,7 +72,6 @@ VIDescription & VIDescription::operator=(const VIDescription & other)
     parameters = other.parameters;
     dim = other.dim;
     vector_search_type = other.vector_search_type;
-    // granularity = other.granularity;
     return *this;
 }
 
@@ -178,8 +177,6 @@ VIDescription VIDescription::getVectorIndexFromAST(
         size_t comma_index = 0;
         if ((comma_index = param_str.rfind(',')) != String::npos)
             param_str.erase(comma_index, 1);
-
-        //LOG_DEBUG(&Poco::Logger::get("test parse arg"), param_str);
     }
     LOG_TRACE(&Poco::Logger::get("get vector index from ast"), "after parameter check, param_str is {}", param_str);
     if (result.arguments.size() > 0)
@@ -189,8 +186,6 @@ VIDescription VIDescription::getVectorIndexFromAST(
             auto json_res = json_parser.parse(param_str);
             Poco::JSON::Object::Ptr object = json_res.extract<Poco::JSON::Object::Ptr>();
             result.parameters = object;
-            // String test = result.parameters->get("metric");
-            // LOG_DEBUG(&Poco::Logger::get("test parse arg"), test);
         }
         catch ([[maybe_unused]] const std::exception & e)
         {
@@ -204,7 +199,6 @@ VIDescription VIDescription::getVectorIndexFromAST(
 
 String VIDescription::parse_arg(String & input, const String verify_json, const String index_type, int _dim, bool check_parameter)
 {
-    // LOG_DEBUG(&Poco::Logger::get("parse arg"), input);
     size_t index = 0;
     if (!input.empty())
     {
@@ -391,7 +385,6 @@ String VIDescription::parse_arg(String & input, const String verify_json, const 
         }
     }
 
-    // LOG_DEBUG(&Poco::Logger::get("parse arg"), "{}:{} {}", key, value, check_);
     if (check_)
         return "\"" + key + "\":" + value + ", ";
     return "\"" + key + "\":\"" + value + "\", ";

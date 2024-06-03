@@ -247,12 +247,10 @@ bool ParserStatisticsDeclarationWithoutTypes::parseImpl(Pos & pos, ASTPtr & node
 bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserKeyword s_type(Keyword::TYPE);
-    // ParserKeyword s_granularity("GRANULARITY");
 
     ParserIdentifier name_p;
     ParserCompoundIdentifier column_p;
     ParserDataType data_type_p;
-    // ParserUnsignedInteger granularity_p;
 
     ASTPtr name;
     ASTPtr column;
@@ -278,17 +276,9 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
         type = function_node;
     }
 
-
-    // if (!s_granularity.ignore(pos, expected))
-    //     return false;
-
-    // if (!granularity_p.parse(pos, granularity, expected))
-    //     return false;
-
     auto index = std::make_shared<ASTVIDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();
-    // index->granularity = granularity->as<ASTLiteral &>().value.safeGet<UInt64>();
     index->set(index->type, type);
     node = index;
 
