@@ -13,7 +13,7 @@ set -o pipefail
 
 PROJECT_PATH=$1
 SHA_TO_TEST=$2
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_fuzzer
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_fuzzer
 PR_TO_TEST=0
 
 TEST_FLOAD=$WORKPATH

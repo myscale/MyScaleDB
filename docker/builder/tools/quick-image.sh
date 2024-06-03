@@ -8,7 +8,7 @@ fi
 
 source docker/builder/tools/version.sh
 
-cp -rfv artifacts/clickhouse-*.tgz docker/mqdb/
+cp -rfv artifacts/clickhouse-*.tgz docker/myscale/
 
 HARBOR_USER_NAME="$1"
 HARBOR_USER_PASSWORD="$2"
@@ -30,7 +30,7 @@ docker buildx build \
   --rm=true \
   -t $HARBOR_REGISTRY/$HARBOR_NAMESPACE/mqdb:${VERSION_STRING}-${GIT_COMMIT}-dev \
   -t $DOCKER_HUB_USER_NAME/mqdb:${VERSION_STRING}-${GIT_COMMIT}-dev \
-  docker/mqdb \
+  docker/myscale \
   --push
 
-rm -rfv docker/mqdb/clickhouse-*.tgz
+rm -rfv docker/myscale/clickhouse-*.tgz

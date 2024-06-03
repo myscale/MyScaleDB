@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 
 #include <Common/quoteString.h>
@@ -856,8 +852,6 @@ void ActionsMatcher::visit(ASTExpressionList & expression_list, const ASTPtr &, 
 
 void ActionsMatcher::visit(const ASTIdentifier & identifier, const ASTPtr &, Data & data)
 {
-    /// Poco::Logger * log = &Poco::Logger::get("ActionsMatcher");
-    /// LOG_DEBUG(log, "visit identifier: {}", identifier.dumpTree());
     auto column_name = identifier.getColumnName();
     if (data.hasColumn(column_name))
         return;
@@ -885,8 +879,6 @@ void ActionsMatcher::visit(const ASTIdentifier & identifier, const ASTPtr &, Dat
 
 void ActionsMatcher::visit(const ASTFunction & node, const ASTPtr & ast, Data & data)
 {
-    /// Poco::Logger * log = &Poco::Logger::get("ActionsMatcher");
-    /// LOG_DEBUG(log, "visit function: {}", node.dumpTree());
     auto column_name = ast->getColumnName();
     if (data.hasColumn(column_name))
         return;

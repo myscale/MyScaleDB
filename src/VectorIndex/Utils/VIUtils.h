@@ -102,7 +102,6 @@ String getVectorIndexCachePrefix(
     const String & part_name,
     const String & index_name);
 
-/// part name, nvme_cache_path uuid
 std::pair<String, String> getPartNameUUIDFromNvmeCachePath(const String & path_with_uuid);
 
 String generateUUIDv4();

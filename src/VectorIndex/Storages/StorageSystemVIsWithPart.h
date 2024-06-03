@@ -1,8 +1,5 @@
 #pragma once
-
-
 #include <Storages/IStorage.h>
-
 
 namespace DB
 {

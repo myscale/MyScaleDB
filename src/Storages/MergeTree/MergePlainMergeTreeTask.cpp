@@ -39,8 +39,6 @@ bool MergePlainMergeTreeTask::executeStep()
     if (merge_list_entry)
         switcher = std::make_unique<MemoryTrackerThreadSwitcher>(*merge_list_entry);
 
-    /// auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
-
     switch (state)
     {
         case State::NEED_PREPARE :
