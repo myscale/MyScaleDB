@@ -3,7 +3,7 @@ set -e
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_fuzzer
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_fuzzer
 SHA_TO_TEST=${2:-run_for_test}
 
 function clean

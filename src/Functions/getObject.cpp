@@ -158,7 +158,6 @@ public:
             flag_type = FlagType::AWSS3;
 
         std::shared_ptr<DataTypeEnum8> flag_element = std::make_shared<DataTypeEnum8>(getProvidersEnumsAndValues());
-        /// Field flag_type = flag_element->castToValue(static_cast<Field>(flag_value));
         auto col_flag = flag_element->createColumnConst(
             input_rows_count, static_cast<Field>(flag_type))->convertToFullColumnIfConst();
 
@@ -179,7 +178,6 @@ private:
         fs::path access_file_path = config_file_absolute_path / access_key_file_name;
         fs::path secret_file_path = config_file_absolute_path / secret_key_file_name;
 
-        /// Do some checks
         if (!fs::exists(access_file_path))
             throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "File {} doesn't exist.", access_file_path.string());
          if (!fs::exists(secret_file_path))

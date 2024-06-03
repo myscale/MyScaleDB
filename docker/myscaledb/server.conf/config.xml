@@ -1,0 +1,158 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger>
+        <level>error</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>1000M</size>
+        <count>10</count>
+        <console>1</console>
+    </logger>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <mysql_port>9004</mysql_port>
+    <postgresql_port>9005</postgresql_port>
+    <interserver_http_port>9009</interserver_http_port>
+    <max_connections>4096</max_connections>
+    <keep_alive_timeout>3</keep_alive_timeout>
+    <max_parts_in_total>10000</max_parts_in_total>
+    <max_concurrent_queries>1000</max_concurrent_queries>
+    <max_table_size_to_drop>1000000000000</max_table_size_to_drop>
+    <max_server_memory_usage>0</max_server_memory_usage>
+    <max_thread_pool_size>10000</max_thread_pool_size>
+    <max_server_memory_usage_to_ram_ratio>0.90</max_server_memory_usage_to_ram_ratio>
+    <total_memory_profiler_step>4194304</total_memory_profiler_step>
+    <total_memory_tracker_sample_probability>0</total_memory_tracker_sample_probability>
+    <uncompressed_cache_size>8589934592</uncompressed_cache_size>
+    <mark_cache_size>5368709120</mark_cache_size>
+    <mmap_cache_size>1000</mmap_cache_size>
+    <compiled_expression_cache_size>134217728</compiled_expression_cache_size>
+    <compiled_expression_cache_elements_size>10000</compiled_expression_cache_elements_size>
+
+    <path>/var/lib/clickhouse/</path>
+    <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+    <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
+
+    <user_directories>
+        <users_xml>
+            <path>users.xml</path>
+        </users_xml>
+        <local_directory>
+            <path>/var/lib/clickhouse/access/</path>
+        </local_directory>
+    </user_directories>
+
+    <default_profile>default</default_profile>
+    <custom_settings_prefixes></custom_settings_prefixes>
+    <default_database>default</default_database>
+    <timezone>Asia/Shanghai</timezone>
+    <mlock_executable>true</mlock_executable>
+    <remap_executable>false</remap_executable>
+    <builtin_dictionaries_reload_interval>3600</builtin_dictionaries_reload_interval>
+    <max_session_timeout>3600</max_session_timeout>
+    <default_session_timeout>60</default_session_timeout>
+
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+
+    <trace_log>
+        <database>system</database>
+        <table>trace_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </trace_log>
+
+    <query_thread_log>
+        <database>system</database>
+        <table>query_thread_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_thread_log>
+
+    <query_views_log>
+        <database>system</database>
+        <table>query_views_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_views_log>
+
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </part_log>
+
+    <metric_log>
+        <database>system</database>
+        <table>metric_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <collect_interval_milliseconds>1000</collect_interval_milliseconds>
+    </metric_log>
+
+    <asynchronous_metric_log>
+        <database>system</database>
+        <table>asynchronous_metric_log</table>
+        <flush_interval_milliseconds>7000</flush_interval_milliseconds>
+    </asynchronous_metric_log>
+
+    <opentelemetry_span_log>
+        <engine>
+            engine MergeTree
+            partition by toYYYYMM(finish_date)
+            order by (finish_date, finish_time_us, trace_id)
+        </engine>
+        <database>system</database>
+        <table>opentelemetry_span_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </opentelemetry_span_log>
+
+    <crash_log>
+        <database>system</database>
+        <table>crash_log</table>
+        <partition_by />
+        <flush_interval_milliseconds>1000</flush_interval_milliseconds>
+    </crash_log>
+
+    <session_log>
+        <database>system</database>
+        <table>session_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </session_log>
+
+
+    <dictionaries_config>*_dictionary.xml</dictionaries_config>
+    <user_defined_executable_functions_config>*_function.xml</user_defined_executable_functions_config>
+
+    <!--
+    <distributed_ddl>
+        <path>/clickhouse/task_queue/ddl</path>
+    </distributed_ddl> 
+    -->
+
+    <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+
+    <query_masking_rules>
+        <rule>
+            <name>hide encrypt/decrypt arguments</name>
+            <regexp>((?:aes_)?(?:encrypt|decrypt)(?:_mysql)?)\s*\(\s*(?:'(?:\\'|.)+'|.*?)\s*\)</regexp>
+            <replace>\1(???)</replace>
+        </rule>
+    </query_masking_rules>
+
+    <merge_tree>
+        <enable_primary_key_cache>true</enable_primary_key_cache>
+        <min_bytes_to_build_vector_index>10485760</min_bytes_to_build_vector_index>
+    </merge_tree>
+</clickhouse>

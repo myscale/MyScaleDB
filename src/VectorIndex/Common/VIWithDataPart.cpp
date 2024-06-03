@@ -175,7 +175,7 @@ VIWithColumnInPart::VIWithColumnInPart(
     des = convertPocoJsonToMap(vec_desc.parameters);
 
     des.erase("metric_type");
-
+    // MYSCALE_INTERNAL_CODE_BEGIN
     UInt32 default_disk_mode = merge_tree_setting->default_mstg_disk_mode;
 
     if (index_type == VIType::MSTG)
@@ -184,6 +184,7 @@ VIWithColumnInPart::VIWithColumnInPart(
         if (!des.contains("disk_mode"))
             des.setParam("disk_mode", disk_mode);
     }
+    // MYSCALE_INTERNAL_CODE_END
 }
 
 void VIWithColumnInPart::onBuildStart()
@@ -414,15 +415,8 @@ VIVariantPtr VIWithColumnInPart::createIndex(bool is_dummy) const
             dimension,
             total_vec,
             index_des,
+            max_threads,
             vector_index_cache_prefix,
-#ifdef MYSCALE_INTERNAL
-            false /* load_diskann_after_build */,
-#ifdef ENABLE_SCANN
-            getDiskIOManager(),
-#endif
-#endif
-            true /* use_file_checksum */,
-            true /* manage_cache_folder */,
             [base_daemon = BaseDaemon::tryGetInstance()]()
             {
                 if (base_daemon.has_value())
@@ -437,15 +431,8 @@ VIVariantPtr VIWithColumnInPart::createIndex(bool is_dummy) const
             dimension,
             total_vec,
             index_des,
+            max_threads,
             vector_index_cache_prefix,
-#ifdef MYSCALE_INTERNAL
-            false /* load_diskann_after_build */,
-#ifdef ENABLE_SCANN
-            getDiskIOManager(),
-#endif
-#endif
-            true /* use_file_checksum */,
-            true /* manage_cache_folder */,
             [base_daemon = BaseDaemon::tryGetInstance()]()
             {
                 if (base_daemon.has_value())
@@ -455,19 +442,6 @@ VIVariantPtr VIWithColumnInPart::createIndex(bool is_dummy) const
 
     return index_variant;
 }
-
-#ifdef ENABLE_SCANN
-std::shared_ptr<DiskIOManager> VIWithColumnInPart::getDiskIOManager() const
-{
-    if (index_type != VIType::MSTG || disk_mode == 0)
-        return nullptr;
-
-    /// After c++11, static local variable initialization does not require the introduction of mutex locks
-    static std::shared_ptr<DiskIOManager> io_manager = std::make_shared<DiskIOManager>(max_threads, 64);
-
-    return io_manager;
-}
-#endif
 
 void VIWithColumnInPart::serialize(
     VIVariantPtr & index,
@@ -681,15 +655,8 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
                     metadata.dimension,
                     metadata.total_vec,
                     index_params,
+                    max_threads,
                     vector_index_cache_prefix,
-#ifdef MYSCALE_INTERNAL
-                    false /* load_diskann_after_build */,
-#ifdef ENABLE_SCANN
-                    getDiskIOManager(),
-#endif
-#endif
-                    true /* use_file_checksum */,
-                    true /* manage_cache_folder */,
                     [base_daemon = BaseDaemon::tryGetInstance()]()
                     {
                         if (base_daemon.has_value())
@@ -704,15 +671,8 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
                     metadata.dimension,
                     metadata.total_vec,
                     index_params,
+                    max_threads,
                     vector_index_cache_prefix,
-#ifdef MYSCALE_INTERNAL
-            false /* load_diskann_after_build */,
-#ifdef ENABLE_SCANN
-            getDiskIOManager(),
-#endif
-#endif
-                    true /* use_file_checksum */,
-                    true /* manage_cache_folder */,
                     [base_daemon = BaseDaemon::tryGetInstance()]()
                     {
                         if (base_daemon.has_value())

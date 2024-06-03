@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
-* Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
-* Co., Ltd. */
-
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 
 #include <IO/Operators.h>

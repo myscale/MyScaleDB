@@ -435,7 +435,7 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
 
     const VSDescription & desc = descs[0];
 
-    /// Currently, only FloatVector can create MSTG index, and use two stage search
+    /// Currently, only FloatVector can create MSTG index, and use two stage search(MYSCALE_OSS_DELETE_LINE)
     if (desc.vector_search_type != Search::DataType::FloatVector)
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Only Float32 Vector support two stage search");
@@ -461,9 +461,6 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
     if (k > static_cast<int>(num_reorder))
         k = static_cast<int>(num_reorder);
 
-    /// Get segment ids for vector index
-
-    // [[maybe_unused]] String metric_str;
     std::vector<IndexWithMetaHolderPtr> index_holders;
     if (column_index)
         index_holders = column_index->getIndexHolders(data_part->getState() != MergeTreeDataPartState::Outdated);
@@ -641,15 +638,12 @@ void MergeTreeVSManager::mergeBatchVectorScanResult(
             size_t end_pos = 0;
             size_t prev_row_num = 0;
 
-            /// auto merge_start_time = std::chrono::system_clock::now();
-
             /// when no filter, the prev read result should be continuous, so we just need to scan all result rows and
             /// keep results of which the row id is contained in label_column
             for (auto & read_range : read_ranges)
             {
                 start_pos = read_range.start_row;
                 end_pos = read_range.start_row + read_range.row_num;
-                /// LOG_DEBUG(log, "start_pos: {}, end_pos: {}, prev_row_num: {}", start_pos, end_pos, prev_row_num);
                 for (size_t ind = 0; ind < label_column->size(); ++ind)
                 {
                     if (label_column->getUInt(ind) >= start_pos && label_column->getUInt(ind) < end_pos)
@@ -821,10 +815,10 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
     if (filter)
     {
         size_t filter_parsed = 0;
-        size_t range_num = 0;
+        [[maybe_unused]] size_t range_num = 0;
 
         /// for debugging filter
-        size_t part_left_rows = 0;
+        [[maybe_unused]] size_t part_left_rows = 0;
         size_t range_left_rows = 0;
         size_t mark_left_rows = 0;
 
@@ -843,7 +837,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
 
         for (const auto & single_range : read_ranges)
         {
-            /// for debug
             LOG_TRACE(
                 log,
                 "VectorScanManager Part: {}, Range: {}, Row Numbers in Range: {}, Start Mark: {}, End Mark: {}, start_row: {}, ",
@@ -908,7 +901,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     /// filter out the data we want to do ANN on using the filter
                     size_t start_pos = filter_parsed;
 
-                    /// only for debug
                     LOG_TRACE(
                         get_logger(),
                         "filter_parsed:{}",
@@ -933,13 +925,13 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                             {
                                 for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
                                     vector_raw_data.emplace_back(src_vec[offset]);
-                                /// only for debug
+
                                 LOG_TRACE(
-                                        get_logger(),
-                                        "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
-                                        current_rows_in_range,
-                                        i,
-                                        src_vec[vec_start_offset]);
+                                    get_logger(),
+                                    "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
+                                    current_rows_in_range,
+                                    i,
+                                    src_vec[vec_start_offset]);
 
                                 actual_id_in_range.emplace_back(current_rows_in_range);
                                 mark_left_rows ++;
@@ -1005,7 +997,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     /// BinaryVector is represented as FixedString(N), sometimes it maybe Sparse(FixedString(N))
                     else if (const ColumnSparse *sparse_column = checkAndGetColumn<ColumnSparse>(one_column.get()))
                     {
-                        LOG_INFO(get_logger(), "test DB::VectorSearchType::BinaryVector: Sparse(FixedString(N))");
+                        LOG_INFO(get_logger(), "test DB::VectorSearchType::BinaryVector: Sparse(FixedString(N))");  /// MYSCALE_OSS_DELETE_LINE
                         const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
                         if (!sparse_fixed_string)
                             throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
@@ -1072,7 +1064,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                         row_exists,
                         0);
 
-                /// for debug
                 if(mark_left_rows)
                 {
                     LOG_TRACE(
@@ -1090,7 +1081,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                 range_left_rows += mark_left_rows;
             }
 
-            /// for debug
             if(range_left_rows)
             {
                 LOG_TRACE(
@@ -1107,7 +1097,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
             part_left_rows += range_left_rows;
         }
 
-        /// for debug
         if(part_left_rows)
         {
             LOG_TRACE(log, "Part:{}, rows left in part:{}", part->name, part_left_rows);
@@ -1119,7 +1108,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
         /// has no filter, will pass the vector data and the dense bitmap for deleted rows to search function
         while (num_rows_read < total_rows_in_part)
         {
-            /// for debug
             LOG_TRACE(
                 log,
                 "VectorScanManager Part: {}, Row numbers in mark: {}, ",
@@ -1208,7 +1196,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                 else
                     throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
             }
-            /// for debug
+
             LOG_TRACE(
                 log,
                 "Part: {}, "
@@ -1224,7 +1212,6 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
             //make sure result contain lwd row_exists column
             if (result.size() == 2 && part->storage.hasLightweightDeletedMask())
             {
-                /// for debug
                 LOG_TRACE(
                     log,
                     "Try to get row exists col, result size: {}",
@@ -1234,15 +1221,12 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                 {
                     const ColumnUInt8 * col = checkAndGetColumn<ColumnUInt8>(row_exists_col.get());
                     const auto & col_data = col->getData();
-                    LOG_TRACE(
-                        log,
-                        "Col data size: {}",
-                        col_data.size());
+                    LOG_TRACE(log, "Col data size: {}", col_data.size()); /// MYSCALE_OSS_DELETE_LINE
                     for (size_t i = 0; i < col_data.size(); i++)
                     {
                         if (!col_data[i])
                         {
-                            LOG_DEBUG(log, "Unset: {}", i);
+                            LOG_TRACE(log, "Unset: {}", i);
                             ++deleted_row_num;
                             row_exists->unset(i);
                         }
@@ -1313,7 +1297,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
         {
             if (final_id[label] > -1)
             {
-                LOG_TRACE(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);
+                LOG_TRACE(log, "Label: {}, distance: {}", final_id[label], final_distance[label]);  /// MYSCALE_OSS_DELETE_LINE
                 label_column->insert(final_id[label]);
                 distance_column->insert(final_distance[label]);
             }

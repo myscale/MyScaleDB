@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <DataTypes/NestedUtils.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/IdentifierSemantic.h>

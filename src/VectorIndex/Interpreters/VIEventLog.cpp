@@ -42,7 +42,6 @@ NamesAndTypesList VIEventLogElement::getNamesAndTypes()
             {"Cleared",      static_cast<Int8>(CLEARED)},
         }
     );
-    // ColumnsWithTypeAndName columns_with_type_and_name;
 
     return {
         {"database", std::make_shared<DataTypeString>()},
