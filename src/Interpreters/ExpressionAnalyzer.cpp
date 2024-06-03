@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 #include <Core/Block.h>
 
@@ -87,7 +83,6 @@
 #include <Parsers/formatAST.h>
 #include <Parsers/QueryParameterVisitor.h>
 
-// txh added
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Common/VICommon.h>
@@ -570,7 +565,7 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeVectorScan] Get vector scan function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeVectorScan] Get vector scan function from right table");
             /// vector search column exists in right joined table
             vector_scan_descriptions.emplace_back(*vec_scan_desc);
             has_vector_scan = true;
@@ -593,7 +588,7 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeTextSearch] Get text search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeTextSearch] Get text search function from right table");
             text_search_info = right_text_search_info;
             has_text_search = true;
         }
@@ -612,7 +607,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAGPtr & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeHybridSearch] Get hybrid search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeHybridSearch] Get hybrid search function from right table");
             hybrid_search_info = right_hybrid_search_info;
             has_hybrid_search = true;
         }
@@ -938,7 +933,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     vector_scan_desc.query_column_name = query_vector->getColumnName();
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeVectorScanDescription] search_column: {}, query_column: {}",
         vector_scan_desc.search_column_name,
         vector_scan_desc.query_column_name);
@@ -975,7 +970,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 
         /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
         vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
-        LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
@@ -1045,7 +1040,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     }
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeTextSearchInfo] text search_column: {}, query_column: {}",
         text_column_name,
         query_text->getColumnName());
@@ -1073,7 +1068,7 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
         getRootActionsNoMakeSet(arguments[1], actions);
 
         auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1]);
-        LOG_DEBUG(log, "[makeTextSearchInfo] create text search function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
@@ -1837,16 +1832,13 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         first_action_names = chain.steps.front()->getRequiredColumns().getNames();
 
     auto & step = chain.lastStep(sourceColumns());
-    /// LOG_DEBUG(log, "[appendPrewhere] before getRootActions: step actions: {}", step.actions()->dumpDAG());
     getRootActions(select_query->prewhere(), only_types, step.actions());
     String prewhere_column_name = select_query->prewhere()->getColumnName();
     step.addRequiredOutput(prewhere_column_name);
-    /// LOG_DEBUG(log, "[appendPrewhere] after getRootActions: step actions: {}", step.actions()->dumpDAG());
-    /// LOG_DEBUG(log, "[appendPrewhere] prewhere_column_name: {}, chain: {}", prewhere_column_name, chain.dumpChain());
 
     const auto & node = step.actions()->findInOutputs(prewhere_column_name);
     auto filter_type = node.result_type;
-    LOG_DEBUG(log, "[appendPrewhere] filter_type: {}", filter_type->getName());
+    LOG_DEBUG(getLogger(), "[appendPrewhere] filter_type: {}", filter_type->getName());
     if (!filter_type->canBeUsedInBooleanContext())
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Invalid type for filter in PREWHERE: {}",
                         filter_type->getName());
@@ -1855,7 +1847,6 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
     {
         /// Remove unused source_columns from prewhere actions.
         auto tmp_actions_dag = std::make_shared<ActionsDAG>(sourceColumns());
-        // LOG_DEBUG(log, "[appendPrewhere] before getRootActions: {}", tmp_actions_dag->dumpDAG());
         getRootActions(select_query->prewhere(), only_types, tmp_actions_dag);
         /// Constants cannot be removed since they can be used in other parts of the query.
         /// And if they are not used anywhere, except PREWHERE, they will be removed on the next step.
@@ -1879,7 +1870,6 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         prewhere_actions = chain.getLastActions();
         prewhere_actions->removeUnusedActions(required_output);
     }
-    /// LOG_DEBUG(log, "[appendPrewhere] chain: {}", chain.dumpChain());
 
     {
         /// Add empty action with input = {prewhere actions output} + {unused source columns}
@@ -1912,8 +1902,6 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         chain.getLastActions();
         chain.addStep();
     }
-
-    /// LOG_DEBUG(log, "[appendPrewhere] after prewhere: {}", chain.dumpChain());
 
     return prewhere_actions;
 }
@@ -2132,12 +2120,7 @@ void SelectQueryExpressionAnalyzer::appendSelect(ExpressionActionsChain & chain,
     const auto * select_query = getSelectQuery();
 
     ExpressionActionsChain::Step & step = chain.lastStep(aggregated_columns);
-
-    /// LOG_DEBUG(log, "[appendSelect] before getRootActions: step actions: {}", step.actions()->dumpDAG());
-
     getRootActions(select_query->select(), only_types, step.actions());
-
-    /// LOG_DEBUG(log, "[appendSelect] after getRootActions: step actions: {}", step.actions()->dumpDAG());
 
     for (const auto & child : select_query->select()->children)
         appendSelectSkipWindowExpressions(step, child);
@@ -2562,8 +2545,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
             }
         }
 
-        /// LOG_DEBUG(log, "[constructor] after append prewhere {}", chain.dumpChain());
-
         array_join = query_analyzer.appendArrayJoin(chain, before_array_join, only_types || !first_stage);
 
         if (query_analyzer.hasTableJoin())
@@ -2612,8 +2593,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
             query_analyzer.appendGroupBy(chain, only_types || !first_stage, optimize_aggregation_in_order, group_by_elements_actions);
             query_analyzer.appendAggregateFunctionsArguments(chain, only_types || !first_stage);
             before_aggregation = chain.getLastActions();
-            /// LOG_DEBUG(log, "[constructor] chain: {}, before_aggregation: {}",
-            ///     chain.dumpChain(), before_aggregation->dumpDAG());
 
             if (settings.group_by_use_nulls)
                 query_analyzer.appendGroupByModifiers(before_aggregation, chain, only_types);
@@ -2769,8 +2748,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
         for (const auto & it : chain.getLastStep().required_output)
             selected_columns.emplace_back(it.first);
 
-        /// query_analyzer.appendVectorScan();
-
         has_order_by = query.orderBy() != nullptr;
         before_order_by = query_analyzer.appendOrderBy(
                 chain,
@@ -2785,9 +2762,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
         }
 
         final_projection = query_analyzer.appendProjectResult(chain);
-        /// LOG_DEBUG(log, "[constructor] : chain: \n {}", chain.dumpChain());
-        /// LOG_DEBUG(log, "[constructor] : ast: \n {}", query.dumpTree());
-        /// LOG_DEBUG(log, "[constructor] : expression analysis result: \n {}", this->dump());
 
         finalize_chain(chain);
     }

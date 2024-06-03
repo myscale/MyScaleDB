@@ -13,7 +13,7 @@ set -x
 
 PROJECT_PATH=${1:-/workspace/ClickHouse}
 SHA_TO_TEST=${2:-run_for_test}
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stress
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_stress
 mkdir /test_output
 
 rm -rf /usr/share/clickhouse-test
@@ -89,7 +89,7 @@ azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --debug /azurite_log &
 start
 
 # shellcheck disable=SC2086 # No quotes because I want to split it into words.
-$PROJECT_PATH/docker/test/mqdb_test_script/s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" --dataset-names $DATASETS
+$PROJECT_PATH/docker/test/myscale_test_script/s3downloader --url-prefix "https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" --dataset-names $DATASETS
 chmod 777 -R /var/lib/clickhouse
 clickhouse-client --query "ATTACH DATABASE IF NOT EXISTS datasets ENGINE = Ordinary"
 clickhouse-client --query "CREATE DATABASE IF NOT EXISTS test"

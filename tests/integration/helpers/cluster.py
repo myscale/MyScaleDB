@@ -58,7 +58,7 @@ HELPERS_DIR = p.dirname(__file__)
 CLICKHOUSE_ROOT_DIR = p.join(p.dirname(__file__), "../../..")
 # set mqdb test compose dir
 LOCAL_DOCKER_COMPOSE_DIR = p.join(
-    CLICKHOUSE_ROOT_DIR, "docker/test/mqdb_test_integration/runner/compose/"
+    CLICKHOUSE_ROOT_DIR, "docker/test/myscale_test_integration/runner/compose/"
     # CLICKHOUSE_ROOT_DIR, "docker/test/integration/runner/compose/"
 )
 DEFAULT_ENV_NAME = ".env"

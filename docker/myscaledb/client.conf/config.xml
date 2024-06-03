@@ -1,0 +1,6 @@
+<config>
+    <prompt_by_server_display_name>
+        <default>\e[92m{user}@\e[0m:\e[32m{display_name}\e[0m :) </default>
+        <production>\e[92m{user}@\e[0m:\e[32m{display_name}\e[0m \e[1;31m:)\e[0m </production>
+    </prompt_by_server_display_name>
+</config>

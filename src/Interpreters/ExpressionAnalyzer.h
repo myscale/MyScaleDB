@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <Core/ColumnNumbers.h>
@@ -183,8 +179,6 @@ protected:
         bool is_explain_,
         PreparedSetsPtr prepared_sets_,
         bool is_create_parameterized_view_ = false);
-    // txh added
-    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalyzer");
 
     ASTPtr query;
     const ExtractedSettings settings;

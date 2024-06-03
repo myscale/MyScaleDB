@@ -6,7 +6,6 @@
 #include "Server/HTTP/HTTPContext.h"
 #include <Server/TCPProtocolStackFactory.h>
 #include <Poco/Net/HTTPServerParams.h>
-#include <Core/BackgroundSchedulePool.h>
 
 /** Server provides three interfaces:
   * 1. HTTP - simple interface for any applications.
@@ -69,11 +68,6 @@ protected:
 
     std::string getDefaultCorePath() const override;
 
-    void checkLicense();
-    void scheduleLicense();
-
-    void checkHardwareResourceLimits();
-
 private:
     ContextMutablePtr global_context;
     /// Updated/recent config, to compare http_handlers
@@ -94,9 +88,6 @@ private:
         Poco::Net::HTTPServerParams::Ptr http_params,
         AsynchronousMetrics & async_metrics,
         bool & is_secure);
-
-    size_t retry_times;
-    std::unique_ptr<BackgroundSchedulePoolTaskHolder> license_task;
 
     using CreateServerFunc = std::function<ProtocolServerAdapter(UInt16)>;
     void createServer(

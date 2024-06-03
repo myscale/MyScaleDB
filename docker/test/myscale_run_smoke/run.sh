@@ -3,7 +3,7 @@
 set -x
 PROJECT_PATH=$1
 SHA_TO_TEST=$2
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_smoke
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_smoke
 mkdir -p $WORKPATH/workspace
 cd $WORKPATH/workspace
 
