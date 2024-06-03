@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include "Storages/MergeTree/MergeTreeDataPartBuilder.h"
 #include <Storages/MergeTree/MergeTreeData.h>
 
@@ -2829,6 +2825,7 @@ void MergeTreeData::clearPKCache(const DataPartsVector & parts)
     }
 }
 
+/// MYSCALE_INTERNAL_CODE_BEGIN
 void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices) const
 {
     auto vector_nvme_cache_folder
@@ -2936,6 +2933,7 @@ void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
     //        vec.removeFromCache();
     //    }
 }
+/// MYSCALE_INTERNAL_CODE_END
 
 void MergeTreeData::clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error, NameSet * parts_failed_to_delete)
 {

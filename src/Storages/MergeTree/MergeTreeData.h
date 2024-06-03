@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <mutex>
@@ -690,13 +686,15 @@ public:
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
     void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
     void clearPKCache(const DataPartsVector & parts);
-    void clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices = {}) const;
     /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
     std::pair<bool, bool> needClearVectorIndexCacheAndFile(
         const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
 
+    /// MYSCALE_INTERNAL_CODE_BEGIN
+    void clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices = {}) const;
     ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
     void regularClearCachedIndex(const DataPartsVector & parts);
+    /// MYSCALE_INTERNAL_CODE_END
 
     /// Delete all directories which names begin with "tmp"
     /// Must be called with locked lockForShare() because it's using relative_data_path.

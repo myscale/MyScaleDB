@@ -16,7 +16,7 @@ performance_test0:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-performance0"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_performance/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_performance/test_output
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/performance-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA} 0
@@ -42,7 +42,7 @@ performance_test1:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-performance1"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_performance/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_performance/test_output
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/performance-test.sh CI_TEST ${CI_COMMIT_SHA} 1
@@ -68,7 +68,7 @@ performance_test1:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-performance2"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_performance/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_performance/test_output
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/performance-test.sh CI_TEST ${CI_COMMIT_SHA} 2
@@ -88,7 +88,7 @@ vector_db_test:
     - cp $KUBECONFIG_CONTENT $HOME/Downloads/cls-config
     - export KUBECONFIG=$KUBECONFIG:$HOME/Downloads/cls-config
     - 'kubectl get pods -n vector-db-ci ||:'
-    - cd docker/test/mqdb_run_vector_db_test
+    - cd docker/test/myscale_run_vector_db_test
     - 'kubectl delete ns vector-db-ci ||:'
     - kubectl create ns vector-db-ci
     - bash config.sh "$VERSION_STRING" "$GIT_COMMIT" "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA" "$CI_COMMIT_MESSAGE"

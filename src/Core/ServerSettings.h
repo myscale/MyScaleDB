@@ -173,9 +173,11 @@ namespace DB
     M(Float, vector_index_cache_size_ratio_of_memory, 0.3f, "Memory limit (ratio of total memory) for vector index search cache", 0) \
     M(Float, vector_index_build_size_ratio_of_memory, 0.6f, "Memory limit (ratio of total memory) for vector index building", 0) \
     M(UInt64, primary_key_cache_size, 1024 * 1024 * 64, "primary key cache size limit", 0) \
+    /** MYSCALE_INTERNAL_CODE_BEGIN */ \
     M(Bool, kubernetes_enabled, false, "Deploy using kubernetes.", 0) \
     M(String, license_file_path, "/etc/clickhouse-server", "Path to store license.", 0) \
     M(UInt64, license_check_period, 86400, "License check period in seconds.", 0) \
+    /** MYSCALE_INTERNAL_CODE_END */ \
 
 /// If you add a setting which can be updated at runtime, please update 'changeable_settings' map in StorageSystemServerSettings.cpp
 

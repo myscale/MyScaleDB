@@ -721,7 +721,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
             for (size_t i = 0; i < block.rows(); ++i)
             {
                 part_offsets[part_num].emplace_back(col_data[i]);
-                /// LOG_DEBUG(ctx->log, "[generateRowIdsMap]: read old part {}, part_offset {}", part_num, col_data[i]);
             }
         }
     }
@@ -1409,7 +1408,6 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         // For the decouple part, the row ids map in the cache needs to be updated in advance, 
         // otherwise, the thread that searches for the decouple part for the first time will 
         // perform an io operation of read row ids map
-        // const VIDescriptions & vector_indices = global_ctx->new_data_part->storage.getInMemoryMetadataPtr()->getVectorIndices();
         for (auto & index_name : decouple_index_name)
         {
             auto column_index_opt = global_ctx->new_data_part->vector_index.getColumnIndex(index_name);

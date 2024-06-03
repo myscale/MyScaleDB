@@ -6,7 +6,7 @@ export CHPC_CHECK_START_TIMESTAMP
 PROJECT_PATH=${1:-/workspace/ClickHouse}
 SHA_TO_TEST=${2:-run_for_test}
 skip=${3:-no_skip}
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_performance
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_performance
 
 cd $WORKPATH
 mkdir workspace ||:

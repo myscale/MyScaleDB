@@ -35,7 +35,7 @@ function copy_config
     mkdir $PROJECT_PATH/performance_pack/config ||:
     rm -rf $PROJECT_PATH/performance_pack/config/* ||:
     cp -rfd $PROJECT_PATH/programs/server/* $PROJECT_PATH/performance_pack/config/.
-    cp -rf $PROJECT_PATH/docker/test/mqdb_run_performance/config/* $PROJECT_PATH/performance_pack/config/.
+    cp -rf $PROJECT_PATH/docker/test/myscale_run_performance/config/* $PROJECT_PATH/performance_pack/config/.
     set_listen_config
     rm -rf $PROJECT_PATH/performance_pack/top_level_domains ||:
     mkdir $PROJECT_PATH/performance_pack/top_level_domains
@@ -63,9 +63,9 @@ function copy_scripts
     echo "***COPY scripts***"
     # mkdir $PROJECT_PATH/performance_pack/scripts ||:
     # rm -rf $PROJECT_PATH/performance_pack/scripts/* ||:
-    # cp -rf $PROJECT_PATH/docker/test/mqdb_run_performance/* $PROJECT_PATH/performance_pack/scripts/.
-    rsync -a --exclude={'output/*','packages/*','test_output/*','tests/*','workspace'} $PROJECT_PATH/docker/test/mqdb_run_performance $PROJECT_PATH/performance_pack/.
-    mv $PROJECT_PATH/performance_pack/mqdb_run_performance $PROJECT_PATH/performance_pack/scripts
+    # cp -rf $PROJECT_PATH/docker/test/myscale_run_performance/* $PROJECT_PATH/performance_pack/scripts/.
+    rsync -a --exclude={'output/*','packages/*','test_output/*','tests/*','workspace'} $PROJECT_PATH/docker/test/myscale_run_performance $PROJECT_PATH/performance_pack/.
+    mv $PROJECT_PATH/performance_pack/myscale_run_performance $PROJECT_PATH/performance_pack/scripts
 }
 
 if [[ "$copy_func" == "all" ]]; then

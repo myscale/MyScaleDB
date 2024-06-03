@@ -4481,9 +4481,6 @@ bool StorageReplicatedMergeTree::executeFetchVectorIndex(LogEntry & entry, Strin
         }
     }
 
-    /// Get active replica having part with built vector index
-    /// String replica = getBuiltVectorIndexReplica(part_name);
-
     /// We can't fetch vector index when none replicas have the built vector index in the part
     if (replica.empty())
     {
@@ -5737,15 +5734,12 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         startBeingLeader();
 
-        /// Move here to avoid wrongly remove just started background build in restart_thread.
-        /// Temporary directories contain incomplete results of build vector index.
-        /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
-        // clearTemporaryIndexBuildDirectories();
-
+        /// MYSCALE_INTERNAL_CODE_BEGIN
         /// clear nvme cache
         /// no need clear nvme cache in this field, reload vector index will reuse this cache.
         auto preload_indices = getPreloadVectorIndicesFromZK();
         clearVectorNvmeCache(preload_indices);
+        /// MYSCALE_INTERNAL_CODE_END
 
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
@@ -5956,10 +5950,6 @@ void StorageReplicatedMergeTree::shutdown(bool)
         /// Wait for all of them
         std::lock_guard lock(data_parts_exchange_ptr->rwlock);
     }
-
-    /// Temporary directories contain incomplete results of vector index building.
-    /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
-    // clearTemporaryIndexBuildDirectories();
 
     /// Clear cached vector index
     clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
@@ -6789,7 +6779,6 @@ void StorageReplicatedMergeTree::alter(
         Coordination::Requests ops;
         size_t alter_path_idx = std::numeric_limits<size_t>::max();
         size_t mutation_path_idx = std::numeric_limits<size_t>::max();
-        /// size_t vector_index_path_idx = std::numeric_limits<size_t>::max();
 
         String new_metadata_str = future_metadata_in_zk.toString();
         ops.emplace_back(zkutil::makeSetRequest(fs::path(zookeeper_path) / "metadata", new_metadata_str, current_metadata->getMetadataVersion()));

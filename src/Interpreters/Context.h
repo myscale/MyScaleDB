@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #pragma once
 
 #include <base/types.h>
@@ -1391,10 +1387,6 @@ public:
     HybridSearchInfoPtr getHybridSearchInfo() const;
     void setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const;
     void resetHybridSearchInfo() const;
-
-    /// Used for license check
-    String getInstanceLicenseKeeperPath() const;
-    void setInstanceLicenseKeeperPath(const String & path);
 
 private:
     std::shared_ptr<const SettingsConstraintsAndProfileIDs> getSettingsConstraintsAndCurrentProfilesWithLock() const;

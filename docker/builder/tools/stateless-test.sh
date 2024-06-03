@@ -9,13 +9,13 @@ fi
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_PATH=$CUR_DIR/../../..
-WORKPATH=$PROJECT_PATH/docker/test/mqdb_run_stateless
+WORKPATH=$PROJECT_PATH/docker/test/myscale_run_stateless
 
-cp -rfv artifacts/clickhouse-*.deb docker/test/mqdb_run_stateless/packages
-cp -rfv tests/queries docker/test/mqdb_run_stateless/tests/
-cp -rfv tests/performance docker/test/mqdb_run_stateless/tests/
-cp -rfv tests/config docker/test/mqdb_run_stateless/tests/
-cp -rfv tests/clickhouse-test docker/test/mqdb_run_stateless/
+cp -rfv artifacts/clickhouse-*.deb docker/test/myscale_run_stateless/packages
+cp -rfv tests/queries docker/test/myscale_run_stateless/tests/
+cp -rfv tests/performance docker/test/myscale_run_stateless/tests/
+cp -rfv tests/config docker/test/myscale_run_stateless/tests/
+cp -rfv tests/clickhouse-test docker/test/myscale_run_stateless/
 
 ln -snf $WORKPATH/packages /package_folder
 ln -snf $WORKPATH/clickhouse-test /usr/bin/clickhouse-test

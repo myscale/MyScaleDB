@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <memory>
 #include <Core/Block.h>
 
@@ -92,7 +88,6 @@
 #include <Parsers/formatAST.h>
 #include <Parsers/QueryParameterVisitor.h>
 
-// txh added
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Common/VICommon.h>
@@ -580,7 +575,7 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAG & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeVectorScan] Get vector scan function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeVectorScan] Get vector scan function from right table");
             /// vector search column exists in right joined table
             vector_scan_descriptions.emplace_back(*vec_scan_desc);
             has_vector_scan = true;
@@ -603,7 +598,7 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAG & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeTextSearch] Get text search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeTextSearch] Get text search function from right table");
             text_search_info = right_text_search_info;
             has_text_search = true;
         }
@@ -622,7 +617,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAG & temp_actions)
     {
         if (syntax->storage_snapshot)
         {
-            LOG_DEBUG(log, "[analyzeHybridSearch] Get hybrid search function from right table");
+            LOG_DEBUG(getLogger(), "[analyzeHybridSearch] Get hybrid search function from right table");
             hybrid_search_info = right_hybrid_search_info;
             has_hybrid_search = true;
         }
@@ -860,7 +855,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     vector_scan_desc.query_column_name = query_vector->getColumnName();
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeVectorScanDescription] search_column: {}, query_column: {}",
         vector_scan_desc.search_column_name,
         vector_scan_desc.query_column_name);
@@ -897,7 +892,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAG & actions)
 
         /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
         vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
-        LOG_DEBUG(log, "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
@@ -967,7 +962,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     }
 
     LOG_DEBUG(
-        log,
+        getLogger(),
         "[commonMakeTextSearchInfo] text search_column: {}, query_column: {}",
         text_column_name,
         query_text->getColumnName());
@@ -995,7 +990,7 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAG & actions)
         getRootActionsNoMakeSet(arguments[1], actions);
 
         auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1]);
-        LOG_DEBUG(log, "[makeTextSearchInfo] create text search function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
         {
@@ -1798,7 +1793,7 @@ ActionsAndProjectInputsFlagPtr SelectQueryExpressionAnalyzer::appendPrewhere(
 
     const auto & node = step.actions()->dag.findInOutputs(prewhere_column_name);
     auto filter_type = node.result_type;
-    LOG_DEBUG(m_log, "[appendPrewhere] filter_type: {}", filter_type->getName());
+    LOG_DEBUG(getLogger(), "[appendPrewhere] filter_type: {}", filter_type->getName());
     if (!filter_type->canBeUsedInBooleanContext())
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Invalid type for filter in PREWHERE: {}",
                         filter_type->getName());
@@ -2773,8 +2768,6 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
         selected_columns.reserve(chain.getLastStep().required_output.size());
         for (const auto & it : chain.getLastStep().required_output)
             selected_columns.emplace_back(it.first);
-
-        /// query_analyzer.appendVectorScan();
 
         has_order_by = query.orderBy() != nullptr;
         before_order_by = query_analyzer.appendOrderBy(

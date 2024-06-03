@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <map>
 #include <set>
 #include <optional>
@@ -259,7 +255,7 @@ struct ContextSharedPart : boost::noncopyable
     String filesystem_cache_user TSA_GUARDED_BY(mutex);
     ConfigurationPtr config TSA_GUARDED_BY(mutex);           /// Global configuration settings.
     String tmp_path TSA_GUARDED_BY(mutex);                   /// Path to the temporary files that occur when processing the request.
-    String vector_index_cache_path;                          /// Path to the directory of vector index cache for MSTG disk mode.
+    String vector_index_cache_path;                          /// Path to the directory of vector index cache for MyScale vector index disk mode.
     String tantivy_index_cache_path;                        /// Path to the directory of tantivy index cache.
 
     /// All temporary files that occur when processing the requests accounted here.
@@ -269,9 +265,6 @@ struct ContextSharedPart : boost::noncopyable
 
     mutable OnceFlag async_loader_initialized;
     mutable std::unique_ptr<AsyncLoader> async_loader; /// Thread pool for asynchronous initialization of arbitrary DAG of `LoadJob`s (used for tables loading)
-
-    /// Keeper path to the instance. For license check, renew active status of instance.
-    String instance_license_keeper_path;
 
     mutable std::unique_ptr<EmbeddedDictionaries> embedded_dictionaries TSA_GUARDED_BY(embedded_dictionaries_mutex);    /// Metrica's dictionaries. Have lazy initialization.
     mutable std::unique_ptr<ExternalDictionariesLoader> external_dictionaries_loader TSA_GUARDED_BY(external_dictionaries_mutex);
@@ -5734,18 +5727,6 @@ void Context::setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const
 void Context::resetHybridSearchInfo() const
 {
     right_hybrid_search_info = nullptr;
-}
-
-String Context::getInstanceLicenseKeeperPath() const
-{
-    return shared->instance_license_keeper_path;
-}
-
-void Context::setInstanceLicenseKeeperPath(const String & path)
-{
-    /// Only changes when service is restarted
-    if (shared->instance_license_keeper_path.empty())
-        shared->instance_license_keeper_path = path;
 }
 
 WriteSettings Context::getWriteSettings() const

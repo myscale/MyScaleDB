@@ -37,8 +37,6 @@ struct VSDescription
     int topk = -1;    /// topK value extracted from limit N
     int direction = 1;  /// 1 - ascending, -1 - descending.
 
-    // void explain(WriteBuffer & out, size_t indent) const; /// Get description for EXPLAIN query.
-    // void explain(JSONBuilder::JSONMap & map) const;
 };
 
 using VSDescriptions = std::vector<VSDescription>;
