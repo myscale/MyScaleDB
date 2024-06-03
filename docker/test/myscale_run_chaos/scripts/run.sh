@@ -36,15 +36,15 @@ function create_namespace()
 
 function setup_mqdb()
 {
-  cp -f docker/test/mqdb_run_chaos/deploy/chaos-runner.yaml docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
-  cp -f docker/test/mqdb_run_chaos/deploy/mqdb-replicated.yaml docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
-  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
-  sed -i "s?UDF_IMAGE_VERSION?$UDF_IMAGE_VERSION?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
-  sed -i "s?IMAGE_VERSION?$VERSION_STRING-$GIT_COMMIT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
-  sed -i "s?CHAOS_TIMEOUT?$CHAOS_TIMEOUT?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
-  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
-  sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
-  sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
+  cp -f docker/test/myscale_run_chaos/deploy/chaos-runner.yaml docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
+  cp -f docker/test/myscale_run_chaos/deploy/mqdb-replicated.yaml docker/test/myscale_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/myscale_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?UDF_IMAGE_VERSION?$UDF_IMAGE_VERSION?" docker/test/myscale_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?IMAGE_VERSION?$VERSION_STRING-$GIT_COMMIT?" docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
+  sed -i "s?CHAOS_TIMEOUT?$CHAOS_TIMEOUT?" docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
+  sed -i "s?BASE_IMAGE?$BASE_IMAGE?" docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
+  sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/myscale_run_chaos/deploy/mqdb-replicated-tmp.yaml
+  sed -i "s?CHAOS_NAMESPACE?$current_namespace?" docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
 }
 
 function check_fatal()
@@ -104,7 +104,7 @@ echo "create namespace"
 create_namespace
 echo "setup mqdb cluster"
 setup_mqdb
-kubectl apply -f docker/test/mqdb_run_chaos/deploy/mqdb-replicated-tmp.yaml
+kubectl apply -f docker/test/myscale_run_chaos/deploy/mqdb-replicated-tmp.yaml
 
 echo "wait cluster running"
 if ! kubectl wait --for=jsonpath='{.status.status}'=Completed  --timeout=1200s -n "${current_namespace}" chi/chaos-test;
@@ -118,7 +118,7 @@ kubectl rollout status --watch --timeout=600s -n "${current_namespace}" stateful
 
 start_time="$(date +%s)000"
 echo "apply chaos runner job"
-kubectl apply -f docker/test/mqdb_run_chaos/deploy/chaos-runner-tmp.yaml
+kubectl apply -f docker/test/myscale_run_chaos/deploy/chaos-runner-tmp.yaml
 echo "start checking job status"
 check_job_status
 kubectl delete ns $current_namespace

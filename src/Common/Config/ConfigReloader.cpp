@@ -161,7 +161,7 @@ std::optional<ConfigProcessor::LoadedConfig> ConfigReloader::reloadIfNewer(bool 
 
         try
         {
-            updater(loaded_config.configuration, initial_loading);
+            updater(loaded_config.configuration, loaded_config.preprocessed_xml, initial_loading);
         }
         catch (...)
         {

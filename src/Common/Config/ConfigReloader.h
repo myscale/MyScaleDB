@@ -27,7 +27,7 @@ class ConfigReloader
 public:
     static constexpr auto DEFAULT_RELOAD_INTERVAL = std::chrono::milliseconds(2000);
 
-    using Updater = std::function<void(ConfigurationPtr, bool)>;
+    using Updater = std::function<void(ConfigurationPtr, XMLDocumentPtr, bool)>;
 
     ConfigReloader(
         std::string_view path_,

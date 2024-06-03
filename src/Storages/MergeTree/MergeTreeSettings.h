@@ -229,7 +229,7 @@ struct Settings;
     M(String, binary_vector_search_metric_type, "HAMMING", "Default metric type for Binary vector brute force search", 0) \
     M(UInt64, max_rows_for_slow_mode_single_vector_index_build, 100000, "The max row number of data part to build vector index using slow mode", 0) \
     M(Bool, enforce_fixed_vector_length_constraint, true, "Stricter length constraint check on columns with vector index.", 0) \
-    M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) \
+    M(UInt32, default_mstg_disk_mode, 0, "Default disk mode value for MSTG.", 0) /*MYSCALE_OSS_DELETE_LINE*/ \
     M(Bool, vector_index_parameter_check, true, "Enable checking for vector index parameters and vector search parameters.", 0) \
     M(Seconds, vidx_zk_update_period, 300, "Vector index info update on zookeeper execute period.", 0) \
     M(UInt64, build_vector_index_on_random_single_replica, 0, "Control single replica build vector index options. 0 - disable. 1 - choose one random replica to build vector index, others wait to download the result. 2 - always choose the last active replica.", 0) \

@@ -17,12 +17,12 @@ stress_test_asan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressasan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stress/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+    - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -44,12 +44,12 @@ stress_test_tsan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stresstsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stress/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+    - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -71,12 +71,12 @@ stress_test_ubsan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressubsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stress/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+    - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -98,12 +98,12 @@ stress_test_msan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stressmsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stress/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stress/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/stress-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_stress
+    - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -124,7 +124,7 @@ vector-test-asan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectorasan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
     when: always
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
@@ -134,9 +134,9 @@ vector-test-asan:
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - ADDRESS_SANITIZER_TEST=true docker/builder/tools/vector-search-test.sh
-    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
-    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
-    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+    # - docker/builder/tools/check_job_states.sh myscale_run_stateless
+    - STATUS=$(cat docker/test/myscale_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/myscale_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -159,7 +159,7 @@ vector-test-asan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectortsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
     when: always
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
@@ -169,9 +169,9 @@ vector-test-asan:
     - replace_openmp=true
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh $replace_openmp
-    # - docker/builder/tools/check_job_states.sh mqdb_run_stateless
-    - STATUS=$(cat docker/test/mqdb_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
-    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/mqdb_run_stateless/test_output/check_status.tsv; exit 1; fi
+    # - docker/builder/tools/check_job_states.sh myscale_run_stateless
+    - STATUS=$(cat docker/test/myscale_run_stateless/test_output/check_status.tsv| awk '{print $2}'| awk -F, '{print $1}')
+    - if [[ $STATUS == "Timeout" ]]; then cat docker/test/myscale_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -194,7 +194,7 @@ vector-test-asan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectormsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
     when: always
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
@@ -203,7 +203,7 @@ vector-test-asan:
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
-    - docker/builder/tools/check_job_states.sh mqdb_run_stateless with_sanitizer
+    - docker/builder/tools/check_job_states.sh myscale_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -225,7 +225,7 @@ vector-test-ubsan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vectorubsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
     when: always
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
@@ -234,7 +234,7 @@ vector-test-ubsan:
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/vector-search-test.sh
-    - docker/builder/tools/check_job_states.sh mqdb_run_stateless with_sanitizer
+    - docker/builder/tools/check_job_states.sh myscale_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -256,12 +256,12 @@ fuzzer_test-asan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzzasan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_fuzzer/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_fuzzer/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/fuzz-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+    - docker/builder/tools/check_job_states.sh myscale_run_fuzzer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
@@ -282,12 +282,12 @@ fuzzer_test-ubsan:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzzubsan"
     paths:
-      - $CI_PROJECT_DIR/docker/test/mqdb_run_fuzzer/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_run_fuzzer/test_output
     when: always
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - docker/builder/tools/fuzz-test.sh CI_TEST_IN_K8S ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh mqdb_run_fuzzer
+    - docker/builder/tools/check_job_states.sh myscale_run_fuzzer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"

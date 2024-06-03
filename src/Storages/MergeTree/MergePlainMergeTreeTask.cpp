@@ -45,8 +45,6 @@ bool MergePlainMergeTreeTask::executeStep()
         switcher.emplace((*merge_list_entry)->thread_group);
     }
 
-    /// auto logger = &Poco::Logger::get("MergePlainMergeTreeTask");
-
     switch (state)
     {
         case State::NEED_PREPARE :

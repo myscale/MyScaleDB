@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -1503,7 +1499,6 @@ void TreeRewriterResult::collectForVectorScanFunctions(
         {
             /// distance func column name should add to left table's source_columns
             /// Will be added inside collectUsedColumns() after erase unrequired columns.
-            /// addDistanceFuncColName(distance_col_name, source_columns);
             metadata_snapshot = storage_snapshot->metadata;
             table_is_remote = is_remote_storage;
 

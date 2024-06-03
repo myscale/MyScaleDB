@@ -245,10 +245,6 @@ public:
 private:
     VIVariantPtr createIndex(bool is_dummy = true) const;
 
-#ifdef ENABLE_SCANN
-    std::shared_ptr<DiskIOManager> getDiskIOManager() const;
-#endif
-
     static std::once_flag once;
     static int max_threads;
 

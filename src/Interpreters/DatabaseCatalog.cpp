@@ -1384,6 +1384,7 @@ void DatabaseCatalog::dropTableFinally(const TableMarkedAsDropped & table)
     LOG_INFO(log, "Removing metadata {} of dropped table {}", table.metadata_path, table.table_id.getNameForLogs());
     fs::remove(fs::path(table.metadata_path));
 
+    /// MYSCALE_INTERNAL_CODE_BEGIN
     try
     {
         auto vector_index_cache_path = fs::path(getContext()->getVectorIndexCachePath() + "/" + "store/" + getPathForUUID(table.table_id.uuid));
@@ -1399,6 +1400,7 @@ void DatabaseCatalog::dropTableFinally(const TableMarkedAsDropped & table)
     {
         LOG_WARNING(log, "Cannot remove vector index cache directory {} of dropped table {}. Reason: {}", table.metadata_path, table.table_id.getNameForLogs(), e.what());
     }
+    /// MYSCALE_INTERNAL_CODE_END
 
     removeUUIDMappingFinally(table.table_id.uuid);
     CurrentMetrics::sub(CurrentMetrics::TablesToDropQueueSize, 1);

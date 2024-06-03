@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tags: no-parallel
 
-# reference: https://moqi.quip.com/U2xhAJL2YmRI
+# reference: https://moqi.quip.com/U2xhAJL2YmRI MYSCALE_OSS_DELETE_LINE
 
 # Case1. Can't create table with vector index if no constraint
 clickhouse-client -q "DROP TABLE IF EXISTS table_with_vector_index_no_constraint;"
