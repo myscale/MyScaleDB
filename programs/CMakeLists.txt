@@ -4,6 +4,7 @@ endif ()
 
 include(${ClickHouse_SOURCE_DIR}/cmake/split_debug_symbols.cmake)
 
+# MYSCALE_INTERNAL_CODE_BEGIN
 option(ENABLE_LICENSE_CHECK "Enable license check" OFF)
 if (ENABLE_LICENSE_CHECK)
     add_definitions(-DENABLE_LICENSE_CHECK)
@@ -18,6 +19,7 @@ endif ()
 if(ENABLE_MYSCALE_COMMUNITY_EDITION AND ENABLE_LICENSE_CHECK)
   message(FATAL_ERROR "ENABLE_MYSCALE_COMMUNITY_EDITION and ENABLE_LICENSE_CHECK cannot be ON at the same time.")
 endif()
+# MYSCALE_INTERNAL_CODE_END
 
 # The `clickhouse` binary is a multi purpose tool that contains multiple execution modes (client, server, etc.),
 # each of them may be built and linked as a separate library.

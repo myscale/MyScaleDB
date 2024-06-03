@@ -35,8 +35,12 @@
 #include <Common/checkStackSize.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeFixedString.h>
-#include <SearchIndex/SearchIndexCommon.h>
+#include <VectorIndex/Common/VICommon.h>
 
+namespace Search
+{
+enum class DataType;
+}
 
 namespace DB
 {

@@ -1,7 +1,3 @@
-/* Please note that the file has been modified by Moqi Technology (Beijing) Co.,
- * Ltd. All the modifications are Copyright (C) 2022 Moqi Technology (Beijing)
- * Co., Ltd. */
-
 #include "StorageMergeTree.h"
 #include "Core/QueryProcessingStage.h"
 #include "Storages/MergeTree/IMergeTreeDataPart.h"
@@ -144,12 +140,7 @@ void StorageMergeTree::startup()
     /// expand cleanup folder vector_tmp
     clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
-    /// Temporary directories contain incomplete results of vector index building.
-    /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
-    // clearTemporaryIndexBuildDirectories();
-
-    /// clear nvme cache
-    clearVectorNvmeCache();
+    clearVectorNvmeCache(); /// clear nvme cache. MYSCALE_OSS_DELETE_LINE
 
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();
@@ -221,10 +212,6 @@ void StorageMergeTree::shutdown()
 
     try
     {
-        /// Temporary directories contain incomplete results of vector index building.
-        /// Reuse the clearOldTemporaryDirectories logic to clean up the vector_tmp folder
-        // clearTemporaryIndexBuildDirectories();
-
         /// Clear cached vector index
         clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 

@@ -197,6 +197,7 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         analyzed_result_ptr_,
         enable_parallel_reading)
 {
+    /// MYSCALE_INTERNAL_CODE_BEGIN
     /// Support multiple vector indices
     auto vector_scan_info_ptr = query_info.vector_scan_info;
 
@@ -288,6 +289,7 @@ ReadWithHybridSearch::ReadWithHybridSearch(
             }
         }
     }
+    /// MYSCALE_INTERNAL_CODE_END
 }
 
 void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)

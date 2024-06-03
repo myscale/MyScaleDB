@@ -17,7 +17,6 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
         return;
     }
 
-    // bool has_final_mark = part->index_granularity.hasFinalMark();
     size_t marks_count = part->index_granularity.getMarksCount();
     /// const auto & index = part->index;
     /// marks_count should not be 0 if we reach here
