@@ -1338,8 +1338,6 @@ MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToDisk(
     }
     catch (...)
     {
-        /// Remove the whole part directory if fetch of base
-        /// part or fetch of any projection was stopped.
         LOG_INFO(log, "Directory {} will be deleted due to an error during fetch part.", part_storage_for_loading->getRelativePath());
         part_storage_for_loading->removeSharedRecursive(true);
         part_storage_for_loading->commitTransaction();

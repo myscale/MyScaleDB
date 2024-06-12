@@ -87,7 +87,6 @@ VIDescription & VIDescription::operator=(const VIDescription & other)
     parameters = other.parameters;
     dim = other.dim;
     vector_search_type = other.vector_search_type;
-
     return *this;
 }
 
@@ -193,8 +192,8 @@ VIDescription VIDescription::getVectorIndexFromAST(
         size_t comma_index = 0;
         if ((comma_index = param_str.rfind(',')) != String::npos)
             param_str.erase(comma_index, 1);
-
     }
+    LOG_TRACE(&Poco::Logger::get("get vector index from ast"), "after parameter check, param_str is {}", param_str);
     if (result.arguments.size() > 0)
     {
         try
@@ -315,7 +314,7 @@ String VIDescription::parse_arg(String & input, const String verify_json, const 
                         ErrorCodes::BAD_ARGUMENTS, "{}: Value for parameter `{}` can't be string", Poco::toUpper(index_type), key);
                 }
             }
-
+            // Checking IVFPQ
             if (Search::getVectorIndexType(index_type, vector_search_type) == Search::IndexType::IVFPQ)
             {
                 if (key == "M" && (std::stoi(value) == 0 || _dim == 0 || _dim % std::stoi(value) != 0))

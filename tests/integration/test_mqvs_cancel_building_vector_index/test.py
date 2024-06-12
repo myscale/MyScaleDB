@@ -72,40 +72,40 @@ def test_drop_table_release_index_cache(started_cluster):
     assert instance.contains_in_log("Num of cache items after forceExpire 0")
 
 
-def test_drop_index_cancel_building_mstg_index(started_cluster):
+def test_drop_index_cancel_building_scann_index(started_cluster):
     instance.query(
         """
-    DROP TABLE IF EXISTS test_drop_mstg_index;
-    CREATE TABLE test_drop_mstg_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 512) Engine MergeTree ORDER BY id;
-    INSERT INTO test_drop_mstg_index SELECT number, randomPrintableASCII(80), range(512) FROM numbers(500000);
-    optimize table test_drop_mstg_index final;
-    ALTER TABLE test_drop_mstg_index ADD VECTOR INDEX v1 vector TYPE MSTG;
+    DROP TABLE IF EXISTS test_drop_scann_index;
+    CREATE TABLE test_drop_scann_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 512) Engine MergeTree ORDER BY id;
+    INSERT INTO test_drop_scann_index SELECT number, randomPrintableASCII(80), range(512) FROM numbers(500000);
+    optimize table test_drop_scann_index final;
+    ALTER TABLE test_drop_scann_index ADD VECTOR INDEX v1 vector TYPE SCANN;
     """
     )
 
-    instance.wait_for_log_line("MSTG adding data finished")
+    instance.wait_for_log_line("SCANN adding data finished")
 
-    instance.query("ALTER TABLE test_drop_mstg_index DROP VECTOR INDEX v1;")
+    instance.query("ALTER TABLE test_drop_scann_index DROP VECTOR INDEX v1;")
 
     instance.wait_for_log_line("Aborting the SearchIndex now")
     assert instance.contains_in_log("Aborting the SearchIndex now")
 
-    instance.query("DROP TABLE IF EXISTS test_drop_mstg_index")
+    instance.query("DROP TABLE IF EXISTS test_drop_scann_index")
 
 
-def test_drop_table_cancel_building_mstg_index(started_cluster):
+def test_drop_table_cancel_building_scann_index(started_cluster):
     instance.query(
         """
-    DROP TABLE IF EXISTS test_drop_mstg_table;
-    CREATE TABLE test_drop_mstg_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
-    INSERT INTO test_drop_mstg_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);
-    optimize table test_drop_mstg_table final;
-    ALTER TABLE test_drop_mstg_table ADD VECTOR INDEX v1 vector TYPE MSTG;
+    DROP TABLE IF EXISTS test_drop_scann_table;
+    CREATE TABLE test_drop_scann_table(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
+    INSERT INTO test_drop_scann_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);
+    optimize table test_drop_scann_table final;
+    ALTER TABLE test_drop_scann_table ADD VECTOR INDEX v1 vector TYPE SCANN;
     """
     )
 
-    instance.wait_for_log_line("MSTG adding data finished")
+    instance.wait_for_log_line("SCANN adding data finished")
 
-    instance.query("DROP TABLE test_drop_mstg_table SYNC;")
+    instance.query("DROP TABLE test_drop_scann_table SYNC;")
 
     assert instance.contains_in_log("Aborting the SearchIndex now")

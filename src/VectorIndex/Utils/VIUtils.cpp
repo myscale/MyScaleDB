@@ -447,10 +447,8 @@ void convertBitmap(
     const std::shared_ptr<RowSource> & inverted_row_sources_map)
 {
     if (segment_id.fromMergedParts())
-    {
         if (!inverted_row_sources_map || !inverted_row_ids_map)
             throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Inverted Row Id Data corruption");
-    }
 
     if (segment_id.fromMergedParts())
     {
@@ -524,23 +522,17 @@ getMergedSourcePartsFromFileName(const String & index_name, const DB::MergeTreeD
     return old_part_names;
 }
 
-String getUniqueVectorIndexCachePrefix(
+String getVectorIndexCachePrefix(
     const String & table_relative_path,
     const String & part_name,
-    const String & index_name,
-    const String & path_uuid)
+    const String & index_name)
 {
     auto global_context = DB::Context::getGlobalContextInstance();
-    String uuid_str;
-    if (path_uuid.empty())
-        uuid_str = generateUUIDv4();
-    else
-        uuid_str = path_uuid;
     if (global_context)
     {
         return fs::path(global_context->getVectorIndexCachePath())
             / fs::path(table_relative_path).parent_path().parent_path()
-            / String(cutMutVer(part_name) + "-" + index_name + "-" + uuid_str)
+            / String(cutMutVer(part_name) + "-" + index_name)
             / "";
     }
     else

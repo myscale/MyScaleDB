@@ -951,6 +951,7 @@ private:
     /// In create and drop vector index cases, do some operations.
     void startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices);
 
+    std::unordered_map<String, std::unordered_set<String>> getPreloadVectorIndicesFromZK();
     /// Get cached vector index info from zookeeper and load into cache.
     void loadVectorIndexFromZookeeper();
 

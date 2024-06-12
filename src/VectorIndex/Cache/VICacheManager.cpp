@@ -175,10 +175,11 @@ std::list<std::pair<CacheKey, VIParameter>> VICacheManager::getAllItems()
     std::list<std::pair<CacheKey, std::shared_ptr<VIWithMeta>>> cache_list = cache->getCacheList();
 
     for (auto cache_item : cache_list)
+    {
         // key   --- string
         // value --- std::shared_ptr<VIWithMeta>
         result.emplace_back(std::make_pair(cache_item.first, cache_item.second->des));
-
+    }
     return result;
 }
 

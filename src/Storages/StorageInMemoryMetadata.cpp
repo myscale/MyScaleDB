@@ -160,6 +160,7 @@ bool StorageInMemoryMetadata::hasVectorIndices() const
 
 bool StorageInMemoryMetadata::hasVectorIndexOnColumn(const String & column_name) const
 {
+    /// Support multiple vector indices
     for (auto & vec_index : vec_indices)
     {
         if (vec_index.column == column_name)

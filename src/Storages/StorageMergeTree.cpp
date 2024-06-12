@@ -140,8 +140,6 @@ void StorageMergeTree::startup()
     /// expand cleanup folder vector_tmp
     clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
-    /// clear nvme cache
-    clearVectorNvmeCache();
 
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();

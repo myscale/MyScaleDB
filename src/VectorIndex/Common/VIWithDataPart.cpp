@@ -18,6 +18,7 @@
 #include <omp.h>
 
 #include <Disks/IDisk.h>
+#include <Daemon/BaseDaemon.h>
 #include <IO/HashingReadBuffer.h>
 #include <IO/copyData.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
@@ -391,7 +392,7 @@ void VIWithColumnInPart::cancelBuild()
         build_index_info->cancel_build.store(true);
 }
 
-VIVariantPtr VIWithColumnInPart::createIndex() const
+VIVariantPtr VIWithColumnInPart::createIndex(bool is_dummy) const
 {
     auto metric = Search::getMetricType(metric_str, vector_search_type);
     VIVariantPtr index_variant;
@@ -405,8 +406,11 @@ VIVariantPtr VIWithColumnInPart::createIndex() const
                 return key != "metric_type";
             });
 
-    const String vector_index_cache_prefix
-        = getUniqueVectorIndexCachePrefix(part_storage->getRelativePath(), current_part_name, index_name);
+    String vector_index_cache_prefix
+        = getVectorIndexCachePrefix(part_storage->getRelativePath(), current_part_name, index_name);
+    
+    if (is_dummy)
+        vector_index_cache_prefix = String(fs::path(vector_index_cache_prefix).parent_path()) + "-dummy" + "/";
 
     if (vector_search_type == Search::DataType::FloatVector)
         index_variant = Search::createVectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::FloatVector>(
@@ -416,9 +420,14 @@ VIVariantPtr VIWithColumnInPart::createIndex() const
             dimension,
             total_vec,
             index_des,
+            max_threads,
             vector_index_cache_prefix,
-            true /* use_file_checksum */,
-            true /* manage_cache_folder */);
+            [base_daemon = BaseDaemon::tryGetInstance()]()
+            {
+                if (base_daemon.has_value())
+                    return base_daemon.value().get().isCancelled();
+                return false;
+            });
     else if (vector_search_type == Search::DataType::BinaryVector)
         index_variant = Search::createVectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::BinaryVector>(
             index_name,
@@ -427,20 +436,17 @@ VIVariantPtr VIWithColumnInPart::createIndex() const
             dimension,
             total_vec,
             index_des,
+            max_threads,
             vector_index_cache_prefix,
-            true /* use_file_checksum */,
-            true /* manage_cache_folder */);
+            [base_daemon = BaseDaemon::tryGetInstance()]()
+            {
+                if (base_daemon.has_value())
+                    return base_daemon.value().get().isCancelled();
+                return false;
+            });
 
     return index_variant;
 }
-
-#ifdef ENABLE_SCANN
-std::shared_ptr<DiskIOManager> VIWithColumnInPart::getDiskIOManager() const
-{
-    return nullptr;
-
-}
-#endif
 
 void VIWithColumnInPart::serialize(
     VIVariantPtr & index,
@@ -569,7 +575,7 @@ IndexWithMetaHolderPtr VIWithColumnInPart::loadDecoupleCache(SegmentId & segment
 }
 
 /// cancel load vector index implement
-IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_active, const String & nvme_cache_path_uuid)
+IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_active)
 {
     OpenTelemetry::SpanHolder span("VIWithColumnInPart::load");
     VICacheManager * mgr = VICacheManager::getInstance();
@@ -638,8 +644,12 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
             }
             index_params.setParam("load_index_version", metadata.version);
 
-            String vector_index_cache_prefix = getUniqueVectorIndexCachePrefix(
-                part_storage->getRelativePath(), segment_id.getCacheKey().part_name_no_mutation, index_name, nvme_cache_path_uuid);
+            String vector_index_cache_prefix = getVectorIndexCachePrefix(
+                part_storage->getRelativePath(), segment_id.getCacheKey().part_name_no_mutation, index_name);
+            
+            if (segment_id.fromMergedParts())
+                vector_index_cache_prefix = fs::path(vector_index_cache_prefix).parent_path().string() + String("-decouple/");
+
             VIVariantPtr index_variant;
 
             if (vector_search_type == Search::DataType::FloatVector)
@@ -650,9 +660,14 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
                     metadata.dimension,
                     metadata.total_vec,
                     index_params,
+                    max_threads,
                     vector_index_cache_prefix,
-                    true /* use_file_checksum */,
-                    true /* manage_cache_folder */);
+                    [base_daemon = BaseDaemon::tryGetInstance()]()
+                    {
+                        if (base_daemon.has_value())
+                            return base_daemon.value().get().isCancelled();
+                        return false;
+                    });
             else if (vector_search_type == Search::DataType::BinaryVector)
                 index_variant = Search::createVectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::BinaryVector>(
                     index_name,
@@ -661,9 +676,14 @@ IndexWithMetaHolderPtr VIWithColumnInPart::load(SegmentId & segment_id, bool is_
                     metadata.dimension,
                     metadata.total_vec,
                     index_params,
+                    max_threads,
                     vector_index_cache_prefix,
-                    true /* use_file_checksum */,
-                    true /* manage_cache_folder */);
+                    [base_daemon = BaseDaemon::tryGetInstance()]()
+                    {
+                        if (base_daemon.has_value())
+                            return base_daemon.value().get().isCancelled();
+                        return false;
+                    });
 
             auto file_reader = Search::IndexDataFileReader<VectorIndexIStream>(
                 segment_id.getFullPath(),
@@ -767,7 +787,7 @@ bool VIWithColumnInPart::cache(VIVariantPtr index)
     auto delete_bitmap = std::make_shared<VIBitmap>(total_vec, true);
     convertBitmap(segment_id, part_deleted_row_ids, delete_bitmap, nullptr, nullptr, nullptr);
 
-    String vector_index_cache_prefix = getUniqueVectorIndexCachePrefix(part_storage->getRelativePath(), current_part_name, index_name);
+    String vector_index_cache_prefix = getVectorIndexCachePrefix(part_storage->getRelativePath(), current_part_name, index_name);
     /// when cacheIndexAndMeta() is called, related files should have already been loaded.
     VectorIndexWithMetaPtr cache_item = std::make_shared<VIWithMeta>(
         index, total_vec, delete_bitmap, des, nullptr, nullptr, nullptr, 0, disk_mode, fallback_to_flat, vector_index_cache_prefix);
@@ -936,6 +956,21 @@ SearchResultPtr VIWithColumnInPart::search(
     }
 }
 
+void VIWithColumnInPart::waitBuildFinish(const size_t timeout)
+{
+    auto timeout_duration = std::chrono::milliseconds(timeout);
+    std::chrono::steady_clock::time_point end_of_timeout
+        = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(timeout_duration);
+    while (std::chrono::steady_clock::now() < end_of_timeout)
+    {
+        if (build_index_info->state != VIState::BUILDING)
+            return;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    LOG_WARNING(log, "Wait index build finish timeout.");
+}
+
+
 bool VIWithDataPart::isBuildCancelled(const String & index_name)
 {
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
@@ -956,6 +991,13 @@ void VIWithDataPart::cancelAllIndexBuild()
     std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
     for (auto it : vector_indices)
         it.second->cancelBuild();
+}
+
+void VIWithDataPart::waitAllIndexFinish()
+{
+    std::shared_lock<std::shared_mutex> lock(vector_indices_mutex);
+    for (auto it : vector_indices)
+        it.second->waitBuildFinish();
 }
 
 /// revert according std::optional

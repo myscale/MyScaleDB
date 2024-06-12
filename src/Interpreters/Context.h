@@ -1173,6 +1173,7 @@ public:
     HybridSearchInfoPtr getHybridSearchInfo() const;
     void setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const;
     void resetHybridSearchInfo() const;
+
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;
 
