@@ -875,7 +875,8 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     ActionsDAGPtr & actions,
     const String & function_col_name,
     ASTPtr query_column,
-    ASTPtr query_vector)
+    ASTPtr query_vector,
+    int topk)
 {
     VSDescription vector_scan_desc;
     vector_scan_desc.column_name = function_col_name;
@@ -942,7 +943,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     vector_scan_desc.vector_search_type = syntax->vector_search_type;
 
     /// top_k is get from limit N
-    vector_scan_desc.topk = static_cast<int>(syntax->limit_length);
+    vector_scan_desc.topk = topk;
 
     /// Pass the correct direction to vector_scan_desc according to metric_type
     vector_scan_desc.direction = Poco::toUpper(syntax->vector_scan_metric_type) == "IP" ? -1 : 1;
@@ -966,7 +967,7 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
                     "wrong argument number in distance function");
         }
 
-        auto vector_scan_desc = commonMakeVectorScanDescription(actions, node->getColumnName(), arguments[0], arguments[1]);
+        auto vector_scan_desc = commonMakeVectorScanDescription(actions, node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length));
 
         /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
         vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
@@ -988,7 +989,8 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     ActionsDAGPtr & actions,
     const String & function_col_name,
     ASTPtr query_column,
-    ASTPtr query_text)
+    ASTPtr query_text,
+    int topk)
 {
     String text_column_name;
     if (auto * identifier = query_column->as<ASTIdentifier>())
@@ -1045,7 +1047,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
         text_column_name,
         query_text->getColumnName());
 
-    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, static_cast<int>(syntax->limit_length), syntax->direction);
+    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, syntax->direction);
 }
 
 bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
@@ -1067,7 +1069,7 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
         /// Only need actions for the second argument, the first argument is used for search index.
         getRootActionsNoMakeSet(arguments[1], actions);
 
-        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1]);
+        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length));
         LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
@@ -1112,7 +1114,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAGPtr & actions)
             String param_key = param_str.substr(0, pos);
             String param_value = param_str.substr(pos + 1);
 
-            if (param_key == "fusion_type" || param_key == "fusion_weight" || param_key == "fusion_k")
+            if (param_key == "fusion_type" || param_key == "fusion_weight" || param_key == "fusion_k" || param_key == "num_candidates")
             {
                 if (hybrid_parameters_map.count(param_key) > 0)
                 {
@@ -1130,10 +1132,32 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAGPtr & actions)
             }
         }
 
+        /// Use num_candidates for vector scan's top-k to get more candidates results for hybrid search
+        const auto & settings = getContext()->getSettingsRef();
+        int num_candidates = 0;
+        if (hybrid_parameters_map.contains("num_candidates"))
+        {
+            std::stringstream num_candidates_ss(hybrid_parameters_map["num_candidates"]);
+            num_candidates_ss >> num_candidates;
+            if (num_candidates_ss.fail() || !num_candidates_ss.eof())
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "HybridSearch parameter `num_candidates` value should be int");
+        }
+
+        /// Use default value (3 * topk) if specified num_candidates <= 0
+        if (num_candidates <= 0)
+            num_candidates = static_cast<int>(settings.hybrid_search_top_k_multiple_base * syntax->limit_length);
+        else if (static_cast<UInt64>(num_candidates) < syntax->limit_length)
+        {
+            /// num_candidates should be no less than limit N (top k)
+            num_candidates = static_cast<int>(syntax->limit_length);
+        }
+
+        LOG_DEBUG(getLogger(), "num_candidates is {}", num_candidates);
+
         /// make VSDescription for HybridSearchInfo
         {
             getRootActionsNoMakeSet(arguments[2], actions);
-            auto vector_scan_desc = commonMakeVectorScanDescription(actions, "distance_func", arguments[0], arguments[2]);
+            auto vector_scan_desc = commonMakeVectorScanDescription(actions, "distance_func", arguments[0], arguments[2], num_candidates);
 
             /// Save vector_scan_parameter to vector_scan_desc's parameters
             if (!vector_scan_parameter.empty())
@@ -1150,11 +1174,10 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAGPtr & actions)
 
         /// make TextSearchInfo for HybridSearchInfo
         getRootActionsNoMakeSet(arguments[3], actions);
-        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, "textsearch_func", arguments[1], arguments[3]);
+        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, "textsearch_func", arguments[1], arguments[3], num_candidates);
 
         String hybrid_fusion_type = hybrid_parameters_map["fusion_type"];
         String function_column_name = node->getColumnName();
-        const auto & settings = getContext()->getSettingsRef();
 
         if (isRelativeScoreFusion(hybrid_fusion_type))
         {
