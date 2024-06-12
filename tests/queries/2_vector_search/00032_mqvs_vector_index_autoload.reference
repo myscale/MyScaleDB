@@ -23,7 +23,7 @@ all_0_0_0\tvec_ind\nall_1_1_0\tvec_ind\n
 0
 all_0_1_1\tvec_ind\n
 --- drop table
---- init (disable_rebuild_for_decouple)
+--- init (enable_rebuild_for_decouple)
 0
 0
 0
