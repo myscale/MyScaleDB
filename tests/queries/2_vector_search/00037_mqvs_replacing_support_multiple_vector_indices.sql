@@ -9,7 +9,7 @@ CREATE TABLE replacing_test_multi(
     CONSTRAINT check_length CHECK length(vector) = 3,
     CONSTRAINT check_length CHECK length(v2) = 4
     ) engine ReplacingMergeTree
-    ORDER BY id SETTINGS disable_rebuild_for_decouple=true, min_bytes_to_build_vector_index=16000;
+    ORDER BY id SETTINGS enable_rebuild_for_decouple=false, min_bytes_to_build_vector_index=16000;
 
 ALTER TABLE replacing_test_multi ADD VECTOR INDEX vector_mstg vector TYPE MSTG;
 ALTER TABLE replacing_test_multi ADD VECTOR INDEX v2_mstg v2 TYPE MSTG;
