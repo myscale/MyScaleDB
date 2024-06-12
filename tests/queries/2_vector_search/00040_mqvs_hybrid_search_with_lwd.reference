@@ -5,15 +5,15 @@ text search after LWD
 text search on part w/o tantivy index
 hybrid search rsf on part w/o tantivy index
 1	0.5
-0	0.44444445
-2	0.44444445
-3	0.2777778
-4	0
+0	0.49704143
+2	0.49704143
+3	0.48816568
+4	0.4733728
 text search on part with index after LWD
 0	1.9431154
 hybrid search rsf on part with index after LWD
-0	0.9444444
+0	0.997449
 1	0.5
-2	0.44444445
-3	0.2777778
-4	0
+2	0.49744898
+3	0.48979592
+4	0.47704083

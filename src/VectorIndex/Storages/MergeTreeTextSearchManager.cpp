@@ -37,7 +37,8 @@ namespace ErrorCodes
 void MergeTreeTextSearchManager::executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part)
 {
     DB::OpenTelemetry::SpanHolder span("MergeTreeTextSearchManager::executeSearchBeforeRead");
-    text_search_result = textSearch(data_part);
+    if (!preComputed() && text_search_info)
+        text_search_result = textSearch(data_part);
 }
 
 void MergeTreeTextSearchManager::executeSearchWithFilter(
@@ -45,7 +46,8 @@ void MergeTreeTextSearchManager::executeSearchWithFilter(
     const ReadRanges & /* read_ranges */,
     const Search::DenseBitmapPtr filter)
 {
-    text_search_result = textSearch(data_part, filter);
+    if (!preComputed() && text_search_info)
+        text_search_result = textSearch(data_part, filter);
 }
 
 TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
