@@ -4,7 +4,7 @@
 echo 'vector index on s3'
 
 clickhouse-client -q "drop table if exists test_vector_index_s3 sync"
-clickhouse-client -q "create table test_vector_index_s3 (id Int32, vector Array(Float32), CONSTRAINT check_length CHECK length(vector) = 3) ENGINE = MergeTree ORDER BY id settings disable_rebuild_for_decouple=true, storage_policy='s3_cache'"
+clickhouse-client -q "create table test_vector_index_s3 (id Int32, vector Array(Float32), CONSTRAINT check_length CHECK length(vector) = 3) ENGINE = MergeTree ORDER BY id settings enable_rebuild_for_decouple=false, storage_policy='s3_cache'"
 clickhouse-client -q "alter table test_vector_index_s3 add vector index vec_ind vector type IVFFLAT"
 
 clickhouse-client -q "insert into test_vector_index_s3 select number, [number,number,number] from numbers(100)"
