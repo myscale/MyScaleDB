@@ -228,14 +228,16 @@ protected:
         ActionsDAG & actions,
         const String & function_col_name,
         ASTPtr query_column,
-        ASTPtr query_text);
+        ASTPtr query_text,
+        int topk);
 
     /// Common logic to generate vector scan description for hybrid search and vector scan
     VSDescription commonMakeVectorScanDescription(
         ActionsDAG & actions,
         const String & function_col_name,
         ASTPtr query_column,
-        ASTPtr query_vector);
+        ASTPtr query_vector,
+        int topk);
 
     void analyzeHybridSearch(ActionsDAG & temp_actions);
     bool makeHybridSearchInfo(ActionsDAG & actions);

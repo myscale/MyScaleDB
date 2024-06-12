@@ -161,6 +161,7 @@ class IColumn;
     M(Bool, enable_brute_force_vector_search, false, "Enable brute-force search for data parts without vector indexes.", 0) \
     M(Float, hybrid_search_fusion_weight, 0.5f, "Default fusion_weight for hybrid search Relative Score Fusion (RSF) function. Valid value is in interval [0.0f, 1.0f]", 0) \
     M(UInt64, hybrid_search_fusion_k, 60, "Default fusion_k for hybrid search Reciprocal Rank Fusion (RRF) function", 0) \
+    M(UInt64, hybrid_search_top_k_multiple_base, 3, "Default multiple base on top k for num_candidates in hybrid search", 0) \
     M(Bool, optimize_prefilter_in_search, true, "Enable prewhere optimization for vector or text search if some partition columns in prewhere condition.", 0) \
     M(String, stream_like_engine_insert_queue, "", "When stream like engine reads from multiple queues, user will need to select one queue to insert into when writing. Used by Redis Streams and NATS.", 0) \
     M(Bool, dictionary_validate_primary_key_type, false, "Validate primary key type for dictionaries. By default id type for simple layouts will be implicitly converted to UInt64.", 0) \

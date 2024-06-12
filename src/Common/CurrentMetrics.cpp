@@ -89,6 +89,10 @@
     M(MergeTreeDataSelectExecutorThreadsScheduled, "Number of queued or active jobs in the MergeTreeDataSelectExecutor thread pool.") \
     M(MergeTreeDataSelectBM25CollectThreads, "Number of threads in the thread pool for collecting statistics for text search.") \
     M(MergeTreeDataSelectBM25CollectThreadsActive, "Number of threads in the thread pool for collecting statistics for text search running a task.") \
+    M(MergeTreeDataSelectHybridSearchThreads, "Number of threads in the thread pool for hybrid search.") \
+    M(MergeTreeDataSelectHybridSearchThreadsActive, "Number of threads in the thread pool for hybrid search running a task.") \
+    M(ReadWithHybridSearchSecondStageThreads, "Number of threads in the thread pool for second stage vector scan in hybrid search.") \
+    M(ReadWithHybridSearchSecondStageThreadsActive, "Number of threads in the thread pool for  second stage vector scan in hybrid search running a task.") \
     M(BackupsThreads, "Number of threads in the thread pool for BACKUP.") \
     M(BackupsThreadsActive, "Number of threads in thread pool for BACKUP running a task.") \
     M(BackupsThreadsScheduled, "Number of queued or active jobs for BACKUP.") \
