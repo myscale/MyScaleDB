@@ -1,0 +1,38 @@
+hybrid search on two parts with relative score fusion
+13	0.5739645
+1	0.5
+0	0.49704143
+2	0.49704143
+3	0.48816568
+hybrid search on two parts with rank fusion
+0	0.032258064
+13	0.029906955
+1	0.016393442
+2	0.015873017
+3	0.015625
+hybrid search on two parts rsf with WHERE clause (0 is top 1 in text)
+0	0.9921875
+1	0.5
+2	0.4921875
+3	0.46875
+4	0.4296875
+0
+hybrid search with two stage enabled
+3	0.9881657
+1	0.5
+0	0.49704143
+2	0.49704143
+4	0.4733728
+0
+hybrid search multi parts with two stage enabled
+3	0.9881657
+1	0.5
+1004	0.5
+0	0.49704143
+2	0.49704143
+optimized to one part, hybrid search with two stage enabled
+3	0.9881657
+1	0.5
+1004	0.5
+0	0.49704143
+2	0.49704143

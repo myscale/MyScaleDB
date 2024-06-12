@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tags: no-parallel, disabled
+# Tags: no-parallel
 #test how MSTG vector index support final, brute force search is required
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 

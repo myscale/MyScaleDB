@@ -195,8 +195,8 @@ public:
     size_t getMaxBlockSize() const { return block_size.max_block_size_rows; }
     size_t getNumStreams() const { return requested_num_streams; }
     bool isParallelReadingEnabled() const { return read_task_callback != std::nullopt; }
-    static void addMergingFinal(Pipe & pipe,const SortDescription & sort_description,MergeTreeData::MergingParams merging_params,
-        Names partition_key_columns,size_t max_block_size);
+    static void addMergingFinal(Pipe & pipe, const SortDescription & sort_description, MergeTreeData::MergingParams merging_params,
+        Names partition_key_columns, size_t max_block_size);
 
     void applyFilters(ActionDAGNodes added_filter_nodes) override;
 
