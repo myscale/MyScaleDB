@@ -157,7 +157,6 @@ private:
     LoggerPtr log;
     std::unordered_map<std::string, UInt64> column_sizes;
     UInt64 total_size_of_queried_columns = 0;
-    bool has_vector_func = false;
 };
 
 
