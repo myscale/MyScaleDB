@@ -91,6 +91,7 @@ namespace ErrorCodes
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int SYNTAX_ERROR;
     extern const int UNKNOWN_IDENTIFIER;
+    extern const int BAD_ARGUMENTS;
 }
 
 namespace
@@ -981,6 +982,63 @@ void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList
     }
 }
 
+UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch = false)
+{
+    UInt64 topk = 0;
+
+    if (!select_query)
+        return topk;
+
+    /// topk for search is sum of length and offset in limit
+    UInt64 length = 0, offset = 0;
+    ASTPtr length_ast = nullptr;
+    ASTPtr offset_ast = nullptr;
+
+    if (is_batch)
+    {
+        /// LIMIT m OFFSET n BY expressions
+        length_ast = select_query->limitByLength();
+        offset_ast = select_query->limitByOffset();
+    }
+    else
+    {
+        /// LIMIT m OFFSET n
+        length_ast = select_query->limitLength();
+        offset_ast = select_query->limitOffset();
+    }
+
+    if (length_ast)
+    {
+        const auto & [field, type] = evaluateConstantExpression(length_ast, context);
+
+        if (isNativeNumber(type))
+        {
+            Field converted = convertFieldToType(field, DataTypeUInt64());
+            if (!converted.isNull())
+                length = converted.safeGet<UInt64>();
+        }
+    }
+
+    if (offset_ast)
+    {
+        const auto & [field, type] = evaluateConstantExpression(offset_ast, context);
+
+        if (isNativeNumber(type))
+        {
+            Field converted = convertFieldToType(field, DataTypeUInt64());
+            if (!converted.isNull())
+                offset = converted.safeGet<UInt64>();
+        }
+    }
+
+    topk = length + offset;
+
+    if (topk > context->getSettingsRef().max_search_result_window)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Sum of m and n in limit ({}) should not exceed `max_search_result_window`({})", topk, context->getSettingsRef().max_search_result_window);
+
+    return topk;
+}
+
 }
 
 TreeRewriterResult::TreeRewriterResult(
@@ -1361,27 +1419,16 @@ void TreeRewriterResult::collectForVectorScanFunctions(
     {
         /// Get topK from limit N
         bool is_batch = isBatchDistance(hybrid_search_funcs[0]->getColumnName());
-        ASTPtr length_ast = nullptr;
-        if (!is_batch && select_query->limitLength())
-            length_ast = select_query->limitLength();
-        else if (is_batch && select_query->limitByLength())
-            length_ast = select_query->limitByLength();
 
-        if (length_ast)
-        {
-            const auto & [field, type] = evaluateConstantExpression(length_ast, context);
+        limit_length = getTopKFromLimit(select_query, context, is_batch);
 
-            if (isNativeNumber(type))
-            {
-                Field converted = convertFieldToType(field, DataTypeUInt64());
-                if (!converted.isNull())
-                    limit_length = converted.safeGet<UInt64>();
-            }
-        }
-
-        /// TODO: Will be removed when distance functions are implemented
         if (limit_length == 0)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT N clause");
+        {
+            if (is_batch)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_distance function without LIMIT BY clause");
+            else
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT clause");
+        }
 
         /// There is no vector scan function, hence the checks like input paramters are put here.
         /// Check if vector column in vector scan func exists in left table or right joined table
@@ -1551,22 +1598,10 @@ void TreeRewriterResult::collectForTextSearchFunctions(
     if (search_func_type == HybridSearchFuncType::TEXT_SEARCH && hybrid_search_funcs.size() == 1)
     {
         /// Get topK from limit N
-        ASTPtr length_ast = nullptr;
-        if (select_query->limitLength())
-            length_ast = select_query->limitLength();
-        if (length_ast)
-        {
-            const auto & [field, type] = evaluateConstantExpression(length_ast, context);
-            if (isNativeNumber(type))
-            {
-                Field converted = convertFieldToType(field, DataTypeUInt64());
-                if (!converted.isNull())
-                    limit_length = converted.safeGet<UInt64>();
-            }
-        }
+        limit_length = getTopKFromLimit(select_query, context);
 
         if (limit_length == 0)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support TextSearch function without LIMIT N clause");
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support TextSearch function without LIMIT clause");
 
         /// There is no text search function, hence the checks like input paramters are put here.
         /// Check if text column in text search func exists in left table or right joined table
@@ -1725,22 +1760,10 @@ void TreeRewriterResult::collectForHybridSearchFunctions(
     if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH && hybrid_search_funcs.size() == 1)
     {
         /// Get topK from limit N
-        ASTPtr length_ast = nullptr;
-        if (select_query->limitLength())
-            length_ast = select_query->limitLength();
-        if (length_ast)
-        {
-            const auto & [field, type] = evaluateConstantExpression(length_ast, context);
-            if (isNativeNumber(type))
-            {
-                Field converted = convertFieldToType(field, DataTypeUInt64());
-                if (!converted.isNull())
-                    limit_length = converted.safeGet<UInt64>();
-            }
-        }
+        limit_length = getTopKFromLimit(select_query, context);
 
         if (limit_length == 0)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support HybridSearch function without LIMIT N clause");
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support HybridSearch function without LIMIT clause");
 
         /// There is no hybrid search function, hence the checks like input paramters are put here.
         /// Check if vector and text column in hybrid search func exists in left table or right joined table
