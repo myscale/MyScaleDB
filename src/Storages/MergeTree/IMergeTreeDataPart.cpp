@@ -2040,7 +2040,9 @@ void IMergeTreeDataPart::remove()
     GinIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
 
 #if USE_TANTIVY_SEARCH
-    TantivyIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
+    size_t removed = TantivyIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
+    if (removed == 0)
+        TantivyIndexFilesManager::removeDataPartInCache(getDataPartStoragePtr()->getRelativePath());
 #endif
 
     std::list<IDataPartStorage::ProjectionChecksums> projection_checksums;
