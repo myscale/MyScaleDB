@@ -21,9 +21,10 @@
 #include <VectorIndex/Processors/ReadWithHybridSearch.h>
 
 #if USE_TANTIVY_SEARCH
-#include <VectorIndex/Common/BM25InfoInDataParts.h>
-#include <Storages/MergeTree/TantivyIndexStore.h>
-#include <Interpreters/TantivyFilter.h>
+#    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#    include <VectorIndex/Common/BM25InfoInDataParts.h>
 #endif
 
 namespace ProfileEvents
@@ -121,8 +122,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
                 tantivy_index_file_name, part->name);
             return;
         }
-
-        auto tantivy_store = TantivyIndexStoreFactory::instance().get(tantivy_index_file_name, part->getDataPartStoragePtr());
+        auto tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(tantivy_index_file_name, part->getDataPartStoragePtr());
 
         if (tantivy_store)
         {
