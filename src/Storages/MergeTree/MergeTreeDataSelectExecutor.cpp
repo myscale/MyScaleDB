@@ -1399,7 +1399,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     TantivyIndexStorePtr tantivy_store = nullptr;
     if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
     {
-        tantivy_store = TantivyIndexStoreFactory::instance().get(index_helper->getFileName(), part->getDataPartStoragePtr());
+        tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), part->getDataPartStoragePtr());
         indexed_doc_nums = tantivy_store->getIndexedDocsNum();
         if (indexed_doc_nums > std::numeric_limits<uint32_t>::max())
         {
