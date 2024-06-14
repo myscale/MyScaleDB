@@ -165,7 +165,7 @@ protected:
     GinIndexStoreFactory::GinIndexStores gin_index_stores;
 
 #if USE_TANTIVY_SEARCH
-    TantivyIndexStores tantivy_index_stores;
+    std::set<String> tantivy_index_store_keys;
 #endif
 
 private:

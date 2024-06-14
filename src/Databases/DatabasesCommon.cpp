@@ -13,6 +13,11 @@
 #include <Backups/BackupEntriesCollector.h>
 #include <Backups/RestorerFromBackup.h>
 
+#if USE_TANTIVY_SEARCH
+#    include <Disks/DiskLocal.h>
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#endif
 
 namespace DB
 {
@@ -247,6 +252,48 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
         DatabaseCatalog::instance().removeUUIDMapping(table_id.uuid);
     }
 
+#if USE_TANTIVY_SEARCH
+    if (res->getInMemoryMetadataPtr()->getSecondaryIndices().hasFTS())
+    {
+        fs::path table_relative_path;
+        if (res->getStorageID().hasUUID())
+        {
+            String uuid = toString(res->getStorageID().uuid);
+            table_relative_path = fs::path("store") / uuid.substr(0, 3) / uuid / "";
+        }
+        else if (res->getStorageID().hasDatabase())
+        {
+            table_relative_path = fs::path("data") / res->getStorageID().getDatabaseName() / res->getStorageID().getTableName() / "";
+        }
+
+        if (!table_relative_path.empty())
+        {
+            auto context = Context::getGlobalContextInstance();
+            String tantivy_index_cache_prefix = context->getTantivyIndexCachePath();
+            fs::path tantivy_index_cache_path_for_table = fs::path(tantivy_index_cache_prefix) / table_relative_path;
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath(), 0);
+            if (disk->isDirectory(tantivy_index_cache_path_for_table))
+            {
+                disk->removeRecursive(tantivy_index_cache_path_for_table);
+                LOG_INFO(
+                    &Poco::Logger::get("DatabaseWithOwnTablesBase"),
+                    "detach table `{}`, hasDatabase {}, hasUUID {} clean FTS cache `{}`",
+                    res->getStorageID().getFullTableName(),
+                    res->getStorageID().hasDatabase(),
+                    res->getStorageID().hasUUID(),
+                    tantivy_index_cache_path_for_table);
+            }
+            auto tantivy_index_cache_parent_path = tantivy_index_cache_path_for_table.parent_path().parent_path();
+            if (disk->isDirectory(tantivy_index_cache_parent_path) && disk->isDirectoryEmpty(tantivy_index_cache_parent_path))
+            {
+                disk->removeRecursive(tantivy_index_cache_parent_path);
+            }
+            // clean stores
+            // TODO needs refine TantivyIndexStoreFactory, the remove func is only for data part relative path.
+            TantivyIndexStoreFactory::instance().remove(table_relative_path);
+        }
+    }
+#endif
     return res;
 }
 

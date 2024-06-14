@@ -96,7 +96,9 @@
 #include <VectorIndex/Common/SegmentId.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
 #include <VectorIndex/Utils/VIUtils.h>
-
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#endif
 template <>
 struct fmt::formatter<DB::DataPartPtr> : fmt::formatter<std::string>
 {
@@ -178,6 +180,7 @@ namespace ErrorCodes
     extern const int SERIALIZATION_ERROR;
     extern const int NETWORK_ERROR;
     extern const int SOCKET_TIMEOUT;
+    extern const int TANTIVY_INDEX_CACHE_RELOAD_ERROR;
 }
 
 
@@ -2541,6 +2544,99 @@ void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unorder
     }
 }
 
+#if USE_TANTIVY_SEARCH
+void MergeTreeData::updateTantivyIndexCache()
+{
+    try
+    {
+        auto part_tantivy_cache_path = fs::path(getContext()->getTantivyIndexCachePath())
+            / TantivyIndexStoreFactory::instance().getPartRelativePath(getRelativeDataPath());
+
+        if (fs::exists(part_tantivy_cache_path))
+        {
+            // key: part_name in ClickHouse
+            // value: a group of part_names in disk with them last modified time.
+            std::map<String, std::vector<std::pair<String, fs::file_time_type>>> part_map;
+
+            for (const auto & entry : fs::directory_iterator(part_tantivy_cache_path))
+            {
+                if (entry.is_directory())
+                {
+                    String part_name_in_disk = entry.path().filename();
+                    DataPartPtr part_name_in_ck = getActiveContainingPart(part_name_in_disk);
+
+
+                    if (part_name_in_ck)
+                    {
+                        if (isWidePart(part_name_in_ck))
+                        {
+                            String active_part_name_in_ck = part_name_in_ck->name;
+                            fs::file_time_type modification_time = fs::last_write_time(entry.path());
+                            part_map[active_part_name_in_ck].emplace_back(part_name_in_disk, modification_time);
+                        }
+                        else
+                        {
+                            LOG_INFO(
+                                log, "[updateTantivyIndexCache] FTS cache part_name({}) is not a WidePart, remove it.", part_name_in_disk);
+                            fs::remove_all(entry.path());
+                        }
+                    }
+                    else
+                    {
+                        LOG_INFO(
+                            log, "[updateTantivyIndexCache] Can't find FTS cache part_name({}) in table, remove it.", part_name_in_disk);
+                        fs::remove_all(entry.path());
+                    }
+                }
+            }
+
+            // Rename latest part_name in disk, and remove older part_name.
+            for (auto & [active_part_name_in_ck, disk_parts_list] : part_map)
+            {
+                std::sort(
+                    disk_parts_list.begin(), disk_parts_list.end(), [](const auto & a, const auto & b) { return a.second > b.second; });
+
+                const String & latest_part_name = disk_parts_list.front().first;
+
+                if (active_part_name_in_ck != latest_part_name)
+                {
+                    LOG_INFO(
+                        log,
+                        "[updateTantivyIndexCache] Rename cache part_name {} -> {}",
+                        part_tantivy_cache_path / latest_part_name,
+                        part_tantivy_cache_path / active_part_name_in_ck);
+                    fs::rename(part_tantivy_cache_path / latest_part_name, part_tantivy_cache_path / active_part_name_in_ck);
+                }
+
+                for (const auto & index_entry : fs::directory_iterator(part_tantivy_cache_path / active_part_name_in_ck))
+                {
+                    if (index_entry.is_directory())
+                    {
+                        String skp_idx_name = index_entry.path().filename();
+                        DataPartPtr active_data_part = getActiveContainingPart(active_part_name_in_ck);
+                        TantivyIndexStoreFactory::instance().getOrLoad(skp_idx_name, active_data_part->getDataPartStoragePtr());
+                    }
+                }
+                for (size_t i = 1; i < disk_parts_list.size(); ++i)
+                {
+                    LOG_INFO(
+                        log,
+                        "[updateTantivyIndexCache] Remove older cache part_name {}",
+                        part_tantivy_cache_path / disk_parts_list[i].first);
+                    fs::remove_all(part_tantivy_cache_path / disk_parts_list[i].first);
+                }
+            }
+        }
+    }
+    catch (...)
+    {
+        // TODO: needs remove all directory?
+        LOG_ERROR(log, "[updateTantivyIndexCache] Updating FTS cache error.");
+        return;
+    }
+}
+#endif
+
 void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
 {
     //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
@@ -3075,7 +3171,9 @@ void MergeTreeData::dropAllData()
             LOG_INFO(log, "dropAllData: removing table directory recursive to cleanup garbage");
             disk->removeRecursive(relative_data_path);
 #if USE_TANTIVY_SEARCH
-            TantivyIndexStoreFactory::instance().remove(relative_data_path);
+            size_t removed = TantivyIndexStoreFactory::instance().remove(relative_data_path);
+            if (removed == 0)
+                TantivyIndexFilesManager::removeDataPartInCache(relative_data_path);
 #endif
         }
         catch (const fs::filesystem_error & e)
@@ -3926,6 +4024,10 @@ bool MergeTreeData::renameTempPartAndReplaceImpl(
 {
     LOG_TRACE(log, "Renaming temporary part {} to {} with tid {}.", part->getDataPartStorage().getPartDirectory(), part->name, out_transaction.getTID());
 
+#if USE_TANTIVY_SEARCH
+    String origin_data_path_relative_path = part->getDataPartStoragePtr()->getRelativePath();
+#endif
+
     if (&out_transaction.data != this)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "MergeTreeData::Transaction for one table cannot be used with another. It is a bug.");
 
@@ -3964,6 +4066,14 @@ bool MergeTreeData::renameTempPartAndReplaceImpl(
         out_covered_parts->reserve(out_covered_parts->size() + hierarchy.covered_parts.size());
         std::move(hierarchy.covered_parts.begin(), hierarchy.covered_parts.end(), std::back_inserter(*out_covered_parts));
     }
+
+#if USE_TANTIVY_SEARCH
+    auto metadata = part->storage.getInMemoryMetadataPtr();
+    if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+    {
+        TantivyIndexStoreFactory::instance().renamePart(origin_data_path_relative_path, part->getDataPartStoragePtr());
+    }
+#endif
 
     return true;
 }
@@ -6365,6 +6475,7 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
 
             for (const auto & part : precommitted_parts)
             {
+                // LOG_INFO(&Poco::Logger::get("MergeTreeData::Transaction"), "[commit] precommitted part is {}", part->getDataPartStoragePtr()->getRelativePath());
                 DataPartPtr covering_part;
                 DataPartsVector covered_parts = data.getActivePartsToReplace(part->info, part->name, covering_part, *owing_parts_lock);
                 if (covering_part)
@@ -6428,7 +6539,10 @@ MergeTreeData::DataPartsVector MergeTreeData::Transaction::commit(MergeTreeData:
     }
 
     clear();
-
+    // for (const auto & covered : total_covered_parts)
+    // {
+    //     LOG_INFO(&Poco::Logger::get("MergeTreeData::Transaction"), "[commit] after covered part is {}", covered->getDataPartStoragePtr()->getRelativePath());
+    // }
     return total_covered_parts;
 }
 
