@@ -18,9 +18,10 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 
 #if USE_TANTIVY_SEARCH
-#include <Storages/MergeTree/MergeTreeIndexTantivy.h>
-#include <Storages/MergeTree/TantivyIndexStore.h>
-#include <Interpreters/TantivyFilter.h>
+#    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #endif
 
 #include <memory>
@@ -93,7 +94,8 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
-                tantivy_store = TantivyIndexStoreFactory::instance().get(index_helper->getFileName(), data_part->getDataPartStoragePtr());
+                tantivy_store
+                    = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), data_part->getDataPartStoragePtr());
 
             if (tantivy_store)
             {

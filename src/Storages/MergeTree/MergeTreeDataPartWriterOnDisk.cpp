@@ -237,10 +237,16 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
 #if USE_TANTIVY_SEARCH
         else if (typeid_cast<const MergeTreeIndexTantivy *>(&*skip_index) != nullptr)
         {
-            TantivyIndexStorePtr store
-                = std::make_shared<TantivyIndexStore>(stream_name, data_part->getDataPartStoragePtr(), data_part->getDataPartStoragePtr());
-            tantivy_index_stores[stream_name] = store;
+            String store_key = TantivyIndexStoreFactory::instance().generateKey(stream_name, data_part->getDataPartStoragePtr());
+            TantivyIndexStorePtr store = TantivyIndexStoreFactory::instance().getOrInit(
+                stream_name, data_part->getDataPartStoragePtr(), data_part->getDataPartStoragePtr());
             skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(store));
+            auto status = tantivy_index_store_keys.insert(store_key);
+            if (!status.second)
+            {
+                LOG_WARNING(
+                    &Poco::Logger::get("MergeTreeDataPartWriterOnDisk"), "[initSkipIndices] store_key({}) already exists", store_key);
+            }
         }
 #endif
         else
@@ -327,12 +333,12 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
 #if USE_TANTIVY_SEARCH
                 else if (typeid_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
                 {
-                    TantivyIndexStorePtr store = nullptr;
                     String stream_name = index_helper->getFileName();
-                    auto it = tantivy_index_stores.find(stream_name);
-                    if (it == tantivy_index_stores.end())
-                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Index '{}' does not exist", stream_name);
-                    store = it->second;
+                    TantivyIndexStorePtr store = TantivyIndexStoreFactory::instance().get(stream_name, data_part->getDataPartStoragePtr());
+                    if (store == nullptr)
+                    {
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "store hasn't been initialized, it shouldn't happen.");
+                    }
                     skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(store);
                 }
 #endif
@@ -439,18 +445,39 @@ void MergeTreeDataPartWriterOnDisk::fillSkipIndicesChecksums(MergeTreeData::Data
     }
 
 #if USE_TANTIVY_SEARCH
-    /// Serialize and calculate checksums for tantivy index files.
-    for (auto & store : tantivy_index_stores)
+
+    if (tantivy_index_store_keys.size() != 0)
     {
-        store.second->finalizeTantivyIndex();
-        ChecksumPairs tantivy_checksums = store.second->serialize();
-        for (const auto & checksum_pair : tantivy_checksums)
+        TantivyIndexStoreFactory::instance().iter(
+            [&](const std::string & store_key, TantivyIndexStorePtr store)
+            {
+                if (tantivy_index_store_keys.find(store_key) != tantivy_index_store_keys.end())
+                {
+                    store->finalizeTantivyIndex();
+                    ChecksumPairs tantivy_checksums = store->serialize();
+                    for (const auto & checksum_pair : tantivy_checksums)
+                    {
+                        checksums.files[checksum_pair.first] = checksum_pair.second;
+                    }
+                    size_t erased = tantivy_index_store_keys.erase(store_key);
+                    if (erased != 1)
+                    {
+                        LOG_WARNING(
+                            &Poco::Logger::get("MergeTreeDataPartWriterOnDisk"),
+                            "[fillSkipIndicesChecksums] duplicated store_key({}) erased, count {}",
+                            store_key,
+                            erased);
+                    }
+                }
+            });
+        if (tantivy_index_store_keys.size() != 0)
         {
-            checksums.files[checksum_pair.first] = checksum_pair.second;
+            LOG_ERROR(
+                &Poco::Logger::get("MergeTreeDataPartWriterOnDisk"),
+                "[fillSkipIndicesChecksums] tantivy_index_store_keys not clear, bab behavior, remain count {}",
+                tantivy_index_store_keys.size());
         }
-        store.second->removeTantivyIndexCache();
     }
-    tantivy_index_stores.clear();
 #endif
 
     for (auto & stream : skip_indices_streams)
