@@ -23,6 +23,10 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
 
+
+#if USE_TANTIVY_SEARCH
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#endif
 #include <VectorIndex/Common/VICommon.h>
 
 
@@ -594,6 +598,26 @@ static NameSet collectFilesToSkip(
     return files_to_skip;
 }
 
+#if USE_TANTIVY_SEARCH
+static void removeTantivyIndexCache(MergeTreeData::DataPartPtr source_part, const MutationCommands & commands_for_removes)
+{
+    for (const auto & command : commands_for_removes)
+    {
+        if (command.type == MutationCommand::Type::DROP_INDEX)
+        {
+            String skp_idx_name = INDEX_FILE_PREFIX + command.column_name;
+            String source_data_part_relative_path = source_part->getDataPartStoragePtr()->getRelativePath();
+            LOG_INFO(
+                &Poco::Logger::get("removeTantivyIndexCache"),
+                "INDEX_FILE_PREFIX: {}, command.column_name: {}, part relative_path: {}",
+                INDEX_FILE_PREFIX,
+                command.column_name,
+                source_part->getDataPartStoragePtr()->getRelativePath());
+            TantivyIndexStoreFactory::instance().dropIndex(skp_idx_name, source_part->getDataPartStoragePtr());
+        }
+    }
+}
+#endif
 
 /// Apply commands to source_part i.e. remove and rename some columns in
 /// source_part and return set of files, that have to be removed or renamed
@@ -819,6 +843,15 @@ void finalizeMutatedPart(
 
     /// TODO: Should new part inherit build error from old part?
     /// Retry build vector index for new parts.
+
+#if USE_TANTIVY_SEARCH
+    auto metadata = source_part->storage.getInMemoryMetadataPtr();
+    if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+    {
+        TantivyIndexStoreFactory::instance().mutate(
+            source_part->getDataPartStoragePtr()->getRelativePath(), new_data_part->getDataPartStoragePtr()->getRelativePath());
+    }
+#endif
 }
 
 }
@@ -1781,6 +1814,14 @@ bool MutateTask::prepare()
 
         part->getDataPartStorage().beginTransaction();
 
+#if USE_TANTIVY_SEARCH
+        auto metadata = ctx->source_part->storage.getInMemoryMetadataPtr();
+        if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+        {
+            TantivyIndexStoreFactory::instance().mutate(
+                ctx->source_part->getDataPartStoragePtr()->getRelativePath(), part->getDataPartStoragePtr()->getRelativePath());
+        }
+#endif
         ctx->temporary_directory_lock = std::move(lock);
         promise.set_value(std::move(part));
         return false;
@@ -1800,6 +1841,10 @@ bool MutateTask::prepare()
     context_for_reading->setSetting("max_streams_for_merge_tree_reading", Field(0));
 
     MutationHelpers::splitMutationCommands(ctx->source_part, ctx->commands_for_part, ctx->for_interpreter, ctx->for_file_renames);
+
+#if USE_TANTIVY_SEARCH
+    MutationHelpers::removeTantivyIndexCache(ctx->source_part, ctx->for_file_renames);
+#endif
 
     ctx->stage_progress = std::make_unique<MergeStageProgress>(1.0);
 
@@ -1943,6 +1988,14 @@ bool MutateTask::prepare()
             
             part->getDataPartStorage().beginTransaction();
 
+#if USE_TANTIVY_SEARCH
+            auto metadata = ctx->source_part->storage.getInMemoryMetadataPtr();
+            if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+            {
+                TantivyIndexStoreFactory::instance().mutate(
+                    ctx->source_part->getDataPartStoragePtr()->getRelativePath(), part->getDataPartStoragePtr()->getRelativePath());
+            }
+#endif
             ctx->temporary_directory_lock = std::move(lock);
             promise.set_value(std::move(part));
             return false;
