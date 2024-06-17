@@ -112,11 +112,10 @@ VIBitmapPtr getRealBitmap(
 std::vector<DB::MergedPartNameAndId>
 getMergedSourcePartsFromFileName(const String & index_name, const DB::MergeTreeDataPartChecksums vector_index_checksums);
 
-String getUniqueVectorIndexCachePrefix(
+String getVectorIndexCachePrefix(
     const String & table_relative_path,
     const String & part_name,
-    const String & index_name,
-    const String & path_uuid = "");
+    const String & index_name);
 
 std::pair<String, String> getPartNameUUIDFromNvmeCachePath(const String & path_with_uuid);
 
@@ -124,7 +123,7 @@ String generateUUIDv4();
 
 void printMemoryInfo(const Poco::Logger * log, std::string msg);
 
-/// Update part's single delete bitmap after lightweight delete on cache if exists.
+/// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
 void updateBitMap(SegmentId & segment_id, const std::vector<UInt64> & deleted_row_ids);
 
 /// Update part's single delete bitmap after lightweight delete on disk and cache if exists.

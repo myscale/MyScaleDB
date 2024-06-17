@@ -22,7 +22,7 @@ def test_decouple_index_upgrade(started_cluster):
     CREATE TABLE test_decouple_upgrade(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id settings disable_rebuild_for_decouple=1;
     INSERT INTO test_decouple_upgrade SELECT number, randomPrintableASCII(80), range(768) FROM numbers(5000);
     INSERT INTO test_decouple_upgrade SELECT number + 5000, randomPrintableASCII(80), range(768) FROM numbers(5000);
-    ALTER TABLE test_decouple_upgrade ADD VECTOR INDEX v1 vector TYPE MSTG;
+    ALTER TABLE test_decouple_upgrade ADD VECTOR INDEX v1 vector TYPE SCANN;
     """
     )
 
@@ -77,7 +77,7 @@ def test_single_vector_index_upgrade(started_cluster):
         """
     CREATE TABLE test_single_index_upgrade(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
     INSERT INTO test_single_index_upgrade SELECT number, randomPrintableASCII(80), range(768) FROM numbers(5000);
-    ALTER TABLE test_single_index_upgrade ADD VECTOR INDEX v1 vector TYPE MSTG;
+    ALTER TABLE test_single_index_upgrade ADD VECTOR INDEX v1 vector TYPE SCANN;
     """
     )
 
@@ -120,7 +120,7 @@ def test_reuse_vector_index(started_cluster):
         """
     CREATE TABLE test_reuse_index(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id;
     INSERT INTO test_reuse_index SELECT number, randomPrintableASCII(80), range(768) FROM numbers(5000);
-    ALTER TABLE test_reuse_index ADD VECTOR INDEX v1 vector TYPE MSTG;
+    ALTER TABLE test_reuse_index ADD VECTOR INDEX v1 vector TYPE SCANN;
     """
     )
 

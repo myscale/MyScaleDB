@@ -27,7 +27,7 @@ class Context;
 class ConfigReloader
 {
 public:
-    using Updater = std::function<void(ConfigurationPtr, bool)>;
+    using Updater = std::function<void(ConfigurationPtr, XMLDocumentPtr, bool)>;
 
     /** include_from_path is usually /etc/metrika.xml (i.e. value of <include_from> tag)
       */

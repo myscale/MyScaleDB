@@ -33,17 +33,18 @@ void VITaskBase::recordBuildStatus()
     /// Check vector index exists in table's latest metadata
     auto & latest_vec_indices = storage.getInMemoryMetadataPtr()->getVectorIndices();
 
-    VIDescription vec_desc;
+    std::optional<VIDescription> vec_desc = std::nullopt;
     for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
         if (vec_index_desc.name == vector_index_name)
             vec_desc = vec_index_desc;
 
+    if (!vec_desc.has_value() || !latest_vec_indices.has(vec_desc.value()))
+        return;
+
     bool is_success
         = build_status.getStatus() == VIBuiltStatus::SUCCESS || build_status.getStatus() == VIBuiltStatus::BUILD_SKIPPED;
 
-    if (!latest_vec_indices.has(vec_desc))
-        return;
-
+    // storage.updateVectorIndexBuildStatus(part_name, vector_index_name, is_success, build_status.err_msg);
     bool record_build_status = true;
     if (ctx)
     {

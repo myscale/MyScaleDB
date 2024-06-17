@@ -68,7 +68,6 @@ protected:
 
     std::string getDefaultCorePath() const override;
 
-
 private:
     ContextMutablePtr global_context;
     /// Updated/recent config, to compare http_handlers
@@ -89,7 +88,6 @@ private:
         Poco::Net::HTTPServerParams::Ptr http_params,
         AsynchronousMetrics & async_metrics,
         bool & is_secure);
-
 
     using CreateServerFunc = std::function<ProtocolServerAdapter(UInt16)>;
     void createServer(

@@ -1264,7 +1264,7 @@ try
         config().getString("path", ""),
         std::move(main_config_zk_node_cache),
         main_config_zk_changed_event,
-        [&](ConfigurationPtr config, bool initial_loading)
+        [&](ConfigurationPtr config, [[maybe_unused]] XMLDocumentPtr preprocessed_xml, bool initial_loading)
         {
             Settings::checkNoSettingNamesAtTopLevel(*config, config_path);
 
@@ -1641,6 +1641,8 @@ try
     CompressionCodecEncrypted::Configuration::instance().load(config(), "encryption_codecs");
 
     SCOPE_EXIT({
+
+
         async_metrics.stop();
 
         /** Ask to cancel background jobs all table engines,

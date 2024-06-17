@@ -110,23 +110,31 @@ String getColumnNameFromLengthCheck(const ASTPtr & constraint_decl)
 
 bool getParameterCheckStatus(StorageInMemoryMetadata & metadata, ContextPtr context)
 {
-    std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
-    bool use_parameter_check = storage_settings->vector_index_parameter_check;
-    if (metadata.hasSettingsChanges())
+std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
+bool use_parameter_check = storage_settings->vector_index_parameter_check;
+LOG_TRACE(
+    &Poco::Logger::get("AlterCommand"),
+    "[getParameterCheckStatus] vector_index_parameter_check value in MergeTreeSetting: {}",
+    use_parameter_check);
+if (metadata.hasSettingsChanges())
+{
+    const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
+    for (const auto & changed_setting : current_changes)
     {
-        const auto current_changes = metadata.getSettingsChanges()->as<const ASTSetQuery &>().changes;
-        for (const auto & changed_setting : current_changes)
+        const auto & setting_name = changed_setting.name;
+        const auto & new_value = changed_setting.value;
+        if (setting_name == "vector_index_parameter_check")
         {
-            const auto & setting_name = changed_setting.name;
-            const auto & new_value = changed_setting.value;
-            if (setting_name == "vector_index_parameter_check")
-            {
-                use_parameter_check = new_value.get<bool>();
-                break;
-            }
+            use_parameter_check = new_value.get<bool>();
+            LOG_TRACE(
+                &Poco::Logger::get("AlterCommand"),
+                "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
+                use_parameter_check);
+            break;
         }
     }
-    return use_parameter_check;
+}
+return use_parameter_check;
 }
 
 std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_ast)

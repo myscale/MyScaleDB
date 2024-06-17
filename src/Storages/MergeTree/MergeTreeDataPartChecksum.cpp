@@ -46,8 +46,10 @@ void MergeTreeDataPartChecksum::checkEqual(const MergeTreeDataPartChecksum & rhs
 
 void MergeTreeDataPartChecksum::checkSize(const IDataPartStorage & storage, const String & name) const
 {
-    /// Skip inverted index files, these have a default MergeTreeDataPartChecksum with file_size == 0
+    /// Skip inverted and fts index files, these have a default MergeTreeDataPartChecksum with file_size == 0
     if (name.ends_with(".gin_dict") || name.ends_with(".gin_post") || name.ends_with(".gin_seg") || name.ends_with(".gin_sid"))
+        return;
+    if (name.ends_with(".data") || name.ends_with(".meta"))
         return;
 
     if (!storage.exists(name))
@@ -81,6 +83,10 @@ void MergeTreeDataPartChecksums::checkEqual(const MergeTreeDataPartChecksums & r
 
         /// Exclude files written by inverted index from check. No correct checksums are available for them currently.
         if (name.ends_with(".gin_dict") || name.ends_with(".gin_post") || name.ends_with(".gin_seg") || name.ends_with(".gin_sid"))
+            continue;
+
+        /// Exclude files written by fts index from check. No correct checksums are available for them currently.
+        if (name.ends_with(".meta") || name.ends_with(".data"))
             continue;
 
         auto jt = rhs.files.find(name);

@@ -610,7 +610,7 @@ void AsynchronousMetrics::update(TimePoint update_time)
             Int64 rss = data.resident;
 #if defined(OS_LINUX)
             // To obtain a more precise memory usage, we deduct the shared
-            // memory utilized by MSTG mmap files.
+            // memory utilized by MyScale vector index mmap files.
             if (first_run)
                 base_shared = data.shared;
             Int64 shared = data.shared - base_shared;

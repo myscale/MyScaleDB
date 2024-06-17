@@ -237,8 +237,7 @@ protected:
                         vector_raw_data[row * dimension + i] = src_vec[vec_start_offset + i];
                     }
                     ids[row] = current_round_start_row + row;
-                }
-                else
+                } else
                 {
                     /// Illegal vector
                     empty_ids.emplace_back(current_round_start_row + row);

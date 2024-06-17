@@ -173,6 +173,10 @@ IMergeTreeDataPart::Checksums checkDataPart(
         if (file_name.ends_with(".gin_dict") || file_name.ends_with(".gin_post") || file_name.ends_with(".gin_seg") || file_name.ends_with(".gin_sid"))
             continue;
 
+        /// Exclude files written by fts index from check. No correct checksums are available for them currently.
+        if (file_name.ends_with(".data") || file_name.ends_with(".meta"))
+            continue;
+
         /// Exclude vector index files to prevent conflicts with newly built vector indexes
         if (file_name.ends_with(VECTOR_INDEX_FILE_SUFFIX))
             continue;

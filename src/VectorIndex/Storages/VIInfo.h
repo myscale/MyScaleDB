@@ -85,6 +85,7 @@ public:
     UInt64 dimension;
     /// Total number of vectors (including deleted ones)
     UInt64 total_vec;
+
     // size of vector index in memory
     UInt64 memory_usage_bytes = 0;
     // Size of vector index on disk

@@ -130,6 +130,7 @@ void VIBuilderUpdater::removeDroppedVectorIndices(const StorageMetadataPtr & met
             LOG_DEBUG(log, "Find Vector Index in metadata");
             VIParameter params = cache_item.second;
 
+            /// Support multiple vector indices
             /// TODO: Further check whether the paramters are the same.
             for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
             {
@@ -262,6 +263,7 @@ VIEntryPtr VIBuilderUpdater::selectPartToBuildVI(const StorageMetadataPtr & meta
             continue;
         }
 
+        /// Support multiple vector indices
         for (const auto & vec_index : metadata_snapshot->getVectorIndices())
         {
             auto column_index_opt = part->vector_index.getColumnIndex(vec_index.name);
@@ -340,6 +342,7 @@ void VIBuilderUpdater::checkPartCanBuildVI(
             ErrorCodes::LOGICAL_ERROR, "Column index {} for part {} does not exits, it's a bug.", vec_desc.name, data_part->name);
 
     /// If we already have this vector index in this part, we do not need to do anything.
+    /// Support multiple vector indices
     if (data_part->vector_index.alreadyWithVIndexSegment(vec_desc.name))
         throw Exception(ErrorCodes::VECTOR_INDEX_ALREADY_EXISTS, "No need to build vector index {} for part {}, because the part already has ready vector index.", vec_desc.name, data_part->name);
 }
@@ -364,6 +367,7 @@ VIContextPtr VIBuilderUpdater::prepareBuildVIContext(
     bool has_vector_index_desc = false;
     for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
+        /// Support multiple vector indices
         if (vec_index_desc.name != vector_index_name)
             continue;
 
@@ -712,7 +716,7 @@ VIBuiltStatus VIBuilderUpdater::TryMoveVIFiles(const VIContextPtr ctx)
     {
         LOG_INFO(log, "Will Move Index File to Part {}", future_part->name);
         /// lock part for move build vector index, avoid concurrently mutation
-        auto move_part_lock = future_part->vector_index.tryLockTimed(RWLockImpl::Type::Write, std::chrono::milliseconds(1000));
+        auto move_index_lock = future_part->vector_index.tryLockTimed(RWLockImpl::Type::Write, std::chrono::milliseconds(1000));
         /// check part is active
         if (future_part->getState() != MergeTreeDataPartState::Active)
         {
@@ -848,13 +852,9 @@ void VIBuilderUpdater::moveVIFilesToFuturePartAndCache(
     auto column_index = dest_part->vector_index.getColumnIndex(vec_index_desc.name).value();
     auto old_index_segment_metadata = column_index->getIndexSegmentMetadata();
 
-    /// No need to Apply lightweight delete bitmap to index's bitmap, because load index func already update bitmap
+    /// FIXME: Release move index lock in advance to reduce blocking time
     if (!column_index->cache(build_index))
-    {
-        auto segment_ids = getAllSegmentIds(dest_part, vector_index_segment_metadata);
-        for (auto & segment_id : segment_ids)
-            column_index->load(segment_id);
-    }
+        LOG_DEBUG(log, "Load vector index from index ptr error, index may be obtained by fetch index.");
 
     column_index->setIndexSegmentMetadata(vector_index_segment_metadata);
 

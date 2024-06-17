@@ -159,11 +159,12 @@ inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage
 
 std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadataPtr & metadata_snapshot, ContextPtr context, String & search_column_name)
 {
+    auto log = getLogger();
     String index_type = "";
     /// Obtain the default value of the `use_parameter_check` in the MergeTreeSetting.
     std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
     bool use_parameter_check = storage_settings->vector_index_parameter_check;
-    LOG_TRACE(getLogger(), "vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
+    LOG_TRACE(log, "vector_index_parameter_check value in MergeTreeSetting: {}", use_parameter_check);
 
     /// Obtain the type of the vector index recorded in the meta_data.
     if (metadata_snapshot)
@@ -175,7 +176,7 @@ std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadat
             if (vec_index_desc.column == search_column_name)
             {
                 index_type = vec_index_desc.type;
-                LOG_TRACE(getLogger(), "The vector index type used for the query is `{}`", Poco::toUpper(index_type));
+                LOG_TRACE(log, "The vector index type used for the query is `{}`", Poco::toUpper(index_type));
 
                 break;
             }
@@ -196,7 +197,7 @@ std::pair<String, bool> getVectorIndexTypeAndParameterCheck(const StorageMetadat
             {
                 use_parameter_check = new_value.get<bool>();
                 LOG_TRACE(
-                    getLogger(), "vector_index_parameter_check value in sql definition: {}", use_parameter_check);
+                    log, "vector_index_parameter_check value in sql definition: {}", use_parameter_check);
                 break;
             }
         }
@@ -570,7 +571,7 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
             has_vector_scan = true;
         }
     }
-
+    /// Fill in dim and recognize VectorSearchType from metadata
     if (has_vector_scan)
     {
         getAndCheckVectorScanInfoFromMetadata(syntax->storage_snapshot, vector_scan_descriptions[0], getContext());
@@ -1837,6 +1838,7 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
 
     const auto & node = step.actions()->findInOutputs(prewhere_column_name);
     auto filter_type = node.result_type;
+    LOG_DEBUG(getLogger(), "[appendPrewhere] filter_type: {}", filter_type->getName());
     if (!filter_type->canBeUsedInBooleanContext())
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Invalid type for filter in PREWHERE: {}",
                         filter_type->getName());
@@ -1846,6 +1848,8 @@ ActionsDAGPtr SelectQueryExpressionAnalyzer::appendPrewhere(
         /// Remove unused source_columns from prewhere actions.
         auto tmp_actions_dag = std::make_shared<ActionsDAG>(sourceColumns());
         getRootActions(select_query->prewhere(), only_types, tmp_actions_dag);
+        /// Constants cannot be removed since they can be used in other parts of the query.
+        /// And if they are not used anywhere, except PREWHERE, they will be removed on the next step.
         tmp_actions_dag->removeUnusedActions(
             NameSet{prewhere_column_name},
             /* allow_remove_inputs= */ true,
@@ -2116,7 +2120,6 @@ void SelectQueryExpressionAnalyzer::appendSelect(ExpressionActionsChain & chain,
     const auto * select_query = getSelectQuery();
 
     ExpressionActionsChain::Step & step = chain.lastStep(aggregated_columns);
-
     getRootActions(select_query->select(), only_types, step.actions());
 
     for (const auto & child : select_query->select()->children)

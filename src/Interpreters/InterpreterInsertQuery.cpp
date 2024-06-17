@@ -42,7 +42,6 @@ namespace Search
 enum class DataType;
 }
 
-
 namespace DB
 {
 

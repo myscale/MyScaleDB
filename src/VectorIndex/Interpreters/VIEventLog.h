@@ -52,7 +52,7 @@ struct VIEventLogElement
     };
     String database_name;
     String table_name;
-    String index_name;
+    String index_name; /// Support multiple vector indices
     mutable String part_name;
     mutable String current_part_name;
     mutable String partition_id;

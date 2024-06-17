@@ -82,6 +82,7 @@ public:
 class VICacheManager
 {
     // cache manager manages a series of cache instance.
+    // these caches could either be cache in memory or cache on GPU device.
     // it privides a getInstance() method which returns a consistent view
     // of all caches to all classes trying to access cache.
 

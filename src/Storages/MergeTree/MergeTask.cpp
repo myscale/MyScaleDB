@@ -616,7 +616,9 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         {
             const PaddedPODArray<UInt64>& col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
             for (size_t i = 0; i < block.rows(); ++i)
+            {
                 part_offsets[part_num].emplace_back(col_data[i]);
+            }
         }
     }
 
@@ -703,11 +705,10 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                 int i = 0;
                 while (old_row_id < partRowNum)
                 {
+                    UInt64 new_row_id = -1;
                     if (parts_new_row_ids[source_num].count(old_row_id) > 0)
                     {
-                        UInt64 new_row_id = parts_new_row_ids[source_num][old_row_id];
-                        writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                        writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+                        new_row_id = parts_new_row_ids[source_num][old_row_id];
                     }
                     else
                     {
@@ -715,6 +716,8 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                         deleteRowIds[i] = static_cast<UInt64>(old_row_id);
                         i++;
                     }
+                    writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+                    writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
                     ++old_row_id;
                 }
 
@@ -726,15 +729,14 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                         const DataPartStorageOnDiskBase * part_storage
                             = dynamic_cast<const DataPartStorageOnDiskBase *>(global_ctx->future_part->parts[source_num]->getDataPartStoragePtr().get());
                         if (part_storage == nullptr)
-                        {
                             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-                        }
 
                         VectorIndex::SegmentId segment_id(
                             global_ctx->future_part->parts[source_num]->getDataPartStoragePtr(),
                             global_ctx->future_part->parts[source_num]->name,
                             vec_index_desc.name,
                             vec_index_desc.column);
+
                         updateBitMap(segment_id, deleteRowIds);
                     }
                 }
@@ -791,7 +793,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         }
 
         LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
-
         if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
         {
             ctx->rows_sources_file.reset();
@@ -815,13 +816,10 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
     {
         /// Release the buffer in advance to prevent fatal occurrences during subsequent buffer destruction.
         for (size_t i = 0; i < global_ctx->row_ids_map_bufs.size(); ++i)
-        {
             global_ctx->row_ids_map_bufs[i].reset();
-        }
+
         for (size_t i = 0; i < global_ctx->row_ids_map_uncompressed_bufs.size(); ++i)
-        {
             global_ctx->row_ids_map_uncompressed_bufs[i].reset();
-        }
 
         global_ctx->inverted_row_ids_map_buf.reset();
         global_ctx->inverted_row_ids_map_uncompressed_buf.reset();
@@ -1135,6 +1133,7 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
     std::unordered_map<String, DB::MergeTreeDataPartChecksums> vector_index_checksums_map_tmp;
     if (global_ctx->can_be_decouple)
     {
+        /// Support multiple vector indices
         for (auto & vec_index : global_ctx->metadata_snapshot->getVectorIndices())
         {
             auto it = global_ctx->all_parts_have_vector_index.find(vec_index.name);
@@ -1239,6 +1238,7 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
     else if (global_ctx->only_one_vpart_merged)
     {
         /// In single one VPart case, move vector index files to new data part dir
+        /// Support multiple vector indices
         auto old_part = global_ctx->future_part->parts[global_ctx->first_part_with_data];
         for (auto & vec_index : global_ctx->metadata_snapshot->getVectorIndices())
         {
@@ -1267,6 +1267,13 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
     else
         /// has no vector index, but should init index from local metadata.
         global_ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
+
+    /// Cancel source part build vector index
+    for (auto & old_part : global_ctx->future_part->parts)
+    {
+        old_part->vector_index.cancelAllIndexBuild();
+        old_part->vector_index.waitAllIndexFinish();
+    }
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
     global_ctx->promise.set_value(global_ctx->new_data_part);

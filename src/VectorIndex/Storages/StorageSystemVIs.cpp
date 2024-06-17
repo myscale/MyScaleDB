@@ -192,12 +192,18 @@ protected:
                     }
                     // total data parts
                     if (column_mask[src_index++])
+                    {
                         res_columns[res_index++]->insert(data_parts.size());
+                    }
                     // vector index built parts
                     if (column_mask[src_index++])
+                    {
                         res_columns[res_index++]->insert(getBuiltParts(data_parts, index));
+                    }
                     if (column_mask[src_index++])
+                    {
                         res_columns[res_index++]->insert(getSmallParts(data, data_parts, index));
+                    }
                     // vector index status
                     if (column_mask[src_index++])
                     {
@@ -224,11 +230,16 @@ protected:
                         res_columns[res_index++]->insert(host);
                     }
 
+                    /// latest failed part
                     if (column_mask[src_index++])
+                    {
                         res_columns[res_index++]->insert(fail_status.latest_failed_part);
-
+                    }
+                    /// latest fail reason
                     if (column_mask[src_index++])
+                    {
                         res_columns[res_index++]->insert(fail_status.latest_fail_reason);
+                    }
                 }
             }
         }

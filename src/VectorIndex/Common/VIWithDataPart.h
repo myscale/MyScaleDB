@@ -37,6 +37,7 @@
 #include <Common/RWLock.h>
 
 
+#define WAIT_BUILD_INDEX_TIMEOUT 10 * 1000 /// 10s
 namespace VectorIndex
 {
 
@@ -216,7 +217,7 @@ public:
         std::shared_ptr<MergeTreeDataPartChecksums> & vector_index_checksum,
         VIBuildMemoryUsageHelper & build_memory_lock);
 
-    IndexWithMetaHolderPtr load(SegmentId & segment_id, bool is_active = true, const String & nvme_cache_path_uuid = "");
+    IndexWithMetaHolderPtr load(SegmentId & segment_id, bool is_active = true);
 
     IndexWithMetaHolderPtr loadDecoupleCache(SegmentId & segment_id);
 
@@ -237,6 +238,8 @@ public:
 
     bool hasUsableVectorIndex();
 
+    void waitBuildFinish(const size_t timeout = WAIT_BUILD_INDEX_TIMEOUT);
+
     static void transferToNewRowIds(const VIWithMeta & index_with_meta, SearchResultPtr result);
 
     static SearchResultPtr TransferToOldRowIds(const VIWithMeta & index_with_meta, const SearchResultPtr result);
@@ -255,11 +258,7 @@ public:
     static bool canMergeForColumnIndex(const MergeTreeDataPartPtr & left, const MergeTreeDataPartPtr & right, const String & vec_index_name);
 
 private:
-    VIVariantPtr createIndex() const;
-
-#ifdef ENABLE_SCANN
-    std::shared_ptr<DiskIOManager> getDiskIOManager() const;
-#endif
+    VIVariantPtr createIndex(bool is_dummy = true) const;
 
     static std::once_flag once;
     static int max_threads;
@@ -311,7 +310,7 @@ void VIWithColumnInPart::buildIndex(
     if (num_threads == 0)
         num_threads = 1;
 
-    index_variant = createIndex();
+    index_variant = createIndex(false);
     typename SearchIndexDataTypeMap<T>::VectorIndexPtr index_ptr;
     if constexpr (T == Search::DataType::FloatVector)
     {
@@ -451,6 +450,8 @@ public:
     void cancelIndexBuild(const String & index_name);
 
     void cancelAllIndexBuild();
+
+    void waitAllIndexFinish();
 
     void convertIndexFileForUpgrade();
 

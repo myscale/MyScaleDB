@@ -185,13 +185,6 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
         type = function_node;
     }
 
-
-    // if (!s_granularity.ignore(pos, expected))
-    //     return false;
-
-    // if (!granularity_p.parse(pos, granularity, expected))
-    //     return false;
-
     auto index = std::make_shared<ASTVIDeclaration>();
     index->name = name->as<ASTIdentifier &>().name();
     index->column = column->as<ASTIdentifier &>().name();

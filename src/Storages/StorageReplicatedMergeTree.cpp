@@ -3659,6 +3659,7 @@ void StorageReplicatedMergeTree::removeVecIndexBuildStatusForPartsFromZK(zkutil:
     {
         String part_name = part->name;
 
+        /// Support multiple vector indices
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
         {
             String vec_index_name = vec_index_desc.name;
@@ -3719,6 +3720,7 @@ void StorageReplicatedMergeTree::cleanupVectorIndexBuildStatusFromZK(const Strin
 void StorageReplicatedMergeTree::startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices)
 {
     /// Compare old and new vector_indices to determine add or drop vector index
+    /// Support multiple vector indices
     /// Check drop vector index
     for (const auto & old_vec_index : old_vec_indices)
     {
@@ -4892,10 +4894,6 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         startBeingLeader();
 
-        /// clear nvme cache
-        /// no need clear nvme cache in this field, reload vector index will reuse this cache.
-        clearVectorNvmeCache();
-
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
             addVectorIndexBuildStatus(vec_index_desc.name);
@@ -5602,8 +5600,10 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
 
         LOG_INFO(log, "Applied changes to the metadata of the table. Current metadata version: {}", metadata_version);
         if (metadata_diff.vector_indices_changed)
+        {
+            /// Support multiple vector indices
             startVectorIndexJob(old_vec_indices, getInMemoryMetadataPtr()->getVectorIndices());
-
+        }
     }
 
     {
@@ -9792,7 +9792,7 @@ void StorageReplicatedMergeTree::attachRestoredParts(MutableDataPartsVector && p
         sink->writeExistingPart(part);
 }
 
-void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
+std::unordered_map<String, std::unordered_set<String>> StorageReplicatedMergeTree::getPreloadVectorIndicesFromZK()
 {
     auto zookeeper = getZooKeeper();
 
@@ -9801,8 +9801,10 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
 
     if (!success || vector_index_info.empty())
     {
+        /// try other replicas
         Strings replicas = zookeeper->getChildren(fs::path(zookeeper_path) / "replicas");
 
+        /// Select replicas in uniformly random order.
         std::shuffle(replicas.begin(), replicas.end(), thread_local_rng);
 
         for (const String & replica : replicas)
@@ -9824,7 +9826,7 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
     if (vector_index_info.empty())
     {
         LOG_INFO(log, "No vector index info found on zookeeper for table {}", getStorageID().getFullTableName());
-        return;
+        return {};
     }
 
     ReadBufferFromString in(vector_index_info);
@@ -9845,6 +9847,14 @@ void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
             vector_indices.try_emplace(part_name, set);
         }
     }
+
+    return vector_indices;
+}
+
+void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
+{
+    
+    std::unordered_map<String, std::unordered_set<String>> vector_indices = getPreloadVectorIndicesFromZK();
 
     LOG_INFO(log, "Load {} vector indices from keeper", vector_indices.size());
 
@@ -9907,6 +9917,7 @@ void StorageReplicatedMergeTree::writeVectorIndexInfoToZookeeper(bool force)
         std::unordered_map<String, std::unordered_set<String>> cached_index_parts;
         std::unordered_map<String, String> index_column_map;
 
+        /// get cached vector index & parts for current table
         for (const auto & cache_item : cache_list)
         {
             auto cache_key = cache_item.first;
@@ -9929,6 +9940,7 @@ void StorageReplicatedMergeTree::writeVectorIndexInfoToZookeeper(bool force)
         WriteBufferFromOwnString out;
         int count = 0;
 
+        /// get active part name (without mutation) for cached vector index
         for (const auto & index_parts : cached_index_parts)
         {
             auto index_name = index_parts.first;

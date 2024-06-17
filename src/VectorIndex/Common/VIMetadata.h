@@ -55,6 +55,8 @@ public:
 
     const SegmentId & segment_id;
 
+    /// Current part name is not provided and is read from the description file. 
+    /// This value is incorrect in some scenarios.
     DB::String version;
     VIType type;
     VIMetric metric;

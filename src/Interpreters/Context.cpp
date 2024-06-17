@@ -223,7 +223,7 @@ struct ContextSharedPart : boost::noncopyable
     String user_files_path;                                 /// Path to the directory with user provided files, usable by 'file' table function.
     String dictionaries_lib_path;                           /// Path to the directory with user provided binaries and libraries for external dictionaries.
     String user_scripts_path;                               /// Path to the directory with user provided scripts.
-    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MSTG disk mode.
+    String vector_index_cache_path;                         /// Path to the directory of vector index cache for MyScale vector index disk mode.
     String tantivy_index_cache_path;                        /// Path to the directory of tantivy index cache.
     ConfigurationPtr config;                                /// Global configuration settings.
 

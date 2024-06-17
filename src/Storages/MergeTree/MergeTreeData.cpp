@@ -2374,6 +2374,7 @@ std::pair<bool, bool> MergeTreeData::needClearVectorIndexCacheAndFile(
         return std::make_pair(true, false);
     }
 
+    /// Support multiple vector indices
     /// The active part contains the part in the cache_key.
     /// First make sure the vector index info in cache key is same with defined in metadata. If not exists or not same, remove cache and file.
     String index_name = cache_key.vector_index_name;
@@ -2447,16 +2448,6 @@ void MergeTreeData::clearPKCache(const DataPartsVector & parts)
 
         const String cache_key = part->getDataPartStorage().getRelativePath() + ":" + part->name;
         PKCacheManager::getMgr().removeFromPKCache(cache_key);
-    }
-}
-
-void MergeTreeData::clearVectorNvmeCache() const
-{
-    auto vector_nvme_cache_folder = fs::path(getContext()->getVectorIndexCachePath()) / VectorIndex::SegmentId::getPartRelativePath(getRelativeDataPath());
-    if (fs::exists(vector_nvme_cache_folder))
-    {
-        LOG_INFO(log, "Remove nvme cache folder: {}", vector_nvme_cache_folder);
-        fs::remove_all(vector_nvme_cache_folder);
     }
 }
 

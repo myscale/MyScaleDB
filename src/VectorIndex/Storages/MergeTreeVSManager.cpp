@@ -676,7 +676,7 @@ void MergeTreeVSManager::mergeBatchVectorScanResult(
                 prev_row_num += read_range.row_num;
             }
         }
-        else
+        else // part_offset != nullptr
         {
             /// when no filter, the prev read result should be continuous, so we just need to scan all result rows and
             /// keep results of which the row id is contained in label_column
@@ -839,8 +839,28 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
         size_t current_rows_in_mark = 0;
         size_t current_rows_in_range = 0;
 
+        /// used to test filter passed in is correct
+        LOG_TRACE(
+            log,
+            "VectorScanManager with filter, Part: {}, Filter Size: {}, Filter Byte Size: {}, Count in Filter is:{}",
+            part->name,
+            filter->get_size(),
+            filter->byte_size(),
+            filter->count()
+            );
+
         for (const auto & single_range : read_ranges)
         {
+            LOG_TRACE(
+                log,
+                "VectorScanManager Part: {}, Range: {}, Row Numbers in Range: {}, Start Mark: {}, End Mark: {}, start_row: {}, ",
+                part->name,
+                range_num,
+                read_ranges[range_num].row_num,
+                read_ranges[range_num].start_mark,
+                read_ranges[range_num].end_mark,
+                read_ranges[range_num].start_row);
+
             /// for each single_range, will only fetch data of one mark each time
             current_mark = single_range.start_mark;
             current_rows_in_range = 0;
@@ -895,6 +915,11 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     /// filter out the data we want to do ANN on using the filter
                     size_t start_pos = filter_parsed;
 
+                    LOG_TRACE(
+                        get_logger(),
+                        "filter_parsed:{}",
+                        filter_parsed);
+
                     /// this outer for loop's i is the position of data relative to the filter
                     /// imagine filter as a array of array:[0,1,0,0,0,1,...][0,1,0...][...]
                     /// where actually all these arrays are concatenated into a single array and
@@ -914,6 +939,13 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                             {
                                 for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
                                     vector_raw_data.emplace_back(src_vec[offset]);
+
+                                LOG_TRACE(
+                                    get_logger(),
+                                    "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
+                                    current_rows_in_range,
+                                    i,
+                                    src_vec[vec_start_offset]);
 
                                 actual_id_in_range.emplace_back(current_rows_in_range);
                                 mark_left_rows ++;
@@ -1045,11 +1077,42 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                         row_exists,
                         0);
 
+                if(mark_left_rows)
+                {
+                    LOG_TRACE(
+                        log,
+                        "Part: {}, Range: {}, Mark: {}, Rows In Mark: {}, rows left in mark: {}, raw_data size: {}, vector index name: {}, path: {}",
+                        part->name,
+                        range_num,
+                        current_mark,
+                        current_rows_in_mark,
+                        mark_left_rows,
+                        vector_raw_data.size(),
+                        "brute force",
+                        part->getDataPartStorage().getFullPath());
+                }
                 range_left_rows += mark_left_rows;
             }
 
+            if(range_left_rows)
+            {
+                LOG_TRACE(
+                    log,
+                    "Part: {}, Range:{}, Total Marks:{}, Rows In Range: {}, filter read:{}, rows left in range:{}",
+                    part->name,
+                    range_num,
+                    single_range.end_mark - single_range.start_mark,
+                    current_rows_in_range,
+                    filter_parsed,
+                    range_left_rows);
+            }
             range_num ++;
             part_left_rows += range_left_rows;
+        }
+
+        if(part_left_rows)
+        {
+            LOG_TRACE(log, "Part:{}, rows left in part:{}", part->name, part_left_rows);
         }
     }
     else
@@ -1058,6 +1121,12 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
         /// has no filter, will pass the vector data and the dense bitmap for deleted rows to search function
         while (num_rows_read < total_rows_in_part)
         {
+            LOG_TRACE(
+                log,
+                "VectorScanManager Part: {}, Row numbers in mark: {}, ",
+                part->name,
+                total_rows_in_part);
+
             size_t max_read_row = std::min((total_rows_in_part - num_rows_read), default_read_num);
             Columns result;
             result.resize(cols.size());
@@ -1141,18 +1210,30 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
             }
 
+            LOG_TRACE(
+                log,
+                "Part: {}, "
+                "num_rows: {}, "
+                "raw_data size: {}",
+                part->name,
+                num_rows,
+                vector_raw_data.size());
+
             int deleted_row_num = 0;
             VIBitmapPtr row_exists = std::make_shared<VIBitmap>(total_rows, true);
 
             //make sure result contain lwd row_exists column
             if (result.size() == 2 && part->storage.hasLightweightDeletedMask())
             {
+                LOG_TRACE(
+                    log,
+                    "Try to get row exists col, result size: {}",
+                    result.size());
                 const auto& row_exists_col = result[1];
                 if (row_exists_col)
                 {
                     const ColumnUInt8 * col = checkAndGetColumn<ColumnUInt8>(row_exists_col.get());
                     const auto & col_data = col->getData();
-
                     for (size_t i = 0; i < col_data.size(); i++)
                     {
                         if (!col_data[i])

@@ -14,6 +14,7 @@ target_link_libraries(clickhouse_vector_index
 	dbms
     PRIVATE
 	ch_contrib::search_index
+    daemon
 )
 
 if (TARGET ch_rust::supercrate)
