@@ -252,7 +252,7 @@ We're committed to continuously improving and evolving MyScaleDB to meet the eve
 ## Roadmap
 
 * [x] Inverted index & performant keyword/vector hybrid search ([supported since 1.5](https://myscale.com/blog/text-search-and-hybrid-search-in-myscale/))
-* [ ] Support more storage engines, e.g. `ReplacingMergeTree`
+* [x] Support more storage engines, e.g. `ReplacingMergeTree` ([supported since 1.6](https://myscale.com/blog/select-with-final/))
 * [x] LLM observability with MyScaleDB and [MyScale Telemetry](https://github.com/myscale/myscale-telemetry)
 * [ ] Data-centric LLM
 * [ ] Automatic data science with MyScaleDB
