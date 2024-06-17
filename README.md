@@ -80,7 +80,7 @@ The simplest way to use MyScaleDB is to create an instance on MyScale Cloud serv
 To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
 
 ```bash
-docker run --name myscaledb --net=host myscale/myscaledb:1.5
+docker run --name myscaledb --net=host myscale/myscaledb:1.6
 ```
 
 >Note: Myscale's default configuration only allows localhost ip access. For the docker run startup method, you need to specify `--net=host` to access services deployed in docker mode on the current node.
@@ -114,7 +114,7 @@ version: '3.7'
 
 services:
   myscaledb:
-    image: myscale/myscaledb:1.5
+    image: myscale/myscaledb:1.6
     tty: true
     ports:
       - '8123:8123'
@@ -252,7 +252,7 @@ We're committed to continuously improving and evolving MyScaleDB to meet the eve
 ## Roadmap
 
 * [x] Inverted index & performant keyword/vector hybrid search ([supported since 1.5](https://myscale.com/blog/text-search-and-hybrid-search-in-myscale/))
-* [ ] Support more storage engines, e.g. `ReplacingMergeTree`
+* [x] Support more storage engines, e.g. `ReplacingMergeTree` ([supported since 1.6](https://myscale.com/blog/select-with-final/))
 * [x] LLM observability with MyScaleDB and [MyScale Telemetry](https://github.com/myscale/myscale-telemetry)
 * [ ] Data-centric LLM
 * [ ] Automatic data science with MyScaleDB
