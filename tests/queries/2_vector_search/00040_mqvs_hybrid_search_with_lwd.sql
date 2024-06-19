@@ -35,12 +35,12 @@ INSERT INTO t_vector_invert_add_index VALUES (0, [0,0,0], 'Ancient empires rise 
 
 ALTER TABLE t_vector_invert_add_index ADD INDEX inv_idx(doc) TYPE fts GRANULARITY 1;
 
-SELECT 'text search on part w/o tantivy index';
-SELECT id, textsearch(doc, 'Ancient') as bm25 FROM t_vector_invert_add_index ORDER BY bm25 DESC LIMIT 2;
+SELECT 'text search on part w/o fts index';
+SELECT id, textsearch(doc, 'Ancient') as bm25 FROM t_vector_invert_add_index ORDER BY bm25 DESC LIMIT 2; -- {serverError QUERY_WAS_CANCELLED}
 
-SELECT 'hybrid search rsf on part w/o tantivy index';
+SELECT 'hybrid search rsf on part w/o fts index';
 SET enable_brute_force_vector_search=1;
-SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, [1.0,1,1], 'Ancient') as score FROM t_vector_invert_add_index ORDER BY score DESC, id LIMIT 5;
+SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, [1.0,1,1], 'Ancient') as score FROM t_vector_invert_add_index ORDER BY score DESC, id LIMIT 5; -- {serverError QUERY_WAS_CANCELLED}
 
 ALTER TABLE t_vector_invert_add_index MATERIALIZE INDEX inv_idx;
 DELETE FROM t_vector_invert_add_index WHERE id=13;

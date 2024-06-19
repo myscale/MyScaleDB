@@ -79,6 +79,15 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
 
     TantivyIndexStorePtr tantivy_store = nullptr;
 
+    /// Suggested index log
+    String suggestion_index_log;
+    String index_name;
+    String db_table_name;
+
+    if (!data_part->storage.getStorageID().database_name.empty())
+        db_table_name = data_part->storage.getStorageID().database_name + ".";
+    db_table_name += data_part->storage.getStorageID().table_name;
+
     /// Find inverted index on the search column
     bool find_index = false;
     for (const auto & index_desc : metadata->getSecondaryIndices())
@@ -88,14 +97,19 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             index_desc.column_names[0] == search_column_name)
         {
             OpenTelemetry::SpanHolder span2("MergeTreeTextSearchManager::textSearch()::find_index::initialize index store");
+
+            index_name = index_desc.name;
+            suggestion_index_log = "ALTER TABLE " + db_table_name + " MATERIALIZE INDEX " + index_desc.name;
+
             /// Initialize TantivyIndexStore
             auto index_helper = MergeTreeIndexFactory::instance().get(index_desc);
             if (!index_helper->getDeserializedFormat(data_part->getDataPartStorage(), index_helper->getFileName()))
             {
-                LOG_DEBUG(log, "File for fts index {} does not exist ({}.*). Skipping it.", backQuote(index_helper->index.name),
-                    (fs::path(data_part->getDataPartStorage().getFullPath()) / index_helper->getFileName()).string());
-
-                break;
+                throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                                "The query was canceled because the FTS index {} has not been built for part {} on table {}. "
+                                "Please run the MATERIALIZE INDEX command {} to build the FTS index for existing data. "
+                                "If you have already run this command, please wait for it to finish.",
+                                index_name, data_part->name, db_table_name, suggestion_index_log);
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
@@ -105,7 +119,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             if (tantivy_store)
             {
                 find_index = true;
-                LOG_DEBUG(log, "Find fts index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
+                LOG_DEBUG(log, "Find FTS index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
 
                 break;
             }
@@ -115,9 +129,16 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     if (!find_index)
     {
         /// No tantivy index available
-        LOG_DEBUG(log, "Failed to find fts index for column {} in part {}", search_column_name, data_part->name);
-        tmp_text_search_result->computed = false;
-        return tmp_text_search_result;
+        if (index_name.empty()) /// no tantivy index
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                        "The query was canceled because the table {} lacks a full-text search (FTS) index. "
+                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
+        else
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                            "The query was canceled because the FTS index {} has not been built for part {} on table {}. "
+                            "Please run the MATERIALIZE INDEX command {} to build the FTS index for existing data. "
+                            "If you have already run this command, please wait for it to finish.",
+                            index_name, data_part->name, db_table_name, suggestion_index_log);
     }
 
     /// Find index, load index and do text search
