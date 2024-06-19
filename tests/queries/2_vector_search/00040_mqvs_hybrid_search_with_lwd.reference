@@ -2,13 +2,8 @@ text search before LWD
 13	2.1646233
 text search after LWD
 0	1.9431154
-text search on part w/o tantivy index
-hybrid search rsf on part w/o tantivy index
-1	0.5
-0	0.49704143
-2	0.49704143
-3	0.48816568
-4	0.4733728
+text search on part w/o fts index
+hybrid search rsf on part w/o fts index
 text search on part with index after LWD
 0	1.9431154
 hybrid search rsf on part with index after LWD
