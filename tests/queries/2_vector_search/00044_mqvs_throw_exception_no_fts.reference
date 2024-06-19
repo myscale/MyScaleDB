@@ -1,0 +1,16 @@
+text search w/o fts index defined on table
+hybrid search w/o fts index defined on table
+After add fts index, before materialize index. text search on part w/o fts index 
+After add fts index, before materialize index. hybrid search rsf on part w/o fts index
+text search on a part w/o fts index and a part with fts index (inserted after index added)
+hybrid search on a part w/o fts index and a part with fts index (inserted after index added)
+0
+text search with all parts with fts after materialize index
+13	2.1646233
+0	1.9431154
+hybrid search with all parts with fts after materialize index
+13	0.5739645
+1	0.5
+0	0.49704143
+2	0.49704143
+3	0.48816568
