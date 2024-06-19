@@ -828,7 +828,7 @@ rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::termsQueryBitmap(String c
     return ffi_query_terms_bitmap(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, terms);
 }
 
-rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, Statistics & statistics, size_t topk)
+rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
@@ -840,11 +840,13 @@ rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sente
         static_cast<uint32_t>(topk),
         u8_alived_bitmap,
         false,
+        enable_nlq,
+        operator_or,
         statistics);
 }
 
 rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25SearchWithFilter(
-    String sentence, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
+    String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
@@ -855,6 +857,8 @@ rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25SearchWithFilter(
         static_cast<uint32_t>(topk),
         u8_alived_bitmap,
         true,
+        enable_nlq,
+        operator_or,
         statistics);
 }
 

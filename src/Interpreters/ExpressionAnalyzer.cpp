@@ -908,11 +908,13 @@ bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAG & actions)
 
 /// create text search info, used by HybridSearch and TextSearch
 TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
+    const String & search_name,
     ActionsDAG & actions,
     const String & function_col_name,
     ASTPtr query_column,
     ASTPtr query_text,
-    int topk)
+    int topk,
+    const Array & parameters)
 {
     String text_column_name;
     if (auto * identifier = query_column->as<ASTIdentifier>())
@@ -924,13 +926,13 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     const auto * dag_node_query_text = actions.tryFindInOutputs(query_text->getColumnName());
     if (!dag_node_query_text)
     {
-        throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "Unknown identifier '{}' in Search function", query_text->getColumnName());
+        throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "Unknown identifier '{}' in {} function", query_text->getColumnName(), search_name);
     }
 
     if (dag_node_query_text->column)
     {
         if (!isColumnConst(*dag_node_query_text->column))
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query text type for argument {} in search function", query_text->getColumnName());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong const query text type for argument {} in {} function", query_text->getColumnName(), search_name);
 
         /// const column's data column type maybe Nullable(String) or String
         const ColumnConst * query_text_column_const = assert_cast<const ColumnConst *>(dag_node_query_text->column.get());
@@ -942,8 +944,8 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
             if (!column_nested_nullable || !typeid_cast<const ColumnString *>(&column_nested_nullable->getNestedColumn()))
             {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                                "Illegal const query text type {} for argument {} in search function. Must be String or Nullable(String)",
-                                column_nested->getName(), query_text->getColumnName());
+                                "Illegal const query text type {} for argument {} in {} function. Must be String or Nullable(String)",
+                                column_nested->getName(), query_text->getColumnName(), search_name);
             }
         }
 
@@ -960,7 +962,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     // }
     else
     {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query text type for argument {} in search function", query_text->getColumnName());
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query text type for argument {} in {} function", query_text->getColumnName(), search_name);
     }
 
     LOG_DEBUG(
@@ -969,7 +971,53 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
         text_column_name,
         query_text->getColumnName());
 
-    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, syntax->direction);
+    bool enable_natural_language_query = true;
+    String text_operator = "OR";
+
+    for(const auto & arg : parameters)
+    {
+        if (arg.getType() != Field::Types::String)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "All parameters inside {} function must be key-value format string, separated by `=`.", search_name);
+
+        String param_str = arg.get<String>();
+        auto pos = param_str.find('=');
+        if (pos == std::string::npos || pos == 0 || pos == param_str.length())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "The parameter {} inside {} function should be key-value format string, separated by `=`.", param_str, search_name);
+
+        String param_key = param_str.substr(0, pos);
+        String param_value = param_str.substr(pos + 1);
+
+        if (param_key == "enable_nlq")
+        {
+            if (param_value.size() == 1)
+            {
+                /// 0 / 1
+                std::stringstream param_ss(param_value);
+                param_ss >> enable_natural_language_query;
+                if (param_ss.fail())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "TextSearch parameter `enable_nlq` value should be bool");
+            }
+            else
+            {
+                /// boolalpha (true or false)
+                std::stringstream param_ss_retry(param_value);
+                param_ss_retry >> std::boolalpha >> enable_natural_language_query;
+                if (param_ss_retry.fail() || !param_ss_retry.eof())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "TextSearch parameter `enable_nlq` value should be bool");
+            }
+        }
+        else if (param_key == "operator")
+        {
+            if (param_value != "OR" && param_value != "AND")
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "TextSearch parameter `operator` value should be either OR or AND");
+
+            text_operator = param_value;
+        }
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown parameter {} for TextSearch", param_key);
+    }
+
+    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, syntax->direction, text_operator, enable_natural_language_query);
 }
 
 bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAG & actions)
@@ -977,21 +1025,20 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAG & actions)
     if (hybrid_search_funcs().size() == 1 && hybrid_search_funcs()[0])
     {
         const ASTFunction * node = hybrid_search_funcs()[0];
-        if (node->parameters)
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "textsearch function does not need to specify parameters");
-        }
 
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
         if (arguments.size() != 2)
         {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in textsearch function: expected 2, got {}", arguments.size());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in TextSearch function: expected 2, got {}", arguments.size());
         }
+
+
+        Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
 
         /// Only need actions for the second argument, the first argument is used for search index.
         getRootActionsNoMakeSet(arguments[1], actions);
 
-        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length));
+        auto tmp_text_search_info = commonMakeTextSearchInfo("TextSearch", actions, node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length), parameters);
         LOG_DEBUG(getLogger(), "[makeTextSearchInfo] create text search function: {}", node->name);
 
         if (syntax->hybrid_search_from_right_table)
@@ -1021,6 +1068,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
         Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
         std::unordered_map<String, String> hybrid_parameters_map;
         std::vector<String> vector_scan_parameter;
+        std::vector<String> text_search_parameters;
         for (const auto & arg : parameters)
         {
             if (arg.getType() != Field::Types::String)
@@ -1047,6 +1095,10 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
             else if (param_key.find(vector_scan_parameter_prefix) == 0)
             {
                 vector_scan_parameter.push_back(param_str.substr(std::strlen(vector_scan_parameter_prefix)));
+            }
+            else if (param_key == "enable_nlq" || param_key == "operator")
+            {
+                text_search_parameters.push_back(param_str);
             }
             else
             {
@@ -1095,8 +1147,12 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
         }
 
         /// make TextSearchInfo for HybridSearchInfo
+        Array text_params(text_search_parameters.size());
+        for (size_t i = 0; i < text_search_parameters.size(); ++i)
+            text_params[i] = text_search_parameters[i];
+
         getRootActionsNoMakeSet(arguments[3], actions);
-        auto tmp_text_search_info = commonMakeTextSearchInfo(actions, "textsearch_func", arguments[1], arguments[3], num_candidates);
+        auto tmp_text_search_info = commonMakeTextSearchInfo("HybridSearch", actions, "textsearch_func", arguments[1], arguments[3], num_candidates, text_params);
 
         String hybrid_fusion_type = hybrid_parameters_map["fusion_type"];
         String function_column_name = node->getColumnName();
