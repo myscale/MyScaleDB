@@ -1,0 +1,37 @@
+text search with natural language query enabled, operator=OR (default)
+2	1.7348896
+0	1.3571694
+1	1.2484449
+text search with natural language query enabled(default), operator=OR
+2	1.7348896
+0	1.3571694
+1	1.2484449
+text search with natural language query enabled(default), operator=AND
+2	1.7348896
+0	1.3571694
+1	1.2484449
+text search with natural language query disabled, operator=OR (default)
+2	1.7348896
+7	1.5094599
+0	1.3571694
+1	1.2484449
+6	0.34194443
+text search with natural language query disabled, operator=AND
+hybrid search with natural language query enabled
+2	0.9861111
+0	0.5978653
+1	0.5
+3	0.44444445
+4	0.375
+hybrid search with natural language query disabled, operator=OR (default)
+2	0.9861111
+0	0.8529831
+1	0.8285519
+3	0.44444445
+7	0.42054698
+hybrid search with natural language query disabled, operator=AND
+1	0.5
+0	0.4861111
+2	0.4861111
+3	0.44444445
+4	0.375
