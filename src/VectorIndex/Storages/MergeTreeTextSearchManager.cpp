@@ -72,6 +72,11 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     const String search_column_name = text_search_info->text_column_name;
     size_t k = static_cast<UInt32>(text_search_info->topk);
 
+    /// Natural language query
+    bool enable_nlq = text_search_info->enable_nlq;
+    bool operator_or = text_search_info->text_operator == "OR";
+    LOG_DEBUG(log, "enable_nlq={}, operator={}", enable_nlq, text_search_info->text_operator);
+
     TantivyIndexStorePtr tantivy_store = nullptr;
 
     /// Find inverted index on the search column
@@ -130,7 +135,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             filter_bitmap_vector.emplace_back(bitmap[i]);
 
         search_results = tantivy_store->bm25SearchWithFilter(
-            text_search_info->query_text, bm25_stats_in_table, k, filter_bitmap_vector);
+            text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, filter_bitmap_vector);
     }
     else if (data_part->hasLightweightDelete())
     {
@@ -181,19 +186,19 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         /// Get non empty delete bitmap (from store or data part) OR fail to get delete bitmap from part
         if (u8_delete_bitmap_vec.empty())
         {
-            search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
+            search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
         }
         else
         {
             search_results = tantivy_store->bm25SearchWithFilter(
-                                text_search_info->query_text, bm25_stats_in_table, k, u8_delete_bitmap_vec);
+                                text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, u8_delete_bitmap_vec);
         }
     }
     else
     {
         OpenTelemetry::SpanHolder span3("MergeTreeTextSearchManager::textSearch()::data_part_generate_results_no_filter");
         LOG_DEBUG(log, "Text search no filter");
-        search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
+        search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
     }
 
     for (size_t i = 0; i < search_results.size(); i++)
