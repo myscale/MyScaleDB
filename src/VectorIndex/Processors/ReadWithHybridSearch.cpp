@@ -45,6 +45,11 @@ namespace CurrentMetrics
 namespace DB
 {
 
+namespace ErrorCodes
+{
+    extern const int QUERY_WAS_CANCELLED;
+}
+
 static MergeTreeReaderSettings getMergeTreeReaderSettings(const ContextPtr & context)
 {
     const auto & settings = context->getSettingsRef();
@@ -83,22 +88,28 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     String tantivy_index_file_name;
     String search_column_name = text_search_info->text_column_name;
     String query_text = text_search_info->query_text;
+    String index_name;
+    String db_table_name;
+
+    if (!data.getStorageID().database_name.empty())
+        db_table_name = data.getStorageID().database_name + ".";
+    db_table_name += data.getStorageID().table_name;
 
     for (const auto & index_desc : metadata_for_reading->getSecondaryIndices())
     {
         if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 &&
             index_desc.column_names[0] == search_column_name)
         {
+            index_name = index_desc.name;
             tantivy_index_file_name = INDEX_FILE_PREFIX + index_desc.name;
             break;
         }
     }
 
     if (tantivy_index_file_name.empty())
-    {
-        LOG_INFO(log, "Failed to get index name, unable to collect statistics");
-        return;
-    }
+        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                        "The query was canceled because the table {} lacks a full-text search (FTS) index. "
+                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
 
     parts_with_bm25_info.resize(prepared_parts.size());
 
@@ -110,9 +121,13 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
         /// Check if index files exist in part
         if (!part->getDataPartStorage().exists(tantivy_index_file_name + ".idx"))
         {
-            LOG_DEBUG(log, "File ({}.idx) for fts index does not exists in part {}. Skipping it",
-                tantivy_index_file_name, part->name);
-            return;
+            String suggestion_index_log = "ALTER TABLE " + db_table_name + " MATERIALIZE INDEX " + index_name;
+
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                            "The query was canceled because the FTS index {} has not been built for part {} on table {}. "
+                            "Please run the MATERIALIZE INDEX command {} to build the FTS index for existing data. "
+                            "If you have already run this command, please wait for it to finish.",
+                            index_name, part->name, db_table_name, suggestion_index_log);
         }
         auto tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(tantivy_index_file_name, part->getDataPartStoragePtr());
 
