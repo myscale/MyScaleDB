@@ -1,8 +1,8 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.0.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.0.1 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.0.1 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.0 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.0 bash
 
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
@@ -159,14 +159,14 @@ ENV GOCACHE=${WORK_DIRECTORY}/go/.cache
 
 RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTORY}
 
-
-RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
-    && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
-    && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
-    && apt update --yes --fix-missing \
-    && apt install mono-complete --yes --fix-missing \
-    && apt clean \
-    && rm -rfv /var/lib/apt/lists/*
+# remove mono-complete dependency in builder:3.1.0, because ubuntu 22.04 does not have mono-complete package
+# RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
+#     && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
+#     && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
+#     && apt update --yes --fix-missing \
+#     && apt install mono-complete --yes --fix-missing \
+#     && apt clean \
+#     && rm -rfv /var/lib/apt/lists/*
 
 RUN pip install --upgrade clickhouse_driver
 
