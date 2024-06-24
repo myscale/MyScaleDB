@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0
 
 ARG TARGETARCH
 
@@ -29,7 +29,7 @@ RUN arch=${TARGETARCH:-amd64} \
     && chmod +x ./mc ./minio
 
 # Download hadoop 
-RUN wget 'https://dlcdn.apache.org/hadoop/common/hadoop-3.3.1/hadoop-3.3.1.tar.gz' \
+RUN wget 'https://archive.apache.org/dist/hadoop/common/hadoop-3.3.1/hadoop-3.3.1.tar.gz' \
     && tar -xvf hadoop-3.3.1.tar.gz \
     && rm -rf hadoop-3.3.1.tar.gz
 
@@ -40,8 +40,8 @@ ENV MINIO_ROOT_USER="clickhouse"
 ENV MINIO_ROOT_PASSWORD="clickhouse"
 ENV EXPORT_S3_STORAGE_POLICIES=1
 
-RUN npm install -g azurite
-RUN npm install tslib
+RUN npm install -g azurite \
+    && npm install -g tslib
 
 COPY setup_minio.sh /
 COPY setup_hdfs_minicluster.sh /
