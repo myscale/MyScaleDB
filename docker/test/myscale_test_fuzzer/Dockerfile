@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.4 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:1.4 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.4
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0
 
 ENV LANG=C.UTF-8
 
