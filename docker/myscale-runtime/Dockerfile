@@ -1,5 +1,5 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:1.4 . --push
-FROM ubuntu:20.04
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:2.0 . --push
+FROM ubuntu:22.04
 
 ARG TARGETARCH
 
