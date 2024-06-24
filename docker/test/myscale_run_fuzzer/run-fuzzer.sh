@@ -25,8 +25,9 @@ repo_dir=$TEST_FLOAD/ch
 PR_TO_TEST=0
 ls -al $TEST_FLOAD
 
-source /etc/profile
-arch="$(dpkg --print-architecture)"
+# source /etc/profile
+# arch="$(dpkg --print-architecture)"
+arch="amd64"
 if [[ "x$arch" = "xamd64" ]]; then
     echo "/opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/lib/intel64" >>/etc/ld.so.conf.d/libc.conf
     ldconfig

@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:1.2 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:1.2
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:2.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:2.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0
 
 RUN apt-get update --allow-releaseinfo-change \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \

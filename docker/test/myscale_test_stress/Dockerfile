@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.4 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:1.4 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:1.4
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
 
 RUN apt-get update --allow-releaseinfo-change -y \
     && env DEBIAN_FRONTEND=noninteractive \
