@@ -1,4 +1,4 @@
-FROM ubuntu:20.04 as builder
+FROM ubuntu:22.04 as builder
 
 ARG TARGETARCH
 ARG version=23.3.2.1
@@ -8,7 +8,7 @@ RUN mkdir -pv /builder/mqdb
 ADD clickhouse-${version}-${TARGETARCH:-amd64}.tgz /builder/mqdb/
 
 
-FROM harbor.internal.moqi.ai/mqdb/runtime:1.4 as runtime
+FROM harbor.internal.moqi.ai/mqdb/runtime:2.0 as runtime
 
 ARG TARGETARCH
 ARG version=23.3.2.1
