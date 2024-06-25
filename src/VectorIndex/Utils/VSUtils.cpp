@@ -107,12 +107,18 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
 
     size_t marks_count = part->index_granularity.getMarksCount();
     /// marks_count should not be 0 if we reach here
+    if (marks_count == 0)
+        mark_ranges = res;
 
     size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
         settings.merge_tree_min_rows_for_seek,
         settings.merge_tree_min_bytes_for_seek,
         part->index_granularity_info.fixed_index_granularity,
         part->index_granularity_info.index_granularity_bytes);
+
+    std::vector<UInt64> labels_vec(labels.size());
+    for (const auto & label : labels)
+        labels_vec.emplace_back(label);
 
     auto need_this_range = [&](MarkRange & range)
     {
@@ -121,9 +127,14 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
         auto start_row = part->index_granularity.getMarkStartingRow(begin);
         auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
 
-        for (const auto & label : labels)
+        /// Use binary search due to labels are sorted
+        size_t low = 0;
+        size_t high = labels_vec.size();
+        while (low < high)
         {
-            if (label >= start_row && label < end_row)
+            const size_t middle = low + (high - low) / 2;
+            auto label_middle = labels_vec[middle];
+            if (label_middle >= start_row && label_middle < end_row)
             {
                 LOG_TRACE(
                     &Poco::Logger::get("filterMarkRangesByLabels"),
@@ -133,6 +144,10 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
                     part->name);
                 return true;
             }
+            else if (label_middle < start_row)
+                low = middle + 1;
+            else
+                high = middle;
         }
         return false;
     };
