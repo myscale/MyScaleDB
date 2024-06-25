@@ -1,0 +1,51 @@
+#cloud-config
+
+# Update and install necessary packages
+package_update: true
+package_upgrade: true
+packages:
+  - supervisor
+
+write_files:
+  - path: /etc/supervisor/conf.d/instance-env-check.conf
+    content: |
+      [program:instance-env-check]
+      command=/usr/local/bin/instance-env-check.sh
+      autostart=true
+      autorestart=false
+      startsecs=4
+      priority=1
+      user=root
+
+  - path: /etc/supervisor/conf.d/clickhouse-server.conf
+    content: |
+      [program:clickhouse-server]
+      command=clickhouse-server --config-file /etc/clickhouse-server/config.xml
+      autostart=true
+      autorestart=true
+      priority=8
+      user=ec2-user
+
+  - path: /etc/supervisor/conf.d/clickhouse-keeper.conf
+    content: |
+      [program:clickhouse-keeper]
+      command=clickhouse-keeper --config-file /etc/clickhouse-keeper/keeper-config.xml
+      autostart=true
+      autorestart=true
+      startsecs=2
+      priority=4
+      user=ec2-user
+
+# Ensure supervisor is enabled and started
+runcmd:
+  - /usr/local/bin/generate-dynamic-cfg.sh
+  - systemctl enable supervisor
+  - systemctl start supervisor
+  - supervisorctl reread
+  - supervisorctl update
+
+# Run the root password change script on boot
+bootcmd:
+  - |
+    PASSWORD=$(cat /var/lib/cloud/data/instance-id)
+    echo "root:${PASSWORD}" | chpasswd
