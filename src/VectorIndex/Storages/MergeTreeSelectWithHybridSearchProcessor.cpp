@@ -977,6 +977,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     const MergeTreeData & data,
     const MergeTreeReaderSettings & reader_settings_)
 {
+    OpenTelemetry::SpanHolder span("MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes()");
     VectorAndTextResultInDataParts parts_with_mix_results;
     if (!query_info.has_hybrid_search)
         return parts_with_mix_results;
