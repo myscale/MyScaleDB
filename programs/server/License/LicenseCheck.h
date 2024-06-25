@@ -3,13 +3,22 @@
 #include <filesystem>
 #include <memory>
 
+#include <iostream>
+#include <sstream>
 #include <Core/BackgroundSchedulePool.h>
 #include <Interpreters/Context.h>
 #include <base/types.h>
+#include <base/JSON.h>
 #include <Poco/Base64Decoder.h>
 #include <Poco/DOM/Text.h>
+#include <Poco/Exception.h>
 #include <Poco/Logger.h>
 #include <Poco/MemoryStream.h>
+#include <Poco/Net/HTTPClientSession.h>
+#include <Poco/Net/HTTPRequest.h>
+#include <Poco/Net/HTTPResponse.h>
+#include <Poco/StreamCopier.h>
+#include <Poco/URI.h>
 #include <Poco/Util/LayeredConfiguration.h>
 #include <Poco/XML/XMLWriter.h>
 #include <Common/Config/ConfigProcessor.h>
@@ -195,81 +204,6 @@ protected:
     XMLDocumentPtr license_doc;
     size_t retry_times;
     std::unique_ptr<BackgroundSchedulePoolTaskHolder> license_task;
-};
-
-class StandAloneLicenseChecker : public ILicenseChecker
-{
-public:
-    StandAloneLicenseChecker(
-        const Poco::Util::LayeredConfiguration & server_config_,
-        const ContextMutablePtr global_context,
-        const XMLDocumentPtr & preprocessed_xml_)
-        : ILicenseChecker(server_config_, global_context, preprocessed_xml_)
-    {
-    }
-    ~StandAloneLicenseChecker() override = default;
-
-private:
-    void checkInstanceCount(const LicenseCheckCtx & check_ctx) override
-    {
-        int max_instance_count = std::stoi(check_ctx.license_doc->getNodeByPath(INSTANCE_COUNT_PATH_XML)->innerText());
-        if (max_instance_count < 1)
-        {
-            LOG_ERROR(log, "The number of cluster instances in stand-alone mode is greater than 1: {}.", max_instance_count);
-            throw Exception(
-                ErrorCodes::LICENSE_ERROR, "Check license failed, the number of cluster instances in stand-alone mode is greater than 1.");
-        }
-    }
-};
-
-class ClusterLicenseChecker : public ILicenseChecker
-{
-public:
-    ClusterLicenseChecker(
-        const Poco::Util::LayeredConfiguration & server_config_,
-        const ContextMutablePtr global_context,
-        const XMLDocumentPtr & preprocessed_xml_)
-        : ILicenseChecker(server_config_, global_context, preprocessed_xml_)
-        , zookeeper(getContext()->getZooKeeper())
-        , cluster_name(getLicenseClusterName())
-        , cluster_prefix(fmt::format(fmt::runtime(LICENSE_CLUSTER_PREFIX_FMT), cluster_name))
-        , active_node_prefix(fmt::format(fmt::runtime(ACTIVE_NODES_PREFIX_FMT), cluster_name))
-    {
-    }
-
-    ~ClusterLicenseChecker() override = default;
-
-private:
-    struct znode_info
-    {
-        String node_path;
-        String node_value;
-        int32_t mode;
-    };
-
-    String getLicenseClusterName() const;
-    void offlineInstanceInZookeeper();
-
-    void createClusterLicenseInfoIfNotExists();
-    void beforeCheckLicense(const LicenseCheckCtx & check_ctx) override;
-    void checkInstanceCount(const LicenseCheckCtx & check_ctx) override;
-    void checkLicenseFinal() override;
-    void stopLicenseCheckImpl() override {
-        /// stop update instance status task
-        if (update_instance_status_task)
-            (*update_instance_status_task)->deactivate();
-        offlineInstanceInZookeeper(); 
-    }
-    void updateInstanceStatus();
-
-    zkutil::ZooKeeperPtr zookeeper;
-    const String cluster_name;
-    const String cluster_prefix;
-    const String active_node_prefix;
-    std::mutex instance_status_mutex;
-    String instance_status_path;
-
-    std::unique_ptr<BackgroundSchedulePoolTaskHolder> update_instance_status_task;
 };
 
 } // namespace MyscaleLicense

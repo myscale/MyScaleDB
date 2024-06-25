@@ -156,6 +156,30 @@ build_package_with_license:
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
     - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
 
+build_package_with_ami_license:
+  stage: package
+  when: manual
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
+    - *init-ssh
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-with-ami-license"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-aarch64 --package --compiler "clang-15"
+
 build_image:
   stage: image
   tags:
