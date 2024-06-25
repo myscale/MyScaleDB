@@ -42,6 +42,8 @@ namespace CurrentMetrics
     extern const Metric MergeTreeDataSelectBM25CollectThreadsActive;
     extern const Metric ReadWithHybridSearchSecondStageThreads;
     extern const Metric ReadWithHybridSearchSecondStageThreadsActive;
+    extern const Metric MergeTreeDataSelectHybridSearchThreads;
+    extern const Metric MergeTreeDataSelectHybridSearchThreadsActive;
 }
 
 namespace DB
@@ -226,8 +228,8 @@ ReadWithHybridSearch::ReadWithHybridSearch(
     else if (query_info.hybrid_search_info)
         vector_scan_info = query_info.hybrid_search_info->vector_scan_info;
 
-    support_two_stage_search = supportTwoStageSearch(prepared_parts, vector_scan_info,
-                        context->getSettingsRef(), metadata_for_reading, data.getSettings()->default_mstg_disk_mode, log, num_reorder);
+    support_two_stage_search = supportTwoStageSearch(prepared_parts, vector_scan_info, context->getSettingsRef(),
+                                        metadata_for_reading, data.getSettings()->default_mstg_disk_mode, query_info, log, num_reorder);
     /// MYSCALE_INTERNAL_CODE_END
 }
 
@@ -238,6 +240,7 @@ bool ReadWithHybridSearch::supportTwoStageSearch(
     const Settings & settings,
     const StorageMetadataPtr & metadata_for_reading,
     const int default_mstg_disk_mode,
+    const SelectQueryInfo & query_info_,
     Poco::Logger * log,
     UInt64 & num_reorder_)
 {
@@ -250,6 +253,10 @@ bool ReadWithHybridSearch::supportTwoStageSearch(
     /// Only Float32 vector can create MSTG index, and use two stage search
     /// Currently two stage search doesn't support batch distance
     if (vector_scan_info_ptr->is_batch || vec_scan_desc.vector_search_type != Search::DataType::FloatVector)
+        return false;
+
+    /// TODO: In adaptive two stage search option, disable two stage search for FINAL
+    if (isFinal(query_info_) && settings.two_stage_search_option == 1)
         return false;
 
     /// Get index type and disk_mode from vector index defined on the search column
@@ -315,12 +322,15 @@ bool ReadWithHybridSearch::supportTwoStageSearch(
 
 void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
 {
+    OpenTelemetry::SpanHolder span("ReadWithHybridSearch::initializePipeline()");
 #if USE_TANTIVY_SEARCH
+    OpenTelemetry::SpanHolder span_text_stats("ReadWithHybridSearch getStatisticForTextSearch()");
     /// Collect additional stastics info for bm25 when parts > 1
     if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
         getStatisticForTextSearch();
 #endif
 
+    OpenTelemetry::SpanHolder span_skip_index("ReadWithHybridSearch getAnalysisResult()");
     /// Referenced from ReadFromMergeTree::initializePipeline(). Add logic for mark range optimization based on where conditions.
     auto result = getAnalysisResult();
     LOG_DEBUG(
@@ -558,6 +568,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
     const StorageMetadataPtr & metadata_snapshot,
     size_t num_streams) const
 {
+    OpenTelemetry::SpanHolder span("ReadWithHybridSearch::selectTotalHybridResult()");
     HybridAnalysisResult hybrid_result;
 
     /// Get vector scan and full-text search result for all selected parts
@@ -597,7 +608,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
     if(isFinal(query_info) && parts_with_vector_text_result.size() > 1)
     {
         LOG_DEBUG(log, "Perform final on search results from parts");
-        performFinal(parts_with_vector_text_result);
+        performFinal(parts_with_vector_text_result, num_streams);
     }
 
     Poco::Logger * hybrid_log = &Poco::Logger::get(log_name);
@@ -608,6 +619,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
     {
         if (support_two_stage_search)   /// MYSCALE_INTERNAL_CODE_BEGIN
         {
+            OpenTelemetry::SpanHolder span2("ReadWithHybridSearch::selectTotalHybridResult(): vector two stage search");
             /// Second stage: get actual top k result
             /// Get top num_reorder candidates: score + part_index + label_id
             auto first_stage_top_candidates = MergeTreeBaseSearchManager::getTotalCandidateVSResult(
@@ -653,8 +665,9 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
     return hybrid_result;
 }
 
-void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result) const
+void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result, size_t num_streams) const
 {
+    OpenTelemetry::SpanHolder span("ReadWithHybridSearch::performFinal()");
     /// A map with part name and all labels in top-k results in this part
     std::map<String, std::set<UInt64>> part_labels_map;
 
@@ -662,24 +675,68 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
 
     /// Construct a local RangesInDataParts based on top k search results
     RangesInDataParts parts_for_final_ranges;
-    for (const auto & part_with_mix_results : parts_with_vector_text_result)
+    parts_for_final_ranges.resize(parts_with_vector_text_result.size());
+
+    auto process_part = [&](size_t part_index)
     {
+        auto & part_with_mix_results = parts_with_vector_text_result[part_index];
         const auto & part_with_ranges = part_with_mix_results.part_with_ranges;
         String part_name = part_with_ranges.data_part->name;
 
         /// Get all labels from vector scan result and/or text result
         auto labels_set = MergeTreeBaseSearchManager::getLabelsInSearchResults(part_with_mix_results, log);
         if (labels_set.empty())
-            continue;
-
-        part_labels_map.emplace(part_name, labels_set);
+            return;
 
         /// Use labels in search result to filter mark ranges of part
         RangesInDataPart result_ranges(part_with_ranges);
         filterMarkRangesByLabels(part_with_ranges.data_part, settings, labels_set, result_ranges.ranges);
 
         if (!result_ranges.ranges.empty())
-            parts_for_final_ranges.emplace_back(std::move(result_ranges));
+        {
+            parts_for_final_ranges[part_index] = std::move(result_ranges);
+            part_labels_map[part_name] = std::move(labels_set);
+        }
+    };
+
+    size_t num_threads = std::min<size_t>(num_streams, parts_with_vector_text_result.size());
+
+    if (num_threads <= 1)
+    {
+        for (size_t part_index = 0; part_index < parts_with_vector_text_result.size(); ++part_index)
+            process_part(part_index);
+    }
+    else
+    {
+        /// Parallel loading of data parts.
+        ThreadPool pool(
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            num_threads);
+
+        for (size_t part_index = 0; part_index < parts_with_vector_text_result.size(); ++part_index)
+            pool.scheduleOrThrowOnError([&, part_index, thread_group = CurrentThread::getGroup()]
+            {
+                SCOPE_EXIT_SAFE(
+                    if (thread_group)
+                        CurrentThread::detachFromGroupIfNotDetached();
+                );
+                if (thread_group)
+                    CurrentThread::attachToGroupIfDetached(thread_group);
+
+                process_part(part_index);
+            });
+
+        pool.wait();
+    }
+
+    /// Erase part with empty labels
+    for (auto it = parts_for_final_ranges.begin(); it != parts_for_final_ranges.end();)
+    {
+        if (it->ranges.empty())
+            it = parts_for_final_ranges.erase(it);
+        else
+            ++it;
     }
 
     /// search result inside parts_with_vector_text_result may be empty (computed = false).
@@ -764,6 +821,7 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
     /// Save final results to another part and labels map, only include results in top-k labels
     std::map<String, std::set<UInt64>> final_part_labels_map;
 
+    OpenTelemetry::SpanHolder span2("ReadWithHybridSearch::performFinal(): execute final and iterate results");
     Block block;
     while (final_executor.pull(block))
     {
@@ -786,6 +844,7 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
         }
     }
 
+    OpenTelemetry::SpanHolder span3("ReadWithHybridSearch::performFinal(): filterSearchResultsByFinalLabels");
     /// Filter top-k results in parts_with_vector_text_result
     /// For a result in a part, remove it if not exists in final results of this part
     for (auto & part_with_mix_results : parts_with_vector_text_result)
@@ -812,6 +871,7 @@ VectorAndTextResultInDataParts ReadWithHybridSearch::selectPartsBySecondStageVec
     const VectorScanInfoPtr & vec_scan_info,
     size_t num_streams) const
 {
+    OpenTelemetry::SpanHolder span3("ReadWithHybridSearch::selectPartsBySecondStageVectorIndex()");
     VectorAndTextResultInDataParts parts_with_vector_result;
     parts_with_vector_result.resize(parts_with_candidates.size());
 
