@@ -16,6 +16,9 @@
 #include <Poco/Logger.h>
 #include <Poco/MemoryStream.h>
 #include <Poco/StreamCopier.h>
+#include <Poco/JSON/Parser.h>
+#include <Poco/Dynamic/Var.h>
+#include <Poco/JSON/Object.h>
 
 #if USE_SSL
 #    include <openssl/pem.h>
@@ -132,6 +135,12 @@ inline void checkHardwareResourceLimitsForCommunityEdition()
         DB::tryLogCurrentException("checkHardwareResourceLimits");
         BaseDaemon::terminate();
     }
+}
+
+inline Poco::JSON::Object::Ptr convertStringToJson(const String & content)
+{
+    Poco::JSON::Parser parser;
+    return parser.parse(content).extract<Poco::JSON::Object::Ptr>();
 }
 
 } // namespace MyscaleLicense
