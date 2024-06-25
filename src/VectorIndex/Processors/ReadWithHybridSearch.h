@@ -88,11 +88,12 @@ private:
         const Settings & settings,
         const StorageMetadataPtr & metadata_for_reading,
         const int default_mstg_disk_mode,
+        const SelectQueryInfo & query_info_,
         Poco::Logger * log,
         UInt64 & num_reorder_);
     /// MYSCALE_INTERNAL_CODE_END
 
-    void performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result) const;
+    void performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result, size_t num_streams) const;
 };
 
 }
