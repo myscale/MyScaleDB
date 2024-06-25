@@ -317,6 +317,7 @@ std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
     const VectorAndTextResultInDataPart & mix_results,
     Poco::Logger * log)
 {
+    OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::getLabelsInSearchResults()");
     std::set<UInt64> label_ids;
 
     VectorScanResultPtr vector_result = mix_results.vector_scan_result;
