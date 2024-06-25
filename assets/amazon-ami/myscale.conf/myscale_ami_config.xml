@@ -1,0 +1,31 @@
+<clickhouse>
+    <merge_tree>
+        <!-- 10 seconds (default is 1 minute) -->
+        <number_of_free_entries_in_pool_to_execute_mutation>2</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>2</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+        <max_parts_to_merge_at_once>100</max_parts_to_merge_at_once>
+        <merge_max_block_size>256</merge_max_block_size>
+        <old_parts_lifetime>5</old_parts_lifetime>
+        <default_mstg_disk_mode>2</default_mstg_disk_mode>
+        <simple_merge_selector_base>1.2</simple_merge_selector_base>
+    </merge_tree>
+    <allow_experimental_transactions>42</allow_experimental_transactions>
+    <query_log>
+        <database>system</database>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <partition_by>toYYYYMMDD(event_date)</partition_by>
+        <table>query_log</table>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </query_log>
+    <transactions_info_log>
+        <database>system</database>
+        <table>transactions_info_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </transactions_info_log>
+    <zookeeper>
+        <node index="1">
+            <host>127.0.0.1</host>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+</clickhouse>
