@@ -154,8 +154,8 @@
 /// A minimal file used when the server is run without installation
 INCBIN(resource_embedded_xml, SOURCE_DIR "/programs/server/embedded.xml");
 
-#if defined(ENABLE_LICENSE_CHECK) || defined(ENABLE_MYSCALE_COMMUNITY_EDITION)     /// MYSCALE_INTERNAL_CODE_BEGIN
-#   include "License/LicenseCheck.h"
+#if defined(ENABLE_LICENSE_CHECK) || defined(ENABLE_MYSCALE_COMMUNITY_EDITION) || defined(ENABLE_AMAZON_AMI_LICENSE_CHECK)    /// MYSCALE_INTERNAL_CODE_BEGIN
+#   include "License/LicenseHeaders.h"
 #endif      /// MYSCALE_INTERNAL_CODE_END
 
 namespace CurrentMetrics
@@ -1599,12 +1599,16 @@ try
             extra_paths.emplace_back(key_path);
     }
 
-#if defined(ENABLE_MYSCALE_COMMUNITY_EDITION) // MYSCALE_INTERNAL_CODE_BEGIN
+// MYSCALE_INTERNAL_CODE_BEGIN
+    std::function<void()> release_license_check = [] {};
+#if defined(ENABLE_MYSCALE_COMMUNITY_EDITION)
     /// Check hardware resource
     MyscaleLicense::checkHardwareResourceLimitsForCommunityEdition();
-#endif
-
-#if defined(ENABLE_LICENSE_CHECK)
+#elif defined(ENABLE_AMAZON_AMI_LICENSE_CHECK)
+    /// Amazon instance check
+    auto amazon_license_check = MyscaleLicense::AMILicenseChecker();
+    amazon_license_check.checkLicense();
+#elif defined(ENABLE_LICENSE_CHECK)
     std::unique_ptr<MyscaleLicense::ILicenseChecker> license_checker;
     if (has_zookeeper)
         license_checker = std::make_unique<MyscaleLicense::ClusterLicenseChecker>(config(), global_context, loaded_config.preprocessed_xml);
@@ -1613,10 +1617,9 @@ try
             = std::make_unique<MyscaleLicense::StandAloneLicenseChecker>(config(), global_context, loaded_config.preprocessed_xml);
 
     license_checker->scheduleLicenseCheckTask();
-    auto release_license_check = [&] { license_checker->stopLicenseCheckTask(); };
-#else
-    auto release_license_check = [] {};
-#endif // MYSCALE_INTERNAL_CODE_END
+    release_license_check = [&] { license_checker->stopLicenseCheckTask(); };
+#endif
+// MYSCALE_INTERNAL_CODE_END
 
     size_t max_memory_usage = 0; // vector index calc need it
 
