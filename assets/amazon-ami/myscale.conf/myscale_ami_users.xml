@@ -1,0 +1,15 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <mutations_sync>1</mutations_sync>
+            <log_queries_cut_to_length>100</log_queries_cut_to_length>
+            <log_queries_min_type>QUERY_FINISH</log_queries_min_type>
+            <log_query_threads>0</log_query_threads>
+            <log_query_views>0</log_query_views>
+            <background_pool_size>4</background_pool_size>
+            <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+            <min_insert_block_size_bytes>33554432</min_insert_block_size_bytes>
+            <allow_experimental_object_type>true</allow_experimental_object_type>
+        </default>
+    </profiles>
+</clickhouse>
