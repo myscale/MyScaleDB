@@ -3,6 +3,7 @@
 SET allow_experimental_inverted_index = 1;
 SET log_queries = 1;
 SET mutations_sync = 1;
+SET enbale_fts_index_for_string_functions = 1;
 
 
 DROP TABLE IF EXISTS tb sync;

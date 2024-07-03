@@ -100,6 +100,7 @@ private:
         UncompressedCache * uncompressed_cache,
         Poco::Logger * log);
 
+#if USE_TANTIVY_SEARCH
     static MarkRanges generateMarkRangesFromTantivy(
         MergeTreeIndexPtr index_helper,
         MergeTreeIndexConditionPtr condition,
@@ -111,7 +112,9 @@ private:
         const size_t & min_marks_for_seek,
         size_t & granules_dropped,
         size_t & total_granules,
+        const Settings & settings,
         Poco::Logger * log);
+#endif
 
     static MarkRanges filterMarksUsingMergedIndex(
         MergeTreeIndices indices,
