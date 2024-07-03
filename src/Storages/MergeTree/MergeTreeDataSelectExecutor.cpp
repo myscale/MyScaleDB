@@ -1657,6 +1657,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     const size_t & min_marks_for_seek,
     size_t & granules_dropped,
     size_t & total_granules,
+    const Settings & settings,
     Poco::Logger * log)
 {
     MarkRanges res;
@@ -1672,6 +1673,13 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     // Boundary
     const auto * tantivy_filter_condition = dynamic_cast<const MergeTreeConditionTantivy *>(&*condition);
     if (tantivy_filter_condition == nullptr)
+    {
+        return index_ranges;
+    }
+    // Boundary
+    UInt64 enbale_fts_index_for_string_functions = settings.enbale_fts_index_for_string_functions;
+    LOG_DEBUG(log, "enbale_fts_index_for_string_functions: {}", enbale_fts_index_for_string_functions);
+    if (enbale_fts_index_for_string_functions == 0)
     {
         return index_ranges;
     }
@@ -1875,6 +1883,7 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
             min_marks_for_seek,
             granules_dropped,
             total_granules,
+            settings,
             log);
     }
 #endif
