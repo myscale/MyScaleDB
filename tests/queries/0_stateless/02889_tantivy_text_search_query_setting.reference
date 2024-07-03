@@ -1,0 +1,59 @@
+[Test Case 1]: function equals / notEquals / == / !=
+1
+2
+1
+10
+9
+10
+1
+6
+1
+10
+9
+10
+9
+10
+[Test Case 2]: function hasToken / hasTokenOrNull / NOT hasToken
+2
+2
+2
+10
+8
+8
+8
+10
+1
+2
+0
+2
+1
+2
+1
+10
+[Test Case 3]: function like; in case sensitive column;
+1
+2
+1
+10
+0
+0
+0
+10
+[Test Case 4]: function not like; in case sensitive column;
+9
+10
+9
+10
+10
+10
+10
+10
+[Test Case 5]: function startsWith / endsWith; in case insensitive column
+1
+2
+1
+10
+1
+2
+0
+2
