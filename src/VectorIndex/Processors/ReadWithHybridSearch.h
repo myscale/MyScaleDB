@@ -44,7 +44,7 @@ public:
 private:
 
     bool support_two_stage_search = false;      /// True if two stage search is used.
-    UInt64 num_reorder = 0;   /// number of candidates for first stage search
+    [[maybe_unused]] UInt64 num_reorder = 0;   /// number of candidates for first stage search
 
     ReadWithHybridSearch::HybridAnalysisResult getHybridSearchResult(const RangesInDataParts & parts) const;
 
