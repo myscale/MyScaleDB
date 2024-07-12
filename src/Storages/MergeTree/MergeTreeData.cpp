@@ -2543,6 +2543,7 @@ void MergeTreeData::clearVectorNvmeCache(std::unordered_map<String, std::unorder
         fs::remove_all(path);
     }
 }
+/// MYSCALE_INTERNAL_CODE_END
 
 #if USE_TANTIVY_SEARCH
 void MergeTreeData::updateTantivyIndexCache()
@@ -2636,26 +2637,6 @@ void MergeTreeData::updateTantivyIndexCache()
     }
 }
 #endif
-
-void MergeTreeData::regularClearCachedIndex(const DataPartsVector & /* parts */)
-{
-    //    StorageMetadataPtr meta_snapshot = getInMemoryMetadataPtr();
-    //    for (const auto & part : parts)
-    //    {
-    //        for(const auto& vec_index_desc :meta_snapshot->vec_indices)
-    //        {
-    //            if(std::vector<std::string>::iterator place=std::find(cached_item_list.begin(),cached_item_list.end(),part->getDataPartStorage().getFullPath() + "/" + vec_index_desc.name+"_"+vec_index_desc.column);
-    //                place!=cached_item_list.end()){
-    //                cached_item_list.erase(place);
-    //            }
-    //        }
-    //    }
-    //    for(const auto& str:cached_item_list){
-    //        VectorIndex::ExecutionEngine vec = VectorIndex::ExecutionEngine(str);
-    //        vec.removeFromCache();
-    //    }
-}
-/// MYSCALE_INTERNAL_CODE_END
 
 void MergeTreeData::clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error, NameSet * parts_failed_to_delete)
 {

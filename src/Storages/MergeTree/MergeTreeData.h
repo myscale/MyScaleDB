@@ -670,14 +670,11 @@ public:
 
     /// MYSCALE_INTERNAL_CODE_BEGIN
     void clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices = {}) const;
+    /// MYSCALE_INTERNAL_CODE_END
 
 #if USE_TANTIVY_SEARCH
     void updateTantivyIndexCache();
 #endif
-
-    ///this one checks cached vector index list every 10s and drop all that's removed in metadata.
-    void regularClearCachedIndex(const DataPartsVector & parts);
-    /// MYSCALE_INTERNAL_CODE_END
 
     /// Delete WAL files containing parts, that all already stored on disk.
     size_t clearOldWriteAheadLogs();
