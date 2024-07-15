@@ -789,7 +789,7 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
     String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
 
 
-    bool json_valid = ffi_varify_index_parameter(index_json_parameter);
+    bool json_valid = ffi_verify_index_parameter(index_json_parameter);
 
     if (!json_valid)
     {
