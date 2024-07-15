@@ -52,12 +52,6 @@ public:
     /// Clear the content
     void clear();
 
-    /// Check if the filter (built from query string) contains any rows in given
-    /// filter by using given tantivy_index_store
-    bool contains(const TantivyFilter & filter, TantivyIndexStore & store) const;
-
-    // bool contains(const TantivyFilter & filter, TantivyIndexStore & store, bool use_regex) const;
-
     template <typename RoaringType>
     RoaringType searchedRoaringTemplate(const TantivyFilter & filter, TantivyIndexStore & store) const;
 

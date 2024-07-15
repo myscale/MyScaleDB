@@ -760,45 +760,6 @@ bool TantivyIndexStore::finalizeTantivyIndex()
     return true;
 }
 
-bool TantivyIndexStore::singleTermQueryWithRowIdRange(String column_name, String term, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result = ffi_query_term_with_range(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, term, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::regexTermQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result
-        = ffi_regex_term_with_range(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, pattern, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::sentenceQueryWithRowIdRange(String column_name, String sentence, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result
-        = ffi_query_sentence_with_range(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, sentence, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::termsQueryWithRowIdRange(String column_name, std::vector<String> terms, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result
-        = ffi_query_terms_with_range(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, terms, lrange, rrange);
-    return result;
-}
-
 rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::singleTermQueryBitmap(String column_name, String term)
 {
     if (!index_reader_status)
