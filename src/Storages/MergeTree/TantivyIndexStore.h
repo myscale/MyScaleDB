@@ -156,13 +156,6 @@ public:
     bool finalizeTantivyIndex();
     void removeTantivyIndexCache();
 
-
-    /// For Skip Index Row Id Range Query.(Deprecated)
-    bool singleTermQueryWithRowIdRange(String column_name, String term, UInt64 lrange, UInt64 rrange);
-    bool regexTermQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange);
-    bool sentenceQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange);
-    bool termsQueryWithRowIdRange(String column_name, std::vector<String> terms, UInt64 lrange, UInt64 rrange);
-
     /// For Skip Index Query.
     rust::cxxbridge1::Vec<std::uint8_t> singleTermQueryBitmap(String column_name, String term);
     rust::cxxbridge1::Vec<std::uint8_t> sentenceQueryBitmap(String column_name, String sentence);
