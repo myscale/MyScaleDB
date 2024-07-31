@@ -111,23 +111,20 @@ struct TreeRewriterResult
     NameSet getArrayJoinSourceNameSet() const;
     const Scalars & getScalars() const { return scalars; }
 
-    /// Special handings for vector scan funcs: get limit_length, cases when distance func in right joined table
-    void collectForVectorScanFunctions(
+    /// Special handings for vector scan / text / hybrid search funcs: get limit_length, cases when search func in right joined table
+    void collectForHybridSearchRelatedFunctions(
         ASTSelectQuery * select_query,
         const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
         ContextPtr context);
 
-    /// Special handings for text search funcs: get limit_length, cases when TextSearch func in right joined table
-    void collectForTextSearchFunctions(
-            ASTSelectQuery * select_query,
-            const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
-            ContextPtr context);
-
-    /// Special handings for hybrid search funcs: get limit_length, cases when HybridSearch func in right joined table
-    void collectForHybridSearchFunctions(
-            ASTSelectQuery * select_query,
-            const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
-            ContextPtr context);
+    std::optional<NameAndTypePair> collectSearchColumnType(
+        String & search_col_name,
+        String & func_col_name,
+        const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
+        ContextPtr context,
+        const ASTPtr search_col_argument,
+        StorageMetadataPtr & metadata_snapshot,
+        bool & table_is_remote);
 };
 
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;
