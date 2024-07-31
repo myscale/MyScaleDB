@@ -36,7 +36,6 @@ struct VSDescription
     uint64_t search_column_dim{0};
     int topk = -1;    /// topK value extracted from limit N
     int direction = 1;  /// 1 - ascending, -1 - descending.
-
 };
 
 using VSDescriptions = std::vector<VSDescription>;
@@ -91,7 +90,7 @@ struct HybridSearchInfo
 
     /// Used for score fusion
     float fusion_weight = -1;       /// weight of text search
-    Search::Metric metric_type;     /// metric_type in vector index
+    /// Remove metric_type, use the direction in vector_scan_info instead.
 
     /// Used for rank fusion
     int fusion_k = -1;
@@ -99,14 +98,13 @@ struct HybridSearchInfo
     HybridSearchInfo(
         VectorScanInfoPtr vec_scan_info_,
         TextSearchInfoPtr text_search_info_,
-        String func_col_name_, int topk_, String fusion_type_, float fusion_weight_, Search::Metric metric_type_)
+        String func_col_name_, int topk_, String fusion_type_, float fusion_weight_)
         : vector_scan_info(vec_scan_info_)
         , text_search_info(text_search_info_)
         , function_column_name(func_col_name_)
         , topk(topk_)
         , fusion_type(fusion_type_)
         , fusion_weight(fusion_weight_)
-        , metric_type(metric_type_)
     {
     }
 
