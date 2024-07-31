@@ -605,7 +605,7 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAG & temp_actions)
     }
 
     /// text search cannot be performed when no fts index exists
-    if (has_text_search)
+    if (!syntax->is_remote_storage && has_text_search)
         checkTantivyIndex(syntax->storage_snapshot, text_search_info->text_column_name);
 }
 
@@ -626,7 +626,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAG & temp_actions)
     if (has_hybrid_search && hybrid_search_info)
     {
         /// check fts index
-        if (hybrid_search_info->text_search_info)
+        if (!syntax->is_remote_storage && hybrid_search_info->text_search_info)
             checkTantivyIndex(syntax->storage_snapshot, hybrid_search_info->text_search_info->text_column_name);
 
         /// Get vector search type and dim from metadata, check paramaters in vector scan and add to vector_paramters
@@ -1032,7 +1032,6 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAG & actions)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in TextSearch function: expected 2, got {}", arguments.size());
         }
 
-
         Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
 
         /// Only need actions for the second argument, the first argument is used for search index.
@@ -1175,11 +1174,10 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
                     "Wrong HybridSearch parameter for Relative Score Fusion(RSF), valid value is in interval [0.0f, 1.0f]");
             }
 
-            auto metric = Search::getMetricType(syntax->vector_scan_metric_type, vector_scan_descriptions[0].vector_search_type);
             hybrid_search_info = std::make_shared<HybridSearchInfo>(
                 std::make_shared<VectorScanInfo>(vector_scan_descriptions),
                 tmp_text_search_info,
-                function_column_name, static_cast<int>(syntax->limit_length), hybrid_fusion_type, hybrid_fusion_weight, metric);
+                function_column_name, static_cast<int>(syntax->limit_length), hybrid_fusion_type, hybrid_fusion_weight);
         }
         else if (isRankFusion(hybrid_fusion_type))
         {
