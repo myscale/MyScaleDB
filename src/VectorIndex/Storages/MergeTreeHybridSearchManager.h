@@ -138,7 +138,7 @@ private:
         const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
         const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
         const float weight_of_text,
-        const Search::Metric vector_index_metric,
+        const int vector_scan_direction,
         Poco::Logger * log);
 
     static void computeMinMaxNormScore(
