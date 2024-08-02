@@ -683,14 +683,15 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
 void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result, size_t num_streams) const
 {
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::performFinal()");
-    /// A map with part name and all labels in top-k results in this part
-    std::map<String, std::set<UInt64>> part_labels_map;
-
     const auto & settings = context->getSettingsRef();
 
     /// Construct a local RangesInDataParts based on top k search results
     RangesInDataParts parts_for_final_ranges;
     parts_for_final_ranges.resize(parts_with_vector_text_result.size());
+
+    /// Save all labels in top-k results of one part
+    std::vector<std::pair<String, std::set<UInt64>>> vec_original_labels_in_parts;
+    vec_original_labels_in_parts.resize(parts_with_vector_text_result.size());
 
     auto process_part = [&](size_t part_index)
     {
@@ -710,7 +711,7 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
         if (!result_ranges.ranges.empty())
         {
             parts_for_final_ranges[part_index] = std::move(result_ranges);
-            part_labels_map[part_name] = std::move(labels_set);
+            vec_original_labels_in_parts[part_index] = std::make_pair(part_name, std::move(labels_set));
         }
     };
 
@@ -852,9 +853,14 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
             String part_name = part_col[i].get<String>();
             UInt64 label = col_data[i];
 
-            if (part_labels_map.contains(part_name) && part_labels_map[part_name].contains(label))
+            /// Check if the label is from original top-k results in this part
+            for (const auto & [orig_part_name, orig_labels] : vec_original_labels_in_parts)
             {
-                final_part_labels_map[part_name].emplace(label);
+                if (orig_part_name == part_name && orig_labels.contains(label))
+                {
+                    final_part_labels_map[part_name].emplace(label);
+                    break;
+                }
             }
         }
     }
