@@ -3,6 +3,7 @@ clusterAllReplicas
 dictionary
 executable
 file
+full_text_search
 generateRandom
 generateSeries
 generate_series

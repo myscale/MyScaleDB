@@ -172,7 +172,7 @@ public:
     /// Get current part total_num_docs, each column will have same total_num_docs.
     UInt64 getTotalNumDocs();
     /// Get current part total_num_tokens, each column will have it's own total_num_tokens.
-    UInt64 getTotalNumTokens();
+    rust::cxxbridge1::Vec<FieldTokenNums> getTotalNumTokens();
     /// Get the number of documents stored in the index file.
     UInt64 getIndexedDocsNum();
 

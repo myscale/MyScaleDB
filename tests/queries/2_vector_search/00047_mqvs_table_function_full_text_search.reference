@@ -1,0 +1,19 @@
+full_text_search with_score=0
+1
+0
+full_text_search + limit 1
+1
+full_text_search with_score=1
+1	2.7395916
+0	2.087308
+full_text_search + where
+3	Every dog has its day
+6
+3
+5
+select from table with bm25_score column
+0	An apple a day keeps
+1	Better late than never ever
+full_text_search with_score=1 on two parts
+1	Better late than never ever	Easy come easy go always	2.7395916
+0	An apple a day keeps	The early bird catches worm	2.087308

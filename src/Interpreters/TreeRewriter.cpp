@@ -26,7 +26,6 @@
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
 #include <Interpreters/TreeRewriter.h>
-#include <Interpreters/convertFieldToType.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/getTableExpressions.h>
 #include <Interpreters/replaceAliasColumnsInQuery.h>
@@ -76,6 +75,7 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
+#include <VectorIndex/Utils/VSUtils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <Parsers/formatAST.h>
@@ -1097,63 +1097,6 @@ void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList
     }
 }
 
-UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch = false)
-{
-    UInt64 topk = 0;
-
-    if (!select_query)
-        return topk;
-
-    /// topk for search is sum of length and offset in limit
-    UInt64 length = 0, offset = 0;
-    ASTPtr length_ast = nullptr;
-    ASTPtr offset_ast = nullptr;
-
-    if (is_batch)
-    {
-        /// LIMIT m OFFSET n BY expressions
-        length_ast = select_query->limitByLength();
-        offset_ast = select_query->limitByOffset();
-    }
-    else
-    {
-        /// LIMIT m OFFSET n
-        length_ast = select_query->limitLength();
-        offset_ast = select_query->limitOffset();
-    }
-
-    if (length_ast)
-    {
-        const auto & [field, type] = evaluateConstantExpression(length_ast, context);
-
-        if (isNativeNumber(type))
-        {
-            Field converted = convertFieldToType(field, DataTypeUInt64());
-            if (!converted.isNull())
-                length = converted.safeGet<UInt64>();
-        }
-    }
-
-    if (offset_ast)
-    {
-        const auto & [field, type] = evaluateConstantExpression(offset_ast, context);
-
-        if (isNativeNumber(type))
-        {
-            Field converted = convertFieldToType(field, DataTypeUInt64());
-            if (!converted.isNull())
-                offset = converted.safeGet<UInt64>();
-        }
-    }
-
-    topk = length + offset;
-
-    if (topk > context->getSettingsRef().max_search_result_window)
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Sum of m and n in limit ({}) should not exceed `max_search_result_window`({})", topk, context->getSettingsRef().max_search_result_window);
-
-    return topk;
-}
-
 void checkOrderBySortDirection(
     String func_name, ASTSelectQuery * select_query, int & sort_direction, int expected_direction,
     String metric_type = "", bool is_batch = false)
@@ -1665,6 +1608,10 @@ std::optional<NameAndTypePair> TreeRewriterResult::collectSearchColumnType(
 
     if (!search_column_type)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", search_col_name);
+
+    /// Check if table with vector index contains the same column as vector scan function column.
+    if (metadata_snapshot && metadata_snapshot->getColumns().has(func_col_name))
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support search function on table with column name '{}'", func_col_name);
 
     return search_column_type;
 }

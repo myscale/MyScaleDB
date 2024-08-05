@@ -70,6 +70,8 @@ void registerDataLakeTableFunctions(TableFunctionFactory & factory);
 
 void registerTableFunctionTimeSeries(TableFunctionFactory & factory);
 
+void registerTableFunctionFullTextSearch(TableFunctionFactory & factory);
+
 void registerTableFunctions();
 
 }
