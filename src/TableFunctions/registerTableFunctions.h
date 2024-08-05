@@ -65,6 +65,8 @@ void registerTableFunctionFormat(TableFunctionFactory & factory);
 
 void registerTableFunctionExplain(TableFunctionFactory & factory);
 
+void registerTableFunctionFullTextSearch(TableFunctionFactory & factory);
+
 void registerTableFunctions();
 
 }

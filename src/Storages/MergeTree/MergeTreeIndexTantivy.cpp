@@ -789,9 +789,13 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
     String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
 
 
-    bool json_valid = ffi_verify_index_parameter(index_json_parameter);
+    FFIBoolResult json_status = ffi_verify_index_parameter(index_json_parameter);
+    if (json_status.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::BAD_ARGUMENTS, "{}", std::string(json_status.error.message));
+    }
 
-    if (!json_valid)
+    if (!json_status.result)
     {
         LOG_ERROR(&Poco::Logger::get("MergeTreeIndexFts"), "[ftsIndexValidator] bad json arguments");
         throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Json parameter may be error");
