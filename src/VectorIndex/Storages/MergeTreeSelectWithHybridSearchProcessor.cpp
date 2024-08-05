@@ -52,7 +52,7 @@ static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const s
     bool match = true;
     for (const auto & read_col_name : read_col_names)
     {
-        if ((read_col_name == pk_col_name) || isHybridSearchFunc(read_col_name))
+        if ((read_col_name == pk_col_name) || isHybridSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
             continue;
         else
         {
@@ -604,22 +604,26 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
 
     /// Remove distance_func column from read_result.columns, it will be added by vector search.
     Columns ordered_columns;
+    String vector_scan_col_name;
     if (base_search_manager)
+    {
         ordered_columns.reserve(sample_block.columns() - 1);
+        vector_scan_col_name = base_search_manager->getFuncColumnName();
+    }
     else
         ordered_columns.reserve(sample_block.columns());
 
     size_t which_cut = 0;
-    String vector_scan_col_name;
+    bool found_search_func_col = false;
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
     {
         auto & col_name = sample_block.getByPosition(ps).name;
 
         /// TODO: not add distance column to header_without_virtual_columns
-        if (isHybridSearchFunc(col_name))
+        if (col_name == vector_scan_col_name)
         {
             which_cut = ps;
-            vector_scan_col_name = col_name;
+            found_search_func_col = true;
             continue;
         }
 
@@ -631,6 +635,12 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
             part_offset = typeid_cast<const ColumnUInt64 *>(ordered_columns.back().get());
         }
     }
+
+    if (!found_search_func_col)
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR,
+            "Failed to find column name '{}' for search function in sample block during read",
+            vector_scan_col_name);
 
     auto read_end_time = std::chrono::system_clock::now();
 

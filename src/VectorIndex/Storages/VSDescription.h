@@ -60,21 +60,35 @@ struct TextSearchInfo
     String function_column_name;    /// What name to use for a column with text search function values
 
     int topk = -1;          /// topK value extracted from limit N
-    int direction = -1;     /// 1 - ascending, -1 - descending.
 
     bool enable_nlq = true; /// If true, enable natural language query.
     String text_operator = "OR"; /// Boolean logic used to interpret text in the query value. Valid values are OR, AND.
 
-    TextSearchInfo(const String text_col_name_, const String query_text_, const String function_column_name_, int topk_, int direction_, String text_operator_ = "OR", bool enable_nlq_ = true)
+    /// Support multiple text columns
+    bool from_table_func = false;
+    String index_name;   /// inverted index name
+
+    TextSearchInfo(const String text_col_name_, const String query_text_, const String function_column_name_, int topk_, String text_operator_ = "OR", bool enable_nlq_ = true)
         : text_column_name(text_col_name_)
         , query_text(query_text_)
         , function_column_name(function_column_name_)
         , topk(topk_)
-        , direction(direction_)
         , enable_nlq(enable_nlq_)
         , text_operator(text_operator_)
     {
     }
+
+    TextSearchInfo(const bool from_table_func_, const String & index_name_, const String & query_text_, const String & score_column_name_, int topk_, String text_operator_ = "OR", bool enable_nlq_ = true)
+        : query_text(query_text_)
+        , function_column_name(score_column_name_)
+        , topk(topk_)
+        , enable_nlq(enable_nlq_)
+        , text_operator(text_operator_)
+        , from_table_func(from_table_func_)
+        , index_name(index_name_)
+    {
+    }
+
 };
 
 using TextSearchInfoPtr = std::shared_ptr<const TextSearchInfo>;
