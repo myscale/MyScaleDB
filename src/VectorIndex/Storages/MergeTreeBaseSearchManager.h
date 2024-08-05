@@ -23,9 +23,10 @@ public:
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     MergeTreeBaseSearchManager(
-        StorageMetadataPtr metadata_, ContextPtr context_)
+        StorageMetadataPtr metadata_, ContextPtr context_, const String & function_col_name_)
         : metadata(metadata_)
         , context(context_)
+        , function_col_name(function_col_name_)
     {
     }
 
@@ -53,6 +54,8 @@ public:
     virtual bool preComputed() { return false; }
 
     virtual CommonSearchResultPtr getSearchResult() { return nullptr; }
+
+    String getFuncColumnName() { return function_col_name; }
 
     const Settings & getSettings() { return context->getSettingsRef(); }
 
@@ -87,6 +90,7 @@ protected:
 
     StorageMetadataPtr metadata;
     ContextPtr context;
+    String function_col_name;  /// search function column name
 
     /// Merge search result with pre_result from read part
     /// Add score/distance of the row id to the corresponding row

@@ -101,6 +101,7 @@
 #include "config_version.h"
 #include <Interpreters/Context.h>
 
+#include <VectorIndex/Utils/CommonUtils.h>
 
 namespace DB
 {
@@ -641,6 +642,21 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 current_info.query = query_ptr;
                 current_info.syntax_analyzer_result = syntax_analyzer_result;
 
+                /// Support full text search table function
+                NameSet table_columns;
+                bool from_table_function = false;
+                if (storage->getName() == "FullTextSearch")
+                {
+                    from_table_function = true;
+                    table_columns = {collections::map<std::unordered_set>(
+                                    metadata_snapshot->getColumns().getAllPhysical(), [](const NameAndTypePair & col) { return col.name; })};
+                    table_columns.erase(SCORE_COLUMN_NAME);
+
+                    current_info.has_hybrid_search = true;
+                }
+                else if (syntax_analyzer_result && !syntax_analyzer_result->hybrid_search_funcs.empty())
+                    current_info.has_hybrid_search = true;
+
                 Names queried_columns = syntax_analyzer_result->requiredSourceColumns();
                 const auto & supported_prewhere_columns = storage->supportedPrewhereColumns();
 
@@ -648,7 +664,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                     std::move(column_compressed_sizes),
                     metadata_snapshot,
                     queried_columns,
-                    supported_prewhere_columns,
+                    from_table_function ? table_columns : supported_prewhere_columns,
                     log};
 
                 where_optimizer.optimize(current_info, context);
