@@ -32,7 +32,7 @@ class MergeTreeHybridSearchManager : public MergeTreeBaseSearchManager
 public:
     MergeTreeHybridSearchManager(
         StorageMetadataPtr metadata_, HybridSearchInfoPtr hybrid_search_info_, ContextPtr context_, bool support_two_stage_search_ = false)
-        : MergeTreeBaseSearchManager{metadata_, context_}
+        : MergeTreeBaseSearchManager{metadata_, context_, hybrid_search_info_ ? hybrid_search_info_->function_column_name : ""}
         , hybrid_search_info(hybrid_search_info_)
     {
         /// Initialize vector scan and text search manager
@@ -44,8 +44,8 @@ public:
 
     /// Hybrid search has done on all parts, no need to do search and fusion.
     /// Only need to merge result for hybrid and other columns in part
-    MergeTreeHybridSearchManager(HybridSearchResultPtr hybrid_search_result_)
-        : MergeTreeBaseSearchManager{nullptr, nullptr}
+    MergeTreeHybridSearchManager(HybridSearchResultPtr hybrid_search_result_, HybridSearchInfoPtr hybrid_search_info_)
+        : MergeTreeBaseSearchManager{nullptr, nullptr, hybrid_search_info_ ? hybrid_search_info_->function_column_name : ""}
         , hybrid_search_result(std::move(hybrid_search_result_))
     {
         if (hybrid_search_result && hybrid_search_result->computed)
