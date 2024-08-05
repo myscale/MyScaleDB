@@ -101,14 +101,17 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     String index_name;
     String db_table_name;
 
+    /// Support multiple text columns in table function
+    bool from_table_function = text_search_info->from_table_func;
+
     if (!data.getStorageID().database_name.empty())
         db_table_name = data.getStorageID().database_name + ".";
     db_table_name += data.getStorageID().table_name;
 
     for (const auto & index_desc : metadata_for_reading->getSecondaryIndices())
     {
-        if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 &&
-            index_desc.column_names[0] == search_column_name)
+        if (index_desc.type == TANTIVY_INDEX_NAME && ((from_table_function && index_desc.name == text_search_info->index_name)
+            || (!from_table_function && index_desc.column_names.size() == 1 && index_desc.column_names[0] == search_column_name)))
         {
             index_name = index_desc.name;
             tantivy_index_file_name = INDEX_FILE_PREFIX + index_desc.name;
@@ -119,7 +122,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     if (tantivy_index_file_name.empty())
         throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
                         "The query was canceled because the table {} lacks a full-text search (FTS) index. "
-                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
+                        "Please create a FTS index before running TextSearch() or HybridSearch() or full_text_search()", db_table_name);
 
     parts_with_bm25_info.resize(prepared_parts.size());
 
@@ -185,7 +188,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
 
     /// Sum the bm25 info from all parts
     bm25_stats_in_table.total_num_docs = parts_with_bm25_info.getTotalDocsCountAllParts();
-    bm25_stats_in_table.total_num_tokens = parts_with_bm25_info.getTotalNumTokensAllParts();
+    bm25_stats_in_table.total_num_tokens = parts_with_bm25_info.getTextColsTotalNumTokensAllParts();
     bm25_stats_in_table.docs_freq = parts_with_bm25_info.getTermWithDocNumsAllParts();
 
     return;
@@ -972,11 +975,11 @@ Pipe ReadWithHybridSearch::readFromParts(
         MergeTreeBaseSearchManagerPtr search_manager = nullptr;
 
         if (query_info.hybrid_search_info)
-            search_manager = std::make_shared<MergeTreeHybridSearchManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeHybridSearchManager>(part_with_hybrid.search_result, query_info.hybrid_search_info);
         else if (query_info.vector_scan_info)
-            search_manager = std::make_shared<MergeTreeVSManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeVSManager>(part_with_hybrid.search_result, query_info.vector_scan_info);
         else if (query_info.text_search_info)
-            search_manager = std::make_shared<MergeTreeTextSearchManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeTextSearchManager>(part_with_hybrid.search_result, query_info.text_search_info);
 
         if (!search_manager)
         {

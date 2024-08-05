@@ -1017,7 +1017,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown parameter {} for TextSearch", param_key);
     }
 
-    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, syntax->direction, text_operator, enable_natural_language_query);
+    return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, text_operator, enable_natural_language_query);
 }
 
 bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAG & actions)

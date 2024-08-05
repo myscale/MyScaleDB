@@ -11,6 +11,8 @@ enum class DataType;
 namespace DB
 {
 
+const String SCORE_COLUMN_NAME = "bm25_score";
+
 /// Different search types
 enum class HybridSearchFuncType
 {
@@ -67,6 +69,11 @@ inline bool isRankFusion(const String & fusion_type)
 {
     String type = Poco::toLower(fusion_type);
     return type.find("rrf") == 0;
+}
+
+inline bool isScoreColumnName(const String & col_name)
+{
+    return col_name == SCORE_COLUMN_NAME;
 }
 
 Search::DataType getSearchIndexDataType(DataTypePtr &data_type);
