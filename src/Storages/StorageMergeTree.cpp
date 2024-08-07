@@ -2079,7 +2079,8 @@ void StorageMergeTree::dropPart(const String & part_name, bool detach, ContextPt
                 auto metadata = part->storage.getInMemoryMetadataPtr();
                 if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
                 {
-                    TantivyIndexStoreFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath());
+                    auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+                    TantivyIndexStoreFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath(), index_names);
                 }
 #endif
             }
