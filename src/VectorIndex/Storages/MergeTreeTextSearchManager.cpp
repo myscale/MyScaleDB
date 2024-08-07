@@ -115,8 +115,8 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
-                tantivy_store
-                    = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), data_part->getDataPartStoragePtr());
+                tantivy_store = TantivyIndexStoreFactory::instance().getOrLoadForSearch(
+                    index_helper->getFileName(), data_part->getDataPartStoragePtr());
 
             if (tantivy_store)
             {
