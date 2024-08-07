@@ -134,7 +134,8 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
                             "If you have already run this command, please wait for it to finish.",
                             index_name, part->name, db_table_name, suggestion_index_log);
         }
-        auto tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(tantivy_index_file_name, part->getDataPartStoragePtr());
+        auto tantivy_store
+            = TantivyIndexStoreFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
 
         if (tantivy_store)
         {
