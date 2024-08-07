@@ -80,6 +80,7 @@ public:
     void deserialize();
 
     String getTantivyIndexCacheDirectory();
+    String getAndLockTantivyIndexCacheDirectory();
 
     /// @brief update data part path in cache.
     /// @param target_part_cache_path example: `store/xxx/xxx/all_1_1_0_2`
@@ -155,6 +156,7 @@ public:
     bool indexMultiColumnDoc(uint64_t row_id, std::vector<String> & column_names, std::vector<String> & docs);
     bool finalizeTantivyIndex();
     void removeTantivyIndexCache();
+    bool loadTantivyIndexReader();
 
     /// For Skip Index Query.
     rust::cxxbridge1::Vec<std::uint8_t> singleTermQueryBitmap(String column_name, String term);
