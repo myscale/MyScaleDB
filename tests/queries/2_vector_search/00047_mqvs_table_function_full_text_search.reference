@@ -11,6 +11,10 @@ full_text_search + where
 6
 3
 5
+query with subquery as query_text
+3
+query with WITH clause as query_text
+3
 select from table with bm25_score column
 0	An apple a day keeps
 1	Better late than never ever

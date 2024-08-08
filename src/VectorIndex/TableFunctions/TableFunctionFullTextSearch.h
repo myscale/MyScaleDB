@@ -35,6 +35,7 @@ private:
     bool enable_nlq = true; /// If true, enable natural language query
     String text_operator = "OR"; /// Boolean logic used to interpret text in the query value
 
+    ASTPtr query_text_ast = nullptr; /// query text is an identifier (alias name of a WITH statement)
     StoragePtr table_storage; /// storage of table
 };
 

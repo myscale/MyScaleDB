@@ -25,6 +25,7 @@ namespace ErrorCodes
 {
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int ILLEGAL_TEXT_SEARCH;
+    extern const int BAD_ARGUMENTS;
 }
 
 namespace
@@ -65,7 +66,8 @@ StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_functi
     String score_col_name = SCORE_COLUMN_NAME;
 
     auto storage = std::make_shared<StorageFullTextSearch>(
-        StorageID(getDatabaseName(), table_name_), table_storage, index_name, query_text, score_col_name, enable_nlq, text_operator, columns, context);
+        StorageID(getDatabaseName(), table_name_), table_storage, index_name, query_text, score_col_name, enable_nlq, text_operator,
+        columns, context, query_text_ast);
     storage->startup();
     return storage;
 }
@@ -102,12 +104,24 @@ void TableFunctionFullTextSearch::parseArguments(const ASTPtr & ast_function, Co
             "Table function '{}' requires 3 to 6 arguments: "
             "table_name, index_name, query, with_score (default 0), enable_nlq (default true), operator (default OR)", getName());
 
-    for (size_t i = 0; i < 3; i++)
+    for (size_t i = 0; i < 2; i++)
         args[i] = evaluateConstantExpressionOrIdentifierAsLiteral(args[i], context);
 
     String tmp_table_name = checkAndGetLiteralArgument<String>(args[0], "table_name");
     index_name = checkAndGetLiteralArgument<String>(args[1], "index_name");
-    query_text = checkAndGetLiteralArgument<String>(args[2], "query");
+
+    /// Special handling for query text which maybe WITH statement
+    if (const auto * identifier = args[2]->as<ASTIdentifier>())
+    {
+        /// WITH statement, will be replaced in StorageFullTextSearch::read()
+        query_text_ast = args[2];
+    }
+    else
+    {
+        /// Literal or subquery
+        args[2] = evaluateConstantExpressionAsLiteral(args[2], context);
+        query_text = checkAndGetLiteralArgument<String>(args[2], "query");
+    }
 
     /// Support 'key=value' format for optional arguments
     for (size_t i = 3; i < args.size(); ++i)
@@ -141,6 +155,10 @@ void TableFunctionFullTextSearch::parseArguments(const ASTPtr & ast_function, Co
                 text_operator = checkAndGetLiteralArgument<String>(args[i], "operator");
         }
     }
+
+    /// Valid check for arguments
+    if (text_operator != "OR" && text_operator != "AND")
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "The value of table function '{}' argument `operator` should be OR or AND", getName());
 
     /// table_name may be db.table
     size_t found_pos = tmp_table_name.find(".");
