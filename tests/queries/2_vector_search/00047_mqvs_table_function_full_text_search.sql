@@ -27,6 +27,10 @@ SELECT id FROM full_text_search(test_inverted_multi, multi_idx); -- {serverError
 SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 'col1:apple or col2:easy', 1, 1, 'OR', 0); -- {serverError NUMBER_OF_ARGUMENTS_DOESNT_MATCH}
 SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 1, 1, 'OR', 0); -- {serverError BAD_ARGUMENTS}
 
+-- invalid value for operator
+SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 'col1:apple or col2:easy', operator='or'); -- {serverError BAD_ARGUMENTS}
+SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 'col1:apple or col2:easy', 1, 1, 'abc'); -- {serverError BAD_ARGUMENTS}
+
 SELECT 'full_text_search + where';
 SELECT id, col1 FROM full_text_search(test_inverted_multi, multi_idx, 'col1:has or col2:has') where id < 5 limit 1;
 
@@ -35,6 +39,13 @@ SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 'col1:has or not
 
 -- query on non-exist text column when enable_nlq = false;
 SELECT id FROM full_text_search(test_inverted_multi, multi_idx, 'col1:has or not_col2:has', enable_nlq=0);
+
+SELECT 'query with subquery as query_text';
+SELECT id FROM full_text_search(test_inverted_multi, multi_idx, (SELECT 'col1:has'));
+
+SELECT 'query with WITH clause as query_text';
+WITH (SELECT 'col1:has') as query
+SELECT id FROM full_text_search(test_inverted_multi, multi_idx, query);
 
 DROP TABLE IF EXISTS test_inverted_multi SYNC;
 
