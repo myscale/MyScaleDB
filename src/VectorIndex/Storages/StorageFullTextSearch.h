@@ -19,7 +19,8 @@ public:
         const bool & enable_nlq,
         const String & text_operator,
         const ColumnsDescription & columns_,
-        const ContextPtr & context);
+        const ContextPtr & context,
+        const ASTPtr & query_text_ast_);
 
     String getName() const override { return "FullTextSearch"; }
 
@@ -59,6 +60,7 @@ private:
     String score_column_name; /// column name for bm25 score
     bool enable_nlq = true;
     String text_operator = "OR";
+    ASTPtr query_text_ast;  /// query text is an identifier (alias name of a WITH statement)
     Poco::Logger * log;
 };
 
