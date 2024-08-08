@@ -25,6 +25,7 @@
 #    include <Storages/MergeTree/TantivyIndexStore.h>
 #    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #    include <VectorIndex/Common/BM25InfoInDataParts.h>
+#    include <VectorIndex/Utils/CommonUtils.h>
 #endif
 
 namespace ProfileEvents
@@ -329,8 +330,36 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::initializePipeline()");
 #if USE_TANTIVY_SEARCH
     OpenTelemetry::SpanHolder span_text_stats("ReadWithHybridSearch getStatisticForTextSearch()");
-    /// Collect additional stastics info for bm25 when parts > 1
-    if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
+
+    /// As for Distributd table, the statistic info is already collected in the sclalar block
+    if (getContext()->hasScalar("_fts_statistic_info"))
+    {
+        Block block = getContext()->getScalar("_fts_statistic_info");
+        if (block.rows() != 1)
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Got the wrong Fts statistics info for Distributed BM25 calculation");
+
+        UInt64 total_docs = 0;
+        std::map<UInt32, UInt64> total_tokens_map;
+        std::map<std::pair<UInt32, String>, UInt64> terms_freq_map;
+
+        parseBM25StaisiticsInfo(block, 0, total_docs, total_tokens_map, terms_freq_map);
+
+        bm25_stats_in_table.total_num_docs = total_docs;
+
+        bm25_stats_in_table.total_num_tokens.reserve(total_tokens_map.size());
+        for (const auto & [field_id, total_tokens] : total_tokens_map)
+        {
+            bm25_stats_in_table.total_num_tokens.push_back({field_id, total_tokens});
+        }
+
+        bm25_stats_in_table.docs_freq.reserve(terms_freq_map.size());
+        for (const auto & [field_and_term, doc_freq] : terms_freq_map)
+        {
+            bm25_stats_in_table.docs_freq.push_back({field_and_term.second, field_and_term.first, doc_freq});
+        }
+    }
+    /// As for non-Distributd table, collect additional stastics info for bm25 when parts > 1
+    else if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
         getStatisticForTextSearch();
 #endif
 

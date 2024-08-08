@@ -604,7 +604,8 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAG & temp_actions)
         }
     }
 
-    /// text search cannot be performed when no fts index exists
+    /// Text search cannot be performed when no fts index exists
+    /// Skip the fts index check when table is distributed.
     if (!syntax->is_remote_storage && has_text_search)
         checkTantivyIndex(syntax->storage_snapshot, text_search_info->text_column_name);
 }
@@ -625,7 +626,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAG & temp_actions)
 
     if (has_hybrid_search && hybrid_search_info)
     {
-        /// check fts index
+        /// Skip the fts index check when table is distributed.
         if (!syntax->is_remote_storage && hybrid_search_info->text_search_info)
             checkTantivyIndex(syntax->storage_snapshot, hybrid_search_info->text_search_info->text_column_name);
 
