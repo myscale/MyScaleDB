@@ -68,6 +68,10 @@ void registerTableFunctions()
     registerTableFunctionFormat(factory);
     registerTableFunctionExplain(factory);
 
+#if USE_TANTIVY_SEARCH
+    registerTableFunctionFtsIndex(factory);
+#endif
+
     registerTableFunctionFullTextSearch(factory);
 }
 
