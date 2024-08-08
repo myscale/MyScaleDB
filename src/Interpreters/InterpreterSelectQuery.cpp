@@ -99,7 +99,9 @@
 #include <Common/typeid_cast.h>
 #include <Interpreters/Context.h>
 
-#include <VectorIndex/Utils/CommonUtils.h>
+#if USE_TANTIVY_SEARCH
+#    include <VectorIndex/Utils/CommonUtils.h>
+#endif
 
 namespace ProfileEvents
 {
@@ -838,6 +840,23 @@ InterpreterSelectQuery::InterpreterSelectQuery(
     /// Conditionally support AST-based PREWHERE optimization.
     analyze(shouldMoveToPrewhere() && (!settings.query_plan_optimize_prewhere || !settings.query_plan_enable_optimizations));
 
+
+#if USE_TANTIVY_SEARCH
+    if (!options.only_analyze && storage && query_analyzer->getAnalyzedData().text_search_info && context->getSettingsRef().dfs_query_then_fetch)
+    {
+        /// Collect global statistics information of all shards used in BM25 calculation when text search is distributed
+        if (auto distributed_storage = std::dynamic_pointer_cast<StorageDistributed>(storage))
+        {
+            collectStatisticForBM25Calculation(
+                context,
+                distributed_storage->getClusterName(),
+                distributed_storage->getRemoteDatabaseName(),
+                distributed_storage->getRemoteTableName(),
+                query_analyzer->getAnalyzedData().text_search_info->text_column_name,
+                query_analyzer->getAnalyzedData().text_search_info->query_text);
+        }
+    }
+#endif
 
     bool need_analyze_again = false;
     bool can_analyze_again = false;

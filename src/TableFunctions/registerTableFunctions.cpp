@@ -63,6 +63,10 @@ void registerTableFunctions()
     registerTableFunctionObjectStorageCluster(factory);
     registerDataLakeTableFunctions(factory);
 
+#if USE_TANTIVY_SEARCH
+    registerTableFunctionFtsIndex(factory);
+#endif
+
     registerTableFunctionFullTextSearch(factory);
 }
 
