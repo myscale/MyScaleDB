@@ -34,11 +34,11 @@ public:
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     template <typename... Args>
-    explicit MergeTreeSelectWithHybridSearchProcessor(MergeTreeBaseSearchManagerPtr base_search_manager_, ContextPtr context_, size_t max_streamns, Args &&... args)
+    explicit MergeTreeSelectWithHybridSearchProcessor(MergeTreeBaseSearchManagerPtr base_search_manager_, ContextPtr context_, size_t max_streams, Args &&... args)
         : MergeTreeSelectAlgorithm{std::forward<Args>(args)...}
         , base_search_manager(base_search_manager_)
         , context(context_)
-        , max_streamns_for_prewhere(max_streamns)
+        , max_streams_for_prewhere(max_streams)
     {
         LOG_TRACE(
             log,
@@ -50,6 +50,25 @@ public:
     }
 
     String getName() const override { return "MergeTreeReadWithHybridSearch"; }
+
+    /// Execute vector scan, text or hybrid search on all parts
+    /// For two stage search cases, execute first stage vector scan.
+    static VectorAndTextResultInDataParts selectPartsByVectorAndTextIndexes(
+        const RangesInDataParts & parts_with_range,
+        const StorageMetadataPtr & metadata_snapshot,
+        const SelectQueryInfo & query_info,
+        const bool support_two_stage_search,
+#if USE_TANTIVY_SEARCH
+        const Statistics & bm25_stats_in_table,
+#endif
+        const PrewhereInfoPtr & prewhere_info,
+        StorageSnapshotPtr storage_snapshot,
+        ContextPtr context,
+        size_t max_block_size,
+        size_t num_streams,
+        const MergeTreeData & data,
+        const MergeTreeReaderSettings & reader_settings);
+
 protected:
     BlockAndProgress readFromPart() override;
     void initializeReaders();
@@ -67,17 +86,55 @@ private:
     BlockAndProgress readFromPartWithPrimaryKeyCache(bool & success);
 
     /// Evaluate the prehwere condition with the partition key value in part. Similar as PartitionPruner
-    bool canSkipPrewhereForPart(const StorageMetadataPtr & metadata_snapshot);
-
-    Search::DenseBitmapPtr performPrefilter(MarkRanges & mark_ranges);
+    static bool canSkipPrewhereForPart(
+        const MergeTreeData::DataPartPtr & data_part_,
+        const PrewhereInfoPtr & prewhere_info_,
+        const MergeTreeData & storage_,
+        const StorageMetadataPtr & metadata_snapshot,
+        const ContextPtr context_);
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeSelectWithHybridSearchProcessor");
+
+    void executeSearch(MarkRanges mark_ranges);
+
+    /// Used for hybrid search refactor, can execute search with provided manager for where or no-where cases
+    static void executeSearch(
+        MergeTreeBaseSearchManagerPtr search_manager,
+        const MergeTreeData & storage_,
+        const StorageSnapshotPtr & storage_snapshot_,
+        const MergeTreeData::DataPartPtr & data_part_,
+        const AlterConversionsPtr & alter_conversions_,
+        size_t max_block_size,
+        UInt64 preferred_block_size_bytes_,
+        UInt64 preferred_max_column_in_block_size_bytes_,
+        MarkRanges mark_ranges,
+        const PrewhereInfoPtr & prewhere_info_copy,
+        const MergeTreeReaderSettings & reader_settings_,
+        bool use_uncompressed_cache_,
+        ContextPtr context_,
+        size_t max_streams);
+
+    /// Peform prefilter on provided data part and mark ranges
+    static VIBitmapPtr performPrefilter(
+        MarkRanges mark_ranges,
+        const PrewhereInfoPtr & prewhere_info_copy,
+        const MergeTreeData & storage_,
+        const StorageSnapshotPtr & storage_snapshot_,
+        const MergeTreeData::DataPartPtr & data_part_,
+        const AlterConversionsPtr & alter_conversions_,
+        size_t max_block_size,
+        UInt64 preferred_block_size_bytes_,
+        UInt64 preferred_max_column_in_block_size_bytes_,
+        const MergeTreeReaderSettings & reader_settings_,
+        bool use_uncompressed_cache_,
+        ContextPtr context_,
+        size_t max_streams);
 
     /// Shared_ptr for base class, the dynamic type may be derived class TextSearch/VectorScan/HybridSearch
     MergeTreeBaseSearchManagerPtr base_search_manager = nullptr;
 
     ContextPtr context;
-    size_t max_streamns_for_prewhere;
+    size_t max_streams_for_prewhere;
 
     /// True if _part_offset column is added for vector scan, but should not exist in select result.
     bool need_remove_part_offset = false;

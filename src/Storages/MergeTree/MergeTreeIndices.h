@@ -19,6 +19,7 @@
 
 #if USE_TANTIVY_SEARCH
 #    include <Storages/MergeTree/TantivyIndexStore.h>
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #endif
 
 

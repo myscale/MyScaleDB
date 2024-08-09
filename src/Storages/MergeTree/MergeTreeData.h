@@ -668,6 +668,10 @@ public:
     std::pair<bool, bool> needClearVectorIndexCacheAndFile(
         const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
 
+#if USE_TANTIVY_SEARCH
+    void updateTantivyIndexCache();
+#endif
+
     /// Delete WAL files containing parts, that all already stored on disk.
     size_t clearOldWriteAheadLogs();
 

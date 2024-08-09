@@ -227,17 +227,21 @@ protected:
 
     /// Common logic to generate text search info for hybrid search and text search
     TextSearchInfoPtr commonMakeTextSearchInfo(
+        const String & search_name,
         ActionsDAGPtr & actions,
         const String & function_col_name,
         ASTPtr query_column,
-        ASTPtr query_text);
+        ASTPtr query_text,
+        int topk,
+        const Array & parameters);
 
     /// Common logic to generate vector scan description for hybrid search and vector scan
     VSDescription commonMakeVectorScanDescription(
         ActionsDAGPtr & actions,
         const String & function_col_name,
         ASTPtr query_column,
-        ASTPtr query_vector);
+        ASTPtr query_vector,
+        int topk);
 
     void analyzeHybridSearch(ActionsDAGPtr & temp_actions);
     bool makeHybridSearchInfo(ActionsDAGPtr & actions);

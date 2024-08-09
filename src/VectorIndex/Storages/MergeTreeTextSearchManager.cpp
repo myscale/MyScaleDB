@@ -33,9 +33,10 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 
 #if USE_TANTIVY_SEARCH
-#include <Storages/MergeTree/MergeTreeIndexTantivy.h>
-#include <Storages/MergeTree/TantivyIndexStore.h>
-#include <Interpreters/TantivyFilter.h>
+#    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
+#    include <Storages/MergeTree/TantivyIndexStore.h>
+#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #endif
 
 #include <memory>
@@ -52,7 +53,8 @@ namespace ErrorCodes
 void MergeTreeTextSearchManager::executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part)
 {
     DB::OpenTelemetry::SpanHolder span("MergeTreeTextSearchManager::executeSearchBeforeRead");
-    text_search_result = textSearch(data_part);
+    if (!preComputed() && text_search_info)
+        text_search_result = textSearch(data_part);
 }
 
 void MergeTreeTextSearchManager::executeSearchWithFilter(
@@ -60,7 +62,8 @@ void MergeTreeTextSearchManager::executeSearchWithFilter(
     const ReadRanges & /* read_ranges */,
     const Search::DenseBitmapPtr filter)
 {
-    text_search_result = textSearch(data_part, filter);
+    if (!preComputed() && text_search_info)
+        text_search_result = textSearch(data_part, filter);
 }
 
 TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
@@ -84,7 +87,21 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     const String search_column_name = text_search_info->text_column_name;
     size_t k = static_cast<UInt32>(text_search_info->topk);
 
+    /// Natural language query
+    bool enable_nlq = text_search_info->enable_nlq;
+    bool operator_or = text_search_info->text_operator == "OR";
+    LOG_DEBUG(log, "enable_nlq={}, operator={}", enable_nlq, text_search_info->text_operator);
+
     TantivyIndexStorePtr tantivy_store = nullptr;
+
+    /// Suggested index log
+    String suggestion_index_log;
+    String index_name;
+    String db_table_name;
+
+    if (!data_part->storage.getStorageID().database_name.empty())
+        db_table_name = data_part->storage.getStorageID().database_name + ".";
+    db_table_name += data_part->storage.getStorageID().table_name;
 
     /// Find inverted index on the search column
     bool find_index = false;
@@ -95,23 +112,29 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             index_desc.column_names[0] == search_column_name)
         {
             OpenTelemetry::SpanHolder span2("MergeTreeTextSearchManager::textSearch()::find_index::initialize index store");
+
+            index_name = index_desc.name;
+            suggestion_index_log = "ALTER TABLE " + db_table_name + " MATERIALIZE INDEX " + index_desc.name;
+
             /// Initialize TantivyIndexStore
             auto index_helper = MergeTreeIndexFactory::instance().get(index_desc);
             if (!index_helper->getDeserializedFormat(data_part->getDataPartStorage(), index_helper->getFileName()))
             {
-                LOG_DEBUG(log, "File for fts index {} does not exist ({}.*). Skipping it.", backQuote(index_helper->index.name),
-                    (fs::path(data_part->getDataPartStorage().getFullPath()) / index_helper->getFileName()).string());
-
-                break;
+                throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                                "The query was canceled because the FTS index {} has not been built for part {} on table {}. "
+                                "Please run the MATERIALIZE INDEX command {} to build the FTS index for existing data. "
+                                "If you have already run this command, please wait for it to finish.",
+                                index_name, data_part->name, db_table_name, suggestion_index_log);
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
-                tantivy_store = TantivyIndexStoreFactory::instance().get(index_helper->getFileName(), data_part->getDataPartStoragePtr());
+                tantivy_store
+                    = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), data_part->getDataPartStoragePtr());
 
             if (tantivy_store)
             {
                 find_index = true;
-                LOG_DEBUG(log, "Find fts index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
+                LOG_DEBUG(log, "Find FTS index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
 
                 break;
             }
@@ -121,9 +144,16 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     if (!find_index)
     {
         /// No tantivy index available
-        LOG_DEBUG(log, "Failed to find fts index for column {} in part {}", search_column_name, data_part->name);
-        tmp_text_search_result->computed = false;
-        return tmp_text_search_result;
+        if (index_name.empty()) /// no tantivy index
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                        "The query was canceled because the table {} lacks a full-text search (FTS) index. "
+                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
+        else
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
+                            "The query was canceled because the FTS index {} has not been built for part {} on table {}. "
+                            "Please run the MATERIALIZE INDEX command {} to build the FTS index for existing data. "
+                            "If you have already run this command, please wait for it to finish.",
+                            index_name, data_part->name, db_table_name, suggestion_index_log);
     }
 
     /// Find index, load index and do text search
@@ -141,7 +171,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             filter_bitmap_vector.emplace_back(bitmap[i]);
 
         search_results = tantivy_store->bm25SearchWithFilter(
-            text_search_info->query_text, bm25_stats_in_table, k, filter_bitmap_vector);
+            text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, filter_bitmap_vector);
     }
     else if (data_part->hasLightweightDelete())
     {
@@ -192,19 +222,19 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         /// Get non empty delete bitmap (from store or data part) OR fail to get delete bitmap from part
         if (u8_delete_bitmap_vec.empty())
         {
-            search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
+            search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
         }
         else
         {
             search_results = tantivy_store->bm25SearchWithFilter(
-                                text_search_info->query_text, bm25_stats_in_table, k, u8_delete_bitmap_vec);
+                                text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, u8_delete_bitmap_vec);
         }
     }
     else
     {
         OpenTelemetry::SpanHolder span3("MergeTreeTextSearchManager::textSearch()::data_part_generate_results_no_filter");
         LOG_DEBUG(log, "Text search no filter");
-        search_results = tantivy_store->bm25Search(text_search_info->query_text, bm25_stats_in_table, k);
+        search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
     }
 
     for (size_t i = 0; i < search_results.size(); i++)

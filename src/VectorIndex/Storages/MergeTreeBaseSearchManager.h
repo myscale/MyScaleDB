@@ -30,7 +30,7 @@
 namespace DB
 {
 
-/// Base class for MergeTreeVectorScanManager, MergeTreeTextSearchManager and MergeTreeHybridSearchManager
+/// Base class for MergeTreeVSManager, MergeTreeTextSearchManager and MergeTreeHybridSearchManager
 class MergeTreeBaseSearchManager
 {
 public:
@@ -69,7 +69,34 @@ public:
 
     virtual CommonSearchResultPtr getSearchResult() { return nullptr; }
 
-    Settings getSettings() { return context->getSettingsRef(); }
+    const Settings & getSettings() { return context->getSettingsRef(); }
+
+    /// Get top-k vector scan result among all selected parts
+    static ScoreWithPartIndexAndLabels getTotalTopKVSResult(
+        const VectorAndTextResultInDataParts & vector_results,
+        const VectorScanInfoPtr & vector_scan_info,
+        Poco::Logger * log);
+
+    static ScoreWithPartIndexAndLabels getTotalTopKTextResult(
+        const VectorAndTextResultInDataParts & text_results,
+        const TextSearchInfoPtr & text_info,
+        Poco::Logger * log);
+
+    /// Get num_reorder candidate vector result among all selected parts for two stage search
+    static ScoreWithPartIndexAndLabels getTotalCandidateVSResult(
+        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        const VectorScanInfoPtr & vector_scan_info,
+        const UInt64 & num_reorder,
+        Poco::Logger * log);
+
+    static std::set<UInt64> getLabelsInSearchResults(
+        const VectorAndTextResultInDataPart & mix_results,
+        Poco::Logger * log);
+
+    static void filterSearchResultsByFinalLabels(
+        VectorAndTextResultInDataPart & mix_results,
+        std::set<UInt64> & label_ids,
+        Poco::Logger * log);
 
 protected:
 
@@ -85,6 +112,28 @@ protected:
         CommonSearchResultPtr tmp_result = nullptr,
         const Search::DenseBitmapPtr filter = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
+
+    /// Get top-k vector or text search result among all selected parts
+    /// need_vector = true, return top-k vector result.
+    /// need_vector = false, return top-k text search result.
+    static ScoreWithPartIndexAndLabels getTotalTopSearchResultImpl(
+        const VectorAndTextResultInDataParts & vector_text_results,
+        const UInt64 & top_k,
+        const bool & desc_direction,
+        Poco::Logger * log,
+        const bool need_vector);
+
+    /// Get label_ids in search result and save in label_ids set.
+    static void getLabelsInSearchResult(
+        std::set<UInt64> & label_ids,
+        const CommonSearchResultPtr & search_result,
+        Poco::Logger * log);
+
+    /// Construct a new search result based on original search result and final label ids.
+    static CommonSearchResultPtr filterSearchResultByFinalLabels(
+        const CommonSearchResultPtr & pre_search_result,
+        std::set<UInt64> & label_ids,
+        Poco::Logger * log);
 };
 
 using MergeTreeBaseSearchManagerPtr = std::shared_ptr<MergeTreeBaseSearchManager>;

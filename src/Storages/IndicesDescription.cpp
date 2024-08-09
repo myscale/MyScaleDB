@@ -12,6 +12,9 @@
 
 #include <Core/Defines.h>
 
+#if USE_TANTIVY_SEARCH
+#    include <Interpreters/TantivyFilter.h>
+#endif
 
 namespace DB
 {
@@ -182,4 +185,18 @@ Names IndicesDescription::getAllRegisteredNames() const
     }
     return result;
 }
+
+#if USE_TANTIVY_SEARCH
+bool IndicesDescription::hasFTS() const
+{
+    for (const auto & index : *this)
+    {
+        if (index.type == TANTIVY_INDEX_NAME)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 }

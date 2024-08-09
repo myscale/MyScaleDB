@@ -4894,6 +4894,9 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         startBeingLeader();
 
+#if USE_TANTIVY_SEARCH
+        updateTantivyIndexCache();
+#endif
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
             addVectorIndexBuildStatus(vec_index_desc.name);

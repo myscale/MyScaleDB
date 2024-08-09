@@ -26,7 +26,21 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
     OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
     MarkRanges res;
 
-    if (!base_search_mgr->preComputed())
+    if (!base_search_mgr || !base_search_mgr->preComputed())
+    {
+        mark_ranges = res;
+        return;
+    }
+
+    filterMarkRangesBySearchResult(part, base_search_mgr->getSettings(), base_search_mgr->getSearchResult(), mark_ranges);
+}
+
+void filterMarkRangesBySearchResult(MergeTreeData::DataPartPtr part, const Settings & settings, CommonSearchResultPtr common_search_result, MarkRanges & mark_ranges)
+{
+    OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
+    MarkRanges res;
+
+    if (!common_search_result || !common_search_result->computed)
     {
         mark_ranges = res;
         return;
@@ -35,8 +49,6 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
     size_t marks_count = part->index_granularity.getMarksCount();
     /// const auto & index = part->index;
     /// marks_count should not be 0 if we reach here
-
-    auto settings = base_search_mgr->getSettings();
 
     size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
         settings.merge_tree_min_rows_for_seek,
@@ -51,10 +63,8 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
         auto start_row = part->index_granularity.getMarkStartingRow(begin);
         auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
 
-        auto result = base_search_mgr->getSearchResult();
-
         const ColumnUInt32 * label_column
-            = checkAndGetColumn<ColumnUInt32>(result->result_columns[0].get());
+            = checkAndGetColumn<ColumnUInt32>(common_search_result->result_columns[0].get());
         for (size_t ind = 0; ind < label_column->size(); ++ind)
         {
             auto label = label_column->getUInt(ind);
@@ -68,6 +78,91 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
                     part->name);
                 return true;
             }
+        }
+        return false;
+    };
+
+    std::vector<MarkRange> ranges_stack = {{0, marks_count}};
+
+    while (!ranges_stack.empty())
+    {
+        MarkRange range = ranges_stack.back();
+        ranges_stack.pop_back();
+
+        if (!need_this_range(range))
+            continue;
+
+        if (range.end == range.begin + 1)
+        {
+            if (res.empty() || range.begin - res.back().end > min_marks_for_seek)
+                res.push_back(range);
+            else
+                res.back().end = range.end;
+        }
+        else
+        {
+            /// Break the segment and put the result on the stack from right to left.
+            size_t step = (range.end - range.begin - 1) / settings.merge_tree_coarse_index_granularity + 1;
+            size_t end;
+
+            for (end = range.end; end > range.begin + step; end -= step)
+                ranges_stack.emplace_back(end - step, end);
+
+            ranges_stack.emplace_back(range.begin, end);
+        }
+    }
+
+    mark_ranges = res;
+}
+
+void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & settings, const std::set<UInt64> labels, MarkRanges & mark_ranges)
+{
+    OpenTelemetry::SpanHolder span("filterMarkRangesByLabels()");
+    MarkRanges res;
+
+    size_t marks_count = part->index_granularity.getMarksCount();
+    /// marks_count should not be 0 if we reach here
+    if (marks_count == 0)
+        mark_ranges = res;
+
+    size_t min_marks_for_seek = MergeTreeDataSelectExecutor::roundRowsOrBytesToMarks(
+        settings.merge_tree_min_rows_for_seek,
+        settings.merge_tree_min_bytes_for_seek,
+        part->index_granularity_info.fixed_index_granularity,
+        part->index_granularity_info.index_granularity_bytes);
+
+    std::vector<UInt64> labels_vec(labels.size());
+    for (const auto & label : labels)
+        labels_vec.emplace_back(label);
+
+    auto need_this_range = [&](MarkRange & range)
+    {
+        auto begin = range.begin;
+        auto end = range.end;
+        auto start_row = part->index_granularity.getMarkStartingRow(begin);
+        auto end_row = start_row + part->index_granularity.getRowsCountInRange(range);
+
+        /// Use binary search due to labels are sorted
+        size_t low = 0;
+        size_t high = labels_vec.size();
+        while (low < high)
+        {
+            const size_t middle = low + (high - low) / 2;
+            auto label_middle = labels_vec[middle];
+            if (label_middle >= start_row && label_middle < end_row)
+            {
+                LOG_TRACE(
+                    &Poco::Logger::get("filterMarkRangesByLabels"),
+                    "Keep range: {}-{} in part: {}",
+                    begin,
+                    end,
+                    part->name);
+                return true;
+            }
+            else if (label_middle < start_row)
+                low = middle + 1;
+            else
+                high = middle;
         }
         return false;
     };

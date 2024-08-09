@@ -278,7 +278,7 @@ VIEntryPtr VIBuilderUpdater::selectPartToBuildVI(const StorageMetadataPtr & meta
             auto status = column_index->getVectorIndexState();
 
             if ((status != VIState::PENDING)
-                || (column_index->isDecoupleIndexFile() && data.getSettings()->disable_rebuild_for_decouple))
+                || (column_index->isDecoupleIndexFile() && !data.getSettings()->enable_rebuild_for_decouple))
                 continue;
 
             /// Part doesn't contain this vector index, need to build.

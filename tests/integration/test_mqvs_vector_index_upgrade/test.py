@@ -19,7 +19,7 @@ def started_cluster():
 def test_decouple_index_upgrade(started_cluster):
     instance.query(
         """
-    CREATE TABLE test_decouple_upgrade(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id settings disable_rebuild_for_decouple=1;
+    CREATE TABLE test_decouple_upgrade(id UInt32, text String, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 768) Engine MergeTree ORDER BY id settings enable_rebuild_for_decouple=0;
     INSERT INTO test_decouple_upgrade SELECT number, randomPrintableASCII(80), range(768) FROM numbers(5000);
     INSERT INTO test_decouple_upgrade SELECT number + 5000, randomPrintableASCII(80), range(768) FROM numbers(5000);
     ALTER TABLE test_decouple_upgrade ADD VECTOR INDEX v1 vector TYPE SCANN;
