@@ -2,8 +2,8 @@
 
 DROP TABLE IF EXISTS test_replicated_vector SYNC;
 DROP TABLE IF EXISTS test_replicated_vector2 SYNC;
-CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 32) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
-CREATE TABLE test_replicated_vector2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 32) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r2') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 32) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r1') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, enable_rebuild_for_decouple=false,max_rows_for_slow_mode_single_vector_index_build = 10;
+CREATE TABLE test_replicated_vector2(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 32) engine=ReplicatedMergeTree('/clickhouse/tables/{database}/mqvs_00017/vector', 'r2') primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, enable_rebuild_for_decouple=false,max_rows_for_slow_mode_single_vector_index_build = 10;
 INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0008 * (number * 32 + x + 1) * (if(x % 2 = 0, -1, 1)), range(32)) as vector FROM numbers(1000);
 ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE MSTG;
 

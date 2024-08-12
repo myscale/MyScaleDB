@@ -80,7 +80,7 @@ CREATE TABLE test_vector_index_autoload
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/'||currentDatabase()||'/mqvs_00032/test_vector_index_autoload/s1', 'r1')
 ORDER BY id
-SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true, max_rows_for_slow_mode_single_vector_index_build=10;
+SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, enable_rebuild_for_decouple=false, max_rows_for_slow_mode_single_vector_index_build=10;
 
 SELECT '--- init (disable_rebuild_for_decouple)';
 
