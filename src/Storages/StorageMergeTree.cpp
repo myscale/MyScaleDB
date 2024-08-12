@@ -141,6 +141,10 @@ void StorageMergeTree::startup()
     clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
 
+#if USE_TANTIVY_SEARCH
+    updateTantivyIndexCache();
+#endif
+
     /// NOTE background task will also do the above cleanups periodically.
     time_after_previous_cleanup_parts.restart();
     time_after_previous_cleanup_temporary_directories.restart();
@@ -1859,6 +1863,13 @@ void StorageMergeTree::dropPart(const String & part_name, bool detach, ContextPt
                 LOG_INFO(log, "{} {} part by replacing it with new empty {} part. With txn {}",
                          op, part->name, future_parts[0].part_name,
                          transaction.getTID());
+#if USE_TANTIVY_SEARCH
+                auto metadata = part->storage.getInMemoryMetadataPtr();
+                if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+                {
+                    TantivyIndexStoreFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath());
+                }
+#endif
             }
         }
     }

@@ -117,8 +117,6 @@ public:
         return false;
     }
 
-    bool mayBeTrueOnGranuleInPart(MergeTreeIndexGranulePtr idx_granule, [[maybe_unused]] TantivyIndexStore & store) const;
-
     template <typename RoaringType>
     RoaringType
     calculateRowIdsRoaringTemplate(MergeTreeIndexGranulePtr idx_granule, TantivyIndexStore & store, UInt64 indexed_doc_nums) const;

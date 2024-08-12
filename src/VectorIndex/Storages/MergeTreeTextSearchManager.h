@@ -46,6 +46,16 @@ public:
     {
     }
 
+    MergeTreeTextSearchManager(TextSearchResultPtr text_search_result_)
+        : MergeTreeBaseSearchManager{nullptr, nullptr}
+        ,text_search_result(text_search_result_)
+    {
+        if (text_search_result && text_search_result->computed)
+        {
+            LOG_DEBUG(log, "Already have precomputed text result, no need to execute search");
+        }
+    }
+
     ~MergeTreeTextSearchManager() override = default;
 
     void executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part) override;

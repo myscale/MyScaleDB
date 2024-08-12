@@ -185,8 +185,8 @@ public:
     size_t getMaxBlockSize() const { return max_block_size; }
     size_t getNumStreams() const { return requested_num_streams; }
     bool isParallelReadingEnabled() const { return read_task_callback != std::nullopt; }
-    static void addMergingFinal(Pipe & pipe,const SortDescription & sort_description,MergeTreeData::MergingParams merging_params,
-        Names partition_key_columns,size_t max_block_size);
+    static void addMergingFinal(Pipe & pipe, const SortDescription & sort_description, MergeTreeData::MergingParams merging_params,
+        Names partition_key_columns, size_t max_block_size);
 
 private:
     static MergeTreeDataSelectAnalysisResultPtr selectRangesToReadImpl(

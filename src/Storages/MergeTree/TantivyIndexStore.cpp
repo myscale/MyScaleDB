@@ -32,148 +32,123 @@ namespace ErrorCodes
     extern const int TANTIVY_INDEX_FILES_DESERIALIZE_ERROR;
     extern const int TANTIVY_BUILD_INDEX_INTERNAL_ERROR;
     extern const int TANTIVY_SEARCH_INTERNAL_ERROR;
+    extern const int TANTIVY_INDEX_FILE_MANAGEMENT_ERROR;
 }
 
 
-TantivyIndexStore::TantivyIndexStore(const String & name_, DataPartStoragePtr storage_)
-    : name(name_), storage(storage_), log(&Poco::Logger::get("TantivyIndexStore"))
+TantivyIndexFilesManager::TantivyIndexFilesManager(const String & skp_index_name_, const DataPartStoragePtr storage_)
+    : skp_index_name(skp_index_name_), storage(storage_), log(&Poco::Logger::get("FTSIndexFilesManager"))
 {
-    initStore();
+    this->index_meta_file_name = skp_index_name_ + TANTIVY_INDEX_OFFSET_FILE_TYPE;
+    this->index_data_file_name = skp_index_name_ + TANTIVY_INDEX_DATA_FILE_TYPE;
+    auto global_context = Context::getGlobalContextInstance();
+    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath(), 0);
+    this->initTantivyIndexCacheDirectory();
 }
 
-TantivyIndexStore::TantivyIndexStore(
-    const String & name_, DataPartStoragePtr storage_, MutableDataPartStoragePtr data_part_storage_builder_)
-    : name(name_), storage(storage_), data_part_storage_builder(data_part_storage_builder_), log(&Poco::Logger::get("TantivyIndexStore"))
+TantivyIndexFilesManager::TantivyIndexFilesManager(
+    const String & skp_index_name_, const DataPartStoragePtr storage_, MutableDataPartStoragePtr storage_builder_)
+    : skp_index_name(skp_index_name_), storage(storage_), storage_builder(storage_builder_), log(&Poco::Logger::get("FTSIndexFilesManager"))
 {
-    initStore();
+    this->index_meta_file_name = skp_index_name_ + TANTIVY_INDEX_OFFSET_FILE_TYPE;
+    this->index_data_file_name = skp_index_name_ + TANTIVY_INDEX_DATA_FILE_TYPE;
+    auto global_context = Context::getGlobalContextInstance();
+    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath(), 0);
+    this->initTantivyIndexCacheDirectory();
 }
 
-void TantivyIndexStore::initStore()
+bool TantivyIndexFilesManager::hasTantivyIndexInDataPart()
 {
-    index_meta_file_name = name + TANTIVY_INDEX_OFFSET_FILE_TYPE;
-    index_data_file_name = name + TANTIVY_INDEX_DATA_FILE_TYPE;
+    return this->storage->exists(this->index_meta_file_name);
+}
 
+
+void TantivyIndexFilesManager::initTantivyIndexCacheDirectory()
+{
     auto global_context = Context::getGlobalContextInstance();
 
     if (global_context)
     {
-        /**
-         * global_context->getTantivyIndexCachePath():  /var/lib/clickhouse/tantivy_index_cache/
-         * getStorePath(storage->getFullPath()):  store/5bc/5bc3950c-1073-4032-b79b-b5e1cac03d43/tmp_mut_all_1_1_0_2/  or store/5bc/5bc3950c-1073-4032-b79b-b5e1cac03d43/all_1_1_0_2/
-         * index_directory_with_backslash:  skp_idx_xxxx_idx/
-         * */
+        // /var/lib/clickhouse/tantivy_index_cache/
         fs::path cache_prefix = global_context->getTantivyIndexCachePath();
-        index_files_cache_path = cache_prefix / storage->getRelativePath() / name / "";
-
-        temp_data_on_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath(), 0);
+        // store/20a/20add947-81e3-41d1-a429-0c4f43e711be/tmp_mut_all_1_1_1_2/
+        fs::path storage_relative_path = storage->getRelativePath();
+        // store/20a/20add947-81e3-41d1-a429-0c4f43e711be/
+        fs::path storage_relative_parent_path = storage_relative_path.parent_path().parent_path();
+        // tmp_mut_all_1_1_1_2 -> all_1_1_1_2
+        // String part_name = storage->getPartDirectory();
+        String part_name = storage->getPartDirectory();
+        std::unique_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+        this->tantivy_index_cache_directory = cache_prefix / storage_relative_parent_path / part_name / this->skp_index_name / "";
+        LOG_DEBUG(this->log, "init FTS index cache directory: {}", this->tantivy_index_cache_directory);
     }
     else
     {
-        throw DB::Exception(DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "Can't get fts index files cache prefix.");
+        throw DB::Exception(DB::ErrorCodes::TANTIVY_INDEX_FILE_MANAGEMENT_ERROR, "Can't init FTS index files cache directory.");
     }
 }
 
-TantivyIndexStore::~TantivyIndexStore()
+String TantivyIndexFilesManager::getTantivyIndexCacheDirectory()
 {
+    std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+    return this->tantivy_index_cache_directory;
 }
 
-bool TantivyIndexStore::exists() const
+String TantivyIndexFilesManager::updateCacheDataPartRelativeDirectory(const String & target_part_cache_path)
 {
-    return storage->exists(index_meta_file_name);
-}
+    auto data_part_path_in_cache = fs::path(this->tantivy_index_cache_directory).parent_path().parent_path();
+    auto target_tantivy_index_cache_directory = fs::path(target_part_cache_path) / this->skp_index_name / "";
 
-void TantivyIndexStore::removeTantivyIndexCache(DB::ContextPtr global_context_, std::string index_cache_part_path)
-{
-    auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context_->getPath(), 0);
-    removeTantivyIndexCache(disk, index_cache_part_path);
-}
-
-void TantivyIndexStore::removeTantivyIndexCache(DiskPtr tmp_disk_, std::string index_files_path, bool need_delete_parent_path)
-{
-    if (tmp_disk_ && tmp_disk_->isDirectory(index_files_path))
+    if (this->tantivy_index_cache_directory != target_tantivy_index_cache_directory)
     {
-        tmp_disk_->removeRecursive(index_files_path);
-        LOG_DEBUG(&Poco::Logger::get("TantivyIndexStore"), "[removeTantivyIndexCache] directory [{}] has been removed", index_files_path);
+        LOG_INFO(
+            this->log,
+            "update FTS index cache directory from `{}` to `{}`",
+            this->tantivy_index_cache_directory,
+            target_tantivy_index_cache_directory);
 
-        if (need_delete_parent_path)
+        // rename tantivy index path in `TantivyIndexFilesManager`.
+        std::unique_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+        this->tantivy_index_cache_directory = target_tantivy_index_cache_directory;
+
+        // rename data part path in tantivy cache directory.
+        if (fs::exists(data_part_path_in_cache))
         {
-            /// There is tailing slash inside index_files_path
-            String part_cache_path = fs::path(index_files_path).parent_path().parent_path();
-            if (tmp_disk_->isDirectoryEmpty(part_cache_path))
-            {
-                /// Multiple fts indexes in a part share the same data part directory.
-                tmp_disk_->removeDirectory(part_cache_path);
-                LOG_DEBUG(&Poco::Logger::get("TantivyIndexStore"), "[removeTantivyIndexCache] parent data part directory [{}] has been removed", part_cache_path);
-            }
+            fs::rename(data_part_path_in_cache, target_part_cache_path);
+        }
+        else
+        {
+            if (fs::exists(target_part_cache_path))
+                LOG_INFO(this->log, "FTS cache directory `{}` has already been renamed.", data_part_path_in_cache);
+            else
+                LOG_WARNING(this->log, "can't find and rename FTS cache directory `{}`.", data_part_path_in_cache);
         }
     }
+    return this->tantivy_index_cache_directory;
 }
 
-void TantivyIndexStore::removeTantivyIndexCache()
+ChecksumPairs TantivyIndexFilesManager::serialize()
 {
-    ffi_free_index_reader(index_files_cache_path);
-    index_reader_status = false;
-    removeTantivyIndexCache(temp_data_on_disk, index_files_cache_path, true /* need delete empty parent path */);
-}
+    String index_files_directory = this->getTantivyIndexCacheDirectory();
 
-void TantivyIndexStore::initFileWriteStreams()
-{
-    if (!data_part_storage_builder)
+    if (!this->tmp_disk->isDirectory(index_files_directory))
     {
-        throw DB::Exception(
-            DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR,
-            "DataPartStorageBuilder can't be null_ptr while rewriting serialized index file!");
-    }
-    try
-    {
-        meta_data_write_stream
-            = data_part_storage_builder->writeFile(index_meta_file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, {});
-        index_data_write_stream
-            = data_part_storage_builder->writeFile(index_data_file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, {});
-    }
-    catch (...)
-    {
-        throw DB::Exception(
-            DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR,
-            "Can't create write stream for target index file: [{}, {}]",
-            index_meta_file_name,
-            index_data_file_name);
-    }
-}
-
-void TantivyIndexStore::initFileReadStreams()
-{
-    try
-    {
-        meta_data_read_stream = storage->readFile(index_meta_file_name, {}, std::nullopt, std::nullopt);
-        index_data_read_stream = storage->readFile(index_data_file_name, {}, std::nullopt, std::nullopt);
-    }
-    catch (...)
-    {
-        throw DB::Exception(
-            DB::ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR,
-            "Can't create read stream for target index file: [{}, {}]",
-            index_meta_file_name,
-            index_data_file_name);
-    }
-}
-
-UInt64 TantivyIndexStore::getNextRowId(size_t rows_read)
-{
-    UInt64 res = tantivy_index_row_id.next_row_id;
-    tantivy_index_row_id.next_row_id += rows_read;
-    return res;
-}
-
-ChecksumPairs TantivyIndexStore::serialize()
-{
-    if (!fs::is_directory(index_files_cache_path))
-    {
+        LOG_WARNING(log, "[serialize] index_files_directory({}) is not a directory, may be an empty part.", index_files_directory);
         ChecksumPairs checksums;
         return checksums;
     }
 
-    initFileWriteStreams();
+    if (!this->storage_builder)
+    {
+        LOG_ERROR(log, "[serialize] storage_builder can't be null when serializing FTS index files.");
+        throw DB::Exception(
+            DB::ErrorCodes::TANTIVY_INDEX_FILE_MANAGEMENT_ERROR, "storage_builder can't be null when serializing FTS index files.");
+    }
+
+    std::unique_ptr<WriteBufferFromFileBase> meta_data_write_stream
+        = storage_builder->writeFile(this->index_meta_file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, {});
+    std::unique_ptr<WriteBufferFromFileBase> index_data_write_stream
+        = storage_builder->writeFile(this->index_data_file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, {});
 
     TantivyIndexFileMetas metas;
     UInt64 written_bytes = 0;
@@ -182,25 +157,19 @@ ChecksumPairs TantivyIndexStore::serialize()
     /// meta_data_write_stream -> meta_hashing_uncompressed_stream
     auto meta_hashing_uncompressed_stream = std::make_unique<HashingWriteBuffer>(*meta_data_write_stream);
 
-    LOG_DEBUG(
-        log,
-        "[serialize] Try serializing fts index files from index_cache:{} to data_part:{}.",
-        index_files_cache_path,
-        storage->getRelativePath());
-
-    for (const auto & entry : fs::directory_iterator(index_files_cache_path))
+    for (const auto & entry : fs::directory_iterator(index_files_directory))
     {
         if (fs::is_regular_file(entry))
         {
             std::unique_ptr<ReadBufferFromFileBase> temp_file_read_stream
-                = temp_data_on_disk->readFile(entry.path(), {}, std::nullopt, std::nullopt);
+                = this->tmp_disk->readFile(entry.path(), {}, std::nullopt, std::nullopt);
             UInt64 file_size = static_cast<DB::UInt64>(temp_file_read_stream->getFileSize());
             copyData(*temp_file_read_stream, *data_hashing_uncompressed_stream);
             metas.emplace_back(entry.path().filename(), written_bytes, written_bytes + file_size);
             written_bytes += file_size;
             LOG_TRACE(
-                log,
-                "[serialize] tantivy index file: {}, file size: {}, written_bytes: {}",
+                this->log,
+                "[serialize] Serializing FTS index file [file_name:{}, file_size:{}, written_bytes:{}]",
                 entry.path().filename(),
                 file_size,
                 written_bytes);
@@ -209,35 +178,38 @@ ChecksumPairs TantivyIndexStore::serialize()
         {
             LOG_ERROR(
                 log,
-                "[serialize] Can't serialize fts index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
-                written_bytes,
+                "[serialize] Can't serialize FTS index file [file_path:{}, written_bytes:{}] from index_cache:{} to data_part:{}",
                 entry.path(),
-                index_files_cache_path,
-                storage->getRelativePath());
+                written_bytes,
+                index_files_directory,
+                this->storage_builder->getRelativePath());
             throw DB::Exception(
                 DB::ErrorCodes::TANTIVY_INDEX_FILES_SERIALIZE_ERROR,
-                "Can't serialize fts index file [written_bytes:{} file_path:{}] from index_cache:{} to data_part: {}",
-                written_bytes,
+                "Can't serialize FTS index file [file_path:{}, written_bytes:{}] from index_cache:{} to data_part:{}",
                 entry.path(),
-                index_files_cache_path,
-                storage->getRelativePath());
+                written_bytes,
+                index_files_directory,
+                this->storage_builder->getRelativePath());
         }
     }
-    data_hashing_uncompressed_stream->preFinalize();
 
-    /// Stores metadata information
+    /// Stores FTS index data information
+    data_hashing_uncompressed_stream->finalize();
+
+    /// Stores FTS index meta information
     size_t metas_size = metas.size();
     meta_hashing_uncompressed_stream->write(reinterpret_cast<const char *>(&metas_size), sizeof(size_t));
     meta_hashing_uncompressed_stream->write(reinterpret_cast<const char *>(metas.data()), metas_size * sizeof(TantivyIndexFileMeta));
-    meta_hashing_uncompressed_stream->preFinalize();
+    meta_hashing_uncompressed_stream->finalize();
 
-    LOG_DEBUG(
-        log,
-        "[serialize] Finish serialized [{}] fts index files from index_cache:{} to data_part:{}, total bytes: {}",
-        metas_size,
-        index_files_cache_path,
-        storage->getRelativePath(),
-        written_bytes);
+    LOG_INFO(
+        this->log,
+        "[serialize] Serialization of FTS index files from the index_cache:`{}` to the data_part:`{}` is complete, total bytes: {}, total "
+        "files: {}",
+        index_files_directory,
+        storage_builder->getRelativePath(),
+        written_bytes,
+        metas_size);
 
     ChecksumPairs checksums;
     // To prevent inconsistency issues with FTS index file checksums across multiple replicas, an empty checksum is generated here.
@@ -249,35 +221,67 @@ ChecksumPairs TantivyIndexStore::serialize()
     return checksums;
 }
 
-void TantivyIndexStore::deserialize()
+void TantivyIndexFilesManager::deserialize()
 {
-    initFileReadStreams();
+    String index_files_directory = this->getTantivyIndexCacheDirectory();
 
+    // TODO Possible optimization plan:
+    // In tantivy_search, check if the path is valid and if the index files can be loaded successfully.
+    // If it is invalid, clear it and re-serialize it.
+    if (this->tmp_disk->isDirectory(index_files_directory))
+    {
+        LOG_INFO(
+            log,
+            "[deserialize] directory `{}` not empty. Assuming the FTS index files have already been deserialized",
+            index_files_directory);
+        return;
+    }
+    else
+    {
+        this->tmp_disk->createDirectories(index_files_directory);
+        if (!this->hasTantivyIndexInDataPart())
+        {
+            throw DB::Exception(
+                DB::ErrorCodes::TANTIVY_INDEX_FILES_DESERIALIZE_ERROR,
+                "Can't perform deserialization operation. The data part `{}` does not contain any index files, bad fts index file.",
+                storage->getRelativePath());
+        }
+    }
+
+    if (!this->storage)
+    {
+        LOG_ERROR(log, "[initIndexReadStreams] storage can't be null when deserializing FTS index meta/data file.");
+        throw DB::Exception(
+            DB::ErrorCodes::TANTIVY_INDEX_FILE_MANAGEMENT_ERROR, "storage can't be null when deserializing FTS index meta/data file.");
+    }
+
+    std::unique_ptr<ReadBufferFromFileBase> meta_data_read_stream
+        = storage->readFile(this->index_meta_file_name, {}, std::nullopt, std::nullopt);
+    std::unique_ptr<ReadBufferFromFileBase> index_data_read_stream
+        = storage->readFile(this->index_data_file_name, {}, std::nullopt, std::nullopt);
+
+    // read tantivy index meta file in data part.
     size_t metas_size = 0;
     meta_data_read_stream->readStrict(reinterpret_cast<char *>(&metas_size), sizeof(size_t));
     TantivyIndexFileMetas metas(metas_size);
     meta_data_read_stream->readStrict(reinterpret_cast<char *>(metas.data()), metas_size * sizeof(TantivyIndexFileMeta));
 
-    LOG_DEBUG(
-        log,
-        "[deserialize] Trying deserialize [{}] fts index files from data_part:{} to index_cache:{}",
-        metas_size,
+    LOG_INFO(
+        this->log,
+        "[deserialize] Deserializing FTS index files from data_part:{} to index_cache:{}, total files: {}.",
         storage->getRelativePath(),
-        index_files_cache_path);
+        index_files_directory,
+        metas_size);
 
-    if (!temp_data_on_disk->isDirectory(index_files_cache_path))
-    {
-        temp_data_on_disk->createDirectories(index_files_cache_path);
-    }
-
+    // read tantivy index data file in data part.
     for (size_t i = 0; i < metas_size; i++)
     {
         try
         {
             UInt64 file_size = metas[i].offset_end - metas[i].offset_begin;
             index_data_read_stream->seek(metas[i].offset_begin, SEEK_SET);
-            std::unique_ptr<WriteBufferFromFileBase> temp_data_write_stream = temp_data_on_disk->writeFile(
-                index_files_cache_path + metas[i].file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Append, {});
+            std::unique_ptr<WriteBufferFromFileBase> temp_data_write_stream
+                = this->tmp_disk->writeFile(index_files_directory + metas[i].file_name, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Append, {});
             char * buffer = new char[file_size];
             index_data_read_stream->readStrict(buffer, file_size);
             temp_data_write_stream->write(buffer, file_size);
@@ -285,64 +289,352 @@ void TantivyIndexStore::deserialize()
             delete[] buffer;
             LOG_TRACE(
                 log,
-                "[deserialize] tantivy index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                "[deserialize] FTS index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}",
                 i,
                 metas[i].file_name,
                 storage->getRelativePath(),
-                index_files_cache_path);
+                index_files_directory);
         }
         catch (...)
         {
             LOG_ERROR(
                 log,
-                "[deserialize] Can't deserialize fts index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                "[deserialize] Can't deserialize FTS index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}",
                 i,
                 metas[i].file_name,
                 storage->getRelativePath(),
-                index_files_cache_path);
+                index_files_directory);
+
             throw DB::Exception(
                 DB::ErrorCodes::TANTIVY_INDEX_FILES_DESERIALIZE_ERROR,
-                "Can't deserialize fts index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}: ",
+                "Can't deserialize fts index file [file_idx:{}, file_name{}] from data_part:{} to index_cache:{}",
                 i,
                 metas[i].file_name,
                 storage->getRelativePath(),
-                index_files_cache_path);
+                index_files_directory);
         }
     }
-    LOG_DEBUG(
-        log,
-        "[deserialize] Finish deserialized [{}] fts index files from data_part:{} to index_cache:{}",
-        metas_size,
-        storage->getRelativePath(),
-        index_files_cache_path);
+}
+
+void TantivyIndexFilesManager::removeTantivyIndexCacheDirectory()
+{
+    std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+    TantivyIndexFilesManager::removeTantivyIndexInCache(this->tantivy_index_cache_directory);
+}
+
+
+std::optional<fs::path> TantivyIndexFilesManager::getDataPartFullPathInCache(const String & relative_data_part_in_cache)
+{
+    try
+    {
+        auto context = Context::getGlobalContextInstance();
+        fs::path tantivy_index_cache_prefix = context->getTantivyIndexCachePath();
+        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath(), 0);
+
+        // example: /var/lib/clickhouse/tantivy_index_cache/store/ba1/ba1625f1-dbf2-4ad4-a06c-e6c4e611984a/all_1_1_1_2/
+        auto data_part_full_cache_path = tantivy_index_cache_prefix / relative_data_part_in_cache / "";
+
+        // example-1: fs::path("store/ba1/ba1625f1-dbf2-4ad4-a06c-e6c4e611984a/all_1_1_1_2/") distance is 5
+        // example-2: fs::path("store/ba1/ba1625f1-dbf2-4ad4-a06c-e6c4e611984a/all_1_1_1_2") distance is 4
+        constexpr int required_depth = 4; // Corrected depth
+        if (std::distance(data_part_full_cache_path.begin(), data_part_full_cache_path.end()) < required_depth)
+        {
+            return std::nullopt;
+        }
+
+        fs::path store_path = data_part_full_cache_path;
+        for (int i = 0; i < required_depth; ++i)
+        {
+            store_path = store_path.parent_path();
+        }
+
+        if (!store_path.has_filename() || (store_path.filename() != "store" && store_path.filename() != "data"))
+        {
+            return std::nullopt;
+        }
+
+        return data_part_full_cache_path;
+    }
+    catch (Exception & e)
+    {
+        LOG_ERROR(
+            &Poco::Logger::get("FTSIndexFilesManager"),
+            "[remove] Error happend when geting data part full path in cache, rel_data_part: `{}`, exception is {}",
+            relative_data_part_in_cache,
+            e.what());
+        return std::nullopt;
+    }
+}
+
+void removeDirectoryIfEmpty(const std::shared_ptr<DiskLocal> & disk, const fs::path & directory)
+{
+    if (disk->isDirectory(directory) && disk->isDirectoryEmpty(directory))
+    {
+        disk->removeRecursive(directory);
+    }
+}
+
+void removeDirectoryDirectly(const std::shared_ptr<DiskLocal> & disk, const fs::path & directory)
+{
+    if (disk->isDirectory(directory))
+    {
+        disk->removeRecursive(directory);
+    }
+}
+
+void TantivyIndexFilesManager::removeDataPartInCache(const String & relative_data_part_in_cache)
+{
+    try
+    {
+        std::optional<fs::path> res = getDataPartFullPathInCache(relative_data_part_in_cache);
+        if (res.has_value())
+        {
+            fs::path data_part_full_path_in_cache = res.value();
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+            if (disk->isDirectory(data_part_full_path_in_cache))
+            {
+                LOG_INFO(&Poco::Logger::get("FTSIndexFilesManager"), "try remove data part in cache `{}`", data_part_full_path_in_cache);
+            }
+
+            // data_part_full_path_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855/202406_60_60_0/`
+            removeDirectoryDirectly(disk, data_part_full_path_in_cache);
+
+            // table_uuid_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855`
+            auto table_uuid_directory_in_cache = data_part_full_path_in_cache.parent_path().parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_directory_in_cache);
+
+            // table_uuid_prefix_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0`
+            auto table_uuid_prefix_directory_in_cache = table_uuid_directory_in_cache.parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
+        }
+    }
+    catch (Exception & e)
+    {
+        LOG_ERROR(
+            &Poco::Logger::get("FTSIndexFilesManager"),
+            "[remove] Error happend when removing data part in cache, rel_data_part: `{}`, exception is {}",
+            relative_data_part_in_cache,
+            e.what());
+    }
+}
+
+void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & relative_data_part_in_cache, const String & skp_index_name)
+{
+    try
+    {
+        std::optional<fs::path> res = getDataPartFullPathInCache(relative_data_part_in_cache);
+        if (res.has_value())
+        {
+            fs::path data_part_full_path_in_cache = res.value();
+            fs::path index_full_path_in_cache = data_part_full_path_in_cache / skp_index_name / "";
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+            if (disk->isDirectory(index_full_path_in_cache))
+            {
+                LOG_INFO(&Poco::Logger::get("FTSIndexFilesManager"), "try remove FTS index in cache `{}`", index_full_path_in_cache);
+            }
+
+            // index_full_path_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855/202406_60_60_0/skp_idx_test_idx/`
+            removeDirectoryDirectly(disk, index_full_path_in_cache);
+
+            // data_part_full_path_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855/202406_60_60_0/`
+            removeDirectoryIfEmpty(disk, data_part_full_path_in_cache);
+
+            // table_uuid_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855`
+            auto table_uuid_directory_in_cache = data_part_full_path_in_cache.parent_path().parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_directory_in_cache);
+
+            // table_uuid_prefix_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0`
+            auto table_uuid_prefix_directory_in_cache = table_uuid_directory_in_cache.parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
+        }
+    }
+    catch (Exception & e)
+    {
+        LOG_ERROR(
+            &Poco::Logger::get("FTSIndexFilesManager"),
+            "[remove] Error happend when removing FTS index in cache, rel_data_part: `{}`, skp_idx_name: `{}`, exception is {}",
+            relative_data_part_in_cache,
+            skp_index_name,
+            e.what());
+    }
+}
+
+void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & tantivy_index_cache_directory)
+{
+    try
+    {
+        // /var/lib/clickhouse/tantivy_index_cache/store/1e5/1e5452bd-c37a-4da4-a285-f9c591cf05ac/all_9959_9959_0_9969/skp_idx_fts_dqi/
+        fs::path tantivy_index_cache_full_directory = fs::path(tantivy_index_cache_directory);
+        constexpr int required_depth = 5; // Corrected depth
+
+        // varify index cache path.
+        fs::path store_path = tantivy_index_cache_full_directory;
+        for (int i = 0; i < required_depth; ++i)
+        {
+            if (!store_path.has_parent_path())
+            {
+                LOG_INFO(
+                    &Poco::Logger::get("FTSIndexFilesManager"),
+                    "Can't remove fts index cache directory `{}`",
+                    tantivy_index_cache_full_directory);
+                return;
+            }
+            store_path = store_path.parent_path();
+        }
+        if (!store_path.has_filename() || (store_path.filename() != "store" && store_path.filename() != "data"))
+        {
+            LOG_INFO(
+                &Poco::Logger::get("FTSIndexFilesManager"),
+                "Can't remove fts index cache directory `{}`",
+                tantivy_index_cache_full_directory);
+            return;
+        }
+
+
+        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+        if (disk->isDirectory(tantivy_index_cache_full_directory))
+        {
+            LOG_INFO(
+                &Poco::Logger::get("FTSIndexFilesManager"),
+                "try remove FTS index directory inner `Store`, path: `{}`",
+                tantivy_index_cache_full_directory);
+        }
+
+        // index_full_path_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855/202406_60_60_0/skp_idx_test_idx/`
+        removeDirectoryDirectly(disk, tantivy_index_cache_full_directory);
+
+        // data_part_full_path_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855/202406_60_60_0/`
+        auto data_part_full_path_in_cache = tantivy_index_cache_full_directory.parent_path().parent_path();
+        removeDirectoryIfEmpty(disk, data_part_full_path_in_cache);
+
+        // table_uuid_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855`
+        auto table_uuid_directory_in_cache = data_part_full_path_in_cache.parent_path();
+        removeDirectoryIfEmpty(disk, table_uuid_directory_in_cache);
+
+        // table_uuid_prefix_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0`
+        auto table_uuid_prefix_directory_in_cache = table_uuid_directory_in_cache.parent_path();
+        removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
+    }
+    catch (Exception & e)
+    {
+        LOG_ERROR(
+            &Poco::Logger::get("FTSIndexFilesManager"),
+            "[remove] Error happend when removing FTS index in cache `{}`, exception is {}",
+            tantivy_index_cache_directory,
+            e.what());
+    }
+}
+
+void TantivyIndexFilesManager::removeEmptyTableUUIDInCache(const String & relative_data_part_in_cache)
+{
+    try
+    {
+        std::optional<fs::path> res = getDataPartFullPathInCache(relative_data_part_in_cache);
+        if (res.has_value())
+        {
+            fs::path data_part_full_path_in_cache = res.value();
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+
+            // table_uuid_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855`
+            auto table_uuid_directory_in_cache = data_part_full_path_in_cache.parent_path().parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_directory_in_cache);
+
+            // table_uuid_prefix_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0`
+            auto table_uuid_prefix_directory_in_cache = table_uuid_directory_in_cache.parent_path();
+            removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
+        }
+    }
+    catch (Exception & e)
+    {
+        LOG_ERROR(
+            &Poco::Logger::get("FTSIndexFilesManager"),
+            "[remove] Error happend when removing empty table UUID cache, rel_data_part: `{}`, exception is {}",
+            relative_data_part_in_cache,
+            e.what());
+    }
+}
+
+
+TantivyIndexStore::TantivyIndexStore(const String & skp_index_name_, const DataPartStoragePtr storage_)
+    : skp_index_name(skp_index_name_)
+    , storage(storage_)
+    , index_files_manager(std::make_unique<TantivyIndexFilesManager>(skp_index_name_, storage_))
+    , log(&Poco::Logger::get("FTSIndexStore"))
+{
+}
+
+TantivyIndexStore::TantivyIndexStore(
+    const String & skp_index_name_, const DataPartStoragePtr storage_, MutableDataPartStoragePtr storage_builder_)
+    : skp_index_name(skp_index_name_)
+    , storage(storage_)
+    , storage_builder(storage_builder_)
+    , index_files_manager(std::make_unique<TantivyIndexFilesManager>(skp_index_name_, storage_, storage_builder_))
+    , log(&Poco::Logger::get("FTSIndexStore"))
+{
+}
+
+
+TantivyIndexStore::~TantivyIndexStore()
+{
+    LOG_INFO(
+        log, "[~] trigger TantivyIndexStore destroy, FTS index path is `{}`", this->index_files_manager->getTantivyIndexCacheDirectory());
+    this->removeTantivyIndexCache();
+}
+
+
+void TantivyIndexStore::removeTantivyIndexCache()
+{
+    this->freeTantivyIndex();
+    this->index_files_manager->removeTantivyIndexCacheDirectory();
+}
+
+
+ChecksumPairs TantivyIndexStore::serialize()
+{
+    return this->index_files_manager->serialize();
+}
+
+String TantivyIndexStore::updateCacheDataPartRelativeDirectory(const String & target_part_cache_path)
+{
+    if (this->index_reader_status)
+    {
+        throw DB::Exception(
+            DB::ErrorCodes::LOGICAL_ERROR,
+            "Can't update FTS store cache path from `{}` to `{}` while index reader is true",
+            this->index_files_manager->getTantivyIndexCacheDirectory(),
+            target_part_cache_path);
+    }
+
+    // Should free tantivy index reader first, avoid unnecessary mistakes.
+    this->freeTantivyIndexReader();
+    return this->index_files_manager->updateCacheDataPartRelativeDirectory(target_part_cache_path);
+}
+
+UInt64 TantivyIndexStore::getNextRowId(size_t rows_read)
+{
+    UInt64 res = tantivy_index_row_id.next_row_id;
+    tantivy_index_row_id.next_row_id += rows_read;
+    return res;
 }
 
 bool TantivyIndexStore::getTantivyIndexReader()
 {
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
     if (!index_reader_status)
     {
-        std::lock_guard<std::mutex> lock(deserialize_mutex);
-        LOG_DEBUG(log, "[getTantivyIndexReader] initialize indexReader from index_cache:{}", index_files_cache_path);
+        std::lock_guard<std::mutex> lock(index_reader_mutex);
+        LOG_INFO(log, "[getTantivyIndexReader] initializing FTS index reader, FTS index cache directory is {}", index_files_cache_path);
         /// double checked lock
         if (!index_reader_status)
         {
-            if (!temp_data_on_disk->isDirectory(index_files_cache_path))
-            {
-                LOG_DEBUG(log, "[getTantivyIndexReader] trying call deserialize");
-                deserialize();
-            }
-            else
-            {
-                LOG_DEBUG(log, "[getTantivyIndexReader] index is already deserialized");
-            }
-
+            this->index_files_manager->deserialize();
             index_reader_status = ffi_load_index_reader(index_files_cache_path);
             if (!index_reader_status)
             {
-                LOG_ERROR(log, "[getTantivyIndexReader] indexReader initialized failed.");
+                LOG_ERROR(log, "[getTantivyIndexReader] Failed to initialize FTS index reader.");
                 throw DB::Exception(
                     DB::ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR,
-                    "Can't get indexReader from index_cache: {}",
+                    "Can't get FTS index reader from index_cache: {}",
                     index_files_cache_path);
             }
         }
@@ -354,24 +646,21 @@ bool TantivyIndexStore::getTantivyIndexReader()
 
 bool TantivyIndexStore::getTantivyIndexWriter()
 {
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
     bool writer_ready = getIndexWriterStatus();
     if (writer_ready)
         return writer_ready;
 
-    LOG_DEBUG(log, "[getTantivyIndexWriter] initialize indexWriter with directory:{}", index_files_cache_path);
-
+    LOG_INFO(log, "[getTantivyIndexWriter] initializing FTS index writer, FTS index cache directory is {}", index_files_cache_path);
     writer_ready = ffi_create_index_with_parameter(
             index_files_cache_path, index_settings.indexed_columns, index_settings.index_json_parameter);
 
     if (!writer_ready)
     {
-        LOG_ERROR(
-            log,
-            "[getTantivyIndexWriter] Error happend when create fts index under index_cache:{}",
-            index_files_cache_path);
+        LOG_ERROR(log, "[getTantivyIndexWriter] Error happend when create FTS index under index_cache:{}", index_files_cache_path);
         throw DB::Exception(
             ErrorCodes::TANTIVY_BUILD_INDEX_INTERNAL_ERROR,
-            "Error happend when create fts index under index_cache:{}",
+            "Error happend when create FTS index under index_cache:{}",
             index_files_cache_path);
     }
 
@@ -384,6 +673,7 @@ bool TantivyIndexStore::indexMultiColumnDoc(uint64_t row_id, std::vector<String>
 {
     if (!getIndexWriterStatus())
         getTantivyIndexWriter();
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
 
     bool status = ffi_index_multi_column_docs(index_files_cache_path, row_id, column_names, docs);
 
@@ -400,10 +690,29 @@ bool TantivyIndexStore::indexMultiColumnDoc(uint64_t row_id, std::vector<String>
     return true;
 }
 
-bool TantivyIndexStore::freeTantivyIndex()
+bool TantivyIndexStore::freeTantivyIndexReader()
+{
+    std::lock_guard<std::mutex> lock(index_reader_mutex);
+    bool reader_freed = true;
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
+
+    if (this->index_reader_status)
+    {
+        reader_freed = ffi_free_index_reader(index_files_cache_path);
+        if (reader_freed)
+        {
+            this->index_reader_status = false;
+        }
+    }
+
+    return reader_freed;
+}
+
+bool TantivyIndexStore::freeTantivyIndexWriter()
 {
     bool writer_freed = true;
-    bool reader_freed = true;
+
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
 
     if (getIndexWriterStatus())
     {
@@ -413,38 +722,35 @@ bool TantivyIndexStore::freeTantivyIndex()
             setIndexWriterStatus(false);
         }
     }
+    return writer_freed;
+}
 
-    if (index_reader_status)
-    {
-        reader_freed = ffi_free_index_reader(index_files_cache_path);
-        if (reader_freed)
-        {
-            index_reader_status = false;
-        }
-    }
-
+bool TantivyIndexStore::freeTantivyIndex()
+{
+    bool writer_freed = freeTantivyIndexWriter();
+    bool reader_freed = freeTantivyIndexReader();
     return writer_freed && reader_freed;
 }
 
-bool TantivyIndexStore::commitTantivyIndex()
+void TantivyIndexStore::commitTantivyIndex()
 {
+    String index_files_cache_path = this->index_files_manager->getTantivyIndexCacheDirectory();
+
     if (!getIndexWriterStatus())
     {
-        // LOG_ERROR(log, "[commitTantivyIndex] fts index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
-        // throw DB::Exception(ErrorCodes::TANTIVY_INDEX_STORE_INTERNAL_ERROR, "fts index writer hasn't been initialized, can't execute commit, index_cache:{}", index_files_cache_path);
-        return true;
+        getTantivyIndexWriter();
+        LOG_WARNING(
+            log, "[commitTantivyIndex] data part may be empty, initialize FTS index writer, index_cache_path({})", index_files_cache_path);
     }
 
     if (!ffi_index_writer_commit(index_files_cache_path))
     {
-        LOG_ERROR(log, "[commitTantivyIndex] Error happened when committing fts index, index_cache:{}", index_files_cache_path);
+        LOG_ERROR(log, "[commitTantivyIndex] Error happened when committing FTS index, index_cache:{}", index_files_cache_path);
         throw DB::Exception(
             ErrorCodes::TANTIVY_BUILD_INDEX_INTERNAL_ERROR,
-            "Error happened when committing fts index, index_cache:{}",
+            "Error happened when committing FTS index, index_cache:{}",
             index_files_cache_path);
     }
-
-    return true;
 }
 
 bool TantivyIndexStore::finalizeTantivyIndex()
@@ -454,195 +760,94 @@ bool TantivyIndexStore::finalizeTantivyIndex()
     return true;
 }
 
-bool TantivyIndexStore::singleTermQueryWithRowIdRange(String column_name, String term, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result = ffi_query_term_with_range(index_files_cache_path, column_name, term, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::regexTermQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result = ffi_regex_term_with_range(index_files_cache_path, column_name, pattern, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::sentenceQueryWithRowIdRange(String column_name, String sentence, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result = ffi_query_sentence_with_range(index_files_cache_path, column_name, sentence, lrange, rrange);
-    return result;
-}
-
-bool TantivyIndexStore::termsQueryWithRowIdRange(String column_name, std::vector<String> terms, UInt64 lrange, UInt64 rrange)
-{
-    if (!index_reader_status)
-        getTantivyIndexReader();
-
-    bool result = ffi_query_terms_with_range(index_files_cache_path, column_name, terms, lrange, rrange);
-    return result;
-}
-
 rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::singleTermQueryBitmap(String column_name, String term)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_query_term_bitmap(index_files_cache_path, column_name, term);
+    return ffi_query_term_bitmap(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, term);
 }
 rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::sentenceQueryBitmap(String column_name, String sentence)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_query_sentence_bitmap(index_files_cache_path, column_name, sentence);
+    return ffi_query_sentence_bitmap(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, sentence);
 }
 rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::regexTermQueryBitmap(String column_name, String pattern)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_regex_term_bitmap(index_files_cache_path, column_name, pattern);
+    return ffi_regex_term_bitmap(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, pattern);
 }
 rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::termsQueryBitmap(String column_name, std::vector<String> terms)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_query_terms_bitmap(index_files_cache_path, column_name, terms);
+    return ffi_query_terms_bitmap(this->index_files_manager->getTantivyIndexCacheDirectory(), column_name, terms);
 }
 
-rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, Statistics & statistics, size_t topk)
+rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25Search(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
     std::vector<uint8_t> u8_alived_bitmap;
-    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, false, statistics);
+    return ffi_bm25_search(
+        this->index_files_manager->getTantivyIndexCacheDirectory(),
+        sentence,
+        static_cast<uint32_t>(topk),
+        u8_alived_bitmap,
+        false,
+        enable_nlq,
+        operator_or,
+        statistics);
 }
 
 rust::cxxbridge1::Vec<RowIdWithScore> TantivyIndexStore::bm25SearchWithFilter(
-    String sentence, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
+    String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
 
-    return ffi_bm25_search(index_files_cache_path, sentence, static_cast<uint32_t>(topk), u8_alived_bitmap, true, statistics);
+    return ffi_bm25_search(
+        this->index_files_manager->getTantivyIndexCacheDirectory(),
+        sentence,
+        static_cast<uint32_t>(topk),
+        u8_alived_bitmap,
+        true,
+        enable_nlq,
+        operator_or,
+        statistics);
 }
 
 rust::cxxbridge1::Vec<DocWithFreq> TantivyIndexStore::getDocFreq(String sentence)
 {
     if (!index_reader_status)
         getTantivyIndexReader();
-    return ffi_get_doc_freq(index_files_cache_path, sentence);
+    return ffi_get_doc_freq(this->index_files_manager->getTantivyIndexCacheDirectory(), sentence);
 }
 
 UInt64 TantivyIndexStore::getTotalNumDocs()
 {
     if (!index_reader_status)
         getTantivyIndexReader();
-    return ffi_get_total_num_docs(index_files_cache_path);
+    return ffi_get_total_num_docs(this->index_files_manager->getTantivyIndexCacheDirectory());
 }
 
 UInt64 TantivyIndexStore::getTotalNumTokens()
 {
     if (!index_reader_status)
         getTantivyIndexReader();
-    return ffi_get_total_num_tokens(index_files_cache_path);
+    return ffi_get_total_num_tokens(this->index_files_manager->getTantivyIndexCacheDirectory());
 }
 
 UInt64 TantivyIndexStore::getIndexedDocsNum()
 {
     if (!index_reader_status)
         getTantivyIndexReader();
-    return ffi_get_indexed_doc_counts(index_files_cache_path);
+    return ffi_get_indexed_doc_counts(this->index_files_manager->getTantivyIndexCacheDirectory());
 }
-
-TantivyIndexStoreFactory & TantivyIndexStoreFactory::instance()
-{
-    static TantivyIndexStoreFactory instance;
-    return instance;
-}
-
-TantivyIndexStorePtr TantivyIndexStoreFactory::get(const String & name, DataPartStoragePtr storage)
-{
-    const String & part_path = storage->getRelativePath();
-    String store_key = name + ":" + part_path;
-
-    std::lock_guard lock(mutex);
-
-    size_t stores_size = stores.size();
-    auto it = stores.find(store_key);
-
-    if (it == stores.end())
-    {
-        TantivyIndexStorePtr store = std::make_shared<TantivyIndexStore>(name, storage);
-        if (!store->exists())
-            return nullptr;
-
-        /// TODO: add deserializer here like GinIndexStore
-        stores[store_key] = store;
-
-        LOG_INFO(
-            &Poco::Logger::get("TantivyIndexStoreFactory"),
-            "[get] Generate fts index store with key [{}], stores size increased from {} to {}",
-            store_key,
-            stores_size,
-            stores.size());
-        return store;
-    }
-    return it->second;
-}
-
-void TantivyIndexStoreFactory::remove(const String & part_path)
-{
-    auto * log = &Poco::Logger::get("TantivyIndexStoreFactory");
-
-    /// In cases when restart happened, factory may not contain the store for this part, we need to clear cache.
-    /// But for stores existing in factory, an non-static removeTantivyIndexCache() will be called.
-    bool cache_removed = false;
-
-    std::lock_guard lock(mutex);
-    size_t stores_size = stores.size();
-    for (auto it = stores.begin(); it != stores.end();)
-    {
-        if (it->first.find(part_path) != String::npos)
-        {
-            /// Remove tantivy files in index cache directory
-            it->second->removeTantivyIndexCache();
-            cache_removed = true;
-
-            it = stores.erase(it);
-
-            LOG_DEBUG(log,
-            "[remove] Fts index store has been removed, stores size decreased from {} to {}",
-            stores_size, stores.size());
-        }
-        else
-            ++it; /// After erasure, point 'it' to the next key-value pair.
-    }
-
-    /// Try to clear cache when not found in store factory
-    if (!cache_removed)
-    {
-        try
-        {
-            auto context = Context::getGlobalContextInstance();
-            fs::path cache_prefix = context->getTantivyIndexCachePath();
-            TantivyIndexStore::removeTantivyIndexCache(context, cache_prefix / part_path);
-        }
-        catch (Exception & e)
-        {
-            LOG_ERROR(log, "[remove] Error happend when remove fts index_cache path for part {}: {}", part_path, e.what());
-        }
-    }
-}
-
 }

@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <queue>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 
 namespace DB
@@ -208,4 +209,241 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
 
     pre_result.emplace_back(std::move(final_distance_column));
 }
+
+ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
+    const VectorAndTextResultInDataParts & vector_results,
+    const VectorScanInfoPtr & vector_scan_info,
+    Poco::Logger * log)
+{
+    const auto vec_scan_desc = vector_scan_info->vector_scan_descs[0];
+
+    bool desc_direction = vec_scan_desc.direction == -1;
+    int top_k = vec_scan_desc.topk > 0 ? vec_scan_desc.topk : VectorIndex::DEFAULT_TOPK;
+
+    return getTotalTopSearchResultImpl(vector_results, static_cast<UInt64>(top_k), desc_direction, log, true);
+}
+
+ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
+    const VectorAndTextResultInDataParts & text_results,
+    const TextSearchInfoPtr & text_info,
+    Poco::Logger * log)
+{
+    int top_k = text_info->topk;
+    return getTotalTopSearchResultImpl(text_results, static_cast<UInt64>(top_k), true, log, false);
+}
+
+ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalCandidateVSResult(
+        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        const VectorScanInfoPtr & vector_scan_info,
+        const UInt64 & num_reorder,
+        Poco::Logger * log)
+{
+    const auto vec_scan_desc = vector_scan_info->vector_scan_descs[0];
+    bool desc_direction = vec_scan_desc.direction == -1;
+
+    /// Get top num_reorder candidates: part index + label + score
+    return getTotalTopSearchResultImpl(parts_with_vector_text_result, num_reorder, desc_direction, log, true);
+}
+
+ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultImpl(
+    const VectorAndTextResultInDataParts & vector_text_results,
+    const UInt64 & top_k,
+    const bool & desc_direction,
+    Poco::Logger * log,
+    const bool need_vector)
+{
+    String search_name = need_vector ? "vector scan" : "text search";
+
+    /// Sort search results from selected parts based on score to get total top-k result.
+    std::multimap<Float32, ScoreWithPartIndexAndLabel> sorted_score_with_index_labels;
+
+    for (const auto & mix_results_in_part : vector_text_results)
+    {
+        /// part + top-k result in part
+        CommonSearchResultPtr search_result;
+        if (need_vector)
+            search_result = mix_results_in_part.vector_scan_result;
+        else
+            search_result = mix_results_in_part.text_search_result;
+
+        const auto & part_index = mix_results_in_part.part_with_ranges.part_index_in_query;
+
+        if (search_result && search_result->computed)
+        {
+            const ColumnUInt32 * label_col = checkAndGetColumn<ColumnUInt32>(search_result->result_columns[0].get());
+            const ColumnFloat32 * score_col = checkAndGetColumn<ColumnFloat32>(search_result->result_columns[1].get());
+
+            if (!label_col)
+            {
+                LOG_DEBUG(log, "getTotalTopKSearchResult: label column in {} result is null", search_name);
+            }
+            else if (!score_col)
+            {
+                LOG_DEBUG(log, "getTotalTopKSearchResult: score column in {} result is null", search_name);
+            }
+            else
+            {
+                /// Store search result (label_id, score) + part_index
+                for (size_t idx = 0; idx < label_col->size(); idx++)
+                {
+                    auto label_id = label_col->getElement(idx);
+                    auto score = score_col->getFloat32(idx);
+
+                    ScoreWithPartIndexAndLabel score_with_index(score, part_index, label_id);
+                    sorted_score_with_index_labels.emplace(score, score_with_index);
+                }
+            }
+        }
+    }
+
+    ScoreWithPartIndexAndLabels result_score_with_index_labels;
+    result_score_with_index_labels.reserve(top_k);
+
+    UInt64 count = 0;
+
+    /// Reverse iteration from the end (the largest)
+    if (desc_direction)
+    {
+        for (auto rit = sorted_score_with_index_labels.rbegin(); rit != sorted_score_with_index_labels.rend(); ++rit)
+        {
+            result_score_with_index_labels.emplace_back(rit->second);
+            count++;
+
+            if (count == top_k)
+                break;
+        }
+    }
+    else
+    {
+        for (const auto & [_, score_with_index_label] : sorted_score_with_index_labels)
+        {
+            result_score_with_index_labels.emplace_back(score_with_index_label);
+            count++;
+
+            if (count == top_k)
+                break;
+        }
+    }
+
+    return result_score_with_index_labels;
+}
+
+std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
+    const VectorAndTextResultInDataPart & mix_results,
+    Poco::Logger * log)
+{
+    OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::getLabelsInSearchResults()");
+    std::set<UInt64> label_ids;
+
+    VectorScanResultPtr vector_result = mix_results.vector_scan_result;
+    TextSearchResultPtr text_result = mix_results.text_search_result;
+
+    if (vector_result && vector_result->computed)
+        getLabelsInSearchResult(label_ids, vector_result, log);
+
+    if (text_result && text_result->computed)
+        getLabelsInSearchResult(label_ids, text_result, log);
+
+    return label_ids;
+}
+
+void MergeTreeBaseSearchManager::getLabelsInSearchResult(
+    std::set<UInt64> & label_ids,
+    const CommonSearchResultPtr & search_result,
+    Poco::Logger * log)
+{
+    if (!search_result || !search_result->computed)
+        return;
+
+    const ColumnUInt32 * label_col = checkAndGetColumn<ColumnUInt32>(search_result->result_columns[0].get());
+
+    if (!label_col)
+    {
+        LOG_DEBUG(log, "getLabelsInSearchResult: label column in search result is null");
+    }
+    else
+    {
+        /// Store label_id
+        for (size_t idx = 0; idx < label_col->size(); idx++)
+        {
+            auto label_id = label_col->getElement(idx);
+            label_ids.emplace(label_id);
+        }
+    }
+}
+
+void MergeTreeBaseSearchManager::filterSearchResultsByFinalLabels(
+    VectorAndTextResultInDataPart & mix_results,
+    std::set<UInt64> & label_ids,
+    Poco::Logger * log)
+{
+    LOG_DEBUG(log, "filterSearchResultsByFinalLabels: part = {}", mix_results.part_with_ranges.data_part->name);
+
+    if (label_ids.empty())
+    {
+        mix_results.vector_scan_result = nullptr;
+        mix_results.text_search_result = nullptr;
+        return;
+    }
+
+    VectorScanResultPtr vector_result = mix_results.vector_scan_result;
+    TextSearchResultPtr text_result = mix_results.text_search_result;
+
+    if (vector_result && vector_result->computed)
+        mix_results.vector_scan_result = filterSearchResultByFinalLabels(vector_result, label_ids, log);
+
+    if (text_result && text_result->computed)
+        mix_results.text_search_result = filterSearchResultByFinalLabels(text_result, label_ids, log);
+}
+
+CommonSearchResultPtr MergeTreeBaseSearchManager::filterSearchResultByFinalLabels(
+    const CommonSearchResultPtr & pre_search_result,
+    std::set<UInt64> & label_ids,
+    Poco::Logger * log)
+{
+    if (!pre_search_result || !pre_search_result->computed)
+        return nullptr;
+
+    const ColumnUInt32 * pre_label_col = checkAndGetColumn<ColumnUInt32>(pre_search_result->result_columns[0].get());
+    const ColumnFloat32 * pre_score_col = checkAndGetColumn<ColumnFloat32>(pre_search_result->result_columns[1].get());
+
+    if (!pre_label_col)
+    {
+        LOG_DEBUG(log, "filterSearchResult: label column in result is null");
+        return nullptr;
+    }
+    else if (!pre_score_col)
+    {
+        LOG_DEBUG(log, "filterSearchResult: score column in result is null");
+        return nullptr;
+    }
+
+    CommonSearchResultPtr final_result = std::make_shared<CommonSearchResult>();
+
+    final_result->result_columns.resize(2);
+    auto res_score_column = DataTypeFloat32().createColumn();
+    auto res_label_column = DataTypeUInt32().createColumn();
+
+    /// Remove labels in pre_label_col if not exists in final label ids.
+    for (size_t idx = 0; idx < pre_label_col->size(); idx++)
+    {
+        auto label_id = pre_label_col->getElement(idx);
+
+        if (label_ids.contains(label_id))
+        {
+            res_label_column->insert(label_id);
+            res_score_column->insert(pre_score_col->getFloat32(idx));
+        }
+    }
+
+    if (res_label_column->size() > 0)
+    {
+        final_result->computed = true;
+        final_result->result_columns[0] = std::move(res_label_column);
+        final_result->result_columns[1] = std::move(res_score_column);
+    }
+
+    return final_result;
+}
+
 }

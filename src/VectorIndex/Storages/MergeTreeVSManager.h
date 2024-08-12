@@ -48,6 +48,17 @@ public:
     {
     }
 
+    MergeTreeVSManager(VectorScanResultPtr vec_scan_result_ = nullptr)
+    : MergeTreeBaseSearchManager{nullptr, nullptr}
+    , vector_scan_info(nullptr)
+    , vector_scan_result(vec_scan_result_)
+    {
+        if (vector_scan_result && vector_scan_result->computed)
+        {
+            LOG_DEBUG(log, "Already have precomputed vector scan result, no need to execute search");
+        }
+    }
+
     ~MergeTreeVSManager() override = default;
 
     void executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part) override;
@@ -59,10 +70,16 @@ public:
 
     /// Two search search: execute vector scan to get accurate distance values
     /// If part doesn't have vector index or real index type doesn't support, just use passed in values.
-    VectorScanResultPtr executeSecondStageVectorScan(
+    static VectorScanResultPtr executeSecondStageVectorScan(
         const MergeTreeData::DataPartPtr & data_part,
-        const std::vector<UInt64> & row_ids,
-        const std::vector<Float32> & distances);
+        const VectorScanInfoPtr vector_scan_info_,
+        const VectorScanResultPtr & first_stage_vec_result);
+
+    /// Split num_reorder candidates based on part index: part + vector scan results from first stage
+    static VectorAndTextResultInDataParts splitFirstStageVSResult(
+        const VectorAndTextResultInDataParts & parts_with_mix_results,
+        const ScoreWithPartIndexAndLabels & first_stage_top_results,
+        Poco::Logger * log);
 
     void mergeResult(
         Columns & pre_result,
@@ -93,7 +110,7 @@ private:
     Poco::Logger * log = &Poco::Logger::get("MergeTreeVSManager");
 
     template <Search::DataType T>
-    VectorIndex::VectorDatasetPtr<T> generateVectorDataset(bool is_batch, const VSDescription & desc);
+    static VectorIndex::VectorDatasetPtr<T> generateVectorDataset(bool is_batch, const VSDescription & desc);
 
     template <>
     VectorIndex::VectorDatasetPtr<Search::DataType::FloatVector> generateVectorDataset(bool is_batch, const VSDescription & desc);

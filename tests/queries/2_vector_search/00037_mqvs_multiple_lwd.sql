@@ -4,7 +4,7 @@ SELECT '-- Test LWD with multiple vector indices';
 DROP TABLE IF EXISTS test_multi_lwd;
 CREATE TABLE test_multi_lwd (`id` UInt32, `v1` Array(Float32), `v2` Array(Float32),
 CONSTRAINT v1_len CHECK length(v1)=3, CONSTRAINT v2_len CHECK length(v2)=3) ENGINE = MergeTree ORDER BY id
-SETTINGS min_bytes_to_build_vector_index=10000, disable_rebuild_for_decouple=true;
+SETTINGS min_bytes_to_build_vector_index=10000, enable_rebuild_for_decouple=false;
 
 INSERT INTO test_multi_lwd SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500);
 

@@ -53,7 +53,7 @@ CREATE TABLE test_vector_two_stage_decouple
 )
 engine = MergeTree
 ORDER BY id
-SETTINGS disable_rebuild_for_decouple=true;
+SETTINGS enable_rebuild_for_decouple=false;
 
 ALTER TABLE test_vector_two_stage_decouple ADD VECTOR INDEX vec_ind vector TYPE MSTG;
 

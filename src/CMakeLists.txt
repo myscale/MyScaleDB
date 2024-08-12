@@ -272,6 +272,8 @@ if (NOT ENABLE_RUST)
     remove_specific_files(clickhouse_storages_mergetree 
         "Storages/MergeTree/TantivyIndexStore.h"
         "Storages/MergeTree/TantivyIndexStore.cpp"
+        "Storages/MergeTree/TantivyIndexStoreFactory.h"
+        "Storages/MergeTree/TantivyIndexStoreFactory.cpp"
         "Storages/MergeTree/MergeTreeIndexTantivy.h"
         "Storages/MergeTree/MergeTreeIndexTantivy.cpp"
     )

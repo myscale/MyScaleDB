@@ -19,6 +19,7 @@
 #include <roaring.hh>
 #include <Common/FST.h>
 
+
 namespace DB
 {
 
@@ -66,43 +67,94 @@ struct TantivyIndexSettings
     }
 };
 
+
+class TantivyIndexFilesManager
+{
+public:
+    TantivyIndexFilesManager(const String & skp_index_name_, const DataPartStoragePtr storage_);
+
+    TantivyIndexFilesManager(const String & skp_index_name_, const DataPartStoragePtr storage_, MutableDataPartStoragePtr storage_builder_);
+
+    ChecksumPairs serialize();
+
+    void deserialize();
+
+    String getTantivyIndexCacheDirectory();
+
+    /// @brief update data part path in cache.
+    /// @param target_part_cache_path example: `store/xxx/xxx/all_1_1_0_2`
+    String updateCacheDataPartRelativeDirectory(const String & target_part_cache_path);
+
+    void removeTantivyIndexCacheDirectory();
+
+    /// @brief recursive remove `tantivy_index_cache_path` in cache. /store/xx/xxx/all_1_1_0/skp_xx/ -> /store/.
+    static void removeTantivyIndexInCache(const String & relative_data_part_in_cache, const String & skp_index_name);
+
+    /// @brief recursive remove `tantivy_index_cache_path` in cache. /store/xx/xxx/all_1_1_0/skp_xx/ -> /store/.
+    static void removeTantivyIndexInCache(const String & tantivy_index_cache_directory);
+
+    /// @brief recursive remove `data_part_path` in cache. /store/xx/xxx/all_1_1_0 -> /store/.
+    static void removeDataPartInCache(const String & relative_data_part_in_cache);
+
+    /// @brief recursive remove `table_uuid_path` in tantivy cache. /store/xx/xxx/ -> /store/.
+    static void removeEmptyTableUUIDInCache(const String & relative_data_part_in_cache);
+
+private:
+    String skp_index_name;
+    DataPartStoragePtr storage;
+    MutableDataPartStoragePtr storage_builder;
+    Poco::Logger * log;
+
+    DiskPtr tmp_disk;
+
+    String index_meta_file_name;
+    String index_data_file_name;
+
+    String tantivy_index_cache_directory = "";
+    mutable std::shared_mutex tantivy_index_cache_directory_mutex;
+
+    void initTantivyIndexCacheDirectory();
+
+    bool hasTantivyIndexInDataPart();
+
+    /// @brief get Full `data_part_path` in tantivy cache.
+    /// @param relative_data_part_in_cache data part relative path.
+    static std::optional<fs::path> getDataPartFullPathInCache(const String & relative_data_part_in_cache);
+};
+
+
 using TantivyDelBitmap = std::vector<uint8_t>;
 using TantivyDelBitmapPtr = std::shared_ptr<TantivyDelBitmap>;
 
 class TantivyIndexStore
 {
 public:
-    TantivyIndexStore(const String & name_, DataPartStoragePtr storage_);
-    TantivyIndexStore(const String & name_, DataPartStoragePtr storage_, MutableDataPartStoragePtr data_part_storage_builder_);
+    TantivyIndexStore(const String & skp_index_name_, DataPartStoragePtr storage_);
+    TantivyIndexStore(const String & skp_index_name_, DataPartStoragePtr storage_, MutableDataPartStoragePtr storage_builder_);
     ~TantivyIndexStore();
 
-    /// Check existence by checking the existence of file .meta
-    bool exists() const;
-
-    UInt64 getNextRowId(size_t rows_read);
+    // static String simplifyRelativePartPath(const String & relative_data_part_path);
 
     inline void setTantivyIndexSettings(TantivyIndexSettings & index_settings_) { index_settings = index_settings_; }
 
-    /// Return the name of the created index.
-    inline String getName() { return name; }
-
-    /// Serialize tantivy index files from `index_files_cache_path` to current data part.
     ChecksumPairs serialize();
+    String updateCacheDataPartRelativeDirectory(const String & target_part_cache_path);
 
-    /// Deserialize tantivy index files(`*.data`, `*.meta`) from current data part to `index_files_cache_path`.
-    void deserialize();
+    mutable std::mutex mutex_of_delete_bitmap;
 
-    /// Index a document.
+    void setDeleteBitmap(const TantivyDelBitmap & u8_delete_bitmap)
+    {
+        auto bitmap_ptr = std::make_shared<TantivyDelBitmap>(u8_delete_bitmap);
+        std::atomic_store(&delete_bitmap, std::move(bitmap_ptr));
+    }
+
+    TantivyDelBitmapPtr getDeleteBitmap() { return std::atomic_load(&delete_bitmap); }
+
+    /// For index build.
+    UInt64 getNextRowId(size_t rows_read);
     bool indexMultiColumnDoc(uint64_t row_id, std::vector<String> & column_names, std::vector<String> & docs);
-
-    /// Submit the index and release resources.
     bool finalizeTantivyIndex();
-
-    /// For Skip Index Row Id Range Query.(Deprecated)
-    bool singleTermQueryWithRowIdRange(String column_name, String term, UInt64 lrange, UInt64 rrange);
-    bool regexTermQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange);
-    bool sentenceQueryWithRowIdRange(String column_name, String pattern, UInt64 lrange, UInt64 rrange);
-    bool termsQueryWithRowIdRange(String column_name, std::vector<String> terms, UInt64 lrange, UInt64 rrange);
+    void removeTantivyIndexCache();
 
     /// For Skip Index Query.
     rust::cxxbridge1::Vec<std::uint8_t> singleTermQueryBitmap(String column_name, String term);
@@ -110,11 +162,10 @@ public:
     rust::cxxbridge1::Vec<std::uint8_t> regexTermQueryBitmap(String column_name, String pattern);
     rust::cxxbridge1::Vec<std::uint8_t> termsQueryBitmap(String column_name, std::vector<String> terms);
 
-    /// For BM25Search and HybridSearch
-    /// New version
-    rust::cxxbridge1::Vec<RowIdWithScore> bm25Search(String sentence, Statistics & statistics, size_t topk);
+    /// For BM25Search and HybridSearch. If enable_nlq is true, use Natural Language Search. If enable_nlq is false, use Standard Search.
+    rust::cxxbridge1::Vec<RowIdWithScore> bm25Search(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk);
     rust::cxxbridge1::Vec<RowIdWithScore>
-    bm25SearchWithFilter(String sentence, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap);
+    bm25SearchWithFilter(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap);
 
     /// Get current part sentence doc_freq, sentence will be tokenized by tokenizer with each indexed column.
     rust::cxxbridge1::Vec<DocWithFreq> getDocFreq(String sentence);
@@ -122,17 +173,36 @@ public:
     UInt64 getTotalNumDocs();
     /// Get current part total_num_tokens, each column will have it's own total_num_tokens.
     UInt64 getTotalNumTokens();
-
     /// Get the number of documents stored in the index file.
     UInt64 getIndexedDocsNum();
 
-    /// Delete tantivy index files in `index_files_cache_path`.
-    void removeTantivyIndexCache();
-    static void removeTantivyIndexCache(DB::ContextPtr global_context_, std::string index_cache_part_path);
 
-    /// If index_files_path is a data part path or table path, no need to delete parent path.
-    /// If index_files_path is a tantivy index path, need to delete parent part path if it's empty.
-    static void removeTantivyIndexCache(DiskPtr tmp_disk_, std::string index_files_path, bool need_delete_parent_path = false);
+private:
+    // The name of the created index.
+    String skp_index_name;
+    // We use `storage` to read FTS index (meta/data) file from data part.
+    DataPartStoragePtr storage;
+    // We use `storage_builder` to write FTS index (meta/data) file into data part.
+    MutableDataPartStoragePtr storage_builder;
+    // `index_files_manager` is responsible for manipulating FTS index files directly.
+    std::unique_ptr<TantivyIndexFilesManager> index_files_manager;
+
+    TantivyIndexRowId tantivy_index_row_id;
+
+    // Represent whether FTS index reader has been loaded.
+    std::mutex index_reader_mutex;
+    bool index_reader_status = false;
+
+    // Represent whether FTS index writer has been loaded.
+    std::mutex index_writer_mutex;
+    bool index_writer_status = false;
+
+    TantivyIndexSettings index_settings;
+
+    Poco::Logger * log;
+
+    /// DeleteBitmap used for part with lightweight delete
+    TantivyDelBitmapPtr delete_bitmap = nullptr;
 
     void setIndexWriterStatus(bool status)
     {
@@ -146,73 +216,15 @@ public:
         return index_writer_status;
     }
 
-    mutable std::mutex mutex_of_delete_bitmap;
+    bool freeTantivyIndexReader();
+    bool freeTantivyIndexWriter();
 
-    void setDeleteBitmap(const TantivyDelBitmap & u8_delete_bitmap)
-    {
-        auto bitmap_ptr = std::make_shared<TantivyDelBitmap>(u8_delete_bitmap);
-        std::atomic_store(&delete_bitmap, std::move(bitmap_ptr));
-    }
-
-    TantivyDelBitmapPtr getDeleteBitmap() { return std::atomic_load(&delete_bitmap); }
-
-private:
-    // The name of the created index.
-    String name;
-    DataPartStoragePtr storage;
-    MutableDataPartStoragePtr data_part_storage_builder;
-    TantivyIndexRowId tantivy_index_row_id;
-    bool index_reader_status = false;
-
-    std::mutex index_writer_mutex;
-    bool index_writer_status = false;
-
-    String index_meta_file_name;
-    String index_data_file_name;
-    std::unique_ptr<WriteBufferFromFileBase> meta_data_write_stream;
-    std::unique_ptr<WriteBufferFromFileBase> index_data_write_stream;
-    std::unique_ptr<ReadBufferFromFileBase> meta_data_read_stream;
-    std::unique_ptr<ReadBufferFromFileBase> index_data_read_stream;
-    String index_files_cache_path = "";
-    DiskPtr temp_data_on_disk;
-    TantivyIndexSettings index_settings;
-    std::mutex deserialize_mutex;
-
-    Poco::Logger * log;
-
-    /// DeleteBitmap used for part with lightweight delete
-    TantivyDelBitmapPtr delete_bitmap = nullptr;
-
-    /// resource initialize
-    void initStore();
-    void initFileWriteStreams();
-    void initFileReadStreams();
     bool freeTantivyIndex();
-    bool commitTantivyIndex();
+    void commitTantivyIndex();
 
     bool getTantivyIndexReader();
     bool getTantivyIndexWriter();
 };
 
 using TantivyIndexStorePtr = std::shared_ptr<TantivyIndexStore>;
-using TantivyIndexStores = std::unordered_map<std::string, TantivyIndexStorePtr>;
-
-/// A singleton for storing TantivyIndexStores
-class TantivyIndexStoreFactory : private boost::noncopyable
-{
-public:
-    /// Get singleton of TantivyIndexStoreFactory
-    static TantivyIndexStoreFactory & instance();
-
-    /// Get TantivyIndexStore by using index name, disk and part_path (which are combined to create key in stores)
-    TantivyIndexStorePtr get(const String & name, DataPartStoragePtr storage);
-
-    /// Remove all Tantivy index files which are under the same part_path
-    void remove(const String & part_path);
-
-private:
-    TantivyIndexStores stores;
-    std::mutex mutex;
-};
-
 }

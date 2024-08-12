@@ -65,8 +65,8 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.is_final = select.final();
 
     /// Move as much as possible where conditions to prewhere for vector search
-    if (select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->hybrid_search_funcs.empty())
-        has_vector_func = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
+    if (!where_optimizer_context.move_all_conditions_to_prewhere && select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->hybrid_search_funcs.empty())
+        where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
     RPNBuilderTreeNode node(select.where().get(), tree_context);
@@ -357,7 +357,7 @@ std::optional<MergeTreeWhereOptimizer::OptimizeResult> MergeTreeWhereOptimizer::
         if (!it->viable)
             break;
 
-        if (!where_optimizer_context.move_all_conditions_to_prewhere && !has_vector_func)
+        if (!where_optimizer_context.move_all_conditions_to_prewhere)
         {
             bool moved_enough = false;
             if (total_size_of_queried_columns > 0)

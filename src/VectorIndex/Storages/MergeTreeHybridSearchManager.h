@@ -38,19 +38,35 @@ namespace DB
 {
 
 /// Hybrid search manager, responsible for hybrid search result precompute
+/// After refactor, the work of hybrid manager changed to:
+/// 1. Combine vector scan and full-text search manager to get top-k or first stage vector results for provided data part.
+/// 2. Provide static hybridSearch() and fusion functions to do fusion on total top-k results from different parts.
+/// 3. Merge hyrbid results on provided data part with other required columns.
 class MergeTreeHybridSearchManager : public MergeTreeBaseSearchManager
 {
 public:
     MergeTreeHybridSearchManager(
-        StorageMetadataPtr metadata_, HybridSearchInfoPtr hybrid_search_info_, ContextPtr context_)
+        StorageMetadataPtr metadata_, HybridSearchInfoPtr hybrid_search_info_, ContextPtr context_, bool support_two_stage_search_ = false)
         : MergeTreeBaseSearchManager{metadata_, context_}
         , hybrid_search_info(hybrid_search_info_)
     {
         /// Initialize vector scan and text search manager
         vector_scan_manager = make_shared<MergeTreeVSManager>(
-                metadata_, hybrid_search_info->vector_scan_info, context_);
+                metadata_, hybrid_search_info->vector_scan_info, context_, support_two_stage_search_);
         text_search_manager = make_shared<MergeTreeTextSearchManager>(
                 metadata_, hybrid_search_info->text_search_info, context_);
+    }
+
+    /// Hybrid search has done on all parts, no need to do search and fusion.
+    /// Only need to merge result for hybrid and other columns in part
+    MergeTreeHybridSearchManager(HybridSearchResultPtr hybrid_search_result_)
+        : MergeTreeBaseSearchManager{nullptr, nullptr}
+        , hybrid_search_result(std::move(hybrid_search_result_))
+    {
+        if (hybrid_search_result && hybrid_search_result->computed)
+        {
+            LOG_DEBUG(log, "Already have precomputed hybrid result, no need to execute search and do fusion");
+        }
     }
 
     ~MergeTreeHybridSearchManager() override = default;
@@ -78,6 +94,26 @@ public:
 
     CommonSearchResultPtr getSearchResult() override { return hybrid_search_result; }
 
+    /// Return vector scan result if exists for hybrid search
+    VectorScanResultPtr getVectorScanResult()
+    {
+        VectorScanResultPtr result = nullptr;
+        if (vector_scan_manager && vector_scan_manager->preComputed())
+            result = vector_scan_manager->getSearchResult();
+
+        return result;
+    }
+
+    /// Return full-text search result if exists for hybrid search
+    TextSearchResultPtr getTextSearchResult()
+    {
+        TextSearchResultPtr result = nullptr;
+        if (text_search_manager && text_search_manager->preComputed())
+            result = text_search_manager->getSearchResult();
+
+        return result;
+    }
+
 #if USE_TANTIVY_SEARCH
     void setBM25Stats(const Statistics & bm25_stats_in_table_)
     {
@@ -86,12 +122,25 @@ public:
     }
 #endif
 
+    /// Fusion vector scan and full-text search results from all selected parts
+    static ScoreWithPartIndexAndLabels hybridSearch(
+        const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
+        const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
+        const HybridSearchInfoPtr & hybrid_info,
+        Poco::Logger * log);
+
+    /// Filter parts using total top-k hybrid search result
+    /// For every part, select mark ranges to read, also save hybrid result
+    static SearchResultAndRangesInDataParts FilterPartsWithHybridResults(
+        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
+        const Settings & settings,
+        Poco::Logger * log);
+
 private:
 
     HybridSearchInfoPtr hybrid_search_info;
 
-    /// lock hybrid search result
-    std::mutex mutex;
     HybridSearchResultPtr hybrid_search_result = nullptr;
 
     MergeTreeVectorScanManagerPtr vector_scan_manager = nullptr;
@@ -99,31 +148,25 @@ private:
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeHybridSearchManager");
 
-    /// Combine results from vector scan and text search based on fusion type and fusion paramters.
-    HybridSearchResultPtr hybridSearch();
-
-    void RelativeScoreFusion(
-        std::map<UInt32, Float32> & labels_with_convex_score,
-        const VectorScanResultPtr vec_scan_result,
-        const TextSearchResultPtr text_search_result,
+    static void RelativeScoreFusion(
+        std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_convex_score,
+        const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
+        const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
         const float weight_of_text,
-        const Search::Metric vector_index_metric);
+        const Search::Metric vector_index_metric,
+        Poco::Logger * log);
 
-    void computeMinMaxNormScore(
-        const ColumnFloat32 * score_col,
-        MutableColumnPtr & norm_score_col);
+    static void computeMinMaxNormScore(
+        const ScoreWithPartIndexAndLabels & search_result_with_part_index,
+        std::vector<Float32> & norm_score_vec,
+        Poco::Logger * log);
 
-    void RankFusion(
-        std::map<UInt32, Float32> & labels_with_rank_score,
-        const VectorScanResultPtr vec_scan_result,
-        const TextSearchResultPtr text_search_result,
-        const int k);
-
-    /// Compute reciprocal rank score for a label id
-    /// The map labels_with_ranked_score stores the sum of rank score for a label id
-    void computeRankFusionScore(
-        std::map<UInt32, Float32> & labels_with_ranked_score,
-        const ColumnUInt32 * label_col,
+    /// Compute reciprocal rank score for a (part_index, label id) pair
+    /// The map part_index_labels_with_ranked_score stores the sum of rank score for a (part_index, label id) pair
+    static void RankFusion(
+        std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_ranked_score,
+        const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
+        const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
         int k);
 };
 

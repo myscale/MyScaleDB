@@ -42,7 +42,7 @@ MergeTreeIndexGranuleTantivy::MergeTreeIndexGranuleTantivy(
 {
 }
 
-[[deprecated("Performance is worth than using bitmap.")]] bool
+[[deprecated("Performance is worse than using bitmap.")]] bool
 MergeTreeIndexGranuleTantivy::granuleRowIdRangesHitted(roaring::Roaring64Map & target_bitmap) const
 {
     bool hitted = false;
@@ -307,94 +307,6 @@ bool MergeTreeConditionTantivy::alwaysUnknownOrTrue() const
     return rpn_stack[0];
 }
 
-bool MergeTreeConditionTantivy::mayBeTrueOnGranuleInPart(
-    MergeTreeIndexGranulePtr idx_granule, [[maybe_unused]] TantivyIndexStore & store) const
-{
-    std::shared_ptr<MergeTreeIndexGranuleTantivy> granule = std::dynamic_pointer_cast<MergeTreeIndexGranuleTantivy>(idx_granule);
-    if (!granule)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "TantivyFilter index condition got a granule with the wrong type.");
-
-    /// Check like in KeyCondition.
-    std::vector<BoolMask> rpn_stack; // BoolMask(can_be_true, can_be_false)
-    for (const auto & element : rpn)
-    {
-        if (element.function == RPNElement::FUNCTION_UNKNOWN)
-        {
-            rpn_stack.emplace_back(true, true);
-        }
-        else if (
-            element.function == RPNElement::FUNCTION_EQUALS || element.function == RPNElement::FUNCTION_NOT_EQUALS
-            || element.function == RPNElement::FUNCTION_HAS)
-        {
-            rpn_stack.emplace_back(granule->tantivy_filters[element.key_column].contains(*element.tantivy_filter, store), true);
-
-            if (element.function == RPNElement::FUNCTION_NOT_EQUALS)
-                rpn_stack.back() = !rpn_stack.back();
-        }
-        else if (element.function == RPNElement::FUNCTION_LIKE || element.function == RPNElement::FUNCTION_NOT_LIKE)
-        {
-            rpn_stack.emplace_back(granule->tantivy_filters[element.key_column].contains(*element.tantivy_filter, store), true);
-
-            if (element.function == RPNElement::FUNCTION_NOT_LIKE)
-                rpn_stack.back() = !rpn_stack.back();
-        }
-        else if (element.function == RPNElement::FUNCTION_IN || element.function == RPNElement::FUNCTION_NOT_IN)
-        {
-            std::vector<bool> result(element.set_tantivy_filters.back().size(), true);
-
-            for (size_t column = 0; column < element.set_key_position.size(); ++column)
-            {
-                const size_t key_idx = element.set_key_position[column];
-                const auto & tantivy_filters = element.set_tantivy_filters[column];
-
-                for (size_t row = 0; row < tantivy_filters.size(); ++row)
-                    result[row] = result[row] || granule->tantivy_filters[key_idx].contains(tantivy_filters[row], store);
-            }
-
-            rpn_stack.emplace_back(std::find(std::cbegin(result), std::cend(result), true) != std::end(result), true);
-            if (element.function == RPNElement::FUNCTION_NOT_IN)
-                rpn_stack.back() = !rpn_stack.back();
-        }
-        else if (element.function == RPNElement::FUNCTION_MULTI_SEARCH)
-        {
-            rpn_stack.emplace_back(granule->tantivy_filters[element.key_column].contains(*element.tantivy_filter, store), true);
-        }
-        else if (element.function == RPNElement::FUNCTION_NOT)
-        {
-            rpn_stack.back() = !rpn_stack.back();
-        }
-        else if (element.function == RPNElement::FUNCTION_AND)
-        {
-            auto arg1 = rpn_stack.back();
-            rpn_stack.pop_back();
-            auto arg2 = rpn_stack.back();
-            rpn_stack.back() = arg1 & arg2;
-        }
-        else if (element.function == RPNElement::FUNCTION_OR)
-        {
-            auto arg1 = rpn_stack.back();
-            rpn_stack.pop_back();
-            auto arg2 = rpn_stack.back();
-            rpn_stack.back() = arg1 | arg2;
-        }
-        else if (element.function == RPNElement::ALWAYS_FALSE)
-        {
-            rpn_stack.emplace_back(false, true);
-        }
-        else if (element.function == RPNElement::ALWAYS_TRUE)
-        {
-            rpn_stack.emplace_back(true, false);
-        }
-        else
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected function type in TantivyFilterCondition::RPNElement");
-    }
-
-    if (rpn_stack.size() != 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected stack size in TantivyFilterCondition::mayBeTrueOnGranule");
-
-    return rpn_stack[0].can_be_true;
-}
-
 // convert RPNBuilderTreeNode to RPNElement
 bool MergeTreeConditionTantivy::traverseAtomAST(const RPNBuilderTreeNode & node, RPNElement & out)
 {
@@ -554,6 +466,8 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
+    // The array of strings in `has(arr, elem)` will be combined into a single string.
+    // Here we use the sentence query.
     else if (function_name == "has")
     {
         out.key_column = key_column_num;
@@ -599,6 +513,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter->setQueryString(value.data(), value.size());
         if (map_key_costant)
         {
+            // When use LIKE in mapKeys(''), we can't use regex search.
             out.tantivy_filter->forbidRegexSearch();
         }
         return true;
@@ -874,7 +789,7 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
     String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
 
 
-    bool json_valid = ffi_varify_index_parameter(index_json_parameter);
+    bool json_valid = ffi_verify_index_parameter(index_json_parameter);
 
     if (!json_valid)
     {

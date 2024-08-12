@@ -1,7 +1,7 @@
 -- Tags: no-parallel
 
 DROP TABLE IF EXISTS test_vector;
-CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, disable_rebuild_for_decouple=true,max_rows_for_slow_mode_single_vector_index_build = 10;
+CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_len CHECK length(vector) = 3) engine MergeTree primary key id SETTINGS index_granularity=1024, min_rows_to_build_vector_index=1, enable_rebuild_for_decouple=false,max_rows_for_slow_mode_single_vector_index_build = 10;
 INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
 ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 

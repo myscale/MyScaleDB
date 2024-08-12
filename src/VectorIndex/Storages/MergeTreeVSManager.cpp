@@ -160,8 +160,6 @@ VectorIndex::Float32VectorDatasetPtr MergeTreeVSManager::generateVectorDataset(b
 
         const IColumn & query_data = query_col->getData();
 
-        LOG_DEBUG(log, "dim to {}", dim);
-
         std::vector<float> query_new_data;
         if (checkColumn<ColumnFloat32>(&query_data))
             query_new_data = getQueryVector<Float32>(&query_data, dim, false);
@@ -256,7 +254,10 @@ VectorIndex::BinaryVectorDatasetPtr MergeTreeVSManager::generateVectorDataset(bo
 void MergeTreeVSManager::executeSearchBeforeRead(const MergeTreeData::DataPartPtr & data_part)
 {
     DB::OpenTelemetry::SpanHolder span("MergeTreeVSManager::executeSearchBeforeRead");
-    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part);
+
+    /// Skip to execute vector scan if already computed
+    if (!preComputed() && vector_scan_info)
+        vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part);
 }
 
 void MergeTreeVSManager::executeSearchWithFilter(
@@ -264,7 +265,9 @@ void MergeTreeVSManager::executeSearchWithFilter(
     const ReadRanges & read_ranges,
     const VIBitmapPtr filter)
 {
-    this->vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part, read_ranges, filter);
+    /// Skip to execute vector scan if already computed
+    if (!preComputed() && vector_scan_info)
+        vector_scan_result = vectorScan(vector_scan_info->is_batch, data_part, read_ranges, filter);
 }
 
 VectorScanResultPtr MergeTreeVSManager::vectorScan(
@@ -397,6 +400,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScan(
                 {
                     if (per_id[label] > -1)
                     {
+                        LOG_TRACE(log, "Label: {}, distance: {}", per_id[label], per_distance[label]);
                         label_column->insert(per_id[label]);
                         distance_column->insert(per_distance[label]);
                     }
@@ -440,42 +444,26 @@ VectorScanResultPtr MergeTreeVSManager::vectorScan(
 
 VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
     const MergeTreeData::DataPartPtr & data_part,
-    const std::vector<UInt64> & row_ids,
-    const std::vector<Float32> & distances)
+    const VectorScanInfoPtr vector_scan_info_,
+    const VectorScanResultPtr & first_stage_vec_result)
 {
-    /// Reference vectorScan() for non-batch vector search
     OpenTelemetry::SpanHolder span("MergeTreeVSManager::executeSecondStageVectorScan()");
-    span.addAttribute("secondsearchstage.num_reorder", row_ids.size());
-    const VSDescriptions & descs = vector_scan_info->vector_scan_descs;
+    Poco::Logger * log_ = &Poco::Logger::get("executeSecondStageVectorScan");
 
+    const VSDescriptions & descs = vector_scan_info_->vector_scan_descs;
     const VSDescription & desc = descs[0];
 
     if (desc.vector_search_type != Search::DataType::FloatVector)
-    {
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Only Float32 Vector support two stage search");
-    }
+        return first_stage_vec_result;
+
     const String search_column_name = desc.search_column_name;
-
     bool brute_force = false;
-
     VIWithColumnInPartPtr column_index;
+    std::vector<IndexWithMetaHolderPtr> index_holders;
+
     if (data_part->vector_index.getColumnIndexByColumnName(search_column_name).has_value())
         column_index = data_part->vector_index.getColumnIndexByColumnName(search_column_name).value();
 
-    VectorScanResultPtr tmp_vector_scan_result = std::make_shared<CommonSearchResult>();
-
-    tmp_vector_scan_result->result_columns.resize(2);
-    auto distance_column = DataTypeFloat32().createColumn();
-    auto label_column = DataTypeUInt32().createColumn();
-
-    /// Determine the top k value, no more than passed in row_ids size.
-    int k = desc.topk > 0 ? desc.topk : VectorIndex::DEFAULT_TOPK;
-    span.addAttribute("secondsearchstage.origin_topk", k);
-    size_t num_reorder = row_ids.size();
-    if (k > static_cast<int>(num_reorder))
-        k = static_cast<int>(num_reorder);
-
-    std::vector<IndexWithMetaHolderPtr> index_holders;
     if (column_index)
         index_holders = column_index->getIndexHolders(data_part->getState() != MergeTreeDataPartState::Outdated);
 
@@ -483,69 +471,88 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
     if (brute_force)
     {
         /// Data part has no vector index, no need to do two stage search.
-        for (int64_t label = 0; label < k; label++)
-        {
-            label_column->insert(row_ids[label]);
-            distance_column->insert(distances[label]);
-        }
+        return first_stage_vec_result;
     }
-    else
-    {
-        /// Prepare paramters for computeTopDistanceSubset() if index supports two stage search
-        VectorIndex::VectorDatasetVariantPtr vec_data = generateVectorDataset<Search::DataType::FloatVector>(false, desc);
-        auto first_stage_result = Search::SearchResult::createTopKHolder(1, num_reorder);
-        auto sr_indices = first_stage_result->getResultIndices();
-        auto sr_distances = first_stage_result->getResultDistances();
 
-        for (size_t i = 0; i < row_ids.size(); i++)
+    /// Prepare for two stage search
+    const ColumnUInt32 * first_label_col = checkAndGetColumn<ColumnUInt32>(first_stage_vec_result->result_columns[0].get());
+    const ColumnFloat32 * first_dist_col = checkAndGetColumn<ColumnFloat32>(first_stage_vec_result->result_columns[1].get());
+
+    if (!first_label_col)
+    {
+        LOG_DEBUG(log_, "Label column is null");
+        return first_stage_vec_result;
+    }
+
+    /// Determine the top k value, no more than passed in result size.
+    int k = desc.topk > 0 ? desc.topk : VectorIndex::DEFAULT_TOPK;
+
+    size_t num_reorder = first_label_col->size();
+    if (k > static_cast<int>(num_reorder))
+        k = static_cast<int>(num_reorder);
+
+    LOG_DEBUG(log_, "[executeSecondStageVectorScan] topk = {}, result size from first stage = {}", desc.topk, num_reorder);
+
+    VectorScanResultPtr tmp_vector_scan_result = std::make_shared<CommonSearchResult>();
+    tmp_vector_scan_result->result_columns.resize(2);
+    auto distance_column = DataTypeFloat32().createColumn();
+    auto label_column = DataTypeUInt32().createColumn();
+
+    /// Prepare paramters for computeTopDistanceSubset() if index supports two stage search
+    VectorIndex::VectorDatasetVariantPtr vec_data = generateVectorDataset<Search::DataType::FloatVector>(false, desc);
+    auto first_stage_result = Search::SearchResult::createTopKHolder(1, num_reorder);
+    auto sr_indices = first_stage_result->getResultIndices();
+    auto sr_distances = first_stage_result->getResultDistances();
+
+    for (size_t i = 0; i < first_label_col->size(); i++)
+    {
+        sr_indices[i] = first_label_col->getUInt(i);
+        sr_distances[i] = first_dist_col->getFloat32(i);
+    }
+
+    OpenTelemetry::SpanHolder span2("MergeTreeVSManager::executeSecondStageVectorScan()::before calling computeTopDistanceSubset");
+
+    for (size_t i = 0; i < index_holders.size(); ++i)
+    {
+        auto & index_with_meta = index_holders[i]->value();
+        std::shared_ptr<Search::SearchResult> real_first_stage_result = nullptr;
+
         {
-            sr_indices[i] = row_ids[i];
-            sr_distances[i] = distances[i];
+            OpenTelemetry::SpanHolder span3("MergeTreeVSManager::executeSecondStageVectorScan()::TransferToOldRowIds()");
+            /// Try to transfer to old part's row ids for decouple part. And skip if no need.
+            real_first_stage_result = VIWithColumnInPart::TransferToOldRowIds(index_with_meta, first_stage_result);
         }
 
-        OpenTelemetry::SpanHolder span2("MergeTreeVSManager::executeSecondStageVectorScan()::before calling computeTopDistanceSubset");
+        /// No rows needed from this old data part
+        if (!real_first_stage_result)
+            continue;
 
-        for (size_t i = 0; i < index_holders.size(); ++i)
+        std::shared_ptr<Search::SearchResult> search_results;
         {
-            auto & index_with_meta = index_holders[i]->value();
-            std::shared_ptr<Search::SearchResult> real_first_stage_result = nullptr;
-
+            OpenTelemetry::SpanHolder span4("MergeTreeVSManager::executeSecondStageVectorScan()::computeTopDistanceSubset()");
+            if (VIWithColumnInPart::supportTwoStageSearch(index_with_meta))
             {
-                OpenTelemetry::SpanHolder span3("MergeTreeVSManager::executeSecondStageVectorScan()::TransferToOldRowIds()");
-                /// Try to transfer to old part's row ids for decouple part. And skip if no need.
-                real_first_stage_result = VIWithColumnInPart::TransferToOldRowIds(index_with_meta, first_stage_result);
+                search_results = column_index->computeTopDistanceSubset(index_with_meta, vec_data, real_first_stage_result, k);
             }
+            else
+                search_results = real_first_stage_result;
+        }
 
-            /// No rows needed from this old data part
-            if (!real_first_stage_result)
-                continue;
+        /// Cut first stage result count (num_reorder) to top k for cases where index not support two stage search
+        auto real_result_size = search_results->getNumCandidates();
+        if (real_result_size > k)
+            real_result_size = k;
 
-            std::shared_ptr<Search::SearchResult> search_results;
+        auto per_id = search_results->getResultIndices();
+        auto per_distance = search_results->getResultDistances();
+
+        for (int64_t label = 0; label < real_result_size; ++label)
+        {
+            if (per_id[label] > -1)
             {
-                OpenTelemetry::SpanHolder span4("MergeTreeVSManager::executeSecondStageVectorScan()::computeTopDistanceSubset()");
-                if (VIWithColumnInPart::supportTwoStageSearch(index_with_meta))
-                {
-                    search_results = column_index->computeTopDistanceSubset(index_with_meta, vec_data, real_first_stage_result, k);
-                }
-                else
-                    search_results = real_first_stage_result;
-            }
-
-            /// Cut first stage result count (num_reorder) to top k for cases where index not support two stage search
-            auto real_result_size = search_results->getNumCandidates();
-            if (real_result_size > k)
-                real_result_size = k;
-
-            auto per_id = search_results->getResultIndices();
-            auto per_distance = search_results->getResultDistances();
-
-            for (int64_t label = 0; label < real_result_size; ++label)
-            {
-                if (per_id[label] > -1)
-                {
-                    label_column->insert(per_id[label]);
-                    distance_column->insert(per_distance[label]);
-                }
+                LOG_TRACE(log_, "Label: {}, distance: {}", per_id[label], per_distance[label]);
+                label_column->insert(per_id[label]);
+                distance_column->insert(per_distance[label]);
             }
         }
     }
@@ -556,13 +563,70 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
         tmp_vector_scan_result->result_columns[0] = std::move(label_column);
         tmp_vector_scan_result->result_columns[1] = std::move(distance_column);
     }
-    else /// no result
-    {
-        tmp_vector_scan_result->computed = false;
-        LOG_DEBUG(log, "[executeSecondStageVectorScan] Failed to get second stage result for part {}", data_part->name);
-    }
 
     return tmp_vector_scan_result;
+}
+
+VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
+    const VectorAndTextResultInDataParts & parts_with_mix_results,
+    const ScoreWithPartIndexAndLabels & first_stage_top_results,
+    Poco::Logger * log)
+{
+    /// Merge candidate vector results from the same part index into a vector
+    std::map<size_t, std::vector<ScoreWithPartIndexAndLabel>> part_index_merged_map;
+
+    for (const auto & score_with_part_index_label : first_stage_top_results)
+    {
+        const auto & part_index = score_with_part_index_label.part_index;
+        part_index_merged_map[part_index].emplace_back(score_with_part_index_label);
+    }
+
+    VectorAndTextResultInDataParts parts_with_vector_result;
+
+    /// Construct new vector scan result for data part existing in top candidates
+    for (const auto & mix_results_in_part : parts_with_mix_results)
+    {
+        const auto & part_with_ranges = mix_results_in_part.part_with_ranges;
+        size_t part_index = part_with_ranges.part_index_in_query;
+
+        /// Found data part in first stage top results
+        if (part_index_merged_map.contains(part_index))
+        {
+            auto & score_with_part_index_labels = part_index_merged_map[part_index];
+
+            /// Construct new vector scan result for second stage
+            VectorScanResultPtr tmp_vector_scan_result = std::make_shared<CommonSearchResult>();
+
+            tmp_vector_scan_result->result_columns.resize(2);
+            auto score_column = DataTypeFloat32().createColumn();
+            auto label_column = DataTypeUInt32().createColumn();
+
+            LOG_TEST(log, "First stage vector scan result for part {}:", part_with_ranges.data_part->name);
+            for (const auto & score_with_part_index_label : score_with_part_index_labels)
+            {
+                const auto & label_id = score_with_part_index_label.label_id;
+                const auto & score = score_with_part_index_label.score;
+
+                LOG_TEST(log, "Label: {}, score: {}", label_id, score);
+                label_column->insert(label_id);
+                score_column->insert(score);
+            }
+
+            if (label_column->size() > 0)
+            {
+                tmp_vector_scan_result->computed = true;
+                tmp_vector_scan_result->result_columns[0] = std::move(label_column);
+                tmp_vector_scan_result->result_columns[1] = std::move(score_column);
+
+                VectorAndTextResultInDataPart part_with_vector(part_with_ranges);
+                part_with_vector.vector_scan_result = tmp_vector_scan_result;
+
+                parts_with_vector_result.emplace_back(std::move(part_with_vector));
+            }
+        }
+    }
+
+    return parts_with_vector_result;
 }
 
 void MergeTreeVSManager::mergeResult(
@@ -572,7 +636,7 @@ void MergeTreeVSManager::mergeResult(
     const VIBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
-    if (vector_scan_info->is_batch)
+    if (vector_scan_info && vector_scan_info->is_batch)
     {
         mergeBatchVectorScanResult(pre_result, read_rows, read_ranges, vector_scan_result, filter, part_offset);
     }

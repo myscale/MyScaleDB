@@ -1657,6 +1657,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     const size_t & min_marks_for_seek,
     size_t & granules_dropped,
     size_t & total_granules,
+    const Settings & settings,
     Poco::Logger * log)
 {
     MarkRanges res;
@@ -1675,11 +1676,18 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     {
         return index_ranges;
     }
+    // Boundary
+    UInt64 enbale_fts_index_for_string_functions = settings.enbale_fts_index_for_string_functions;
+    LOG_DEBUG(log, "enbale_fts_index_for_string_functions: {}", enbale_fts_index_for_string_functions);
+    if (enbale_fts_index_for_string_functions == 0)
+    {
+        return index_ranges;
+    }
 
     TantivyIndexStorePtr tantivy_store = nullptr;
     if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
     {
-        tantivy_store = TantivyIndexStoreFactory::instance().get(index_helper->getFileName(), part->getDataPartStoragePtr());
+        tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), part->getDataPartStoragePtr());
         indexed_doc_nums = tantivy_store->getIndexedDocsNum();
         if (indexed_doc_nums > std::numeric_limits<uint32_t>::max())
         {
@@ -1875,6 +1883,7 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
             min_marks_for_seek,
             granules_dropped,
             total_granules,
+            settings,
             log);
     }
 #endif
