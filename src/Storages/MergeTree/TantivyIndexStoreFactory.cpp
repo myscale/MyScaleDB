@@ -55,14 +55,29 @@ void FTSSafeCache::emplace_for_mutate(const String & before_mutate, const String
 
 String FTSSafeCache::find_from_mutate(const String & after_mutate)
 {
-    auto it = this->mutate_to_from.find(after_mutate);
-    if (it == this->mutate_to_from.end())
+    auto before_mutate = this->mutate_to_from.get_optional(after_mutate);
+    if (before_mutate.has_value())
+    {
+        return before_mutate.value();
+    }
+    else
     {
         return std::string();
     }
-    return it->second;
 }
 
+TantivyIndexStorePtr FTSSafeCache::find_from_stores(const String & key, TantivyIndexStores & stores)
+{
+    auto result = stores.get_optional(key);
+    if (result.has_value())
+    {
+        return result.value();
+    }
+    else
+    {
+        return nullptr;
+    }
+}
 size_t FTSSafeCache::mutate_size()
 {
     return this->mutate_to_from.size();
@@ -114,10 +129,20 @@ TantivyIndexStorePtr TantivyIndexStoreFactory::getForBuild(const String & skp_in
 TantivyIndexStorePtr TantivyIndexStoreFactory::getOrLoadForSearch(const String & skp_index_name, const DataPartStoragePtr storage)
 {
     String store_key = this->cache.combineFTSKey(skp_index_name, storage->getRelativePath());
+
+    // First check
     auto res = this->cache.find_from_stores_for_search(store_key);
     if (res != nullptr)
         return res;
 
+    std::unique_lock<std::shared_mutex> lock(this->mutex_for_search);
+
+    // Second check
+    res = this->cache.find_from_stores_for_search(store_key);
+    if (res != nullptr)
+        return res;
+
+    // Ensure only one thread can generate store object, avoid index files corrupt.
     TantivyIndexStorePtr new_store = std::make_shared<TantivyIndexStore>(skp_index_name, storage);
     this->cache.emplace_stores_for_search(store_key, new_store);
     LOG_INFO(
@@ -139,10 +164,19 @@ TantivyIndexStorePtr TantivyIndexStoreFactory::getOrInitForBuild(
 {
     String store_key = this->cache.combineFTSKey(skp_index_name, storage->getRelativePath());
 
+    // First check
     auto res = this->cache.find_from_stores_for_build(store_key);
     if (res != nullptr)
         return res;
 
+    std::unique_lock<std::shared_mutex> lock(this->mutex_for_build);
+
+    // Second check
+    res = this->cache.find_from_stores_for_build(store_key);
+    if (res != nullptr)
+        return res;
+
+    // Ensure only one thread can generate store object, avoid index files corrupt.
     TantivyIndexStorePtr new_store = std::make_shared<TantivyIndexStore>(skp_index_name, storage, storage_builder);
     this->cache.emplace_stores_for_build(store_key, new_store);
     LOG_INFO(

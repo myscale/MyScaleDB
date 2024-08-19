@@ -78,7 +78,8 @@ void TantivyIndexFilesManager::initTantivyIndexCacheDirectory()
         // tmp_mut_all_1_1_1_2 -> all_1_1_1_2
         // String part_name = storage->getPartDirectory();
         String part_name = storage->getPartDirectory();
-        std::unique_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+        // initialize cache directory
+        std::unique_lock<std::shared_mutex> lock(this->tantivy_index_cache_directory_mutex);
         this->tantivy_index_cache_directory = cache_prefix / storage_relative_parent_path / part_name / this->skp_index_name / "";
         LOG_DEBUG(this->log, "init FTS index cache directory: {}", this->tantivy_index_cache_directory);
     }
@@ -91,12 +92,6 @@ void TantivyIndexFilesManager::initTantivyIndexCacheDirectory()
 String TantivyIndexFilesManager::getTantivyIndexCacheDirectory()
 {
     std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
-    return this->tantivy_index_cache_directory;
-}
-
-String TantivyIndexFilesManager::getAndLockTantivyIndexCacheDirectory()
-{
-    std::unique_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
     return this->tantivy_index_cache_directory;
 }
 
@@ -135,7 +130,9 @@ String TantivyIndexFilesManager::updateCacheDataPartRelativeDirectory(const Stri
 
 ChecksumPairs TantivyIndexFilesManager::serialize()
 {
-    String index_files_directory = this->getAndLockTantivyIndexCacheDirectory();
+    std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+    String index_files_directory = this->tantivy_index_cache_directory;
+
 
     if (!this->tmp_disk->isDirectory(index_files_directory))
     {
@@ -229,7 +226,8 @@ ChecksumPairs TantivyIndexFilesManager::serialize()
 
 void TantivyIndexFilesManager::deserialize()
 {
-    String index_files_directory = this->getAndLockTantivyIndexCacheDirectory();
+    std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+    String index_files_directory = this->tantivy_index_cache_directory;
 
     // TODO Possible optimization plan:
     // In tantivy_search, check if the path is valid and if the index files can be loaded successfully.
@@ -324,7 +322,8 @@ void TantivyIndexFilesManager::deserialize()
 
 void TantivyIndexFilesManager::removeTantivyIndexCacheDirectory()
 {
-    TantivyIndexFilesManager::removeTantivyIndexInCache(this->getAndLockTantivyIndexCacheDirectory());
+    std::shared_lock<std::shared_mutex> lock(tantivy_index_cache_directory_mutex);
+    TantivyIndexFilesManager::removeTantivyIndexInCache(this->tantivy_index_cache_directory);
 }
 
 
@@ -360,13 +359,12 @@ std::optional<fs::path> TantivyIndexFilesManager::getDataPartFullPathInCache(con
 
         return data_part_full_cache_path;
     }
-    catch (Exception & e)
+    catch (...)
     {
         LOG_ERROR(
             &Poco::Logger::get("FTSIndexFilesManager"),
-            "[remove] Error happend when geting data part full path in cache, rel_data_part: `{}`, exception is {}",
-            relative_data_part_in_cache,
-            e.what());
+            "[remove] Error happend when geting data part full path in cache, rel_data_part: `{}`",
+            relative_data_part_in_cache);
         return std::nullopt;
     }
 }
@@ -380,9 +378,9 @@ void removeDirectoryIfEmpty(const std::shared_ptr<DiskLocal> & disk, const fs::p
             disk->removeRecursive(directory);
         }
     }
-    catch (Exception & e)
+    catch (...)
     {
-        LOG_ERROR(&Poco::Logger::get("FTSIndexFilesManager"), "[removeDirectoryIfEmpty] exception is {}", e.what());
+        LOG_ERROR(&Poco::Logger::get("FTSIndexFilesManager"), "error happened when execute removeDirectoryIfEmpty");
     }
 }
 
@@ -396,9 +394,9 @@ void removeDirectoryDirectly(const std::shared_ptr<DiskLocal> & disk, const fs::
             disk->removeDirectory(directory);
         }
     }
-    catch (Exception & e)
+    catch (...)
     {
-        LOG_ERROR(&Poco::Logger::get("FTSIndexFilesManager"), "[removeDirectoryDirectly] exception is {}", e.what());
+        LOG_ERROR(&Poco::Logger::get("FTSIndexFilesManager"), "error happened when execute removeDirectoryDirectly");
     }
 }
 
@@ -428,13 +426,12 @@ void TantivyIndexFilesManager::removeDataPartInCache(const String & relative_dat
             removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
         }
     }
-    catch (Exception & e)
+    catch (...)
     {
         LOG_ERROR(
             &Poco::Logger::get("FTSIndexFilesManager"),
-            "[remove] Error happend when removing data part in cache, rel_data_part: `{}`, exception is {}",
-            relative_data_part_in_cache,
-            e.what());
+            "[remove] Error happend when removing data part in cache, rel_data_part: `{}`",
+            relative_data_part_in_cache);
     }
 }
 
@@ -468,14 +465,13 @@ void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & relative
             removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
         }
     }
-    catch (Exception & e)
+    catch (...)
     {
         LOG_ERROR(
             &Poco::Logger::get("FTSIndexFilesManager"),
-            "[remove] Error happend when removing FTS index in cache, rel_data_part: `{}`, skp_idx_name: `{}`, exception is {}",
+            "[remove] Error happend when removing FTS index in cache, rel_data_part: `{}`, skp_idx_name: `{}`",
             relative_data_part_in_cache,
-            skp_index_name,
-            e.what());
+            skp_index_name);
     }
 }
 
@@ -535,13 +531,12 @@ void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & tantivy_
         auto table_uuid_prefix_directory_in_cache = table_uuid_directory_in_cache.parent_path();
         removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
     }
-    catch (Exception & e)
+    catch (...)
     {
         LOG_ERROR(
             &Poco::Logger::get("FTSIndexFilesManager"),
-            "[remove] Error happend when removing FTS index in cache `{}`, exception is {}",
-            tantivy_index_cache_directory,
-            e.what());
+            "[remove] Error happend when removing FTS index in cache `{}`",
+            tantivy_index_cache_directory);
     }
 }
 
@@ -564,13 +559,12 @@ void TantivyIndexFilesManager::removeEmptyTableUUIDInCache(const String & relati
             removeDirectoryIfEmpty(disk, table_uuid_prefix_directory_in_cache);
         }
     }
-    catch (Exception & e)
+    catch (...)
     {
         LOG_ERROR(
             &Poco::Logger::get("FTSIndexFilesManager"),
-            "[remove] Error happend when removing empty table UUID cache, rel_data_part: `{}`, exception is {}",
-            relative_data_part_in_cache,
-            e.what());
+            "[remove] Error happend when removing empty table UUID cache, rel_data_part: `{}`",
+            relative_data_part_in_cache);
     }
 }
 
