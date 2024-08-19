@@ -29,6 +29,16 @@ public:
     safe_unordered_map(const safe_unordered_map &) = delete;
     safe_unordered_map & operator=(const safe_unordered_map &) = delete;
 
+    std::optional<Value> get_optional(const Key & key)
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = map_.find(key);
+        if (it != map_.end())
+            return it->second;
+        else
+            return std::nullopt;
+    }
+
     // access
     Value & at(const Key & key)
     {
@@ -160,15 +170,7 @@ public:
     String combineFTSKey(const String & skp_index_name, const String & relative_path);
 
 private:
-    TantivyIndexStorePtr find_from_stores(const String & key, TantivyIndexStores & stores)
-    {
-        auto it = stores.find(key);
-        if (it == stores.end())
-        {
-            return nullptr;
-        }
-        return it->second;
-    }
+    TantivyIndexStorePtr find_from_stores(const String & key, TantivyIndexStores & stores);
 
     void emplace_into_stores(const String & key, TantivyIndexStores & stores, TantivyIndexStorePtr new_store)
     {
@@ -251,6 +253,8 @@ public:
 private:
     Poco::Logger * log = &Poco::Logger::get("FTSIndexStoreFactory");
     FTSSafeCache cache;
+    mutable std::shared_mutex mutex_for_search;
+    mutable std::shared_mutex mutex_for_build;
 
     /// @brief update this->stores and move tantivy index cache directory.
     /// @param data_part_relative_path_before_rename data part before rename.
