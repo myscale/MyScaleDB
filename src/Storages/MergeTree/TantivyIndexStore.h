@@ -80,7 +80,6 @@ public:
     void deserialize();
 
     String getTantivyIndexCacheDirectory();
-    String getAndLockTantivyIndexCacheDirectory();
 
     /// @brief update data part path in cache.
     /// @param target_part_cache_path example: `store/xxx/xxx/all_1_1_0_2`
