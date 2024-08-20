@@ -23,7 +23,7 @@ performance_test0:
     - ls -al artifacts
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "test-performance"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /test-performance/'
 
 performance_test1:
   stage: performance-test
@@ -49,7 +49,7 @@ performance_test1:
     - ls -al artifacts
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "test-performance"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /test-performance/'
 
 .performance_test2:
   stage: performance-test
@@ -75,7 +75,7 @@ performance_test1:
     - ls -al artifacts
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false" && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "test-performance"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /test-performance/'
 
 ########## VECTOR-DB ###########
 vector_db_test:
