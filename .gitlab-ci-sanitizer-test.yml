@@ -25,7 +25,7 @@ stress_test_asan:
     - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 stress_test_tsan:
   stage: sanitizer-test
@@ -52,7 +52,7 @@ stress_test_tsan:
     - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 stress_test_ubsan:
   stage: sanitizer-test
@@ -79,7 +79,7 @@ stress_test_ubsan:
     - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 stress_test_msan:
   stage: sanitizer-test
@@ -106,7 +106,7 @@ stress_test_msan:
     - docker/builder/tools/check_job_states.sh myscale_run_stress
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 vector-test-asan:
   stage: sanitizer-test
@@ -139,7 +139,7 @@ vector-test-asan:
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/myscale_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 # disable TSAN due to #89
 .vector-test-tsan:
@@ -174,7 +174,7 @@ vector-test-asan:
     - if [[ $STATUS == "Timeout" ]]; then cat docker/test/myscale_run_stateless/test_output/check_status.tsv; exit 1; fi
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 # disable MSAN due to #89
 .vector-test-msan:
@@ -206,7 +206,7 @@ vector-test-asan:
     - docker/builder/tools/check_job_states.sh myscale_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 vector-test-ubsan:
   stage: sanitizer-test
@@ -237,7 +237,7 @@ vector-test-ubsan:
     - docker/builder/tools/check_job_states.sh myscale_run_stateless with_sanitizer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 
 fuzzer_test-asan:
   stage: sanitizer-test
@@ -264,7 +264,7 @@ fuzzer_test-asan:
     - docker/builder/tools/check_job_states.sh myscale_run_fuzzer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
 fuzzer_test-ubsan:
   stage: sanitizer-test
   needs:
@@ -290,4 +290,4 @@ fuzzer_test-ubsan:
     - docker/builder/tools/check_job_states.sh myscale_run_fuzzer
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "sanitizer-test"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
