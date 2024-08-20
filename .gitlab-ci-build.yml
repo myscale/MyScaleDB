@@ -78,7 +78,7 @@ build_with_sanitizer_asanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
 build_with_sanitizer_tsanbinary:
   stage: build
@@ -111,7 +111,7 @@ build_with_sanitizer_tsanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
 build_with_sanitizer_ubsanbinary:
   stage: build
@@ -144,7 +144,7 @@ build_with_sanitizer_ubsanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
 build_with_sanitizer_msanbinary:
   stage: build
@@ -178,7 +178,7 @@ build_with_sanitizer_msanbinary:
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "sanitizer-test"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
 build_for_integration_test:
   stage: build
@@ -203,4 +203,4 @@ build_for_integration_test:
     - docker/builder/build.py --output artifacts --arch linux-x86_64
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS =~ "test-integration"
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /test-integration/'
