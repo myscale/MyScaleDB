@@ -18,7 +18,7 @@ integration_test0:
     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 0 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" --runner-image-version 1.8.4 ||:'
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "test-integration"
 
 integration_test1:
   stage: failover-test
@@ -39,7 +39,7 @@ integration_test1:
     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 1 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" --runner-image-version 1.8.4 ||:'
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "test-integration"
 
 integration_test2:
   stage: failover-test
@@ -60,4 +60,4 @@ integration_test2:
     - 'python3 tests/integration/mqdb-ci-runner.py --hash-test --hash-test-total 3 --hash-test-num 2 --exclude-test-list-file tests/integration/exclude_test.list -n 2 "--timeout=300 --log-level=INFO --log-file-level=INFO" --runner-image-version 1.8.4 ||:'
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
-    - if: $CI_MERGE_REQUEST_LABELS == "test-integration"
+    - if: $CI_MERGE_REQUEST_LABELS =~ "test-integration"
