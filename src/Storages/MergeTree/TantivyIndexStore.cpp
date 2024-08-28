@@ -25,6 +25,8 @@
 namespace DB
 {
 
+static constexpr size_t DESERIALIZE_MAX_RETRY_TIMES = 3;
+
 namespace ErrorCodes
 {
     extern const int TANTIVY_INDEX_STORE_INTERNAL_ERROR;
@@ -644,6 +646,22 @@ bool TantivyIndexStore::getTantivyIndexReader()
             LOG_INFO(log, "[getTantivyIndexReader] initializing FTS index reader, FTS index cache directory is {}", index_files_cache_path);
             this->index_files_manager->deserialize();
             FFIBoolResult load_status = ffi_load_index_reader(index_files_cache_path);
+            size_t retry_times = 0;
+            const int base_wait_slots = 50;
+            while (load_status.error.is_error && retry_times < DESERIALIZE_MAX_RETRY_TIMES)
+            {
+                int wait_slots = base_wait_slots * (1 << retry_times);
+                std::this_thread::sleep_for(std::chrono::milliseconds(wait_slots));
+                LOG_ERROR(
+                    log,
+                    "[getTantivyIndexReader] Failed to load FTS index reader, {}, retry {} times.",
+                    std::string(load_status.error.message),
+                    retry_times);
+                this->index_files_manager->removeTantivyIndexCacheDirectory();
+                this->index_files_manager->deserialize();
+                load_status = ffi_load_index_reader(index_files_cache_path);
+                retry_times += 1;
+            }
             if (load_status.error.is_error)
             {
                 throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(load_status.error.message));
