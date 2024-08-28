@@ -7,8 +7,9 @@
 #include <Storages/MergeTree/MergeTreeSource.h>
 #include <Storages/MergeTree/MergeTreeThreadSelectProcessor.h>
 #include <Storages/MergeTree/LoadedMergeTreeDataPartInfoForReader.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <QueryPipeline/Pipe.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <Common/logger_useful.h>
 
@@ -878,7 +879,6 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
     Pipe pipe;
 
-
     if (num_streams > 1)
     {
         Pipes pipes;
@@ -949,8 +949,11 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
         pipe = Pipe(std::move(source));
     }
 
-    QueryPipeline filter_pipeline(std::move(pipe));
-    PullingPipelineExecutor filter_executor(filter_pipeline);
+    QueryPipelineBuilder builder;
+    builder.init(std::move(pipe));
+
+    QueryPipeline filter_pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
+    PullingAsyncPipelineExecutor filter_executor(filter_pipeline);
 
     size_t num_rows = data_part_->rows_count;
 
@@ -960,10 +963,13 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
         OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithHybridSearchProcessor::performPrefilter()::StartPipe");
         while (filter_executor.pull(block))
         {
-            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
-            for (size_t i = 0; i < block.rows(); ++i)
+            if (block)
             {
-                filter->set(col_data[i]);
+                const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+                for (size_t i = 0; i < block.rows(); ++i)
+                {
+                    filter->set(col_data[i]);
+                }
             }
         }
     }
