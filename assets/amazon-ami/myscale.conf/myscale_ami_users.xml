@@ -12,4 +12,17 @@
             <allow_experimental_object_type>true</allow_experimental_object_type>
         </default>
     </profiles>
+    <users>
+        <default>
+            <password></password>
+            <networks>
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+                <ip>0.0.0.0/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
 </clickhouse>

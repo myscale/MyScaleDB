@@ -8,3 +8,4 @@ export VERSION_DESCRIBE=$(grep "SET(VERSION_DESCRIBE" $ck_version_file | sed 's/
 export VERSION_STRING=$(grep "SET(VERSION_STRING" $ck_version_file | sed 's/^.*VERSION_STRING \(.*\)/\1/' | sed 's/[) ].*//')
 export MYSCALE_MAJOR=$(grep "SET(MYSCALE_VERSION_MAJOR" $myscale_version_file | sed 's/^.*MYSCALE_VERSION_MAJOR \(.*\)/\1/' | sed 's/[) ].*//')
 export MYSCALE_MINOR=$(grep "SET(MYSCALE_VERSION_MINOR" $myscale_version_file | sed 's/^.*MYSCALE_VERSION_MINOR \(.*\)/\1/' | sed 's/[) ].*//')
+export MYSCALE_PATCH=$(grep "SET(MYSCALE_VERSION_PATCH" $myscale_version_file | sed 's/^.*MYSCALE_VERSION_PATCH \(.*\)/\1/' | sed 's/[) ].*//')
