@@ -11,6 +11,7 @@ variables {
   ck_version_string = env("VERSION_STRING")
   myscale_version_major = env("MYSCALE_MAJOR")
   myscale_version_minor = env("MYSCALE_MINOR")
+  myscale_version_patch = env("MYSCALE_PATCH")
 }
 
 locals {
@@ -18,7 +19,7 @@ locals {
   package_folder = "${path.root}/package"
   packer_folder = "${path.root}"
   upload_packer_folder = "${path.root}/upload"
-  myscale_version_string = "${var.myscale_version_major}.${var.myscale_version_minor}.0"
+  myscale_version_string = "${var.myscale_version_major}.${var.myscale_version_minor}.${var.myscale_version_patch}"
 }
 source "amazon-ebs" "myscale" {
   ami_name      = "myscale/images/myscaledb-${local.myscale_version_string}-amd64-{{timestamp}}"

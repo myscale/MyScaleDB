@@ -35,7 +35,7 @@ namespace MyscaleLicense
 using namespace DB;
 
 /// Amazon EC2 metadata
-const String AMAZON_MYSCALE_MARKETPLACE_PRODUCT_CODE = "dd4gh8by099sh0lxvok3lhtbk";
+const String AMAZON_MYSCALE_MARKETPLACE_PRODUCT_CODE = "6rxngdcr4m8y00ujmtkixs4p7";
 // const String AMAZON_EC2_METADATA_SERVER_IP = "127.0.0.1:1338";  /// for debug
 const String AMAZON_EC2_METADATA_SERVER_IP = "169.254.169.254";
 const String AMAZON_EC2_DYNAMIC_DATA_URL = "/latest/dynamic/instance-identity/document";
