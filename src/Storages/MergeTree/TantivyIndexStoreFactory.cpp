@@ -3,94 +3,51 @@
 
 namespace DB
 {
-TantivyIndexStorePtr FTSSafeCache::find_from_stores_for_build(const String & key)
+TantivyIndexStorePtr FTSSafeCache::find_from_stores(const String & key)
 {
-    return this->find_from_stores(key, this->stores_for_build);
-}
-
-TantivyIndexStorePtr FTSSafeCache::find_from_stores_for_search(const String & key)
-{
-    return this->find_from_stores(key, this->stores_for_search);
-}
-
-void FTSSafeCache::emplace_stores_for_build(const String & key, TantivyIndexStorePtr new_store)
-{
-    return this->emplace_into_stores(key, this->stores_for_build, new_store);
-}
-
-void FTSSafeCache::emplace_stores_for_search(const String & key, TantivyIndexStorePtr new_store)
-{
-    return this->emplace_into_stores(key, this->stores_for_search, new_store);
-}
-
-size_t FTSSafeCache::erase_keys_for_build(const std::vector<String> & keys)
-{
-    return this->erase_keys(keys, this->stores_for_build);
-}
-
-size_t FTSSafeCache::erase_keys_for_search(const std::vector<String> & keys)
-{
-    return this->erase_keys(keys, this->stores_for_search);
-}
-
-size_t FTSSafeCache::erase_key_for_build(const String & key)
-{
-    return this->erase_key(key, this->stores_for_build);
-}
-
-size_t FTSSafeCache::erase_key_for_search(const String & key)
-{
-    return this->erase_key(key, this->stores_for_search);
-}
-
-size_t FTSSafeCache::erase_key_for_mutate(const String & key)
-{
-    return this->mutate_to_from.erase(key);
-}
-
-void FTSSafeCache::emplace_for_mutate(const String & before_mutate, const String & after_mutate)
-{
-    this->mutate_to_from.emplace(after_mutate, before_mutate);
+    auto result = this->stores.get_optional(key);
+    return result.has_value() ? result.value() : nullptr;
 }
 
 String FTSSafeCache::find_from_mutate(const String & after_mutate)
 {
     auto before_mutate = this->mutate_to_from.get_optional(after_mutate);
-    if (before_mutate.has_value())
-    {
-        return before_mutate.value();
-    }
-    else
-    {
-        return std::string();
-    }
+    return before_mutate.has_value() ? before_mutate.value() : std::string();
 }
 
-TantivyIndexStorePtr FTSSafeCache::find_from_stores(const String & key, TantivyIndexStores & stores)
+void FTSSafeCache::emplace_into_stores(const String & key, TantivyIndexStorePtr new_store)
 {
-    auto result = stores.get_optional(key);
-    if (result.has_value())
-    {
-        return result.value();
-    }
-    else
-    {
-        return nullptr;
-    }
+    this->stores.emplace(key, new_store);
 }
+
+void FTSSafeCache::emplace_into_mutate(const String & before_mutate, const String & after_mutate)
+{
+    this->mutate_to_from.emplace(after_mutate, before_mutate);
+}
+
+size_t FTSSafeCache::erase_store_keys(const std::vector<String> & keys)
+{
+    return this->stores.erase_keys(keys);
+}
+
+size_t FTSSafeCache::erase_store_key(const String & key)
+{
+    return this->stores.erase(key);
+}
+
+size_t FTSSafeCache::erase_mutate_key(const String & key)
+{
+    return this->mutate_to_from.erase(key);
+}
+
 size_t FTSSafeCache::mutate_size()
 {
     return this->mutate_to_from.size();
 }
 
-size_t FTSSafeCache::stores_for_build_size()
+size_t FTSSafeCache::stores_size()
 {
-    return this->stores_for_build.size();
-}
-
-size_t FTSSafeCache::stores_for_search_size()
-{
-    return this->stores_for_search.size();
+    return this->stores.size();
 }
 
 std::pair<String, String> FTSSafeCache::splitFTSKey(const String & key)
@@ -108,6 +65,22 @@ String FTSSafeCache::combineFTSKey(const String & skp_index_name, const String &
     return skp_index_name + ":" + relative_path;
 }
 
+
+String concatenateStrings(const std::vector<String> & strings, const String & delimiter)
+{
+    std::ostringstream oss;
+    std::copy(strings.begin(), strings.end(), std::ostream_iterator<std::string>(oss, delimiter.c_str()));
+
+    std::string result = oss.str();
+    if (!result.empty() && !delimiter.empty())
+    {
+        result.erase(result.length() - delimiter.length());
+    }
+
+    return result;
+}
+
+
 TantivyIndexStoreFactory & TantivyIndexStoreFactory::instance()
 {
     static TantivyIndexStoreFactory instance;
@@ -116,13 +89,13 @@ TantivyIndexStoreFactory & TantivyIndexStoreFactory::instance()
 
 TantivyIndexStorePtr TantivyIndexStoreFactory::getForBuidWithKey(const String & key)
 {
-    return this->cache.find_from_stores_for_build(key);
+    return this->cache.find_from_stores(key);
 }
 
 TantivyIndexStorePtr TantivyIndexStoreFactory::getForBuild(const String & skp_index_name, const DataPartStoragePtr storage)
 {
     String store_key = this->cache.combineFTSKey(skp_index_name, storage->getRelativePath());
-    return this->cache.find_from_stores_for_build(store_key);
+    return this->cache.find_from_stores(store_key);
 }
 
 
@@ -131,29 +104,36 @@ TantivyIndexStorePtr TantivyIndexStoreFactory::getOrLoadForSearch(const String &
     String store_key = this->cache.combineFTSKey(skp_index_name, storage->getRelativePath());
 
     // First check
-    auto res = this->cache.find_from_stores_for_search(store_key);
+    auto res = this->cache.find_from_stores(store_key);
     if (res != nullptr)
+    {
+        LOG_DEBUG(
+            this->log,
+            "[getOrLoadForSearch] store_key: {}, part_rel_path: {}, store_index_path: {}",
+            store_key,
+            storage->getRelativePath(),
+            res->getTantivyIndexCacheDirectory());
         return res;
+    }
 
     std::unique_lock<std::shared_mutex> lock(this->mutex_for_search);
 
     // Second check
-    res = this->cache.find_from_stores_for_search(store_key);
+    res = this->cache.find_from_stores(store_key);
     if (res != nullptr)
         return res;
 
     // Ensure only one thread can generate store object, avoid index files corrupt.
     TantivyIndexStorePtr new_store = std::make_shared<TantivyIndexStore>(skp_index_name, storage);
-    this->cache.emplace_stores_for_search(store_key, new_store);
+    this->cache.emplace_into_stores(store_key, new_store);
     LOG_INFO(
         this->log,
-        "[getOrLoadForSearch] store_key: {}, ref count : {}, load from {}, `stores_for_build` size: {}, "
-        "`stores_for_search` size: {}, `mutate_to_from` size: {}",
+        "[getOrLoadForSearch] store_key: {}, ref count : {}, load from {}, `stores` size: {}, "
+        "`mutate_to_from` size: {}",
         store_key,
         new_store.use_count(),
         storage->getRelativePath(),
-        this->cache.stores_for_build_size(),
-        this->cache.stores_for_search_size(),
+        this->cache.stores_size(),
         this->cache.mutate_size());
     return new_store;
 }
@@ -165,29 +145,35 @@ TantivyIndexStorePtr TantivyIndexStoreFactory::getOrInitForBuild(
     String store_key = this->cache.combineFTSKey(skp_index_name, storage->getRelativePath());
 
     // First check
-    auto res = this->cache.find_from_stores_for_build(store_key);
+    auto res = this->cache.find_from_stores(store_key);
     if (res != nullptr)
+    {
+        LOG_DEBUG(
+            this->log,
+            "[getOrInitForBuild] store_key: {}, part_rel_path: {}, store_index_path: {}",
+            store_key,
+            storage->getRelativePath(),
+            res->getTantivyIndexCacheDirectory());
         return res;
+    }
 
     std::unique_lock<std::shared_mutex> lock(this->mutex_for_build);
 
     // Second check
-    res = this->cache.find_from_stores_for_build(store_key);
+    res = this->cache.find_from_stores(store_key);
     if (res != nullptr)
         return res;
 
     // Ensure only one thread can generate store object, avoid index files corrupt.
     TantivyIndexStorePtr new_store = std::make_shared<TantivyIndexStore>(skp_index_name, storage, storage_builder);
-    this->cache.emplace_stores_for_build(store_key, new_store);
+    this->cache.emplace_into_stores(store_key, new_store);
     LOG_INFO(
         this->log,
-        "[getOrInitForBuild] store_key: {}, ref count is: {}, build from {}, `stores_for_build` size: {}, "
-        "`stores_for_search` size: {}, `mutate_to_from` size: {}",
+        "[getOrInitForBuild] store_key: {}, part_rel_path: {}, `stores` size: {}, "
+        "`mutate_to_from` size: {}",
         store_key,
-        new_store.use_count(),
         storage->getRelativePath(),
-        this->cache.stores_for_build_size(),
-        this->cache.stores_for_search_size(),
+        this->cache.stores_size(),
         this->cache.mutate_size());
     return new_store;
 }
@@ -205,7 +191,7 @@ void TantivyIndexStoreFactory::updateStoresForBuild(
     {
         String index_name = "skp_idx_" + index_names[i];
         String store_key = this->cache.combineFTSKey(index_name, data_part_relative_path_before_rename);
-        auto store_ptr = this->cache.find_from_stores_for_build(store_key);
+        auto store_ptr = this->cache.find_from_stores(store_key);
         if (store_ptr)
         {
             store_ptr->updateCacheDataPartRelativeDirectory(target_part_path_in_tantivy_cache);
@@ -216,19 +202,25 @@ void TantivyIndexStoreFactory::updateStoresForBuild(
         }
     }
 
-    this->cache.erase_keys_for_build(old_keys_to_remove);
-
+    // add new keys with updated stores.
     for (auto & [key, store] : stores_need_append)
     {
-        // TODO: reduce memory usage.
-        // bool status = store->loadTantivyIndexReader();
-        // if (!status)
-        // {
-        //     LOG_WARNING(this->log, "[updateStoresForBuild] FTS reader is not loaded for store key: {}", key);
-        // }
-        this->cache.emplace_stores_for_build(key, store);
-        this->cache.emplace_stores_for_search(key, store);
+        this->cache.emplace_into_stores(key, store);
+        LOG_INFO(
+            this->log,
+            "[updateStoresForBuild] insert updated store into `stores`, key: {}, store_inner_index_path(new): {}, store_size:{}",
+            key,
+            store->getTantivyIndexCacheDirectory(),
+            this->cache.stores_size());
     }
+
+    // erase old keys
+    this->cache.erase_store_keys(old_keys_to_remove);
+    LOG_INFO(
+        this->log,
+        "[updateStoresForBuild] remove old store keys: {}, store_size:{}",
+        concatenateStrings(old_keys_to_remove, ", "),
+        this->cache.stores_size());
 }
 
 
@@ -244,20 +236,28 @@ bool TantivyIndexStoreFactory::updateStoresForMutate(
         String index_name = "skp_idx_" + index_names[i];
         String old_key = this->cache.combineFTSKey(index_name, data_part_relative_path_before_mutate);
         String new_key = this->cache.combineFTSKey(index_name, data_part_relative_path_after_rename);
-        auto old_store_ptr = this->cache.find_from_stores_for_build(old_key);
+        auto old_store_ptr = this->cache.find_from_stores(old_key);
         if (old_store_ptr)
         {
             is_lwd = true;
-            this->cache.emplace_stores_for_build(new_key, old_store_ptr);
-            this->cache.emplace_stores_for_search(new_key, old_store_ptr);
+            this->cache.emplace_into_stores(new_key, old_store_ptr);
         }
+        LOG_INFO(
+            this->log,
+            "[updateStoresForMutate] idx_name:{}, is_lwd: {}, old_key: {}, new_key: {}, store_inner_index_path(old): {}, mutate_size:{}",
+            index_name,
+            is_lwd,
+            old_key,
+            new_key,
+            old_store_ptr == nullptr ? "" : old_store_ptr->getTantivyIndexCacheDirectory(),
+            this->cache.mutate_size());
     }
     return is_lwd;
 }
 
 void TantivyIndexStoreFactory::mutate(const String & source_part_relative_path, const String & target_part_relative_path)
 {
-    this->cache.emplace_for_mutate(source_part_relative_path, target_part_relative_path);
+    this->cache.emplace_into_mutate(source_part_relative_path, target_part_relative_path);
     LOG_INFO(
         this->log,
         "[mutate] from `{} to `{}`, `mutate_to_from` size: {}",
@@ -296,17 +296,16 @@ void TantivyIndexStoreFactory::renamePart(
                 index_names);
         }
         // Remove mutate operation from `mutate_to_from` record.
-        this->cache.erase_key_for_mutate(data_part_relative_path_before_rename);
+        this->cache.erase_mutate_key(data_part_relative_path_before_rename);
 
         LOG_INFO(
             this->log,
-            "[renamePart] after mutate(lwd:{}), before_rename {}, after_rename {}, `stores_for_build` size: {}, `stores_for_search` size: "
-            "{}, `mutate_to_from` size: {}",
+            "[renamePart] after mutate(lwd:{}), before_rename {}, after_rename {}, `stores` size: {}, "
+            "`mutate_to_from` size: {}",
             is_lwd,
             is_lwd ? data_part_relative_path_before_mutate : data_part_relative_path_before_rename,
             data_part_relative_path_after_rename,
-            this->cache.stores_for_build_size(),
-            this->cache.stores_for_search_size(),
+            this->cache.stores_size(),
             this->cache.mutate_size());
     }
     else
@@ -322,12 +321,11 @@ void TantivyIndexStoreFactory::renamePart(
 
         LOG_INFO(
             this->log,
-            "[renamePart] after insert/merge/xxx, before_rename {}, after_rename {}, `stores_for_build` size: {}, `stores_for_search` "
-            "size: {}, `mutate_to_from` size: {}",
+            "[renamePart] after insert/merge/xxx, before_rename {}, after_rename {}, `stores` size: {}, "
+            "`mutate_to_from` size: {}",
             data_part_relative_path_before_rename,
             data_part_relative_path_after_rename,
-            this->cache.stores_for_build_size(),
-            this->cache.stores_for_search_size(),
+            this->cache.stores_size(),
             this->cache.mutate_size());
     }
 }
@@ -340,10 +338,8 @@ void TantivyIndexStoreFactory::dropIndex(const String & skp_index_name, const Da
         fs::path data_part_relative_path = fs::path(storage->getRelativePath());
         String store_key = this->cache.combineFTSKey(skp_index_name, data_part_relative_path);
 
-        this->cache.erase_key_for_build(store_key);
-        this->cache.erase_key_for_search(store_key);
+        this->cache.erase_store_key(store_key);
         TantivyIndexFilesManager::removeTantivyIndexInCache(data_part_relative_path, skp_index_name);
-
         TantivyIndexFilesManager::removeEmptyTableUUIDInCache(data_part_relative_path);
     }
     catch (Exception & e)
@@ -365,19 +361,16 @@ size_t TantivyIndexStoreFactory::remove(const String & data_part_relative_path, 
     {
         removed_keys.push_back(this->cache.combineFTSKey("skp_idx_" + index_names[i], data_part_relative_path));
     }
-    // try remove from `stores_for_build`
-    size_t erased_build = this->cache.erase_keys_for_build(removed_keys);
-    // try remove from `stores_for_search`
-    size_t erased_search = this->cache.erase_keys_for_search(removed_keys);
+
+    size_t erased_size = this->cache.erase_store_keys(removed_keys);
 
     LOG_INFO(
         this->log,
-        "[remove] part relative path `{}`, `stores_for_build` size: {}, `stores_for_search` size: {}, `mutate_to_from` size: {}",
+        "[remove] part relative path `{}`, `stores` size: {}, `mutate_to_from` size: {}",
         data_part_relative_path,
-        this->cache.stores_for_build_size(),
-        this->cache.stores_for_search_size(),
+        this->cache.stores_size(),
         this->cache.mutate_size());
-    return erased_build > erased_search ? erased_build : erased_search;
+    return erased_size;
 }
 
 
