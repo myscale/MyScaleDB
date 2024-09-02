@@ -2045,6 +2045,11 @@ void IMergeTreeDataPart::remove()
     if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
     {
         auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+        LOG_INFO(
+            storage.log,
+            "try remove part {}, part_rel_path: {}, will update FTS store map",
+            getNameWithState(),
+            getDataPartStoragePtr()->getRelativePath());
         size_t removed = TantivyIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath(), index_names);
         if (removed == 0)
             TantivyIndexFilesManager::removeDataPartInCache(getDataPartStoragePtr()->getRelativePath());

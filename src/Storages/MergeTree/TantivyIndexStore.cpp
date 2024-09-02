@@ -83,7 +83,8 @@ void TantivyIndexFilesManager::initTantivyIndexCacheDirectory()
         // initialize cache directory
         std::unique_lock<std::shared_mutex> lock(this->tantivy_index_cache_directory_mutex);
         this->tantivy_index_cache_directory = cache_prefix / storage_relative_parent_path / part_name / this->skp_index_name / "";
-        LOG_DEBUG(this->log, "init FTS index cache directory: {}", this->tantivy_index_cache_directory);
+        LOG_INFO(
+            this->log, "init FTS index cache directory: {} for part {}", this->tantivy_index_cache_directory, storage->getRelativePath());
     }
     else
     {
@@ -608,6 +609,11 @@ void TantivyIndexStore::removeTantivyIndexCache()
 ChecksumPairs TantivyIndexStore::serialize()
 {
     return this->index_files_manager->serialize();
+}
+
+String TantivyIndexStore::getTantivyIndexCacheDirectory()
+{
+    return this->index_files_manager->getTantivyIndexCacheDirectory();
 }
 
 String TantivyIndexStore::updateCacheDataPartRelativeDirectory(const String & target_part_cache_path)
