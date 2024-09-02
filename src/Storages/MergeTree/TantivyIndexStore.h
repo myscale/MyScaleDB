@@ -139,6 +139,7 @@ public:
 
     ChecksumPairs serialize();
     String updateCacheDataPartRelativeDirectory(const String & target_part_cache_path);
+    String getTantivyIndexCacheDirectory();
 
     mutable std::mutex mutex_of_delete_bitmap;
 
