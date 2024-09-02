@@ -89,6 +89,17 @@ public:
         return map_.erase(key);
     }
 
+    size_t erase_keys(const std::vector<Key> & keys)
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        size_t count = 0;
+        for (const auto & key : keys)
+        {
+            count += map_.erase(key);
+        }
+        return count;
+    }
+
     // metrics
     bool empty() const
     {
@@ -148,49 +159,26 @@ using IndexNames = safe_unordered_map<String, safe_unordered_map<String, size_t>
 class FTSSafeCache
 {
 public:
-    TantivyIndexStorePtr find_from_stores_for_build(const String & key);
-    TantivyIndexStorePtr find_from_stores_for_search(const String & key);
+    TantivyIndexStorePtr find_from_stores(const String & key);
     String find_from_mutate(const String & after_mutate);
 
-    void emplace_stores_for_build(const String & key, TantivyIndexStorePtr new_store);
-    void emplace_stores_for_search(const String & key, TantivyIndexStorePtr new_store);
-    void emplace_for_mutate(const String & before_mutate, const String & after_mutate);
+    void emplace_into_stores(const String & key, TantivyIndexStorePtr new_store);
+    void emplace_into_mutate(const String & before_mutate, const String & after_mutate);
 
-    size_t erase_keys_for_build(const std::vector<String> & keys);
-    size_t erase_keys_for_search(const std::vector<String> & keys);
-    size_t erase_key_for_build(const String & key);
-    size_t erase_key_for_search(const String & key);
-    size_t erase_key_for_mutate(const String & key);
+    size_t erase_store_keys(const std::vector<String> & keys);
+    size_t erase_store_key(const String & key);
+    size_t erase_mutate_key(const String & key);
 
     size_t mutate_size();
-    size_t stores_for_build_size();
-    size_t stores_for_search_size();
+    size_t stores_size();
 
     std::pair<String, String> splitFTSKey(const String & key);
     String combineFTSKey(const String & skp_index_name, const String & relative_path);
 
 private:
-    TantivyIndexStorePtr find_from_stores(const String & key, TantivyIndexStores & stores);
-
-    void emplace_into_stores(const String & key, TantivyIndexStores & stores, TantivyIndexStorePtr new_store)
-    {
-        stores.emplace(key, new_store);
-    }
-
-    size_t erase_keys(const std::vector<String> & keys, TantivyIndexStores & stores)
-    {
-        size_t erased = 0;
-        for (const auto & key : keys)
-        {
-            erased += stores.erase(key);
-        }
-        return erased;
-    }
-    size_t erase_key(const String & key, TantivyIndexStores & stores) { return stores.erase(key); }
     // size_t default zero.
     safe_unordered_map<String, String> mutate_to_from;
-    TantivyIndexStores stores_for_build;
-    TantivyIndexStores stores_for_search;
+    TantivyIndexStores stores;
 };
 
 
