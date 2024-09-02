@@ -2,6 +2,30 @@
 
 ## 2024
 
+### [v1.7.1](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.7.1) - 2024-09-02
+
+Features & Improvements
+
+- Improve automated release scripts.
+ [#476](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/476) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Fix CI for label detection.
+ [#481](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/481) ([Qin Liu](https://git.moqi.ai/qliu)).
+- Implement parallel reading in `performPrefilter()`.
+ [#484](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/484) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- Update AMI product code.
+ [#485](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/485) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Optimize filter search for large datasets.
+ [#478](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/478) ([Qin Liu](https://git.moqi.ai/qliu)).
+
+Fixs
+
+- Resolve the "failed to load Tantivy index file" error when deleting parts.
+ [#486](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/486) ([Mochi Xu](https://git.moqi.ai/mochix)).
+- Correct distance results for Cosine distance in two-stage vector search.
+ [#482](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/482) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Resolve the tantivy index loading error.
+ [#483](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/483) ([Mochi Xu](https://git.moqi.ai/mochix)).
+
 ### [v1.7.0](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.7.0) - 2024-08-19
 
 Features & Improvements
