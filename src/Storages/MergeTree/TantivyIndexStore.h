@@ -139,6 +139,7 @@ public:
 
     ChecksumPairs serialize();
     String updateCacheDataPartRelativeDirectory(const String & target_part_cache_path);
+    String getTantivyIndexCacheDirectory();
 
     mutable std::mutex mutex_of_delete_bitmap;
 
@@ -155,6 +156,7 @@ public:
     bool indexMultiColumnDoc(uint64_t row_id, std::vector<String> & column_names, std::vector<String> & docs);
     bool finalizeTantivyIndex();
     void removeTantivyIndexCache();
+    bool loadTantivyIndexReader();
 
     /// For Skip Index Query.
     rust::cxxbridge1::Vec<std::uint8_t> singleTermQueryBitmap(String column_name, String term);
@@ -172,7 +174,7 @@ public:
     /// Get current part total_num_docs, each column will have same total_num_docs.
     UInt64 getTotalNumDocs();
     /// Get current part total_num_tokens, each column will have it's own total_num_tokens.
-    UInt64 getTotalNumTokens();
+    rust::cxxbridge1::Vec<FieldTokenNums> getTotalNumTokens();
     /// Get the number of documents stored in the index file.
     UInt64 getIndexedDocsNum();
 

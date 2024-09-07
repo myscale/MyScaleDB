@@ -290,7 +290,8 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
             }
             // clean stores
             // TODO needs refine TantivyIndexStoreFactory, the remove func is only for data part relative path.
-            TantivyIndexStoreFactory::instance().remove(table_relative_path);
+            auto index_names = res->getInMemoryMetadataPtr()->getSecondaryIndices().getAllRegisteredNames();
+            TantivyIndexStoreFactory::instance().remove(table_relative_path, index_names);
         }
     }
 #endif

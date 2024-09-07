@@ -13,7 +13,6 @@
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeWhereOptimizer.h>
-#include <VectorIndex/Utils/CommonUtils.h>
 #include <base/map.h>
 #include <Common/typeid_cast.h>
 
@@ -64,8 +63,8 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().move_all_conditions_to_prewhere;
     where_optimizer_context.is_final = select.final();
 
-    /// Move as much as possible where conditions to prewhere for vector search
-    if (!where_optimizer_context.move_all_conditions_to_prewhere && select_query_info.syntax_analyzer_result && !select_query_info.syntax_analyzer_result->hybrid_search_funcs.empty())
+    /// Move as much as possible where conditions to prewhere for vector / text / hybrid search function or full_text_search table function
+    if (!where_optimizer_context.move_all_conditions_to_prewhere && select_query_info.has_hybrid_search)
         where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
@@ -130,6 +129,14 @@ static void collectColumns(const RPNBuilderTreeNode & node, const NameSet & colu
     }
 
     auto function_node = node.toFunctionNode();
+
+    /// Get function name for text / vector / hybrid search
+    if (isHybridSearchFunc(function_node.getFunctionName()))
+    {
+        has_invalid_column = true;
+        return;
+    }
+
     size_t arguments_size = function_node.getArgumentsSize();
     for (size_t i = 0; i < arguments_size; ++i)
     {
@@ -221,39 +228,6 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
 
         cond.columns_size = getColumnsSize(cond.table_columns);
 
-        auto containHybridSearchFunc = [&]()
-        {
-            if (function_node_optional.has_value() && function_node_optional->getASTNode()
-                && function_node_optional->getASTNode()->as<ASTFunction>())
-            {
-                auto func = function_node_optional->getASTNode()->as<ASTFunction>();
-                if (!func->arguments->children.empty())
-                {
-                    for (auto & argu : func->arguments->children)
-                    {
-                        if (isHybridSearchFunc(argu->getColumnName()))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        };
-
-//        bool require_distance_func = false;
-//        for (const auto & col : queried_columns)
-//        {
-//            LOG_DEBUG(log, "Queried column: {}", col);
-//            if (isVectorScanFunc(col))
-//            {
-//                require_distance_func = true;
-//                break;
-//            }
-//        }
-
-        LOG_DEBUG(log, "containHybridSearchFunc(cond.node): {}", containHybridSearchFunc());
-
         cond.viable =
             !has_invalid_column &&
             /// Condition depend on some column. Constant expressions are not moved.
@@ -265,8 +239,7 @@ void MergeTreeWhereOptimizer::analyzeImpl(Conditions & res, const RPNBuilderTree
             /// Some identifiers can unable to support PREWHERE (usually because of different types in Merge engine)
             && columnsSupportPrewhere(cond.table_columns)
             /// Do not move conditions involving all queried columns.
-            && cond.table_columns.size() < queried_columns.size()
-            && !containHybridSearchFunc();
+            && cond.table_columns.size() < queried_columns.size();
 
         if (cond.viable)
             cond.good = isConditionGood(node, table_columns);

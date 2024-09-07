@@ -40,6 +40,7 @@
 #    include <Storages/MergeTree/TantivyIndexStore.h>
 #    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #    include <VectorIndex/Common/BM25InfoInDataParts.h>
+#    include <VectorIndex/Utils/CommonUtils.h>
 #endif
 
 namespace ProfileEvents
@@ -108,14 +109,17 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     String index_name;
     String db_table_name;
 
+    /// Support multiple text columns in table function
+    bool from_table_function = text_search_info->from_table_func;
+
     if (!data.getStorageID().database_name.empty())
         db_table_name = data.getStorageID().database_name + ".";
     db_table_name += data.getStorageID().table_name;
 
     for (const auto & index_desc : metadata_for_reading->getSecondaryIndices())
     {
-        if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 &&
-            index_desc.column_names[0] == search_column_name)
+        if (index_desc.type == TANTIVY_INDEX_NAME && ((from_table_function && index_desc.name == text_search_info->index_name)
+            || (!from_table_function && index_desc.column_names.size() == 1 && index_desc.column_names[0] == search_column_name)))
         {
             index_name = index_desc.name;
             tantivy_index_file_name = INDEX_FILE_PREFIX + index_desc.name;
@@ -126,7 +130,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     if (tantivy_index_file_name.empty())
         throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
                         "The query was canceled because the table {} lacks a full-text search (FTS) index. "
-                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
+                        "Please create a FTS index before running TextSearch() or HybridSearch() or full_text_search()", db_table_name);
 
     parts_with_bm25_info.resize(prepared_parts.size());
 
@@ -146,7 +150,13 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
                             "If you have already run this command, please wait for it to finish.",
                             index_name, part->name, db_table_name, suggestion_index_log);
         }
-        auto tantivy_store = TantivyIndexStoreFactory::instance().getOrLoad(tantivy_index_file_name, part->getDataPartStoragePtr());
+        LOG_DEBUG(
+            this->log,
+            "[getStatisticForTextSearch] part_rel_path: {}, part_status: {}",
+            part->getDataPartStoragePtr()->getRelativePath(),
+            part->getNameWithState());
+        auto tantivy_store
+            = TantivyIndexStoreFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
 
         if (tantivy_store)
         {
@@ -192,7 +202,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
 
     /// Sum the bm25 info from all parts
     bm25_stats_in_table.total_num_docs = parts_with_bm25_info.getTotalDocsCountAllParts();
-    bm25_stats_in_table.total_num_tokens = parts_with_bm25_info.getTotalNumTokensAllParts();
+    bm25_stats_in_table.total_num_tokens = parts_with_bm25_info.getTextColsTotalNumTokensAllParts();
     bm25_stats_in_table.docs_freq = parts_with_bm25_info.getTermWithDocNumsAllParts();
 
     return;
@@ -239,8 +249,36 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::initializePipeline()");
 #if USE_TANTIVY_SEARCH
     OpenTelemetry::SpanHolder span_text_stats("ReadWithHybridSearch getStatisticForTextSearch()");
-    /// Collect additional stastics info for bm25 when parts > 1
-    if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
+
+    /// As for Distributd table, the statistic info is already collected in the sclalar block
+    if (getContext()->hasScalar("_fts_statistic_info"))
+    {
+        Block block = getContext()->getScalar("_fts_statistic_info");
+        if (block.rows() != 1)
+            throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Got the wrong Fts statistics info for Distributed BM25 calculation");
+
+        UInt64 total_docs = 0;
+        std::map<UInt32, UInt64> total_tokens_map;
+        std::map<std::pair<UInt32, String>, UInt64> terms_freq_map;
+
+        parseBM25StaisiticsInfo(block, 0, total_docs, total_tokens_map, terms_freq_map);
+
+        bm25_stats_in_table.total_num_docs = total_docs;
+
+        bm25_stats_in_table.total_num_tokens.reserve(total_tokens_map.size());
+        for (const auto & [field_id, total_tokens] : total_tokens_map)
+        {
+            bm25_stats_in_table.total_num_tokens.push_back({field_id, total_tokens});
+        }
+
+        bm25_stats_in_table.docs_freq.reserve(terms_freq_map.size());
+        for (const auto & [field_and_term, doc_freq] : terms_freq_map)
+        {
+            bm25_stats_in_table.docs_freq.push_back({field_and_term.second, field_and_term.first, doc_freq});
+        }
+    }
+    /// As for non-Distributd table, collect additional stastics info for bm25 when parts > 1
+    else if (prepared_parts.size() > 1 && (query_info.text_search_info || query_info.hybrid_search_info))
         getStatisticForTextSearch();
 #endif
 
@@ -578,14 +616,15 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
 void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result, size_t num_streams) const
 {
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::performFinal()");
-    /// A map with part name and all labels in top-k results in this part
-    std::map<String, std::set<UInt64>> part_labels_map;
-
     const auto & settings = context->getSettingsRef();
 
     /// Construct a local RangesInDataParts based on top k search results
     RangesInDataParts parts_for_final_ranges;
     parts_for_final_ranges.resize(parts_with_vector_text_result.size());
+
+    /// Save all labels in top-k results of one part
+    std::vector<std::pair<String, std::set<UInt64>>> vec_original_labels_in_parts;
+    vec_original_labels_in_parts.resize(parts_with_vector_text_result.size());
 
     auto process_part = [&](size_t part_index)
     {
@@ -605,7 +644,7 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
         if (!result_ranges.ranges.empty())
         {
             parts_for_final_ranges[part_index] = std::move(result_ranges);
-            part_labels_map[part_name] = std::move(labels_set);
+            vec_original_labels_in_parts[part_index] = std::make_pair(part_name, std::move(labels_set));
         }
     };
 
@@ -747,9 +786,14 @@ void ReadWithHybridSearch::performFinal(VectorAndTextResultInDataParts & parts_w
             String part_name = part_col[i].get<String>();
             UInt64 label = col_data[i];
 
-            if (part_labels_map.contains(part_name) && part_labels_map[part_name].contains(label))
+            /// Check if the label is from original top-k results in this part
+            for (const auto & [orig_part_name, orig_labels] : vec_original_labels_in_parts)
             {
-                final_part_labels_map[part_name].emplace(label);
+                if (orig_part_name == part_name && orig_labels.contains(label))
+                {
+                    final_part_labels_map[part_name].emplace(label);
+                    break;
+                }
             }
         }
     }
@@ -876,11 +920,11 @@ Pipe ReadWithHybridSearch::readFromParts(
         MergeTreeBaseSearchManagerPtr search_manager = nullptr;
 
         if (query_info.hybrid_search_info)
-            search_manager = std::make_shared<MergeTreeHybridSearchManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeHybridSearchManager>(part_with_hybrid.search_result, query_info.hybrid_search_info);
         else if (query_info.vector_scan_info)
-            search_manager = std::make_shared<MergeTreeVSManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeVSManager>(part_with_hybrid.search_result, query_info.vector_scan_info);
         else if (query_info.text_search_info)
-            search_manager = std::make_shared<MergeTreeTextSearchManager>(part_with_hybrid.search_result);
+            search_manager = std::make_shared<MergeTreeTextSearchManager>(part_with_hybrid.search_result, query_info.text_search_info);
 
         if (!search_manager)
         {

@@ -2524,7 +2524,9 @@ void MergeTreeData::updateTantivyIndexCache()
                     {
                         String skp_idx_name = index_entry.path().filename();
                         DataPartPtr active_data_part = getActiveContainingPart(active_part_name_in_ck);
-                        TantivyIndexStoreFactory::instance().getOrLoad(skp_idx_name, active_data_part->getDataPartStoragePtr());
+                        TantivyIndexStoreFactory::instance().getOrLoadForSearch(skp_idx_name, active_data_part->getDataPartStoragePtr());
+                        TantivyIndexStoreFactory::instance().getOrInitForBuild(
+                            skp_idx_name, active_data_part->getDataPartStoragePtr(), nullptr);
                     }
                 }
                 for (size_t i = 1; i < disk_parts_list.size(); ++i)
@@ -3061,9 +3063,14 @@ void MergeTreeData::dropAllData()
             LOG_INFO(log, "dropAllData: removing table directory recursive to cleanup garbage");
             disk->removeRecursive(relative_data_path);
 #if USE_TANTIVY_SEARCH
-            size_t removed = TantivyIndexStoreFactory::instance().remove(relative_data_path);
-            if (removed == 0)
-                TantivyIndexFilesManager::removeDataPartInCache(relative_data_path);
+            auto metadata = this->getInMemoryMetadataPtr();
+            if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+            {
+                auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+                size_t removed = TantivyIndexStoreFactory::instance().remove(relative_data_path, index_names);
+                if (removed == 0)
+                    TantivyIndexFilesManager::removeDataPartInCache(relative_data_path);
+            }
 #endif
         }
         catch (const fs::filesystem_error & e)
@@ -3961,7 +3968,8 @@ bool MergeTreeData::renameTempPartAndReplaceImpl(
     auto metadata = part->storage.getInMemoryMetadataPtr();
     if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
     {
-        TantivyIndexStoreFactory::instance().renamePart(origin_data_path_relative_path, part->getDataPartStoragePtr());
+        auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+        TantivyIndexStoreFactory::instance().renamePart(origin_data_path_relative_path, part->getDataPartStoragePtr(), index_names);
     }
 #endif
 

@@ -30,4 +30,7 @@ void filterMarkRangesBySearchResult(MergeTreeData::DataPartPtr part, const Setti
 /// if we has labels from precompute search result, use it to filter mark ranges
 void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & settings, const std::set<UInt64> labels, MarkRanges & mark_ranges);
 
+/// get topk from limit clause
+UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch = false);
+
 }

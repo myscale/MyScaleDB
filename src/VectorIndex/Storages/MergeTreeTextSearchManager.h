@@ -41,13 +41,13 @@ class MergeTreeTextSearchManager : public MergeTreeBaseSearchManager
 public:
     MergeTreeTextSearchManager(
         StorageMetadataPtr metadata_, TextSearchInfoPtr text_search_info_, ContextPtr context_)
-        : MergeTreeBaseSearchManager{metadata_, context_}
+        : MergeTreeBaseSearchManager{metadata_, context_, text_search_info_ ? text_search_info_->function_column_name : ""}
         , text_search_info(text_search_info_)
     {
     }
 
-    MergeTreeTextSearchManager(TextSearchResultPtr text_search_result_)
-        : MergeTreeBaseSearchManager{nullptr, nullptr}
+    MergeTreeTextSearchManager(TextSearchResultPtr text_search_result_, TextSearchInfoPtr text_search_info_)
+        : MergeTreeBaseSearchManager{nullptr, nullptr, text_search_info_ ? text_search_info_->function_column_name : ""}
         ,text_search_result(text_search_result_)
     {
         if (text_search_result && text_search_result->computed)

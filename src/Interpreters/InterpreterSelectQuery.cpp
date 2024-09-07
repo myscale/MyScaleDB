@@ -101,6 +101,9 @@
 #include "config_version.h"
 #include <Interpreters/Context.h>
 
+#if USE_TANTIVY_SEARCH
+#    include <VectorIndex/Utils/CommonUtils.h>
+#endif
 
 namespace DB
 {
@@ -641,6 +644,21 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 current_info.query = query_ptr;
                 current_info.syntax_analyzer_result = syntax_analyzer_result;
 
+                /// Support full text search table function
+                NameSet table_columns;
+                bool from_table_function = false;
+                if (storage->getName() == "FullTextSearch")
+                {
+                    from_table_function = true;
+                    table_columns = {collections::map<std::unordered_set>(
+                                    metadata_snapshot->getColumns().getAllPhysical(), [](const NameAndTypePair & col) { return col.name; })};
+                    table_columns.erase(SCORE_COLUMN_NAME);
+
+                    current_info.has_hybrid_search = true;
+                }
+                else if (syntax_analyzer_result && !syntax_analyzer_result->hybrid_search_funcs.empty())
+                    current_info.has_hybrid_search = true;
+
                 Names queried_columns = syntax_analyzer_result->requiredSourceColumns();
                 const auto & supported_prewhere_columns = storage->supportedPrewhereColumns();
 
@@ -648,7 +666,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                     std::move(column_compressed_sizes),
                     metadata_snapshot,
                     queried_columns,
-                    supported_prewhere_columns,
+                    from_table_function ? table_columns : supported_prewhere_columns,
                     log};
 
                 where_optimizer.optimize(current_info, context);
@@ -761,6 +779,23 @@ InterpreterSelectQuery::InterpreterSelectQuery(
     };
 
     analyze(shouldMoveToPrewhere());
+
+#if USE_TANTIVY_SEARCH
+    if (!options.only_analyze && storage && query_analyzer->getAnalyzedData().text_search_info && context->getSettingsRef().dfs_query_then_fetch)
+    {
+        /// Collect global statistics information of all shards used in BM25 calculation when text search is distributed
+        if (auto distributed_storage = std::dynamic_pointer_cast<StorageDistributed>(storage))
+        {
+            collectStatisticForBM25Calculation(
+                context,
+                distributed_storage->getClusterName(),
+                distributed_storage->getRemoteDatabaseName(),
+                distributed_storage->getRemoteTableName(),
+                query_analyzer->getAnalyzedData().text_search_info->text_column_name,
+                query_analyzer->getAnalyzedData().text_search_info->query_text);
+        }
+    }
+#endif
 
     bool need_analyze_again = false;
     bool can_analyze_again = false;
