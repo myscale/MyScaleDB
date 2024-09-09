@@ -80,7 +80,7 @@ The simplest way to use MyScaleDB is to create an instance on MyScale Cloud serv
 To quickly get a MyScaleDB instance up and running, simply pull and run the latest Docker image:
 
 ```bash
-docker run --name myscaledb --net=host myscale/myscaledb:1.6.4
+docker run --name myscaledb --net=host myscale/myscaledb:1.7.1
 ```
 
 >Note: Myscale's default configuration only allows localhost ip access. For the docker run startup method, you need to specify `--net=host` to access services deployed in docker mode on the current node.
@@ -114,7 +114,7 @@ version: '3.7'
 
 services:
   myscaledb:
-    image: myscale/myscaledb:1.6.4
+    image: myscale/myscaledb:1.7.1
     tty: true
     ports:
       - '8123:8123'
