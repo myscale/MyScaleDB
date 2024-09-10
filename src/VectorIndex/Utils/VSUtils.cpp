@@ -14,6 +14,8 @@
  */
 
 #include <pdqsort.h>
+#include <Interpreters/convertFieldToType.h>
+#include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <VectorIndex/Utils/VSUtils.h>
@@ -198,6 +200,64 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
     }
 
     mark_ranges = res;
+}
+
+UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch)
+{
+    UInt64 topk = 0;
+
+    if (!select_query)
+        return topk;
+
+    /// topk for search is sum of length and offset in limit
+    UInt64 length = 0, offset = 0;
+    ASTPtr length_ast = nullptr;
+    ASTPtr offset_ast = nullptr;
+
+    if (is_batch)
+    {
+        /// LIMIT m OFFSET n BY expressions
+        length_ast = select_query->limitByLength();
+        offset_ast = select_query->limitByOffset();
+    }
+    else
+    {
+        /// LIMIT m OFFSET n
+        length_ast = select_query->limitLength();
+        offset_ast = select_query->limitOffset();
+    }
+
+    if (length_ast)
+    {
+        const auto & [field, type] = evaluateConstantExpression(length_ast, context);
+
+        if (isNativeNumber(type))
+        {
+            Field converted = convertFieldToType(field, DataTypeUInt64());
+            if (!converted.isNull())
+                length = converted.safeGet<UInt64>();
+        }
+    }
+
+    if (offset_ast)
+    {
+        const auto & [field, type] = evaluateConstantExpression(offset_ast, context);
+
+        if (isNativeNumber(type))
+        {
+            Field converted = convertFieldToType(field, DataTypeUInt64());
+            if (!converted.isNull())
+                offset = converted.safeGet<UInt64>();
+        }
+    }
+
+    topk = length + offset;
+
+    /// Check when offset n is provided
+    if (offset > 0 && topk > context->getSettingsRef().max_search_result_window)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Sum of m and n in limit ({}) should not exceed `max_search_result_window`({})", topk, context->getSettingsRef().max_search_result_window);
+
+    return topk;
 }
 
 }

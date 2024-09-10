@@ -116,8 +116,9 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
         LOG_DEBUG(log, "Use Relative Score Fusion");
         /// Get fusion weight, assume fusion_weight is handled by ExpressionAnalyzer
         float weight = hybrid_info->fusion_weight;
-        auto vec_index_metric = hybrid_info->metric_type;
-        RelativeScoreFusion(part_index_labels_with_fusion_score, vec_scan_result_with_part_index, text_search_result_with_part_index, weight, vec_index_metric, log);
+        /// Use direction in vector scan info
+        int vec_scan_direction = hybrid_info->vector_scan_info ? hybrid_info->vector_scan_info->vector_scan_descs[0].direction : 1;
+        RelativeScoreFusion(part_index_labels_with_fusion_score, vec_scan_result_with_part_index, text_search_result_with_part_index, weight, vec_scan_direction, log);
     }
     else
     {
@@ -160,7 +161,7 @@ void MergeTreeHybridSearchManager::RelativeScoreFusion(
     const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
     const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
     const float weight_of_text,
-    const Search::Metric vector_index_metric,
+    const int vector_scan_direction,
     Poco::Logger * log)
 {
     /// min-max normalization on text search score
@@ -198,15 +199,11 @@ void MergeTreeHybridSearchManager::RelativeScoreFusion(
 
         Float32 fusion_score = 0;
 
-        if (vector_index_metric == Search::Metric::IP)
+        /// 1 - ascending, -1 - descending
+        if (vector_scan_direction == -1)
             fusion_score = norm_score[idx] * (1 - weight_of_text);
-        else if (vector_index_metric == Search::Metric::L2 || vector_index_metric == Search::Metric::Cosine
-            || vector_index_metric == Search::Metric::Hamming || vector_index_metric == Search::Metric::Jaccard)
-            fusion_score = (1 - weight_of_text) * (1 - norm_score[idx]);
         else
-        {
-            throw DB::Exception(DB::ErrorCodes::NOT_IMPLEMENTED, "Not implement metric type {} for hybrid search", vector_index_metric);
-        }
+            fusion_score = (1 - weight_of_text) * (1 - norm_score[idx]);
 
         /// Insert or update score for label_id
         part_index_labels_with_convex_score[part_index_label_id] += fusion_score;

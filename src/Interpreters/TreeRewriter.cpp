@@ -26,7 +26,6 @@
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
 #include <Interpreters/TreeOptimizer.h>
 #include <Interpreters/TreeRewriter.h>
-#include <Interpreters/convertFieldToType.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/getTableExpressions.h>
 #include <Interpreters/replaceAliasColumnsInQuery.h>
@@ -74,6 +73,7 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
+#include <VectorIndex/Utils/VSUtils.h>
 
 #include <Parsers/formatAST.h>
 
@@ -958,85 +958,98 @@ void getHybridSearchFunctions(
     }
 }
 
-void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList & source_columns)
+void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList & source_columns, ASTSelectQuery * select_query = nullptr)
 {
-    if (source_columns.contains(func_col_name)) /* consider second analysis round */
-        return;
-
-    /// Spencial handle for batch distance
-    if (isBatchDistance(func_col_name))
+    if (!source_columns.contains(func_col_name)) /* consider second analysis round */
     {
-        auto id_type = std::make_shared<DataTypeUInt32>();
-        auto distance_type = std::make_shared<DataTypeFloat32>();
-        DataTypes types;
-        types.emplace_back(id_type);
-        types.emplace_back(distance_type);
-        auto type = std::make_shared<DataTypeTuple>(types);
-        NameAndTypePair new_name_pair(func_col_name, type);
-        source_columns.push_back(new_name_pair);
+        /// Spencial handle for batch distance
+        if (isBatchDistance(func_col_name))
+        {
+            auto id_type = std::make_shared<DataTypeUInt32>();
+            auto distance_type = std::make_shared<DataTypeFloat32>();
+            DataTypes types;
+            types.emplace_back(id_type);
+            types.emplace_back(distance_type);
+            auto type = std::make_shared<DataTypeTuple>(types);
+            NameAndTypePair new_name_pair(func_col_name, type);
+            source_columns.push_back(new_name_pair);
+        }
+        else
+        {
+            NameAndTypePair new_name_pair(func_col_name, std::make_shared<DataTypeFloat32>());
+            source_columns.push_back(new_name_pair);
+        }
     }
-    else
+
+    /// Add search func name to select clauses if not exists
+    if (select_query)
     {
-        NameAndTypePair new_name_pair(func_col_name, std::make_shared<DataTypeFloat32>());
-        source_columns.push_back(new_name_pair);
+        const auto select_expression_list = select_query->select();
+        bool found = false;
+        for (const auto & elem : select_expression_list->children)
+        {
+            String name = elem->getAliasOrColumnName();
+            if (name == func_col_name)
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+            select_expression_list->children.emplace_back(std::make_shared<ASTIdentifier>(func_col_name));
     }
 }
 
-UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch = false)
+void checkOrderBySortDirection(
+    String func_name, ASTSelectQuery * select_query, int & sort_direction, int expected_direction,
+    String metric_type = "", bool is_batch = false)
 {
-    UInt64 topk = 0;
-
     if (!select_query)
-        return topk;
+        return;
 
-    /// topk for search is sum of length and offset in limit
-    UInt64 length = 0, offset = 0;
-    ASTPtr length_ast = nullptr;
-    ASTPtr offset_ast = nullptr;
+    auto order_by = select_query->orderBy();
+    if (!order_by)
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", func_name);
 
-    if (is_batch)
+    /// Find the direction for hybrid search func
+    for (const auto & child : order_by->children)
     {
-        /// LIMIT m OFFSET n BY expressions
-        length_ast = select_query->limitByLength();
-        offset_ast = select_query->limitByOffset();
-    }
-    else
-    {
-        /// LIMIT m OFFSET n
-        length_ast = select_query->limitLength();
-        offset_ast = select_query->limitOffset();
-    }
+        auto * order_by_element = child->as<ASTOrderByElement>();
+        if (!order_by_element || order_by_element->children.empty())
+            continue;
+        ASTPtr order_expression = order_by_element->children.at(0);
 
-    if (length_ast)
-    {
-        const auto & [field, type] = evaluateConstantExpression(length_ast, context);
-
-        if (isNativeNumber(type))
+        if (!is_batch && isHybridSearchFunc(order_expression->getColumnName()))
         {
-            Field converted = convertFieldToType(field, DataTypeUInt64());
-            if (!converted.isNull())
-                length = converted.safeGet<UInt64>();
+            sort_direction = order_by_element->direction;
+            break;
         }
-    }
-
-    if (offset_ast)
-    {
-        const auto & [field, type] = evaluateConstantExpression(offset_ast, context);
-
-        if (isNativeNumber(type))
+        else if (is_batch)
         {
-            Field converted = convertFieldToType(field, DataTypeUInt64());
-            if (!converted.isNull())
-                offset = converted.safeGet<UInt64>();
+            /// order by batch_distance column name's 1 and 2, where 2 is distance column.
+            if (auto * function = order_expression->as<ASTFunction>(); function->name == "tupleElement")
+            {
+                const ASTs & func_arguments = function->arguments->as<ASTExpressionList &>().children;
+                if (func_arguments.size() >= 2 && isBatchDistance(func_arguments[0]->getColumnName()))
+                {
+                    if (func_arguments[1]->getColumnName() == "2")
+                    {
+                        sort_direction = order_by_element->direction;
+                        break;
+                    }
+                }
+            }
         }
+   }
+
+    if (sort_direction != expected_direction)
+    {
+        String vector_scan_error_log = metric_type.empty() ? "" : " when the metric type is " + metric_type;
+        throw Exception(ErrorCodes::SYNTAX_ERROR,
+                "The results returned by the {} function should be ordered by `{}`{}",
+                func_name, expected_direction == 1 ? "ASC" : "DESC", vector_scan_error_log);
     }
-
-    topk = length + offset;
-
-    if (topk > context->getSettingsRef().max_search_result_window)
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Sum of m and n in limit ({}) should not exceed `max_search_result_window`({})", topk, context->getSettingsRef().max_search_result_window);
-
-    return topk;
 }
 
 }
@@ -1365,95 +1378,88 @@ NameSet TreeRewriterResult::getArrayJoinSourceNameSet() const
     return forbidden_columns;
 }
 
-inline String getMetircType(StorageMetadataPtr & metadata_snapshot, Search::DataType & vector_search_type, String & vec_col_name, ContextPtr context)
+inline String getMetricType(StorageMetadataPtr & metadata_snapshot, Search::DataType & vector_search_type, String & vec_col_name, ContextPtr context)
 {
     /// The default value is float_vector_search_metric_type or binary_vector_search_metric_type in MergeTree, but we cannot get it here.
     String metric_type;
-    for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
+
+    if (metadata_snapshot)
     {
-        if (vector_index_desc.column == vec_col_name)
+        /// Try to get from parameters of vector index on search vector column
+        for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
         {
-            const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
-            if (index_parameter.contains("metric_type"))
+            if (vector_index_desc.column == vec_col_name)
             {
-                /// Get metric_type in index definition
-                metric_type = index_parameter.at("metric_type");
-                break;
+                const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
+                if (index_parameter.contains("metric_type"))
+                {
+                    /// Get metric_type in index definition
+                    metric_type = index_parameter.at("metric_type");
+                    break;
+                }
+            }
+        }
+
+        /// Try to get from storage settings in create table
+        if (metric_type.empty() && metadata_snapshot->hasSettingsChanges())
+        {
+            const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+            Field change_metric;
+            /// TODO: Try not to use string literals directly
+            if ((vector_search_type == Search::DataType::FloatVector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
+                (vector_search_type == Search::DataType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
+            {
+                metric_type = change_metric.safeGet<String>();
             }
         }
     }
-    if (metric_type.empty() && metadata_snapshot->hasSettingsChanges())
-    {
-        const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
-        Field change_metric;
-        /// TODO: Try not to use string literals directly
-        if ((vector_search_type == Search::DataType::FloatVector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
-            (vector_search_type == Search::DataType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
-        {
-            metric_type = change_metric.safeGet<String>();
-        }
-    }
+
+    /// Try to get from merge tree settings in context
     if (metric_type.empty())
     {
         const auto settings = context->getMergeTreeSettings();
         if (vector_search_type == Search::DataType::FloatVector)
-        {
             metric_type = settings.float_vector_search_metric_type.toString();
-        }
         else if (vector_search_type == Search::DataType::BinaryVector)
-        {
             metric_type = settings.binary_vector_search_metric_type.toString();
-        }
     }
 
     return metric_type;
 }
 
-void TreeRewriterResult::collectForVectorScanFunctions(
-    ASTSelectQuery * select_query,
+std::optional<NameAndTypePair> TreeRewriterResult::collectSearchColumnType(
+    String & search_col_name,
+    String & func_col_name,
     const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
-    ContextPtr context)
+    ContextPtr context,
+    const ASTPtr search_col_argument,
+    StorageMetadataPtr & metadata_snapshot,
+    bool & table_is_remote)
 {
-    /// distance function exists in main query's select caluse
-    if (search_func_type == HybridSearchFuncType::VECTOR_SCAN && hybrid_search_funcs.size() == 1)
+    std::optional<NameAndTypePair> search_column_type = std::nullopt;
+
+    /// Check if text column exists for hybrid search cases
+    /// metadata_snapshot is initialized by first call for vector column
+    if (metadata_snapshot)
     {
-        /// Get topK from limit N
-        bool is_batch = isBatchDistance(hybrid_search_funcs[0]->getColumnName());
-
-        limit_length = getTopKFromLimit(select_query, context, is_batch);
-
-        if (limit_length == 0)
+        if (tables_with_columns.size() > 1)
         {
-            if (is_batch)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_distance function without LIMIT BY clause");
-            else
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without LIMIT clause");
+            if (auto * identifier = search_col_argument->as<ASTIdentifier>())
+                search_col_name = identifier->shortName();
         }
 
-        /// There is no vector scan function, hence the checks like input paramters are put here.
-        /// Check if vector column in vector scan func exists in left table or right joined table
-        /// Insert distance func columns into source columns here
-        const ASTFunction * node = hybrid_search_funcs[0];
-        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
-
-        if (arguments.size() != 2)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
-
-        String vec_col_name = arguments[0]->getColumnName();
-        String distance_col_name = node->getColumnName();
-        StorageMetadataPtr metadata_snapshot = nullptr;
-        bool table_is_remote = false; /// Mark if the storage with vector column is distributed.
-
-        std::optional<NameAndTypePair> search_column_type = std::nullopt;
-
-        if (storage_snapshot && storage_snapshot->metadata->getColumns().has(vec_col_name))
+        search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(search_col_name);
+    }
+    else
+    {
+        if (storage_snapshot && storage_snapshot->metadata->getColumns().has(search_col_name))
         {
-            /// distance func column name should add to left table's source_columns
+            /// search func column name should add to left table's source_columns
             /// Will be added inside collectUsedColumns() after erase unrequired columns.
             metadata_snapshot = storage_snapshot->metadata;
             table_is_remote = is_remote_storage;
 
-            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vec_col_name);
+            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(search_col_name);
         }
         else if (tables_with_columns.size() > 1)
         {
@@ -1461,24 +1467,24 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             const auto & right_table = tables_with_columns[1];
             String table_name = right_table.table.getQualifiedNamePrefix(false);
 
-            /// Handle cases where left table and right table both have the same vector column.
-            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
-                vec_col_name = identifier->shortName();
+            /// Handle cases where left table and right table both have the same search column.
+            if (auto * identifier = search_col_argument->as<ASTIdentifier>())
+                search_col_name = identifier->shortName();
 
-            if (!right_table.hasColumn(vec_col_name))
+            if (!right_table.hasColumn(search_col_name))
             {
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
+                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", search_col_name, table_name);
             }
 
-            search_column_type = right_table.columns.tryGetByName(vec_col_name);
+            search_column_type = right_table.columns.tryGetByName(search_col_name);
             hybrid_search_from_right_table = true;
 
             /// distance func column name should add to right joined table's source columns
-            addSearchFunctionColumnName(distance_col_name, analyzed_join->columns_from_joined_table);
+            addSearchFunctionColumnName(func_col_name, analyzed_join->columns_from_joined_table);
 
             /// Add distance func column to original_names too
             auto & original_names = analyzed_join->original_names;
-            original_names[distance_col_name] = distance_col_name;
+            original_names[func_col_name] = func_col_name;
 
             /// Get metadata for right table
             auto table_id = context->resolveStorageID(StorageID(right_table.table.database, right_table.table.table, right_table.table.uuid));
@@ -1492,137 +1498,122 @@ void TreeRewriterResult::collectForVectorScanFunctions(
             const auto & left_table = tables_with_columns[0];
             String table_name = left_table.table.getQualifiedNamePrefix(false);
 
-            if (!left_table.hasColumn(vec_col_name))
-            {
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vec_col_name, table_name);
-            }
+            if (!left_table.hasColumn(search_col_name))
+                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", search_col_name, table_name);
 
             /// Unable get metadata for left table, because the table name and UUID are empty.
-            search_column_type = left_table.columns.tryGetByName(vec_col_name);
+            search_column_type = left_table.columns.tryGetByName(search_col_name);
         }
         else
         {
-            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", vec_col_name);
-        }
-
-        /// Check vector column data type
-        if (!search_column_type)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", vec_col_name);
-        vector_search_type = getSearchIndexDataType(search_column_type->type);
-
-        /// When metric_type = IP in definition of vector index, order by must be DESC.
-        /// Skip the check when table is distributed.
-        if (metadata_snapshot && !table_is_remote)
-        {
-            /// 1 for ASC, -1 for DESC
-            direction = 1;
-
-            auto order_by = select_query->orderBy();
-            if (!order_by)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support distance function without ORDER BY clause");
-
-            /// Find the direction for distance func
-            for (const auto & child : order_by->children)
-            {
-                auto * order_by_element = child->as<ASTOrderByElement>();
-                if (!order_by_element || order_by_element->children.empty())
-                    continue;
-                ASTPtr order_expression = order_by_element->children.at(0);
-
-                if (!is_batch && isDistance(order_expression->getColumnName()))
-                {
-                    direction = order_by_element->direction;
-                    break;
-                }
-                else if (is_batch)
-                {
-                    /// order by batch_distance column name's 1 and 2, where 2 is distance column.
-                    if (auto * function = order_expression->as<ASTFunction>(); function->name == "tupleElement")
-                    {
-                        const ASTs & func_arguments = function->arguments->as<ASTExpressionList &>().children;
-                        if (func_arguments.size() >= 2 && isBatchDistance(func_arguments[0]->getColumnName()))
-                        {
-                            if (func_arguments[1]->getColumnName() == "2")
-                            {
-                                direction = order_by_element->direction;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            vector_scan_metric_type = getMetircType(metadata_snapshot, vector_search_type, vec_col_name, context);
-
-            String metric_type = vector_scan_metric_type;
-            Poco::toUpperInPlace(metric_type);
-            if (metric_type == "IP")
-            {
-                if (direction == 1)
-                    throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance DESC' when the metric type is IP");
-            }
-            else if (direction == -1)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance ASC' when the metric type is {}", metric_type);
+            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", search_col_name);
         }
     }
-    /// Interpreter select on the right joined table where vector column exists, insert distance func column name.
-    else if (auto vector_scan_desc = context->getVecScanDescription())
-    {
-        /// Add vector scan func name and type to source columns
-        addSearchFunctionColumnName(vector_scan_desc->column_name, source_columns);
 
-        /// Add vector scan func name to select clauses if not exists
-        const auto select_expression_list = select_query->select();
-        bool found = false;
-        for (const auto & elem : select_expression_list->children)
-        {
-            String name = elem->getAliasOrColumnName();
-            if (name == vector_scan_desc->column_name)
-            {
-                found = true;
-                break;
-            }
-        }
+    if (!search_column_type)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", search_col_name);
 
-        if (!found)
-            select_expression_list->children.emplace_back(std::make_shared<ASTIdentifier>(vector_scan_desc->column_name));
-    }
+    /// Check if table with vector index contains the same column as vector scan function column.
+    if (metadata_snapshot && metadata_snapshot->getColumns().has(func_col_name))
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support search function on table with column name '{}'", func_col_name);
+
+    return search_column_type;
 }
 
-void TreeRewriterResult::collectForTextSearchFunctions(
+void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
     ASTSelectQuery * select_query,
     const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
     ContextPtr context)
 {
-    /// text search function exists in main query's select clause
-    if (search_func_type == HybridSearchFuncType::TEXT_SEARCH && hybrid_search_funcs.size() == 1)
+    /// distance function exists in main query's select caluse
+    if (hybrid_search_funcs.size() == 1)
     {
-        /// Get topK from limit N
-        limit_length = getTopKFromLimit(select_query, context);
+        String function_name;
+        size_t expected_args_size = 0;
+        bool is_batch = false;
+        bool has_vector = false;
+        bool has_text = false;
 
-        if (limit_length == 0)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support TextSearch function without LIMIT clause");
-
-        /// There is no text search function, hence the checks like input paramters are put here.
-        /// Check if text column in text search func exists in left table or right joined table
-        /// Insert text search func columns into source columns here
         const ASTFunction * node = hybrid_search_funcs[0];
+        if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
+        {
+            has_vector = true;
+            expected_args_size = 2;
+            is_batch = isBatchDistance(node->getColumnName());
+
+            function_name = is_batch ? "batch_distance" : "distance";
+        }
+        else if (search_func_type == HybridSearchFuncType::TEXT_SEARCH)
+        {
+            has_text = true;
+            function_name = "TextSearch";
+            expected_args_size = 2;
+        }
+        else if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH)
+        {
+            has_vector = true;
+            has_text = true;
+            function_name = "HybridSearch";
+            expected_args_size = 4;
+        }
+
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
 
-        if (arguments.size() != 2)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in TextSearch function");
+        /// There is no real search function, hence the checks like input paramters are put here.
+        if (arguments.size() != expected_args_size)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in {} function: {}, expected {}", function_name, arguments.size(), expected_args_size);
 
-        String text_col_name = arguments[0]->getColumnName();
-        String function_col_name = node->getColumnName();
-        StorageMetadataPtr metadata_snapshot = nullptr;
-        std::optional<NameAndTypePair> search_column_type = std::nullopt;
-        bool is_mapkeys = false;
+        /// Get topK from limit N
+        limit_length = getTopKFromLimit(select_query, context, is_batch);
 
-        if (const ASTFunction * function = arguments[0]->as<ASTFunction>())
+        if (limit_length == 0)
         {
-            if (function->name == "mapKeys")
+            if (is_batch)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_distance function without LIMIT BY clause");
+            else
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT clause", function_name);
+        }
+
+        String function_col_name = node->getColumnName(); /// column name of search function
+        ASTPtr vector_argument;
+        ASTPtr text_argument;
+
+        /// Use the first argument in search function
+        /// vector column in vector scan and hybrid search, text column in text search
+        if (has_vector)
+        {
+            vector_argument = arguments[0];
+
+            /// hybrid search
+            if (has_text)
+                text_argument = arguments[1];
+        }
+        else
+            text_argument = arguments[0];
+
+        String vector_col_name = vector_argument ? vector_argument->getColumnName() : "";
+        String text_col_name = text_argument ? text_argument->getColumnName() : "";
+
+        StorageMetadataPtr metadata_snapshot = nullptr;
+        bool table_is_remote = false; /// Mark if the storage with search column is distributed.
+
+        if (has_vector)
+        {
+            auto search_vector_column_type = collectSearchColumnType(vector_col_name, function_col_name, tables_with_columns, context,
+                                                vector_argument, metadata_snapshot, table_is_remote);
+
+            vector_search_type = getSearchIndexDataType(search_vector_column_type->type);
+
+            vector_scan_metric_type = getMetricType(metadata_snapshot, vector_search_type, vector_col_name, context);
+        }
+
+        if (has_text)
+        {
+            /// Check mappKeys for text column
+            bool is_mapkeys = false;
+            if (const ASTFunction * function = text_argument->as<ASTFunction>())
             {
-                if (function->arguments)
+                if ((function->name == "mapKeys") && function->arguments)
                 {
                     const auto & function_arguments_list = function->arguments->as<ASTExpressionList>()->children;
                     if (function_arguments_list.size() == 1)
@@ -1632,284 +1623,42 @@ void TreeRewriterResult::collectForTextSearchFunctions(
                     }
                 }
             }
+            auto search_text_column_type = collectSearchColumnType(text_col_name, function_col_name, tables_with_columns, context,
+                                                text_argument, metadata_snapshot, table_is_remote);
+
+            checkTextSearchColumnDataType(search_text_column_type->type, is_mapkeys);
         }
 
-        /// Mark if the storage with text column is distributed.
-        bool table_is_remote = false;
-
-        if (storage_snapshot && storage_snapshot->metadata->getColumns().has(text_col_name))
-        {
-            metadata_snapshot = storage_snapshot->metadata;
-            table_is_remote = is_remote_storage;
-            search_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(text_col_name);
-        }
-        else if (tables_with_columns.size() > 1)
-        {
-            /// Check if text column name exists in right joined table
-            const auto & right_table = tables_with_columns[1];
-            String table_name = right_table.table.getQualifiedNamePrefix(false);
-
-            /// Handle cases where left table and right table both have the same text column.
-            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
-                text_col_name = identifier->shortName();
-
-            if (!right_table.hasColumn(text_col_name))
-            {
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", text_col_name, table_name);
-            }
-
-            search_column_type = right_table.columns.tryGetByName(text_col_name);
-            hybrid_search_from_right_table = true;
-
-            /// text search func column name should add to right joined table's source columns
-            addSearchFunctionColumnName(function_col_name, analyzed_join->columns_from_joined_table);
-
-            /// Add text search func column to original_names too
-            auto & original_names = analyzed_join->original_names;
-            original_names[function_col_name] = function_col_name;
-
-            /// Get metadata for right table
-            auto table_id = context->resolveStorageID(StorageID(right_table.table.database, right_table.table.table, right_table.table.uuid));
-            const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
-            metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
-            table_is_remote = right_table_storage->isRemote();
-        }
-        else if (tables_with_columns.size() == 1)
-        {
-            /// Left table is subquery
-            const auto & left_table = tables_with_columns[0];
-            String table_name = left_table.table.getQualifiedNamePrefix(false);
-
-            if (!left_table.hasColumn(text_col_name))
-            {
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", text_col_name, table_name);
-            }
-
-            /// Unable get metadata for left table, because the table name and UUID are empty.
-            search_column_type = left_table.columns.tryGetByName(text_col_name);
-        }
+        /// The direction of TextSearch/HybridSearch func in order by should be DESC
+        if (has_text)
+            checkOrderBySortDirection(function_col_name, select_query, direction, -1);
         else
         {
-            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", text_col_name);
-        }
-
-        /// Check text column data type
-        if (!search_column_type)
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type not exist", text_col_name);
-        }
-        checkTextSearchColumnDataType(search_column_type->type, is_mapkeys);
-
-        /// Skip the check when table is distributed.
-        if (metadata_snapshot && !table_is_remote)
-        {
-            auto order_by = select_query->orderBy();
-            if (!order_by)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support TextSearch function without ORDER BY clause");
-
-            /// 1 for ASC, -1 for DESC
-            direction = 1;
-            /// Find the direction for TextSearch func
-            for (const auto & child : order_by->children)
+            /// When metric_type = IP in definition of vector index, order by must be DESC.
+            /// Skip the check when table is distributed.
+            if (!table_is_remote)
             {
-                auto * order_by_element = child->as<ASTOrderByElement>();
-                if (!order_by_element || order_by_element->children.empty())
-                    continue;
-                ASTPtr order_expression = order_by_element->children.at(0);
-
-                if (isTextSearch(order_expression->getColumnName()))
-                {
-                    direction = order_by_element->direction;
-                    break;
-                }
+                String metric_type = vector_scan_metric_type;
+                Poco::toUpperInPlace(metric_type);
+                checkOrderBySortDirection("distance", select_query, direction, metric_type == "IP" ? -1 : 1, metric_type, is_batch);
             }
-            if (direction == 1)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "The results returned by the TextSearch function should be ordered by `DESC`");
         }
     }
-    /// Interpreter select on the right joined table where text column exists, insert text search func column name.
-    else if (auto text_search_info = context->getTextSearchInfo())
+    else
     {
-        /// Add text search func name and type to source columns
-        addSearchFunctionColumnName(text_search_info->function_column_name, source_columns);
+        /// Interpreter select on the right joined table where search column exists, insert search func column name.
+        /// Add search func name and type to source columns
+        /// Add search func name to select clauses if not exists
+        String search_func_col_name;
+        if (auto vector_scan_desc = context->getVecScanDescription())
+            search_func_col_name = vector_scan_desc->column_name;
+        else if (auto text_search_info = context->getTextSearchInfo())
+            search_func_col_name = text_search_info->function_column_name;
+        else if (auto hybrid_search_info = context->getHybridSearchInfo())
+            search_func_col_name = hybrid_search_info->function_column_name;
 
-        /// Add text search func name to select clauses if not exists
-        const auto select_expression_list = select_query->select();
-        bool found = false;
-        for (const auto & elem : select_expression_list->children)
-        {
-            String name = elem->getAliasOrColumnName();
-            if (name == text_search_info->function_column_name)
-            {
-                found = true;
-               break;
-           }
-        }
-
-        if (!found)
-            select_expression_list->children.emplace_back(std::make_shared<ASTIdentifier>(text_search_info->function_column_name));
-    }
-}
-
-void TreeRewriterResult::collectForHybridSearchFunctions(
-    ASTSelectQuery * select_query,
-    const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
-    ContextPtr context)
-{
-    /// hybrid search related function exists in main query's select caluse
-    if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH && hybrid_search_funcs.size() == 1)
-    {
-        /// Get topK from limit N
-        limit_length = getTopKFromLimit(select_query, context);
-
-        if (limit_length == 0)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support HybridSearch function without LIMIT clause");
-
-        /// There is no hybrid search function, hence the checks like input paramters are put here.
-        /// Check if vector and text column in hybrid search func exists in left table or right joined table
-        /// Insert hybrid search func columns into source columns here
-        const ASTFunction * node = hybrid_search_funcs[0];
-        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
-
-        if (arguments.size() != 4)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in HybridSearch function");
-
-        String function_col_name = node->getColumnName();
-        StorageMetadataPtr metadata_snapshot = nullptr;
-
-        String vector_col_name = arguments[0]->getColumnName();
-        String text_col_name = arguments[1]->getColumnName();
-        std::optional<NameAndTypePair> search_vector_column_type = std::nullopt;
-        std::optional<NameAndTypePair> search_text_column_type = std::nullopt;
-        bool is_mapkeys = false;
-
-        if (const ASTFunction * function = arguments[1]->as<ASTFunction>())
-        {
-            if (function->name == "mapKeys")
-            {
-                if(function->arguments)
-                {
-                    const auto & function_arguments_list = function->arguments->as<ASTExpressionList>()->children;
-                    if (function_arguments_list.size() == 1)
-                    {
-                        text_col_name = function_arguments_list[0]->getColumnName();
-                        is_mapkeys = true;
-                    }
-                }
-            }
-        }
-
-        /// Mark if the storage with text column is distributed.
-        bool table_is_remote = false;
-
-        if (storage_snapshot && storage_snapshot->metadata->getColumns().has(text_col_name))
-        {
-            metadata_snapshot = storage_snapshot->metadata;
-            table_is_remote = is_remote_storage;
-
-            search_vector_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(vector_col_name);
-            search_text_column_type = metadata_snapshot->columns.getAllPhysical().tryGetByName(text_col_name);
-        }
-        else if (tables_with_columns.size() > 1)
-        {
-            /// Check if text column name exists in right joined table
-            const auto & right_table = tables_with_columns[1];
-            String table_name = right_table.table.getQualifiedNamePrefix(false);
-
-            /// Handle cases where left table and right table both have the same vector column.
-            if (auto * identifier = arguments[0]->as<ASTIdentifier>())
-                vector_col_name = identifier->shortName();
-            if (!right_table.hasColumn(vector_col_name))
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", vector_col_name, table_name);
-            search_vector_column_type = right_table.columns.tryGetByName(vector_col_name);
-
-            /// Handle cases where left table and right table both have the same text column.
-            if (auto * identifier = arguments[1]->as<ASTIdentifier>())
-                text_col_name = identifier->shortName();
-            if (!right_table.hasColumn(text_col_name))
-                throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}' in table '{}'", text_col_name, table_name);
-            search_text_column_type = right_table.columns.tryGetByName(text_col_name);
-
-            hybrid_search_from_right_table = true;
-
-            /// text search func column name should add to right joined table's source columns
-            addSearchFunctionColumnName(function_col_name, analyzed_join->columns_from_joined_table);
-
-            /// Add text search func column to original_names too
-            auto & original_names = analyzed_join->original_names;
-            original_names[function_col_name] = function_col_name;
-
-            /// Get metadata for right table
-            auto table_id = context->resolveStorageID(StorageID(right_table.table.database, right_table.table.table, right_table.table.uuid));
-            const auto & right_table_storage = DatabaseCatalog::instance().getTable(table_id, context);
-            metadata_snapshot = right_table_storage->getInMemoryMetadataPtr();
-            table_is_remote = right_table_storage->isRemote();
-        }
-        else
-        {
-            throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "There is no column '{}'", text_col_name);
-        }
-
-        /// Check vector column data type
-        if (!search_vector_column_type)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "search vector column name: {}, type is not exist", vector_col_name);
-        vector_search_type = getSearchIndexDataType(search_vector_column_type->type);
-
-        /// Check text column data type
-        if (!search_text_column_type)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "search text column name: {}, type is not exist", text_col_name);
-        checkTextSearchColumnDataType(search_text_column_type->type, is_mapkeys);
-
-        /// Skip the check when table is distributed.
-        if (metadata_snapshot && !table_is_remote)
-        {
-            auto order_by = select_query->orderBy();
-            if (!order_by)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support HybridSearch function without ORDER BY clause");
-
-            /// 1 for ASC, -1 for DESC
-            direction = 1;
-            /// Find the direction for hybrid search func
-            for (const auto & child : order_by->children)
-            {
-                auto * order_by_element = child->as<ASTOrderByElement>();
-                if (!order_by_element || order_by_element->children.empty())
-                    continue;
-                ASTPtr order_expression = order_by_element->children.at(0);
-
-                if (isHybridSearch(order_expression->getColumnName()))
-                {
-                    direction = order_by_element->direction;
-                    break;
-                }
-            }
-            if (direction == 1)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "The results returned by the HybridSearch function should be ordered by `DESC`");
-
-            vector_scan_metric_type = getMetircType(metadata_snapshot, vector_search_type, vector_col_name, context);
-        }
-    }
-    /// Interpreter select on the right joined table where hybrid column exists, insert hybrid search func column name.
-    else if (auto hybrid_search_info = context->getHybridSearchInfo())
-    {
-        /// Add hybrid search func name and type to source columns
-        addSearchFunctionColumnName(hybrid_search_info->function_column_name, source_columns);
-
-        /// Add hybrid search func name to select clauses if not exists
-        const auto select_expression_list = select_query->select();
-        bool found = false;
-        for (const auto & elem : select_expression_list->children)
-        {
-            String name = elem->getAliasOrColumnName();
-            if (name == hybrid_search_info->function_column_name)
-            {
-                found = true;
-                break;
-            }
-        }
-
-        if (!found)
-            select_expression_list->children.emplace_back(std::make_shared<ASTIdentifier>(hybrid_search_info->function_column_name));
+        if (!search_func_col_name.empty())
+            addSearchFunctionColumnName(search_func_col_name, source_columns, select_query);
     }
 }
 
@@ -2027,11 +1776,8 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
 
     getHybridSearchFunctions(query, *select_query, result.hybrid_search_funcs, result.search_func_type);
 
-    /// TODO: will combine three functions into one collectForHybridSearchRelatedFunctions function
     /// Special handling for vector scan, text search and hybrid search function
-    result.collectForVectorScanFunctions(select_query, tables_with_columns, getContext());
-    result.collectForTextSearchFunctions(select_query, tables_with_columns, getContext());
-    result.collectForHybridSearchFunctions(select_query, tables_with_columns, getContext());
+    result.collectForHybridSearchRelatedFunctions(select_query, tables_with_columns, getContext());
 
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 

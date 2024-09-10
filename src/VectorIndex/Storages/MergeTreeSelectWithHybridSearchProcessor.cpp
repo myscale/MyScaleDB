@@ -22,8 +22,9 @@
 #include <Storages/MergeTree/MergeTreeSource.h>
 #include <Storages/MergeTree/MergeTreeThreadSelectProcessor.h>
 #include <Storages/MergeTree/LoadedMergeTreeDataPartInfoForReader.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <QueryPipeline/Pipe.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <Common/logger_useful.h>
 
@@ -62,7 +63,7 @@ static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const s
     bool match = true;
     for (const auto & read_col_name : read_col_names)
     {
-        if ((read_col_name == pk_col_name) || isHybridSearchFunc(read_col_name))
+        if ((read_col_name == pk_col_name) || isHybridSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
             continue;
         else
         {
@@ -459,22 +460,26 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
 
     /// Remove distance_func column from read_result.columns, it will be added by vector search.
     Columns ordered_columns;
+    String vector_scan_col_name;
     if (base_search_manager)
+    {
         ordered_columns.reserve(sample_block.columns() - 1);
+        vector_scan_col_name = base_search_manager->getFuncColumnName();
+    }
     else
         ordered_columns.reserve(sample_block.columns());
 
     size_t which_cut = 0;
-    String vector_scan_col_name;
+    bool found_search_func_col = false;
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
     {
         auto & col_name = sample_block.getByPosition(ps).name;
 
         /// TODO: not add distance column to header_without_virtual_columns
-        if (isHybridSearchFunc(col_name))
+        if (col_name == vector_scan_col_name)
         {
             which_cut = ps;
-            vector_scan_col_name = col_name;
+            found_search_func_col = true;
             continue;
         }
 
@@ -486,6 +491,12 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
             part_offset = typeid_cast<const ColumnUInt64 *>(ordered_columns.back().get());
         }
     }
+
+    if (!found_search_func_col)
+        throw Exception(
+            ErrorCodes::LOGICAL_ERROR,
+            "Failed to find column name '{}' for search function in sample block during read",
+            vector_scan_col_name);
 
     auto read_end_time = std::chrono::system_clock::now();
 
@@ -883,7 +894,6 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
     Pipe pipe;
 
-
     if (num_streams > 1)
     {
         Pipes pipes;
@@ -954,8 +964,11 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
         pipe = Pipe(std::move(source));
     }
 
-    QueryPipeline filter_pipeline(std::move(pipe));
-    PullingPipelineExecutor filter_executor(filter_pipeline);
+    QueryPipelineBuilder builder;
+    builder.init(std::move(pipe));
+
+    QueryPipeline filter_pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
+    PullingAsyncPipelineExecutor filter_executor(filter_pipeline);
 
     size_t num_rows = data_part_->rows_count;
 
@@ -965,10 +978,13 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
         OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithHybridSearchProcessor::performPrefilter()::StartPipe");
         while (filter_executor.pull(block))
         {
-            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
-            for (size_t i = 0; i < block.rows(); ++i)
+            if (block)
             {
-                filter->set(col_data[i]);
+                const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+                for (size_t i = 0; i < block.rows(); ++i)
+                {
+                    filter->set(col_data[i]);
+                }
             }
         }
     }

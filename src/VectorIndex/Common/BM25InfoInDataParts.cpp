@@ -26,9 +26,9 @@ UInt64 BM25InfoInDataPart::getTotalDocsCount() const
     return total_docs;
 }
 
-UInt64 BM25InfoInDataPart::getTotalNumTokens() const
+VecTextColumnTokenNums BM25InfoInDataPart::getTextColsTotalNumTokens() const
 {
-    return total_num_tokens;
+    return text_cols_total_num_tokens;
 }
 
 const RustVecDocWithFreq & BM25InfoInDataPart::getTermWithDocNums() const
@@ -45,11 +45,25 @@ UInt64 BM25InfoInDataParts::getTotalDocsCountAllParts() const
     return result;   
 }
 
-UInt64 BM25InfoInDataParts::getTotalNumTokensAllParts() const
+VecTextColumnTokenNums BM25InfoInDataParts::getTextColsTotalNumTokensAllParts() const
 {
-    UInt64 result = 0;
+    /// Add total num tokens in all parts based on column name
+    std::map<UInt32, UInt64> text_cols_total_tokens_map;
     for (const auto & part : *this)
-        result += part.getTotalNumTokens();
+    {
+        const auto & cols_total_tokens_in_part = part.getTextColsTotalNumTokens();
+
+        /// Loop through the vector of Vec<TextColumnTokenNums> in a part
+        for (auto & col_total_tokens : cols_total_tokens_in_part)
+            text_cols_total_tokens_map[col_total_tokens.field_id] += col_total_tokens.field_total_tokens;
+    }
+
+    VecTextColumnTokenNums result;
+    result.reserve(text_cols_total_tokens_map.size());
+
+    for (const auto & [field_id, field_total_tokens] : text_cols_total_tokens_map)
+        result.push_back({field_id, field_total_tokens});
+
     return result;
 }
 

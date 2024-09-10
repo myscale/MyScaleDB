@@ -92,6 +92,9 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     bool operator_or = text_search_info->text_operator == "OR";
     LOG_DEBUG(log, "enable_nlq={}, operator={}", enable_nlq, text_search_info->text_operator);
 
+    /// Support multiple text columns in table function
+    bool from_table_function = text_search_info->from_table_func;
+
     TantivyIndexStorePtr tantivy_store = nullptr;
 
     /// Suggested index log
@@ -103,13 +106,12 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         db_table_name = data_part->storage.getStorageID().database_name + ".";
     db_table_name += data_part->storage.getStorageID().table_name;
 
-    /// Find inverted index on the search column
+    /// Find inverted index on the search column OR search index name from table function
     bool find_index = false;
     for (const auto & index_desc : metadata->getSecondaryIndices())
     {
-        /// Find tantivy inverted index on the search column
-        if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 &&
-            index_desc.column_names[0] == search_column_name)
+        if (index_desc.type == TANTIVY_INDEX_NAME && ((from_table_function && index_desc.name == text_search_info->index_name)
+                || (!from_table_function && index_desc.column_names.size() == 1 && index_desc.column_names[0] == search_column_name)))
         {
             OpenTelemetry::SpanHolder span2("MergeTreeTextSearchManager::textSearch()::find_index::initialize index store");
 
@@ -128,13 +130,16 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
-                tantivy_store
-                    = TantivyIndexStoreFactory::instance().getOrLoad(index_helper->getFileName(), data_part->getDataPartStoragePtr());
+                tantivy_store = TantivyIndexStoreFactory::instance().getOrLoadForSearch(
+                    index_helper->getFileName(), data_part->getDataPartStoragePtr());
 
             if (tantivy_store)
             {
                 find_index = true;
-                LOG_DEBUG(log, "Find FTS index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
+                if (from_table_function)
+                    LOG_DEBUG(log, "Find FTS index {} in part {}", index_desc.name, data_part->name);
+                else
+                    LOG_DEBUG(log, "Find FTS index {} for column {} in part {}", index_desc.name, search_column_name, data_part->name);
 
                 break;
             }
@@ -147,7 +152,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         if (index_name.empty()) /// no tantivy index
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
                         "The query was canceled because the table {} lacks a full-text search (FTS) index. "
-                        "Please create a FTS index before running TextSearch() or HybridSearch()", db_table_name);
+                        "Please create a FTS index before running TextSearch() or HybridSearch() or full_text_search()", db_table_name);
         else
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED,
                             "The query was canceled because the FTS index {} has not been built for part {} on table {}. "

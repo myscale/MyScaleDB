@@ -112,13 +112,15 @@ NameSet injectRequiredColumns(
 
     for (size_t i = 0; i < columns.size(); ++i)
     {
-        /// skip hybrid search related columns
-        if (isHybridSearchFunc(columns[i]))
-            continue;
-
         /// We are going to fetch only physical columns and system columns
         if (!storage_snapshot->tryGetColumn(options, columns[i]))
+        {
+            /// skip hybrid search related columns after check existance in table
+            if (isHybridSearchFunc(columns[i]) || isScoreColumnName(columns[i]))
+                continue;
+
             throw Exception(ErrorCodes::NO_SUCH_COLUMN_IN_TABLE, "There is no physical column or subcolumn {} in table", columns[i]);
+        }
 
         have_at_least_one_physical_column |= injectRequiredColumnsRecursively(
             columns[i], storage_snapshot, alter_conversions,

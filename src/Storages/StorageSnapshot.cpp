@@ -70,9 +70,17 @@ NamesAndTypesList StorageSnapshot::getColumnsByNames(const GetColumnsOptions & o
     NamesAndTypesList res;
     for (const auto & name : names)
     {
-        if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
+        auto column = tryGetColumn(options, name);
+        if (column)
         {
-            res.emplace_back(name, std::make_shared<DataTypeUInt32>());
+            res.push_back(*column);
+            continue;
+        }
+
+        /// Check special columns for text/vector/hybrid search after get columns from table columns
+        if (isDistance(name) || isTextSearch(name) || isHybridSearch(name) || isScoreColumnName(name))
+        {
+            res.emplace_back(name, std::make_shared<DataTypeFloat32>());
         }
         else if (isBatchDistance(name))
         {
@@ -85,8 +93,9 @@ NamesAndTypesList StorageSnapshot::getColumnsByNames(const GetColumnsOptions & o
             res.emplace_back(name, type);
         }
         else
-            res.push_back(getColumn(options, name));
+            throw Exception(ErrorCodes::NO_SUCH_COLUMN_IN_TABLE, "There is no column {} in table", name);
     }
+
     return res;
 }
 
@@ -161,7 +170,7 @@ Block StorageSnapshot::getSampleBlockForColumns(const Names & column_names, cons
             const auto & type = it->second;
             res.insert({type->createColumn(), type, column_name});
         }
-        else if (isDistance(column_name) || isTextSearch(column_name) || isHybridSearch(column_name))
+        else if (isDistance(column_name) || isTextSearch(column_name) || isHybridSearch(column_name) || isScoreColumnName(column_name))
         {
             auto type = std::make_shared<DataTypeFloat32>();
             res.insert({type->createColumn(), type, column_name});
@@ -206,20 +215,6 @@ ColumnsDescription StorageSnapshot::getDescriptionForColumns(const Names & colum
             /// Virtual columns must be appended after ordinary, because user can
             /// override them.
             const auto & type = it->second;
-            res.add({name, type});
-        }
-        else if (isDistance(name) || isTextSearch(name) || isHybridSearch(name))
-        {
-            res.add({name, std::make_shared<DataTypeFloat32>()});
-        }
-        else if (isBatchDistance(name))
-        {
-            auto id_type = std::make_shared<DataTypeUInt32>();
-            auto distance_type = std::make_shared<DataTypeFloat32>();
-            DataTypes types;
-            types.emplace_back(id_type);
-            types.emplace_back(distance_type);
-            auto type = std::make_shared<DataTypeTuple>(types);
             res.add({name, type});
         }
         else

@@ -41,15 +41,15 @@ class MergeTreeVSManager : public MergeTreeBaseSearchManager
 public:
     MergeTreeVSManager(
         StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, bool support_two_stage_search_ = false)
-        : MergeTreeBaseSearchManager{metadata_, context_}
+        : MergeTreeBaseSearchManager{metadata_, context_, vector_scan_info_ ? vector_scan_info_->vector_scan_descs[0].column_name : ""}
         , vector_scan_info(vector_scan_info_)
         , support_two_stage_search(support_two_stage_search_)
         , enable_brute_force_search(context_->getSettingsRef().enable_brute_force_vector_search)
     {
     }
 
-    MergeTreeVSManager(VectorScanResultPtr vec_scan_result_ = nullptr)
-    : MergeTreeBaseSearchManager{nullptr, nullptr}
+    MergeTreeVSManager(VectorScanResultPtr vec_scan_result_, VectorScanInfoPtr vector_scan_info_)
+    : MergeTreeBaseSearchManager{nullptr, nullptr, vector_scan_info_ ? vector_scan_info_->vector_scan_descs[0].column_name : ""}
     , vector_scan_info(nullptr)
     , vector_scan_result(vec_scan_result_)
     {

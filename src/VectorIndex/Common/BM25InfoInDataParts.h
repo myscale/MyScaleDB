@@ -30,25 +30,28 @@ namespace DB
 
 using RustVecDocWithFreq = rust::cxxbridge1::Vec<DocWithFreq>;
 
+/// Support tantivy index on multiple text columns
+using VecTextColumnTokenNums = rust::cxxbridge1::Vec<FieldTokenNums>;
+
 struct BM25InfoInDataPart
 {
     UInt64 total_docs; /// Total number of documents in a data part   
-    UInt64 total_num_tokens;  /// Total number of tokens from all documents in a data part 
+    VecTextColumnTokenNums text_cols_total_num_tokens;  /// Total number of tokens from all documents on all text columns in a data part
     RustVecDocWithFreq term_with_doc_nums;  /// vector of terms with number of documents containing it
 
     BM25InfoInDataPart() = default;
 
     BM25InfoInDataPart(
         const UInt64 & total_docs_,
-        const UInt64 & total_num_tokens_,
+        const VecTextColumnTokenNums & text_cols_total_num_tokens_,
         const RustVecDocWithFreq & term_with_doc_nums_)
         : total_docs{total_docs_}
-        , total_num_tokens{total_num_tokens_}
+        , text_cols_total_num_tokens{text_cols_total_num_tokens_}
         , term_with_doc_nums{term_with_doc_nums_}
     {}
 
     UInt64 getTotalDocsCount() const;
-    UInt64 getTotalNumTokens() const;
+    VecTextColumnTokenNums getTextColsTotalNumTokens() const;
     const RustVecDocWithFreq & getTermWithDocNums() const;
 };
 
@@ -57,7 +60,7 @@ struct BM25InfoInDataParts: public std::vector<BM25InfoInDataPart>
     using std::vector<BM25InfoInDataPart>::vector;
 
     UInt64 getTotalDocsCountAllParts() const;
-    UInt64 getTotalNumTokensAllParts() const;
+    VecTextColumnTokenNums getTextColsTotalNumTokensAllParts() const;
     RustVecDocWithFreq getTermWithDocNumsAllParts() const;
 };
 
