@@ -5,14 +5,8 @@
 Install additional dependencies:
 ```bash
 sudo apt update && apt install git git-lfs build-essential ccache \
-curl g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf \
+curl g++ gcc ninja-build debhelper pbuilder fakeroot alien devscripts gperf rustc cargo \
 moreutils pigz pixz debian-archive-keyring debian-keyring yasm --yes
-```
-
-Install Rust Toolchain:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Add the LLVM repository:
@@ -66,7 +60,7 @@ Clone the source code repository:
 git clone https://github.com/myscale/MyScaleDB.git && cd MyScaleDB
 
 # initialize submodules
-git submodule update --init --recursive && git -C contrib/sysroot lfs pull
+git submodule update --init --recursive -f && git -C contrib/sysroot lfs pull
 ```
 
 ## Building the Code
