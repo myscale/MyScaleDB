@@ -57,10 +57,10 @@ public:
     /// Execute vector scan, text or hybrid search on all parts
     /// For two stage search cases, execute first stage vector scan.
     static VectorAndTextResultInDataParts selectPartsByVectorAndTextIndexes(
-        const RangesInDataParts & parts_with_range,
+        const RangesInDataParts & parts_with_ranges,
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
-        const bool support_two_stage_search,
+        const std::vector<bool> & vec_support_two_stage_searches,
 #if USE_TANTIVY_SEARCH
         const Statistics & bm25_stats_in_table,
 #endif

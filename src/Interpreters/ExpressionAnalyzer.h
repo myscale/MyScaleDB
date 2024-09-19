@@ -239,7 +239,9 @@ protected:
         const String & function_col_name,
         ASTPtr query_column,
         ASTPtr query_vector,
-        int topk);
+        int topk,
+        String vector_scan_metric_type,
+        Search::DataType vector_search_type);
 
     void analyzeHybridSearch(ActionsDAG & temp_actions);
     bool makeHybridSearchInfo(ActionsDAG & actions);
