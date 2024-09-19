@@ -39,6 +39,7 @@ struct VSDescription
 };
 
 using VSDescriptions = std::vector<VSDescription>;
+using MutableVSDescriptionsPtr = std::shared_ptr<VSDescriptions>;
 
 struct VectorScanInfo
 {

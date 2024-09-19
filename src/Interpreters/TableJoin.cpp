@@ -140,7 +140,7 @@ void TableJoin::resetCollected()
     renames.clear();
     left_type_map.clear();
     right_type_map.clear();
-    right_vector_scan_description.reset();
+    right_vector_scan_descs.reset();
 }
 
 void TableJoin::addUsingKey(const ASTPtr & ast)
@@ -944,14 +944,14 @@ void TableJoin::resetToCross()
     this->table_join.kind = JoinKind::Cross;
 }
 
-std::optional<VSDescription> TableJoin::getVecScanDescription() const
+MutableVSDescriptionsPtr TableJoin::getVecScanDescriptions() const
 {
-    return right_vector_scan_description;
+    return right_vector_scan_descs;
 }
 
-void TableJoin::setVecScanDescription(VSDescription & vec_scan_desc) const
+void TableJoin::setVecScanDescriptions(MutableVSDescriptionsPtr vec_scan_descs) const
 {
-    right_vector_scan_description = vec_scan_desc;
+    right_vector_scan_descs = vec_scan_descs;
 }
 
 TextSearchInfoPtr TableJoin::getTextSearchInfoPtr() const

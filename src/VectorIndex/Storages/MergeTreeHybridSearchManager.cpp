@@ -6,7 +6,7 @@
 #include <DataTypes/DataTypesNumber.h>
 
 #include <Columns/ColumnArray.h>
-
+#include <Common/CurrentMetrics.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
@@ -19,6 +19,12 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 
 #include <memory>
+
+namespace CurrentMetrics
+{
+    extern const Metric MergeTreeDataSelectHybridSearchThreads;
+    extern const Metric MergeTreeDataSelectHybridSearchThreadsActive;
+}
 
 namespace DB
 {
@@ -274,7 +280,7 @@ void MergeTreeHybridSearchManager::RankFusion(
 }
 
 SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHybridResults(
-    const VectorAndTextResultInDataParts & parts_with_vector_text_result,
+    const RangesInDataParts & parts_with_ranges,
     const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
     const Settings & settings,
     Poco::Logger * log)
@@ -288,15 +294,16 @@ SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHy
         part_index_merged_map[part_index].emplace_back(score_with_part_index_label);
     }
 
+    size_t parts_with_ranges_size = parts_with_ranges.size();
     SearchResultAndRangesInDataParts parts_with_ranges_hybrid_result;
+    parts_with_ranges_hybrid_result.resize(parts_with_ranges_size);
 
     /// Filter data part with part index in hybrid search and label ids for mark ranges
-    for (const auto & mix_results_in_part : parts_with_vector_text_result)
+    auto filter_part_with_results = [&](size_t part_index)
     {
-        const auto & part_with_ranges = mix_results_in_part.part_with_ranges;
-        size_t part_index = part_with_ranges.part_index_in_query;
+        const auto & part_with_ranges = parts_with_ranges[part_index];
 
-        /// Check if part_index exists in map
+        /// Check if part_index for this part_with_ranges exists in map
         if (part_index_merged_map.contains(part_index))
         {
             /// Found data part
@@ -310,15 +317,51 @@ SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHy
 
             if (!mark_ranges_for_part.empty())
             {
-                parts_with_ranges_hybrid_result.emplace_back(
-                    part_with_ranges.data_part,
-                    part_with_ranges.alter_conversions,
-                    part_index,
-                    std::move(mark_ranges_for_part),
-                    tmp_hybrid_search_result);
+                RangesInDataPart ranges(part_with_ranges.data_part,
+                                        part_with_ranges.alter_conversions,
+                                        part_with_ranges.part_index_in_query,
+                                        std::move(mark_ranges_for_part));
+
+                SearchResultAndRangesInDataPart result_with_ranges(std::move(ranges), tmp_hybrid_search_result);
+                parts_with_ranges_hybrid_result[part_index] = std::move(result_with_ranges);
             }
         }
+    };
+
+    size_t num_threads = std::min<size_t>(settings.max_threads, parts_with_ranges_size);
+    if (num_threads <= 1)
+    {
+        for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
+            filter_part_with_results(part_index);
     }
+    else
+    {
+        /// Parallel executing filter parts_in_ranges with total top-k results
+        ThreadPool pool(CurrentMetrics::MergeTreeDataSelectHybridSearchThreads, CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive, num_threads);
+
+        for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
+            pool.scheduleOrThrowOnError([&, part_index]()
+                {
+                    filter_part_with_results(part_index);
+                });
+
+        pool.wait();
+    }
+
+    /// Skip empty search result
+    size_t next_part = 0;
+    for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
+    {
+        auto & part_with_results = parts_with_ranges_hybrid_result[part_index];
+        if (!part_with_results.search_result)
+            continue;
+
+        if (next_part != part_index)
+            std::swap(parts_with_ranges_hybrid_result[next_part], part_with_results);
+        ++next_part;
+    }
+
+    parts_with_ranges_hybrid_result.resize(next_part);
 
     return parts_with_ranges_hybrid_result;
 }
@@ -327,10 +370,9 @@ void MergeTreeHybridSearchManager::mergeResult(
     Columns & pre_result,
     size_t & read_rows,
     const ReadRanges & read_ranges,
-    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
-    mergeSearchResultImpl(pre_result, read_rows, read_ranges, hybrid_search_result, filter, part_offset);
+    mergeSearchResultImpl(pre_result, read_rows, read_ranges, hybrid_search_result, part_offset);
 }
 
 }
