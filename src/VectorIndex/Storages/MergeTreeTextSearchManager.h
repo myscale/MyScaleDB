@@ -54,7 +54,6 @@ public:
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges,
-        const Search::DenseBitmapPtr filter = nullptr,
         const ColumnUInt64 * part_offset = nullptr) override;
 
     bool preComputed() override

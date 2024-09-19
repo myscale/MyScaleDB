@@ -249,10 +249,9 @@ void MergeTreeTextSearchManager::mergeResult(
     Columns & pre_result,
     size_t & read_rows,
     const ReadRanges & read_ranges,
-    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
-    mergeSearchResultImpl(pre_result, read_rows, read_ranges, text_search_result, filter, part_offset);
+    mergeSearchResultImpl(pre_result, read_rows, read_ranges, text_search_result, part_offset);
 }
 
 }
