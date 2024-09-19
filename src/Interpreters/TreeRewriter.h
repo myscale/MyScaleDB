@@ -55,10 +55,9 @@ struct TreeRewriterResult
     HybridSearchFuncType search_func_type = HybridSearchFuncType::UNKNOWN_FUNC;
 
     /// Save vector scan metric_type
-    String vector_scan_metric_type;
-    Search::DataType vector_search_type;
+    std::vector<String> vector_scan_metric_types;
+    std::vector<Search::DataType> vector_search_types;
     UInt64 limit_length = 0;
-    int direction = 1;
 
     /// True if hybrid search function is from right table
     bool hybrid_search_from_right_table = false;

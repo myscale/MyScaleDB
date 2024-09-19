@@ -5,7 +5,7 @@ SET allow_experimental_inverted_index = 1;
 DROP TABLE IF EXISTS test_vector_same SYNC;
 CREATE TABLE test_vector_same
 (
-    distance_func    UInt32,
+    distance_func UInt32,
     vector  Array(Float32),
     CONSTRAINT check_length CHECK length(vector) = 3
 )
