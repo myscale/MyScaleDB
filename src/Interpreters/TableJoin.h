@@ -152,7 +152,7 @@ private:
     NamesAndTypesList columns_added_by_join;
 
     /// vector scan functions from joined table
-    mutable std::optional<VSDescription> right_vector_scan_description;
+    mutable MutableVSDescriptionsPtr right_vector_scan_descs;
     /// text search info from joined table
     mutable TextSearchInfoPtr right_text_search_info;
     /// hybrid search info from joined table
@@ -365,8 +365,8 @@ public:
     std::shared_ptr<const IKeyValueEntity> getStorageKeyValue() { return right_kv_storage; }
 
     /// Used for vector scan functions
-    std::optional<VSDescription> getVecScanDescription() const;
-    void setVecScanDescription(VSDescription & vec_scan_desc) const;
+    MutableVSDescriptionsPtr getVecScanDescriptions() const;
+    void setVecScanDescriptions(MutableVSDescriptionsPtr vec_scan_descs) const;
 
     /// Used for text search function
     TextSearchInfoPtr getTextSearchInfoPtr() const;
