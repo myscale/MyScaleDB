@@ -15,58 +15,68 @@ struct CommonSearchResult
 {
     bool computed = false;
     MutableColumns result_columns;
-    std::vector<bool> was_result_processed;  /// Mark if the result was processed or not.
+    String name; /// vector scan function (distance) result column name
 };
 
 using CommonSearchResultPtr = std::shared_ptr<CommonSearchResult>;
 
 using VectorScanResultPtr = std::shared_ptr<CommonSearchResult>;
+using ManyVectorScanResults = std::vector<VectorScanResultPtr>;
+
 using TextSearchResultPtr = std::shared_ptr<CommonSearchResult>;
 using HybridSearchResultPtr = std::shared_ptr<CommonSearchResult>;
 
 /// Extend RangesInDataPart to include search result for hybrid, vector scan or text search
 struct SearchResultAndRangesInDataPart
 {
-    DataPartPtr data_part;
-    AlterConversionsPtr alter_conversions;
-    size_t part_index_in_query;
-    MarkRanges ranges;
-    CommonSearchResultPtr search_result;
+    RangesInDataPart part_with_ranges;
+
+    /// Valid for text, hybrid search
+    CommonSearchResultPtr search_result = nullptr;
+
+    /// Support multiple distance functions
+    /// Valid for vector scan
+    ManyVectorScanResults multiple_vector_scan_results = {};
 
     SearchResultAndRangesInDataPart() = default;
 
     SearchResultAndRangesInDataPart(
-        const DataPartPtr & data_part_,
-        const AlterConversionsPtr & alter_conversions_,
-        const size_t part_index_in_query_,
-        const MarkRanges & ranges_ = MarkRanges{},
+        const RangesInDataPart & part_with_ranges_,
         const CommonSearchResultPtr & search_result_ = nullptr)
-        : data_part{data_part_}
-        , alter_conversions{alter_conversions_}
-        , part_index_in_query{part_index_in_query_}
-        , ranges{ranges_}
+        : part_with_ranges{part_with_ranges_}
         , search_result{search_result_}
+    {}
+
+    SearchResultAndRangesInDataPart(
+        const RangesInDataPart & part_with_ranges_,
+        const ManyVectorScanResults & multiple_vector_scan_results_ = {})
+        : part_with_ranges{part_with_ranges_}
+        , multiple_vector_scan_results{multiple_vector_scan_results_}
     {}
 };
 
 using SearchResultAndRangesInDataParts = std::vector<SearchResultAndRangesInDataPart>;
 
+/// Internal structure of intermediate results
 /// Save vector scan and/or text search result for a part
 struct VectorAndTextResultInDataPart
 {
-    RangesInDataPart part_with_ranges;
-    VectorScanResultPtr vector_scan_result;
-    TextSearchResultPtr text_search_result;
+    /// Other data part info can be accessed by part_index from parts_with_ranges
+    size_t part_index;
+    DataPartPtr data_part;
+
+    /// Valid for text and hybrid search
+    TextSearchResultPtr text_search_result = nullptr;
+
+    /// Support multiple distance functions
+    /// Use the first element for hybrid search and second stage of two-stage vector search
+    ManyVectorScanResults vector_scan_results = {};
 
     VectorAndTextResultInDataPart() = default;
 
-    VectorAndTextResultInDataPart(
-        const RangesInDataPart & part_with_ranges_,
-        const VectorScanResultPtr & vector_scan_result_ = nullptr,
-        const TextSearchResultPtr & text_search_result_ = nullptr)
-        : part_with_ranges{part_with_ranges_}
-        , vector_scan_result{vector_scan_result_}
-        , text_search_result{text_search_result_}
+    VectorAndTextResultInDataPart(const size_t part_index_, const DataPartPtr & data_part_)
+        : part_index{part_index_}
+        , data_part{data_part_}
     {}
 };
 
@@ -76,7 +86,7 @@ using VectorAndTextResultInDataParts = std::vector<VectorAndTextResultInDataPart
 struct ScoreWithPartIndexAndLabel
 {
     Float32 score;
-    size_t part_index;
+    size_t part_index; /// part index in parts_with_ranges
     UInt32 label_id;
 
     ScoreWithPartIndexAndLabel() = default;
