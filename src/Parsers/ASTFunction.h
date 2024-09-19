@@ -79,6 +79,11 @@ public:
     /// This is used for parameterized view, to identify if name is 'db.view'
     bool is_compound_name = false;
 
+    /// True if query has multiple distance functions
+    /// Single distance function's column name is 'distance_func'
+    /// while in multiple cases it's 'distance_func_<alias_name_or_hash_code>'
+    mutable bool is_from_multiple_distances = false;
+
     bool hasSecretParts() const override;
 
 protected:

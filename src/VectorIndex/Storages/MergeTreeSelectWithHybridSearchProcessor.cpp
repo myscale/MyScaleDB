@@ -39,7 +39,7 @@ namespace ErrorCodes
     extern const int QUERY_WAS_CANCELLED;
 }
 
-/// Check if only select primary key column and vector search/text search/hybrid search functions. 
+/// Check if only select primary key column, _part_offset and vector search/text search/hybrid search functions. 
 static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const std::vector<String> & read_col_names)
 {
     size_t pk_col_nums = pk_col_names.size();
@@ -54,7 +54,8 @@ static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const s
     bool match = true;
     for (const auto & read_col_name : read_col_names)
     {
-        if ((read_col_name == pk_col_name) || isHybridSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
+        if ((read_col_name == pk_col_name) || read_col_name == "_part_offset"
+            || isHybridSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
             continue;
         else
         {
@@ -604,45 +605,63 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
     if (read_result.num_rows == 0)
         return {Block(), read_result.num_rows, num_read_rows, num_read_bytes};
 
-    /// Remove distance_func column from read_result.columns, it will be added by vector search.
+    /// Support multiple distance functions
+    /// Remove distance_func columns from read_result.columns, it will be added by vector search.
     Columns ordered_columns;
-    String vector_scan_col_name;
+    Names vector_scan_cols_names;
+    size_t cols_size_in_sample_block = sample_block.columns();
+    size_t cols_size_except_search_cols = cols_size_in_sample_block;
+
     if (base_search_manager)
     {
-        ordered_columns.reserve(sample_block.columns() - 1);
-        vector_scan_col_name = base_search_manager->getFuncColumnName();
+        vector_scan_cols_names = base_search_manager->getSearchFuncColumnNames();
+        cols_size_except_search_cols = cols_size_in_sample_block - vector_scan_cols_names.size();
+        ordered_columns.reserve(cols_size_except_search_cols);
+
+        /// Throw exception if vector_scan_cols_names is empty
+        if (vector_scan_cols_names.empty())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Failed to find any search result column name, this should not happen");
     }
     else
-        ordered_columns.reserve(sample_block.columns());
+        ordered_columns.reserve(cols_size_in_sample_block);
 
-    size_t which_cut = 0;
-    bool found_search_func_col = false;
+    /// sample block columns may be:
+    /// part without LWD: table columns + distance_func columns + non_const_virtual_columns
+    /// part with LWD: non_const_virtual_columns + table columns + distance_func columns
+    /// All distances are put at the end of ordered_columns, the order of distances is same as in vector_scan_descriptions. 
+    /// This vector is a map of the index of ordered_columns to the sample block
+    std::vector<size_t> orig_pos_in_sample_block;
+    orig_pos_in_sample_block.resize(cols_size_in_sample_block);
+    size_t ordered_index = 0;
+
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
     {
         auto & col_name = sample_block.getByPosition(ps).name;
 
-        /// TODO: not add distance column to header_without_virtual_columns
-        if (col_name == vector_scan_col_name)
+        /// Check if distance_func columns
+        bool is_search_func = false;
+        for (size_t i = 0; i < vector_scan_cols_names.size(); ++i)
         {
-            which_cut = ps;
-            found_search_func_col = true;
-            continue;
+            if (col_name == vector_scan_cols_names[i])
+            {
+                orig_pos_in_sample_block[cols_size_except_search_cols+i] = ps;
+                is_search_func = true;
+                break;
+            }
         }
 
+        /// No need to put search func cols
+        if (is_search_func)
+            continue;
+
         ordered_columns.emplace_back(std::move(read_result.columns[ps]));
+        orig_pos_in_sample_block[ordered_index] = ps;
+        ordered_index++;
 
         /// Copy _part_offset column
         if (col_name == "_part_offset")
-        {
             part_offset = typeid_cast<const ColumnUInt64 *>(ordered_columns.back().get());
-        }
     }
-
-    if (!found_search_func_col)
-        throw Exception(
-            ErrorCodes::LOGICAL_ERROR,
-            "Failed to find column name '{}' for search function in sample block during read",
-            vector_scan_col_name);
 
     auto read_end_time = std::chrono::system_clock::now();
 
@@ -655,10 +674,12 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
         base_search_manager->mergeResult(
             ordered_columns,
             read_result.num_rows,
-            read_ranges, nullptr, part_offset);
+            read_ranges, part_offset);
     }
 
     const size_t final_result_num_rows = read_result.num_rows;
+
+    LOG_DEBUG(log, "mergeResult() finished with result rows: {}", final_result_num_rows);
 
     Block res_block;
 
@@ -678,34 +699,16 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
         res_block.insert(std::move(prewhere_col));
     }
 
+    /// ordered_columns: non-search functions, search functions cols
+    /// Use the map orig_pos_in_sample_block to get column name and type from sample block
     for (size_t i = 0; i < ordered_columns.size(); ++i)
     {
+        size_t pos_in_sample = orig_pos_in_sample_block[i];
+
         ColumnWithTypeAndName ctn;
         ctn.column = ordered_columns[i];
-
-        if (i < ordered_columns.size() - 1)
-        {
-            size_t src_index = i >= which_cut ? i+1 : i;
-            ctn.type = sample_block.getByPosition(src_index).type;
-            ctn.name = sample_block.getByPosition(src_index).name;
-        }
-        else
-        {
-            ctn.name = vector_scan_col_name;
-            if (isBatchDistance(vector_scan_col_name))
-            {
-                // the result of batch search, it's type is Tuple(UInt32, Float32)
-                DataTypes data_types;
-                data_types.emplace_back(std::make_shared<DataTypeUInt32>());
-                data_types.emplace_back(std::make_shared<DataTypeFloat32>());
-                ctn.type = std::make_shared<DataTypeTuple>(data_types);
-            }
-            else
-            {
-                // the result of single search, it's type is Float32
-                ctn.type = std::make_shared<DataTypeFloat32>();
-            }
-        }
+        ctn.type = sample_block.getByPosition(pos_in_sample).type;
+        ctn.name = sample_block.getByPosition(pos_in_sample).name;
 
         res_block.insert(std::move(ctn));
     }
@@ -814,7 +817,8 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
 
     LOG_DEBUG(log, "Fetch from primary key cache size = {}", tmp_result_columns[0]->size());
 
-    /// Get _part_offset if exists.
+    /// Get _part_offset if exists
+    bool part_offset_exists_in_result = false;
     if (mutable_part_offset_col)
     {
         /// _part_offset column exists in original select columns
@@ -822,8 +826,11 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
         {
             tmp_result_columns.emplace_back(std::move(mutable_part_offset_col));
             part_offset = typeid_cast<const ColumnUInt64 *>(tmp_result_columns.back().get());
+
+            /// Need to adjust order in results
+            part_offset_exists_in_result = true;
         }
-        else
+        else /// No need to put result columns, it's just used in mergeResult() for LWD
             part_offset = typeid_cast<const ColumnUInt64 *>(mutable_part_offset_col.get());
     }
 
@@ -835,18 +842,41 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
             tmp_result_columns, /// _Inout_
             result_row_num, /// _Out_
             read_ranges,
-            nullptr,
             part_offset);
 
+        /// header_without_const_virtual_columns: pk columns + distance columns + non const virtual columns(_part_offset)
+        /// tmp_result_columns: pk columns + non const virtual columns(_part_offset) + distance columns
         Columns result_columns;
+        result_columns.resize(tmp_result_columns.size());
 
-        if(!need_remove_part_offset){
-            result_columns = tmp_result_columns;
-        }else{
-            result_columns.emplace_back(tmp_result_columns[0]);
-            result_columns.emplace_back(tmp_result_columns.back());
+        /// _part_offset column exists in original select columns
+        if (part_offset_exists_in_result)
+        {
+            /// Exchange order of non const virtual column and distance columns
+            size_t distances_size = base_search_manager->getSearchFuncColumnNames().size();
+
+            /// Throw exception if distances_size is empty
+            if (distances_size == 0)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "[PKCache] Failed to find any search result column name, this should not happen");
+
+            for (size_t i = 0; i < tmp_result_columns.size(); ++i)
+            {
+                size_t pos_in_result;
+                if (i < pk_col_size)
+                    pos_in_result = i;
+                else if (i == pk_col_size)
+                    pos_in_result = i + distances_size;
+                else
+                    pos_in_result = i - 1; /// non const virtual column has ONE column: _part_offset
+
+                result_columns[pos_in_result] = tmp_result_columns[i];
+            }
         }
-
+        else
+        {
+            /// No _part_offset column possibly added for LWD in tmp result columns
+            result_columns = tmp_result_columns;
+        }
 
         task->mark_ranges.clear();
         if (result_row_num > 0)
@@ -1184,10 +1214,10 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 }
 
 VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes(
-    const RangesInDataParts & parts_with_range,
+    const RangesInDataParts & parts_with_ranges,
     const StorageMetadataPtr & metadata_snapshot,
     const SelectQueryInfo & query_info,
-    const bool support_two_stage_search,
+    const std::vector<bool> & vec_support_two_stage_searches,
 #if USE_TANTIVY_SEARCH
     const Statistics & bm25_stats_in_table,
 #endif
@@ -1204,7 +1234,8 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     if (!query_info.has_hybrid_search)
         return parts_with_mix_results;
 
-    parts_with_mix_results.resize(parts_with_range.size());
+    size_t parts_with_ranges_size = parts_with_ranges.size();
+    parts_with_mix_results.resize(parts_with_ranges_size);
 
     PrewhereInfoPtr prewhere_info_copy = nullptr;
     if (prewhere_info_)
@@ -1219,17 +1250,18 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     /// Execute vector scan and text search in this part.
     auto process_part = [&](size_t part_index)
     {
-        auto & part_with_range = parts_with_range[part_index];
+        auto & part_with_range = parts_with_ranges[part_index];
         auto & data_part = part_with_range.data_part;
         auto & mark_ranges = part_with_range.ranges;
 
-        VectorAndTextResultInDataPart mix_results(part_with_range);
+        /// Save part_index in parts_with_ranges
+        VectorAndTextResultInDataPart mix_results(part_index, data_part);
 
         /// Handle three cases: vector scan, full-text seach and hybrid search
         if (query_info.hybrid_search_info)
         {
             auto hybrid_search_mgr = std::make_shared<MergeTreeHybridSearchManager>(metadata_snapshot, query_info.hybrid_search_info,
-                                            context, support_two_stage_search);
+                                            context, vec_support_two_stage_searches[0]);
 #if USE_TANTIVY_SEARCH
             hybrid_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
@@ -1241,14 +1273,14 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
 
             if (hybrid_search_mgr)
             {
-                mix_results.vector_scan_result = hybrid_search_mgr->getVectorScanResult();
+                mix_results.vector_scan_results.emplace_back(hybrid_search_mgr->getVectorScanResult());
                 mix_results.text_search_result = hybrid_search_mgr->getTextSearchResult();
             }
         }
         else if (query_info.vector_scan_info)
         {
             auto vector_scan_mgr = std::make_shared<MergeTreeVSManager>(metadata_snapshot, query_info.vector_scan_info,
-                                        context, support_two_stage_search);
+                                        context, vec_support_two_stage_searches);
 
             /// Get vector scan
             executeSearch(vector_scan_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
@@ -1256,8 +1288,9 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
                         mark_ranges, prewhere_info_copy, reader_settings_, settings.use_uncompressed_cache,
                         context, num_streams);
 
+            /// Support multiple distance functions
             if (vector_scan_mgr && vector_scan_mgr->preComputed())
-                mix_results.vector_scan_result = vector_scan_mgr->getSearchResult();
+                mix_results.vector_scan_results = vector_scan_mgr->getVectorScanResults();
         }
         else if (query_info.text_search_info)
         {
@@ -1278,11 +1311,11 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         parts_with_mix_results[part_index] = std::move(mix_results);
     };
 
-    size_t num_threads = std::min<size_t>(num_streams, parts_with_range.size());
+    size_t num_threads = std::min<size_t>(num_streams, parts_with_ranges_size);
 
     if (num_threads <= 1)
     {
-        for (size_t part_index = 0; part_index < parts_with_range.size(); ++part_index)
+        for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
             process_part(part_index);
     }
     else
@@ -1293,7 +1326,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
             num_threads);
 
-        for (size_t part_index = 0; part_index < parts_with_range.size(); ++part_index)
+        for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
             pool.scheduleOrThrowOnError([&, part_index, thread_group = CurrentThread::getGroup()]
             {
                 SCOPE_EXIT_SAFE(

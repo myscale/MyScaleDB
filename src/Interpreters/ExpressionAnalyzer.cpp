@@ -571,20 +571,22 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAG & temp_actions)
 {
     if (syntax->search_func_type == HybridSearchFuncType::VECTOR_SCAN && !syntax->hybrid_search_funcs.empty())
         has_vector_scan = makeVectorScanDescriptions(temp_actions);
-    else if (auto vec_scan_desc = getContext()->getVecScanDescription())
+    else if (auto vec_scan_descs = getContext()->getVecScanDescriptions())
     {
         if (syntax->storage_snapshot)
         {
             LOG_DEBUG(getLogger(), "[analyzeVectorScan] Get vector scan function from right table");
             /// vector search column exists in right joined table
-            vector_scan_descriptions.emplace_back(*vec_scan_desc);
+            vector_scan_descriptions = *vec_scan_descs;
             has_vector_scan = true;
         }
     }
     /// Fill in dim and recognize VectorSearchType from metadata
     if (has_vector_scan)
     {
-        getAndCheckVectorScanInfoFromMetadata(syntax->storage_snapshot, vector_scan_descriptions[0], getContext());
+        /// Support multiple distance functions
+        for (auto & vector_scan_desc : vector_scan_descriptions)
+            getAndCheckVectorScanInfoFromMetadata(syntax->storage_snapshot, vector_scan_desc, getContext());
     }
 }
 
@@ -630,7 +632,7 @@ void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAG & temp_actions)
         if (!syntax->is_remote_storage && hybrid_search_info->text_search_info)
             checkTantivyIndex(syntax->storage_snapshot, hybrid_search_info->text_search_info->text_column_name);
 
-        /// Get vector search type and dim from metadata, check paramaters in vector scan and add to vector_paramters
+        /// Get vector search type and dim from metadata, check paramaters in vector scan and add to vector_parameters
         VSDescription & vec_scan_desc =
                 const_cast<VSDescription &>(hybrid_search_info->vector_scan_info->vector_scan_descs[0]);
 
@@ -799,7 +801,9 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
     const String & function_col_name,
     ASTPtr query_column,
     ASTPtr query_vector,
-    int topk)
+    int topk,
+    String vector_scan_metric_type,
+    Search::DataType vector_search_type)
 {
     VSDescription vector_scan_desc;
     vector_scan_desc.column_name = function_col_name;
@@ -863,13 +867,13 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
         vector_scan_desc.query_column_name);
 
     /// vector search type from syntax result
-    vector_scan_desc.vector_search_type = syntax->vector_search_type;
+    vector_scan_desc.vector_search_type = vector_search_type;
 
     /// top_k is get from limit N
     vector_scan_desc.topk = topk;
 
     /// Pass the correct direction to vector_scan_desc according to metric_type
-    vector_scan_desc.direction = Poco::toUpper(syntax->vector_scan_metric_type) == "IP" ? -1 : 1;
+    vector_scan_desc.direction = Poco::toUpper(vector_scan_metric_type) == "IP" ? -1 : 1;
 
     return vector_scan_desc;
 }
@@ -877,31 +881,38 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
 /// create vector scan descriptions, mainly record the column name and parameters
 bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAG & actions)
 {
-    for (const ASTFunction * node : hybrid_search_funcs())
+    for (size_t i = 0; i < hybrid_search_funcs().size(); ++i)
     {
-        if (node->arguments)
-            getRootActionsNoMakeSet(node->arguments, actions);
+        const ASTFunction * node = hybrid_search_funcs()[i];
+
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
 
         // arguments 0 indicates the vector name; arguments 1 indicates the specific vector content.
         if (arguments.size() != 2)
         {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                    "wrong argument number in distance function");
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in distance function");
         }
 
-        auto vector_scan_desc = commonMakeVectorScanDescription(actions, node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length));
+        getRootActionsNoMakeSet(node->arguments, actions);
+
+        auto vector_scan_desc = commonMakeVectorScanDescription(actions, node->getColumnName(), arguments[0], arguments[1],
+                                        static_cast<int>(syntax->limit_length), syntax->vector_scan_metric_types[i], syntax->vector_search_types[i]);
 
         /// Save parameters, parse and check parameters will be done in analyzeVectorScan()
         vector_scan_desc.parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
-        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}", node->name);
+        LOG_DEBUG(getLogger(), "[makeVectorScanDescriptions] create vector scan function: {}, column name:{}", node->name, node->getColumnName());
 
-        if (syntax->hybrid_search_from_right_table)
-        {
-            analyzedJoin().setVecScanDescription(vector_scan_desc);
-        }
-        else
-            vector_scan_descriptions.push_back(vector_scan_desc);
+        vector_scan_descriptions.push_back(vector_scan_desc);
+    }
+
+    /// Support multiple distance functions
+    /// If vector columns are from right table, save the vector scan descriptions to analyzedJoin().
+    if (syntax->hybrid_search_from_right_table)
+    {
+        auto vector_scan_descs_ptr = std::make_shared<VSDescriptions>(vector_scan_descriptions);
+        analyzedJoin().setVecScanDescriptions(vector_scan_descs_ptr);
+
+        vector_scan_descriptions.clear();
     }
 
     return !vector_scan_descriptions.empty();
@@ -1131,7 +1142,8 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
         /// make VSDescription for HybridSearchInfo
         {
             getRootActionsNoMakeSet(arguments[2], actions);
-            auto vector_scan_desc = commonMakeVectorScanDescription(actions, "distance_func", arguments[0], arguments[2], num_candidates);
+            auto vector_scan_desc = commonMakeVectorScanDescription(actions, "distance_func", arguments[0], arguments[2],
+                                                num_candidates, syntax->vector_scan_metric_types[0], syntax->vector_search_types[0]);
 
             /// Save vector_scan_parameter to vector_scan_desc's parameters
             if (!vector_scan_parameter.empty())
@@ -1688,10 +1700,10 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
 {
     /// Add vector scan description to Context for subquery of joined table
     bool has_vector_scan = false;
-    if (auto vec_scan_desc = analyzed_join.getVecScanDescription())
+    if (auto vec_scan_descs = analyzed_join.getVecScanDescriptions())
     {
         has_vector_scan = true;
-        context->setVecScanDescription(*vec_scan_desc);
+        context->setVecScanDescriptions(vec_scan_descs);
     }
 
     /// Add text search info to Context for subquery of joined table
@@ -1756,7 +1768,7 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
 
     /// Reset vector scan description
     if (has_vector_scan)
-        context->resetVecScanDescription();
+        context->resetVecScanDescriptions();
     else if (has_text_search)
         context->resetTextSearchInfo();
     else if (has_hybrid_search)

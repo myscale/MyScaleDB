@@ -2549,7 +2549,10 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         
         /// If there is vector scan in the outer query and main table is subquery, save the vector scan description to subquery.
         if (query_analyzer->hasVectorScan())
-            context->setVecScanDescription(query_analyzer->vectorScanDescs().front());
+        {
+            auto vector_scan_desc_ptr = std::make_shared<VSDescriptions>(query_analyzer->vectorScanDescs());
+            context->setVecScanDescriptions(vector_scan_desc_ptr);
+        }
 
         interpreter_subquery = std::make_unique<InterpreterSelectWithUnionQuery>(
             subquery, getSubqueryContext(context),
@@ -2558,7 +2561,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         interpreter_subquery->addStorageLimits(storage_limits);
 
         if (query_analyzer->hasVectorScan())
-            context->resetVecScanDescription();
+            context->resetVecScanDescriptions();
 
         if (query_analyzer->hasAggregation())
             interpreter_subquery->ignoreWithTotals();

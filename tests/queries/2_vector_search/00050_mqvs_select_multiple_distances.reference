@@ -1,0 +1,135 @@
+0
+mutiple distances order by dist1 + dist2
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+4	48	12
+mutiple distances with distances_top_k_multiply_factor=1
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+4	48	12
+mutiple distances order by dist1
+0	0	12
+1	3	3
+2	12	0
+3	27	3
+4	48	12
+multiple distances no order by (default _part, _part_offset)
+0	0	12
+1	3	3
+2	12	0
+3	27	3
+4	48	12
+mutiple distances order by dist1 + dist2 (different labels, default NULL)
+49	0	nan
+48	3	nan
+47	12	nan
+42	147	nan
+46	27	nan
+multiple distances with WHERE clause
+3	27	3
+4	48	12
+5	75	27
+6	108	48
+7	147	75
+multiple distances with WHERE clause after LWD
+3	27	3
+5	75	27
+6	108	48
+7	147	75
+8	192	108
+multiple distances on right joined table
+1	1	3	3
+0	0	0	12
+2	2	12	0
+3	3	27	3
+5	5	75	27
+multiple distances in subquery
+1
+multiple distances with subquery and WITH clause as query vector
+0	0	0
+1	3	3
+2	12	12
+3	27	27
+5	75	75
+brute force on multiple distances
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+4	48	12
+brute force on multiple distances on two parts and where condition filter out the first part
+1	3	3
+3	27	3
+5	75	27
+7	147	75
+9	243	147
+0
+mutiple distances order by dist1 + dist2 on two parts
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+4	48	12
+mutiple distances no order by (default _part, _part_offset)
+0	0	12
+2	12	0
+4	48	12
+1	3	3
+3	27	3
+mutiple distances with WHERE clause on two parts
+3	27	3
+4	48	12
+5	75	27
+6	108	48
+7	147	75
+mutiple distances on two parts after LWD
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+5	75	27
+0
+mutiple distances with primary key cache
+1	3	3
+0	0	12
+2	12	0
+3	27	3
+4	48	12
+mutiple distances + _part_offset with primary key cache
+1	1	3	3
+0	0	0	12
+2	2	12	0
+3	3	27	3
+4	4	48	12
+mutiple distances with primary key cache after LWD
+1	3	3
+0	0	12
+3	27	3
+4	48	12
+5	75	27
+0
+multiple distances with binary vectors
+2	4	0	0
+3	8	0.5	3
+4	4	0.5	12
+5	8	0.6666667	27
+10	8	0.5	192
+0
+0
+0
+multiple distances with two stage search enabled on MSTG type
+1	16	16
+0	0	64
+2	64	0
+3	144	16
+4	256	64
+multiple distances with two stage search enable on MSTG and IVFFLAT type
+1	16	72
+2	64	32
+0	0	128
+3	144	8
+4	256	0
