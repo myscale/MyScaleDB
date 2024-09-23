@@ -167,6 +167,7 @@ class IColumn;
     M(Bool, enbale_fts_index_for_string_functions, false, "Enable the FTS index to accelerate functions for searching in strings (e.g., LIKE, hasToken, startsWith). Only the raw tokenizer can ensure correct results.", 0) \
     M(Bool, dfs_query_then_fetch, false, "Enable Distributed Frequency Search (DFS) query to gather global statistical info for accurate BM25 calculation.", 0) \
     M(UInt64, distances_top_k_multiply_factor, 3, "Multiply k in limit by this factor for the top_k in multiple distance functions", 0) \
+    M(UInt64, parallel_reading_prefilter_option, 1, "Control parallel reading prefilter options for vector/text/hybrid search in SELECT queries with where clause. 0 - disable, 1 - adaptive enable depending on mark ranges and row count. 2 - always enable.", 0) \
     M(String, stream_like_engine_insert_queue, "", "When stream like engine reads from multiple queues, user will need to select one queue to insert into when writing. Used by Redis Streams and NATS.", 0) \
     M(Bool, dictionary_validate_primary_key_type, false, "Validate primary key type for dictionaries. By default id type for simple layouts will be implicitly converted to UInt64.", 0) \
     M(Bool, distributed_insert_skip_read_only_replicas, false, "If true, INSERT into Distributed will skip read-only replicas.", 0) \
