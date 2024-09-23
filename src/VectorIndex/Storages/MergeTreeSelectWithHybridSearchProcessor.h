@@ -95,7 +95,6 @@ private:
         MarkRanges mark_ranges,
         const PrewhereInfoPtr & prewhere_info_copy,
         const MergeTreeReaderSettings & reader_settings_,
-        bool use_uncompressed_cache_,
         ContextPtr context_,
         size_t max_streams);
 
@@ -111,7 +110,6 @@ private:
         UInt64 preferred_block_size_bytes_,
         UInt64 preferred_max_column_in_block_size_bytes_,
         const MergeTreeReaderSettings & reader_settings_,
-        bool use_uncompressed_cache_,
         ContextPtr context_,
         size_t max_streams);
 
