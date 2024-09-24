@@ -201,6 +201,9 @@ private:
     /// Check if we can limit block size to read based on LIMIT clause
     UInt64 maxBlockSizeByLimit() const;
 
+    /// Distributed HybridSearch Fusion and Sorting
+    void executeFusionSorted(QueryPlan & query_plan);
+
     enum class Modificator : uint8_t
     {
         ROLLUP = 0,
