@@ -82,7 +82,7 @@ private:
 #if USE_TANTIVY_SEARCH
     void getStatisticForTextSearch();
 
-    Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
+    TANTIVY::Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
 #endif
     /// MYSCALE_INTERNAL_CODE_BEGIN
     /// Determine if we can use two stage search, initialize num_reorder
