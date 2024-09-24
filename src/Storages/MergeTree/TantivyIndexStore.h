@@ -165,16 +165,29 @@ public:
     rust::cxxbridge1::Vec<std::uint8_t> termsQueryBitmap(String column_name, std::vector<String> terms);
 
     /// For BM25Search and HybridSearch. If enable_nlq is true, use Natural Language Search. If enable_nlq is false, use Standard Search.
-    rust::cxxbridge1::Vec<RowIdWithScore> bm25Search(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk);
-    rust::cxxbridge1::Vec<RowIdWithScore>
-    bm25SearchWithFilter(String sentence, bool enable_nlq, bool operator_or, Statistics & statistics, size_t topk, const std::vector<uint8_t> & u8_alived_bitmap);
+    rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> bm25Search(
+        String sentence,
+        bool enable_nlq,
+        bool operator_or,
+        TANTIVY::Statistics & statistics,
+        size_t topk,
+        std::vector<String> column_names = {});
+
+    rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> bm25SearchWithFilter(
+        String sentence,
+        bool enable_nlq,
+        bool operator_or,
+        TANTIVY::Statistics & statistics,
+        size_t topk,
+        const std::vector<uint8_t> & u8_alived_bitmap,
+        std::vector<String> column_names = {});
 
     /// Get current part sentence doc_freq, sentence will be tokenized by tokenizer with each indexed column.
-    rust::cxxbridge1::Vec<DocWithFreq> getDocFreq(String sentence);
+    rust::cxxbridge1::Vec<TANTIVY::DocWithFreq> getDocFreq(String sentence);
     /// Get current part total_num_docs, each column will have same total_num_docs.
     UInt64 getTotalNumDocs();
     /// Get current part total_num_tokens, each column will have it's own total_num_tokens.
-    rust::cxxbridge1::Vec<FieldTokenNums> getTotalNumTokens();
+    rust::cxxbridge1::Vec<TANTIVY::FieldTokenNums> getTotalNumTokens();
     /// Get the number of documents stored in the index file.
     UInt64 getIndexedDocsNum();
 
