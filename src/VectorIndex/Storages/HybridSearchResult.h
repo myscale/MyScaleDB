@@ -86,14 +86,28 @@ using VectorAndTextResultInDataParts = std::vector<VectorAndTextResultInDataPart
 struct ScoreWithPartIndexAndLabel
 {
     Float32 score;
-    size_t part_index; /// part index in parts_with_ranges
-    UInt32 label_id;
+    UInt64 part_index; /// part index in parts_with_ranges
+    UInt64 label_id;
+
+    /// Only used in multi-shard hybrid search
+    UInt32 shard_num = 0;
 
     ScoreWithPartIndexAndLabel() = default;
 
-    ScoreWithPartIndexAndLabel(const Float32 score_, const size_t part_index_, const UInt32 label_id_)
-    : score{score_}, part_index{part_index_}, label_id{label_id_}
-    {}
+    ScoreWithPartIndexAndLabel(const Float32 score_, const UInt64 part_index_, const UInt64 label_id_)
+        : score{score_}, part_index{part_index_}, label_id{label_id_}
+    {
+    }
+
+    ScoreWithPartIndexAndLabel(const Float32 score_, const UInt64 part_index_, const UInt64 label_id_, const UInt32 shard_num_)
+        : score{score_}, part_index{part_index_}, label_id{label_id_}, shard_num{shard_num_}
+    {
+    }
+
+    String dump() const
+    {
+        return fmt::format("[shard_num: {}, part_index: {}, label_id: {}]: {}", shard_num, part_index, label_id, score);
+    }
 };
 
 using ScoreWithPartIndexAndLabels = std::vector<ScoreWithPartIndexAndLabel>;
