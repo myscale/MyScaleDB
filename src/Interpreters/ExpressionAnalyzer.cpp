@@ -94,6 +94,7 @@
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
 #include <VectorIndex/Utils/VIUtils.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 #include <AggregateFunctions/parseAggregateFunctionParameters.h>
 
 namespace DB
@@ -2372,6 +2373,10 @@ ActionsAndProjectInputsFlagPtr SelectQueryExpressionAnalyzer::appendProjectResul
     for (const auto & ast : asts)
     {
         String result_name = ast->getAliasOrColumnName();
+
+        /// Skip score_type column used for distributed hybrid search fusion
+        if (hasHybridSearch() && (result_name == SCORE_TYPE_COLUMN.name))
+            continue;
 
         if (required_result_columns_set.empty() || required_result_columns_set.contains(result_name))
         {

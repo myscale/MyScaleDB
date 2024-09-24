@@ -60,6 +60,7 @@
 #include <Common/checkStackSize.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageView.h>
+#include <Storages/StorageDistributed.h>
 
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -76,6 +77,7 @@
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
 #include <VectorIndex/Utils/VSUtils.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 
 #include <boost/algorithm/string.hpp>
 #include <Parsers/formatAST.h>
@@ -1025,7 +1027,7 @@ void getHybridSearchFunctions(
     {
         hybrid_search_functions = data.vector_scan_funcs;
         search_func_type = HybridSearchFuncType::VECTOR_SCAN;
-        search_func_name = "distance";
+        search_func_name = DISTANCE_FUNCTION;
 
         if (has_multiple_distances)
         {
@@ -1038,13 +1040,13 @@ void getHybridSearchFunctions(
     {
         hybrid_search_functions = data.text_search_func;
         search_func_type = HybridSearchFuncType::TEXT_SEARCH;
-        search_func_name = "TextSearch";
+        search_func_name = TEXT_SEARCH_FUNCTION;
     }
     else if (data.hybrid_search_func.size() == 1)
     {
         hybrid_search_functions = data.hybrid_search_func;
         search_func_type = HybridSearchFuncType::HYBRID_SEARCH;
-        search_func_name = "HybridSearch";
+        search_func_name = HYBRID_SEARCH_FUNCTION;
     }
 
     /// Remove the restriction that distance() function must exist in order by clause.
@@ -1415,6 +1417,14 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
             const String func_column_name = node->getColumnName();
             addSearchFunctionColumnName(func_column_name, source_columns);
             unknown_required_source_columns.erase(func_column_name);
+
+            /// Add score type column for distributed storage with multiple shards
+            auto * distributed = dynamic_cast<StorageDistributed *>(const_cast<DB::IStorage *>(storage.get()));
+            if (isHybridSearch(func_column_name) && distributed && distributed->getCluster()->getShardsInfo().size() > 1)
+            {
+                source_columns.push_back(SCORE_TYPE_COLUMN);
+                unknown_required_source_columns.erase(SCORE_TYPE_COLUMN.name);
+            }
         }
     }
 
@@ -1710,14 +1720,14 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
         else if (search_func_type == HybridSearchFuncType::TEXT_SEARCH)
         {
             has_text = true;
-            function_name = "TextSearch";
+            function_name = TEXT_SEARCH_FUNCTION;
             expected_args_size = 2;
         }
         else if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH)
         {
             has_vector = true;
             has_text = true;
-            function_name = "HybridSearch";
+            function_name = HYBRID_SEARCH_FUNCTION;
             expected_args_size = 4;
         }
 
@@ -1988,6 +1998,35 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
     result.expressions_with_window_function = getExpressionsWithWindowFunctions(query);
 
     getHybridSearchFunctions(query, select_query, result.hybrid_search_funcs, result.search_func_type);
+
+    /// Add score_type column and fusion id columns for multiple-shard distributed hybrid search
+    /// fusion id columns: _shard_num, _part_index, _part_offset
+    auto * distributed = dynamic_cast<StorageDistributed *>(const_cast<DB::IStorage *>(result.storage.get()));
+    if (result.search_func_type == HybridSearchFuncType::HYBRID_SEARCH && distributed
+        && distributed->getCluster()->getShardsInfo().size() > 1)
+    {
+        auto score_type_identifier = std::make_shared<ASTIdentifier>(SCORE_TYPE_COLUMN.name);
+        select_query->select()->children.push_back(score_type_identifier);
+
+        if (!select_query->orderBy())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Hybrid search requires ORDER BY clause.");
+
+        auto shard_num_element = std::make_shared<ASTOrderByElement>();
+        shard_num_element->direction = 1;
+        shard_num_element->children.emplace_back(makeASTFunction("shardNum"));
+
+        auto part_index_element = std::make_shared<ASTOrderByElement>();
+        part_index_element->direction = 1;
+        part_index_element->children.emplace_back(std::make_shared<ASTIdentifier>("_part_index"));
+
+        auto part_offset_element = std::make_shared<ASTOrderByElement>();
+        part_offset_element->direction = 1;
+        part_offset_element->children.emplace_back(std::make_shared<ASTIdentifier>("_part_offset"));
+
+        select_query->orderBy()->children.push_back(std::move(shard_num_element));
+        select_query->orderBy()->children.push_back(std::move(part_index_element));
+        select_query->orderBy()->children.push_back(std::move(part_offset_element));
+    }
 
     /// Special handling for vector scan, text search and hybrid search function
     result.collectForHybridSearchRelatedFunctions(select_query, tables_with_columns, getContext());
