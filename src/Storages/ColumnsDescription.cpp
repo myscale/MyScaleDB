@@ -33,6 +33,7 @@
 
 #include <DataTypes/DataTypesNumber.h>
 #include <VectorIndex/Utils/CommonUtils.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 
 #include <Common/logger_useful.h>
 
@@ -559,6 +560,12 @@ NamesAndTypesList ColumnsDescription::getByNames(const GetColumnsOptions & optio
             res.emplace_back(name, std::make_shared<DataTypeUInt32>());
             continue;
         }
+        else if (name == SCORE_TYPE_COLUMN.name)
+        {
+            res.emplace_back(SCORE_TYPE_COLUMN);
+            continue;
+        }
+
         if (isBatchDistance(name))
         {
             auto id_type = std::make_shared<DataTypeUInt32>();

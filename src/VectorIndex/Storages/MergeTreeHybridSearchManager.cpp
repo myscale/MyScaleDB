@@ -13,6 +13,7 @@
 
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Utils/VSUtils.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 #include <Storages/MergeTree/MergeTreeDataPartState.h>
 
 #include <Storages/MergeTree/IMergeTreeReader.h>
@@ -98,8 +99,9 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
     /// Get fusion type from hybrid_info
     String fusion_type = hybrid_info->fusion_type;
 
-    /// Store result after fusion. (<part_index, label_id>, score)
-    std::map<std::pair<size_t, UInt32>, Float32> part_index_labels_with_fusion_score;
+    /// Store result after fusion. (<shard_num, part_index, label_id>, score)
+    /// As for single-shard hybrid search, shard_num is always 0.
+    std::map<std::tuple<UInt32, UInt64, UInt64>, Float32> part_index_labels_with_fusion_score;
 
     /// Relative Sore Fusion
     if (isRelativeScoreFusion(fusion_type))
@@ -118,7 +120,7 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
 
         /// Assume fusion_k is handled by ExpressionAnalyzer
         int fusion_k = hybrid_info->fusion_k <= 0 ? 60 : hybrid_info->fusion_k;
-        RankFusion(part_index_labels_with_fusion_score, vec_scan_result_with_part_index, text_search_result_with_part_index, fusion_k);
+        RankFusion(part_index_labels_with_fusion_score, vec_scan_result_with_part_index, text_search_result_with_part_index, fusion_k, log);
     }
 
     /// Sort hybrid search result based on fusion score and return top-k rows.
@@ -126,8 +128,14 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
     std::multimap<Float32, std::pair<size_t, UInt32>, std::greater<Float32>> sorted_fusion_scores_with_part_index_label;
     for (const auto & [part_index_label_id, fusion_score] : part_index_labels_with_fusion_score)
     {
-        LOG_TEST(log, "part_index={}, label_id={}, hybrid_score={}", part_index_label_id.first, part_index_label_id.second, fusion_score);
-        sorted_fusion_scores_with_part_index_label.emplace(fusion_score, part_index_label_id);
+        LOG_TEST(
+            log,
+            "part_index={}, label_id={}, hybrid_score={}",
+            std::get<1>(part_index_label_id),
+            std::get<2>(part_index_label_id),
+            fusion_score);
+
+        sorted_fusion_scores_with_part_index_label.emplace(fusion_score, std::make_pair(std::get<1>(part_index_label_id), std::get<2>(part_index_label_id)));
     }
 
     /// Save topk part indexes, label ids and fusion score into hybrid_result.
@@ -145,138 +153,6 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
     }
 
     return hybrid_result;
-}
-
-void MergeTreeHybridSearchManager::RelativeScoreFusion(
-    std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_convex_score,
-    const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
-    const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
-    const float weight_of_text,
-    const int vector_scan_direction,
-    Poco::Logger * log)
-{
-    /// min-max normalization on text search score
-    std::vector<Float32> norm_score;
-    norm_score.reserve(text_search_result_with_part_index.size());
-    computeMinMaxNormScore(text_search_result_with_part_index, norm_score, log);
-
-    LOG_TEST(log, "text bm25 scores:");
-    /// final score = norm-BM25 * w + (1-w) * norm-distance
-    for (size_t idx = 0; idx < text_search_result_with_part_index.size(); idx++)
-    {
-        const auto & text_score_with_part_index = text_search_result_with_part_index[idx];
-        auto part_index_label_id = std::make_pair(text_score_with_part_index.part_index, text_score_with_part_index.label_id);
-
-        LOG_TEST(log, "part_index={}, label_id={}, origin_score={}, norm_score={}",
-                    text_score_with_part_index.part_index, text_score_with_part_index.label_id, text_score_with_part_index.score, norm_score[idx]);
-
-        /// label_ids from text search are unique
-        part_index_labels_with_convex_score[part_index_label_id] = norm_score[idx] * weight_of_text;
-    }
-
-    /// min-max normalization on text search score
-    norm_score.clear();
-    computeMinMaxNormScore(vec_scan_result_with_part_index, norm_score, log);
-
-    LOG_TEST(log, "distance scores:");
-    /// The Relative score fusion with distance score depends on the metric type.
-    for (size_t idx = 0; idx < vec_scan_result_with_part_index.size(); idx++)
-    {
-        const auto & vec_score_with_part_index = vec_scan_result_with_part_index[idx];
-        auto part_index_label_id = std::make_pair(vec_score_with_part_index.part_index, vec_score_with_part_index.label_id);
-
-        LOG_TEST(log, "part_index={}, label_id={}, origin_score={}, norm_score={}",
-                    vec_score_with_part_index.part_index, vec_score_with_part_index.label_id, vec_score_with_part_index.score, norm_score[idx]);
-
-        Float32 fusion_score = 0;
-
-        /// 1 - ascending, -1 - descending
-        if (vector_scan_direction == -1)
-            fusion_score = norm_score[idx] * (1 - weight_of_text);
-        else
-            fusion_score = (1 - weight_of_text) * (1 - norm_score[idx]);
-
-        /// Insert or update score for label_id
-        part_index_labels_with_convex_score[part_index_label_id] += fusion_score;
-    }
-}
-
-void MergeTreeHybridSearchManager::computeMinMaxNormScore(
-    const ScoreWithPartIndexAndLabels & search_result_with_part_index,
-    std::vector<Float32> & norm_score_vec,
-    Poco::Logger * log)
-{
-    const auto result_size = search_result_with_part_index.size();
-    if (result_size == 0)
-    {
-        LOG_DEBUG(log, "search result is empty");
-        return;
-    }
-
-    /// Here assume the scores in score column are ordered.
-    /// Thus the min score and max score are the first and last.
-    Float32 min_score, max_score, min_max_scale;
-    min_score = search_result_with_part_index[0].score;
-    max_score = search_result_with_part_index[result_size - 1].score;
-
-    /// When min_score = max_score, norm_score = 1.0;
-    if (min_score == max_score)
-    {
-        LOG_DEBUG(log, "max_score and min_score are equal");
-        for (size_t idx = 0; idx < result_size; idx++)
-            norm_score_vec.emplace_back(1.0);
-
-        return;
-    }
-    else if (min_score > max_score) /// DESC
-    {
-        Float32 tmp_score = min_score;
-        min_score = max_score;
-        max_score = tmp_score;
-    }
-
-    min_max_scale = max_score - min_score;
-
-    /// min-max normalization score = (score - min_score) / (max_score - min_score)
-    for (size_t idx = 0; idx < result_size; idx++)
-    {
-        Float32 norm_score = (search_result_with_part_index[idx].score - min_score) / min_max_scale;
-        norm_score_vec.emplace_back(norm_score);
-    }
-}
-
-void MergeTreeHybridSearchManager::RankFusion(
-    std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_ranked_score,
-    const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
-    const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
-    int k)
-{
-    /// Ranked score = 1.0 / (k + rank(label_id))
-    size_t idx = 0;
-    for (const auto & score_with_part_index_label : vec_scan_result_with_part_index)
-    {
-        Float32 rank_score = 1.0f / (k + idx + 1);
-        auto part_index_label = std::make_pair(score_with_part_index_label.part_index, score_with_part_index_label.label_id);
-
-        /// For new (part_index, label_id) pair, map will insert.
-        /// part_index_labels_with_ranked_score map saved the fusion score for a (part_index, label_id) pair.
-        part_index_labels_with_ranked_score[part_index_label] += rank_score;
-
-        idx++;
-    }
-
-    idx = 0;
-    for (const auto & score_with_part_index_label : text_search_result_with_part_index)
-    {
-        Float32 rank_score = 1.0f / (k + idx + 1);
-        auto part_index_label = std::make_pair(score_with_part_index_label.part_index, score_with_part_index_label.label_id);
-
-        /// For new (part_index, label_id) pair, map will insert.
-        /// part_index_labels_with_ranked_score map saved the fusion score for a (part_index, label_id) pair.
-        part_index_labels_with_ranked_score[part_index_label] += rank_score;
-
-        idx++;
-    }
 }
 
 SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHybridResults(

@@ -189,6 +189,9 @@ private:
     void executeSubqueriesInSetsAndJoins(QueryPlan & query_plan);
     bool autoFinalOnQuery(ASTSelectQuery & select_query);
 
+    /// Distributed HybridSearch Fusion and Sorting
+    void executeFusionSorted(QueryPlan & query_plan);
+
     enum class Modificator
     {
         ROLLUP = 0,
