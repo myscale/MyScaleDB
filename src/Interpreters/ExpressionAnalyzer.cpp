@@ -144,10 +144,15 @@ inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage
         for (const auto & index_desc : metadata_snapshot->getSecondaryIndices())
         {
             /// Find tantivy inverted index on the search column
-            if (index_desc.type == TANTIVY_INDEX_NAME && index_desc.column_names.size() == 1 && index_desc.column_names[0] == text_column_name)
+            if (index_desc.type == TANTIVY_INDEX_NAME)
             {
-                find_tantivy_index = true;
-                break;
+                auto & column_names = index_desc.column_names;
+                /// Support search on a column in a multi-columns index
+                if (std::find(column_names.begin(), column_names.end(), text_column_name) != column_names.end())
+                {
+                    find_tantivy_index = true;
+                    break;
+                }
             }
         }
     }

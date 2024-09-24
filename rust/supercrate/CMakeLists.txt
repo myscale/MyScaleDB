@@ -69,6 +69,10 @@ target_include_directories(supercrate_cxxbridge
     ${cxx_include}
 )
 
+#-Wno-dollar-in-identifier-extension -Wno-unused-macros
+target_compile_options(supercrate_cxxbridge PUBLIC -Wno-dollar-in-identifier-extension)
+target_compile_options(supercrate_cxxbridge PUBLIC -Wno-unused-macros)
+
 # Create total target with alias with given namespace
 add_library(supercrate-total INTERFACE)
 target_link_libraries(supercrate-total

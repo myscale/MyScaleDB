@@ -44,7 +44,7 @@ public:
         const SelectQueryInfo & query_info,
         const std::vector<bool> & vec_support_two_stage_searches,
 #if USE_TANTIVY_SEARCH
-        const Statistics & bm25_stats_in_table,
+        const TANTIVY::Statistics & bm25_stats_in_table,
 #endif
         const PrewhereInfoPtr & prewhere_info,
         StorageSnapshotPtr storage_snapshot,
