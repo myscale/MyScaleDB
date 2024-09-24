@@ -99,7 +99,7 @@ public:
     }
 
 #if USE_TANTIVY_SEARCH
-    void setBM25Stats(const Statistics & bm25_stats_in_table_)
+    void setBM25Stats(const TANTIVY::Statistics & bm25_stats_in_table_)
     {
         if (text_search_manager)
             text_search_manager->setBM25Stats(bm25_stats_in_table_);
