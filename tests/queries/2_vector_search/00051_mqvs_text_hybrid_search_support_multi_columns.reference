@@ -1,0 +1,17 @@
+text search on col1 with multi_idx
+0	2.087308
+3	1.905803
+text search on col2 with multi_idx
+5	1.9924302
+hybrid search on col1 with multi_idx
+0	0.9921875
+1	0.5
+2	0.4921875
+3	0.46875
+4	0.4296875
+hybrid search on col3 with multi_idx
+1	1
+0	0.4921875
+2	0.4921875
+3	0.46875
+4	0.4296875
