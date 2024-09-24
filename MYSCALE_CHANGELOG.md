@@ -2,6 +2,20 @@
 
 ## 2024
 
+### [v1.8.0](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.8.0) - 2024-09-24
+
+Features & Improvements
+
+- Support multiple distance() functions in a query
+ [!491](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/491) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- Fix Score Calculation Error in Distributed Hybrid Search
+ [!492](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/492) ([Libao Yang](https://git.moqi.ai/libaoy)).
+- Add setting for parallel reading in performPrefilter()
+ [!493](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/493) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- TextSearch and HybridSearch support multi-columns FTS index
+ [!496](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/496) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+
+
 ### [v1.7.1](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.7.1) - 2024-09-02
 
 Features & Improvements
