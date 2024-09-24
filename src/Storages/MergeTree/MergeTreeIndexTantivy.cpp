@@ -789,7 +789,7 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
     String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
 
 
-    FFIBoolResult json_status = ffi_verify_index_parameter(index_json_parameter);
+    TANTIVY::FFIBoolResult json_status = TANTIVY::ffi_verify_index_parameter(index_json_parameter);
     if (json_status.error.is_error)
     {
         throw DB::Exception(ErrorCodes::BAD_ARGUMENTS, "{}", std::string(json_status.error.message));
