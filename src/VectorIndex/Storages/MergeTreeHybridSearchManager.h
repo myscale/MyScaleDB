@@ -131,27 +131,6 @@ private:
     MergeTreeTextSearchManagerPtr text_search_manager = nullptr;
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeHybridSearchManager");
-
-    static void RelativeScoreFusion(
-        std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_convex_score,
-        const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
-        const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
-        const float weight_of_text,
-        const int vector_scan_direction,
-        Poco::Logger * log);
-
-    static void computeMinMaxNormScore(
-        const ScoreWithPartIndexAndLabels & search_result_with_part_index,
-        std::vector<Float32> & norm_score_vec,
-        Poco::Logger * log);
-
-    /// Compute reciprocal rank score for a (part_index, label id) pair
-    /// The map part_index_labels_with_ranked_score stores the sum of rank score for a (part_index, label id) pair
-    static void RankFusion(
-        std::map<std::pair<size_t, UInt32>, Float32> & part_index_labels_with_ranked_score,
-        const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
-        const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
-        int k);
 };
 
 using MergeTreeHybridSearchManagerPtr = std::shared_ptr<MergeTreeHybridSearchManager>;
