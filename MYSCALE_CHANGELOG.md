@@ -6,13 +6,13 @@
 
 Features & Improvements
 
-- Support multiple distance() functions in a query
+- Add support for multiple `distance()` functions in a single query.
  [!491](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/491) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
-- Fix Score Calculation Error in Distributed Hybrid Search
+- Resolve score calculation error in distributed hybrid search.
  [!492](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/492) ([Libao Yang](https://git.moqi.ai/libaoy)).
-- Add setting for parallel reading in performPrefilter()
+- Improve filterd vector search performance by intrudcing a setting for parallel reading in `performPrefilter()`.
  [!493](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/493) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
-- TextSearch and HybridSearch support multi-columns FTS index
+- Enhance `TextSearch()` and `HybridSearch()` to support multi-column FTS indexing。
  [!496](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/496) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
 
 
