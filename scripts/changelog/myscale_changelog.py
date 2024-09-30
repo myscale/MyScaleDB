@@ -72,14 +72,14 @@ class Description:
         # Substitute issue links.
         # 1) issue number w/o markdown link
         entry = re.sub(
-            r"([^[])#([0-9]{4,})",
-            r"\1[#\2](https://git.moqi.ai/mqdb/ClickHouse/-/issues/\2)",
+            r"([^[])!([0-9]{4,})",
+            r"\1[!\2](https://git.moqi.ai/mqdb/ClickHouse/-/issues/\2)",
             self.entry,
         )
         # 2) issue URL w/o markdown link
         entry = re.sub(
             r"([^(])https://git.moqi.ai/mqdb/ClickHouse/-/issues/([0-9]{4,})",
-            r"\1[#\2](https://git.moqi.ai/mqdb/ClickHouse/-/issues/\2)",
+            r"\1[!\2](https://git.moqi.ai/mqdb/ClickHouse/-/issues/\2)",
             entry,
         )
         # It's possible that we face a secondary rate limit.
@@ -87,7 +87,7 @@ class Description:
         user_name = self.user["name"]
         user_url = self.user["web_url"]
         return (
-            f"- {entry}\n [#{self.number}]({self.html_url}) "
+            f"- {entry}\n [!{self.number}]({self.html_url}) "
             f"([{user_name}]({user_url}))."
         )
 
@@ -215,7 +215,7 @@ def check_tag(tag: str) -> None:
         )
 
     logging.info("Fetch all tags")
-    runner.run("git fetch --tags", stderr=DEVNULL)
+    runner.run("git fetch --tags -f", stderr=DEVNULL)
     logging.info("Check if the tag exists")
     if runner.run(f"git tag --list {tag}") != "":
         raise argparse.ArgumentTypeError(f"tag {tag} already exists")
@@ -328,8 +328,8 @@ def insert_description_to_changelog(
 
     seen_mr = set()
     for i, line in enumerate(changelog_lines):
-        if re.search(r" \[#[0-9]+\]\(", line):
-            mr_number = int(re.search(r"#([0-9]+)", line).group(1))
+        if re.search(r" \[![0-9]+\]\(", line):
+            mr_number = int(re.search(r"!([0-9]+)", line).group(1))
             seen_mr.add(int(mr_number))
         if i > check_mr_deep:
             break
@@ -427,6 +427,7 @@ def update_default_branch_chglog(chg_update_sha: str, tag: str) -> str:
     runner.run(f"git checkout {release_branch} {CHANGELOG_PATH}")
     runner.run(f"git add {CHANGELOG_PATH}")
     runner.run(f"git commit -m 'Update changelog for {version}'")
+    return update_branch
 
 
 def verify_options(description: str, skip_verify: bool = False) -> None:

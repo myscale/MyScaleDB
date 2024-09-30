@@ -1,7 +1,7 @@
 import gitlab
 import logging
 import requests
-from config import myscale_repo_config
+from config import myscale_repo_config, NO_CHGLOG_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class GitLab:
                 "target_branch": target_branch,
                 "title": title,
                 "description": description,
+                "labels": [NO_CHGLOG_LABEL],
             }
         )
     

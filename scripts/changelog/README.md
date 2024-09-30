@@ -39,13 +39,13 @@ pip install fuzzywuzzy python-gitlab PyGithub
 使用以下命令运行脚本：
 
 ```bash
-./myscale_version_helper.py --version <版本号> --branch <分支名称> --private-token <GitLab私有令牌>
+./myscale_changelog.py --version <版本号> --branch <分支名称> --private-token <GitLab私有令牌>
 ```
 
 例如：
 
 ```bash
-python myscale_version_helper.py --version 1.2.3 --branch master --private-token your_private_token
+python myscale_changelog.py --version 1.2.3 --branch master --private-token your_private_token
 ```
 
 #### 脚本流程
