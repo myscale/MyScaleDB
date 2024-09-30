@@ -87,7 +87,7 @@ def get_nearest_tag_list(deep: int = 2) -> list:
 def get_version_from_tag_or_chglog(tag: str) -> str:
     if not re.search(r".*v[0-9]+\.[0-9]+\.[0-9]+(-rc\d+)?.*", tag):
         raise ValueError(f"Tag {tag} is not valid")
-    return re.search(r"v[0-9]+\.[0-9]+\.[0-9]+(rc\d+)?", tag).group(0)
+    return re.search(r"[0-9]+\.[0-9]+\.[0-9]+(rc\d+)?", tag).group(0)
 
 def get_newest_changelog() -> list:
     is_expected_changelog = False
