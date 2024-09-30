@@ -21,7 +21,8 @@ public:
         const StorageMetadataPtr & metadata_snapshot_,
         const MergeTreeData::MutableDataPartPtr & data_part_,
         time_t current_time,
-        bool force_
+        bool force_,
+        std::shared_ptr<std::unordered_set<UInt64>> ttl_delete_row_ids_ = nullptr
     );
 
     String getName() const override { return "TTL"; }
@@ -43,6 +44,8 @@ private:
     /// ttl_infos and empty_columns are updating while reading
     const MergeTreeData::MutableDataPartPtr & data_part;
     Poco::Logger * log;
+
+    std::shared_ptr<std::unordered_set<UInt64>> ttl_delete_row_ids;
 };
 
 }

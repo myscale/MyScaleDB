@@ -4,8 +4,13 @@ namespace DB
 {
 
 TTLDeleteAlgorithm::TTLDeleteAlgorithm(
-    const TTLDescription & description_, const TTLInfo & old_ttl_info_, time_t current_time_, bool force_)
+    const TTLDescription & description_,
+    const TTLInfo & old_ttl_info_,
+    time_t current_time_,
+    bool force_,
+    std::shared_ptr<std::unordered_set<UInt64>> ttl_delete_row_ids_)
     : ITTLAlgorithm(description_, old_ttl_info_, current_time_, force_)
+    , ttl_delete_row_ids(ttl_delete_row_ids_)
 {
     if (!isMinTTLExpired())
         new_ttl_info = old_ttl_info;
@@ -43,7 +48,14 @@ void TTLDeleteAlgorithm::execute(Block & block)
                 result_column->insertFrom(*values_column, i);
             }
             else if (it == column_names.begin())
+            {
                 ++rows_removed;
+                if (ttl_delete_row_ids)
+                {
+                    ttl_delete_row_ids->insert(part_row_id);
+                }
+            }
+            ++part_row_id;
         }
 
         result_columns.emplace_back(std::move(result_column));

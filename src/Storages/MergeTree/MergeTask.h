@@ -239,6 +239,7 @@ private:
         std::list<DB::NameAndTypePair>::const_iterator it_name_and_type;
         size_t column_num_for_vertical_merge{0};
         bool need_sync{false};
+        std::shared_ptr<std::unordered_set<UInt64>> ttl_delete_row_ids{nullptr};
     };
 
     using ExecuteAndFinalizeHorizontalPartRuntimeContextPtr = std::shared_ptr<ExecuteAndFinalizeHorizontalPartRuntimeContext>;

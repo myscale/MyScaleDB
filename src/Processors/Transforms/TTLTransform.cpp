@@ -22,10 +22,12 @@ TTLTransform::TTLTransform(
     const StorageMetadataPtr & metadata_snapshot_,
     const MergeTreeData::MutableDataPartPtr & data_part_,
     time_t current_time_,
-    bool force_)
+    bool force_,
+    std::shared_ptr<std::unordered_set<UInt64>> ttl_delete_row_ids_)
     : IAccumulatingTransform(header_, header_)
     , data_part(data_part_)
     , log(&Poco::Logger::get(storage_.getLogName() + " (TTLTransform)"))
+    , ttl_delete_row_ids(ttl_delete_row_ids_)
 {
     auto old_ttl_infos = data_part->ttl_infos;
 
@@ -33,7 +35,7 @@ TTLTransform::TTLTransform(
     {
         const auto & rows_ttl = metadata_snapshot_->getRowsTTL();
         auto algorithm = std::make_unique<TTLDeleteAlgorithm>(
-            rows_ttl, old_ttl_infos.table_ttl, current_time_, force_);
+            rows_ttl, old_ttl_infos.table_ttl, current_time_, force_, ttl_delete_row_ids);
 
         /// Skip all data if table ttl is expired for part
         if (algorithm->isMaxTTLExpired() && !rows_ttl.where_expression)
@@ -45,7 +47,7 @@ TTLTransform::TTLTransform(
 
     for (const auto & where_ttl : metadata_snapshot_->getRowsWhereTTLs())
         algorithms.emplace_back(std::make_unique<TTLDeleteAlgorithm>(
-            where_ttl, old_ttl_infos.rows_where_ttl[where_ttl.result_column], current_time_, force_));
+            where_ttl, old_ttl_infos.rows_where_ttl[where_ttl.result_column], current_time_, force_, ttl_delete_row_ids));
 
     for (const auto & group_by_ttl : metadata_snapshot_->getGroupByTTLs())
         algorithms.emplace_back(std::make_unique<TTLAggregationAlgorithm>(
