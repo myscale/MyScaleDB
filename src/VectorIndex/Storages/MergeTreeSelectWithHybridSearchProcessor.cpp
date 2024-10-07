@@ -17,6 +17,7 @@
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeThreadSelectWithFilterAlgorithm.h>
 #include <VectorIndex/Utils/VSUtils.h>
 #include <VectorIndex/Cache/PKCacheManager.h>
 
@@ -888,7 +889,7 @@ struct PartRangesReadInfo
 };
 
 template<typename PullingExecutor>
-VIBitmapPtr getFilterFromPipeline(size_t num_rows, Pipe & pipe)
+void getFilterFromPipeline(Pipe & pipe, VIBitmapPtr & filter)
 {
     QueryPipelineBuilder builder;
     builder.init(std::move(pipe));
@@ -899,23 +900,34 @@ VIBitmapPtr getFilterFromPipeline(size_t num_rows, Pipe & pipe)
     PullingExecutor filter_executor(filter_pipeline);
 
     Block block;
-    VIBitmapPtr filter = std::make_shared<VIBitmap>(num_rows);
+    OpenTelemetry::SpanHolder span_pipe("performPrefilter()::getFilterFromPipeline()");
+    while (filter_executor.pull(block))
     {
-        OpenTelemetry::SpanHolder span_pipe("performPrefilter()::getFilterFromPipeline()");
-        while (filter_executor.pull(block))
+        if (block)
         {
-            if (block)
+            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+            for (size_t i = 0; i < block.rows(); ++i)
             {
-                const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
-                for (size_t i = 0; i < block.rows(); ++i)
-                {
-                    filter->set(col_data[i]);
-                }
+                filter->set(col_data[i]);
             }
         }
     }
+}
 
-    return filter;
+/// In Async pulling pipeline executor cases (multiple threads), set the filter during read in parallel.
+void parallelGetFilterFromPipeline(Pipe & pipe)
+{
+    QueryPipelineBuilder builder;
+    builder.init(std::move(pipe));
+
+    QueryPipeline filter_pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
+    PullingAsyncPipelineExecutor filter_executor(filter_pipeline);
+
+    Block block;
+    OpenTelemetry::SpanHolder span_pipe("performPrefilter()::parallelGetFilterFromPipeline()");
+    while (filter_executor.pull(block))
+    {
+    }
 }
 
 }
@@ -972,7 +984,6 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
     bool enable_parallel_reading = false;
     const auto & settings = context_->getSettingsRef();
     const auto data_settings = storage_.getSettings();
-    size_t num_rows = data_part_->rows_count;
 
     PartRangesReadInfo info(data_part_, mark_ranges, settings, *data_settings);
 
@@ -1017,6 +1028,9 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
     LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", max_streams, info.min_marks_for_concurrent_read);
 
+    size_t num_rows = data_part_->rows_count;
+    VIBitmapPtr filter = std::make_shared<VIBitmap>(num_rows);
+
     /// Read in multiple threads will use Async pulling executor
     if (enable_parallel_reading)
     {
@@ -1050,11 +1064,11 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
         for (size_t i = 0; i < num_streams; ++i)
         {
-            auto algorithm = std::make_unique<MergeTreeThreadSelectAlgorithm>(
+            auto algorithm = std::make_unique<MergeTreeThreadSelectWithFilterAlgorithm>(
                 i, pool, info.min_marks_for_concurrent_read, max_block_size,
                 settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
                 storage_, storage_snapshot_, info.use_uncompressed_cache,
-                prewhere_info_copy, actions_settings, reader_settings_, system_columns);
+                prewhere_info_copy, actions_settings, reader_settings_, system_columns, filter);
 
             auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
 
@@ -1066,7 +1080,8 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
         Pipe pipe = Pipe::unitePipes(std::move(pipes));
 
-        return getFilterFromPipeline<PullingAsyncPipelineExecutor>(num_rows, pipe);
+        /// filter bitmap will be set during read data
+        parallelGetFilterFromPipeline(pipe);
     }
     else
     {
@@ -1092,8 +1107,10 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
 
         Pipe pipe = Pipe(std::move(source));
 
-        return getFilterFromPipeline<PullingPipelineExecutor>(num_rows, pipe);
+        getFilterFromPipeline<PullingPipelineExecutor>(pipe, filter);
     }
+
+    return filter;
 }
 
 VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes(
