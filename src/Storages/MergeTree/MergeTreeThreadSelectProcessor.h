@@ -11,7 +11,7 @@ using IMergeTreeReadPoolPtr = std::shared_ptr<IMergeTreeReadPool>;
 /** Used in conjunction with MergeTreeReadPool, asking it for more work to do and performing whatever reads it is asked
   * to perform.
   */
-class MergeTreeThreadSelectAlgorithm final : public IMergeTreeSelectAlgorithm
+class MergeTreeThreadSelectAlgorithm : public IMergeTreeSelectAlgorithm
 {
 public:
     MergeTreeThreadSelectAlgorithm(
