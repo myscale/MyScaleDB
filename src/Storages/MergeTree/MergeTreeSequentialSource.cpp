@@ -78,6 +78,9 @@ private:
     /// current row at which we stop reading
     size_t current_row = 0;
 
+    /// max rows to read at a time
+    size_t max_rows_to_read = 0;
+
     /// Closes readers and unlock part locks
     void finish();
 };
@@ -174,6 +177,15 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
         /*avg_value_size_hints=*/ {},
         /*profile_callback=*/ {});
 
+    /// Try to read many marks at once in a readRows() to speed up the sequential read
+    /// Enabled when index_granuality * 2 is small than global default index_granularity and rows count in part is larger than it.
+    const auto & global_data_settings = storage.getContext()->getMergeTreeSettings();
+    size_t sequential_read_max_rows = global_data_settings.index_granularity;
+
+    const auto & data_settings = storage.getSettings();
+    if (data_settings->index_granularity * 2 < sequential_read_max_rows && data_part->rows_count > sequential_read_max_rows)
+        max_rows_to_read = sequential_read_max_rows;
+
     if (prefetch && !data_part->isEmpty())
         reader->prefetchBeginOfRange(Priority{});
 }
@@ -217,10 +229,39 @@ try
     /// Part level is useful for next step for merging non-merge tree table
     bool add_part_level = storage.merging_params.mode != MergeTreeData::MergingParams::Ordinary;
     size_t num_marks_in_part = data_part->getMarksCount();
+    size_t num_marks_to_read = 0;
+    std::vector<size_t> marks_rows_to_read; /// Save rows for marks to read
 
     if (!isCancelled() && current_row < data_part->rows_count)
     {
         size_t rows_to_read = data_part->index_granularity.getMarkRows(current_mark);
+
+        /// Try to read many marks at a time in cases when index_granularity is small
+        if (max_rows_to_read)
+        {
+            /// Save rows for current mark
+            marks_rows_to_read.emplace_back(rows_to_read);
+            ++num_marks_to_read;
+
+            while (rows_to_read < max_rows_to_read && current_mark + num_marks_to_read < num_marks_in_part)
+            {
+                size_t next_mark_rows = data_part->index_granularity.getMarkRows(current_mark + num_marks_to_read);
+
+                /// last mark is final mark
+                if (next_mark_rows == 0)
+                    break;
+
+                /// Read rows no more than max_rows_to_read
+                if (rows_to_read + next_mark_rows > max_rows_to_read)
+                    break;
+
+                /// Add next mark rows and num_marks_to_read
+                rows_to_read += next_mark_rows;
+                marks_rows_to_read.emplace_back(next_mark_rows);
+                ++num_marks_to_read;
+            }
+        }
+
         bool continue_reading = (current_mark != 0);
 
         const auto & sample = reader->getColumns();
@@ -233,7 +274,28 @@ try
             reader->fillVirtualColumns(columns, rows_read);
 
             current_row += rows_read;
-            current_mark += (rows_to_read == rows_read);
+
+            if (max_rows_to_read)
+            {
+                if (rows_to_read == rows_read)
+                    current_mark += num_marks_to_read;
+                else
+                {
+                    /// Skip to mark at which we stop reading
+                    size_t sum_marks_rows = 0;
+                    for (const auto & mark_rows : marks_rows_to_read)
+                    {
+                        sum_marks_rows += mark_rows;
+                        if (rows_read < sum_marks_rows)
+                            break;
+
+                        /// Increase current mark
+                        ++current_mark;
+                    }
+                }
+            }
+            else
+                current_mark += (rows_to_read == rows_read);
 
             bool should_evaluate_missing_defaults = false;
             reader->fillMissingColumns(columns, should_evaluate_missing_defaults, rows_read);
