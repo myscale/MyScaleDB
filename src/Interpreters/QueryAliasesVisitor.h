@@ -2,12 +2,12 @@
 
 #include <Interpreters/Aliases.h>
 #include <Interpreters/InDepthNodeVisitor.h>
+#include <Parsers/ASTSubquery.h>
 
 namespace DB
 {
 
 class ASTSelectQuery;
-class ASTSubquery;
 struct ASTTableExpression;
 struct ASTArrayJoin;
 
