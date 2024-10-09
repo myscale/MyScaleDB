@@ -187,25 +187,9 @@ docker exec -it myscaledb-myscaledb-1 clickhouse-client
 
 #### Building from source
 
-The supported build environment is Ubuntu 22.04 with LLVM 15.07 and CMake 3.24+.
+The supported build environment is Ubuntu 22.04 with LLVM 15.07.
 
-> Ubuntu 22.04 ships with an older CMake, you need to install 3.24+
-> You can do so from source or binaries following instructions at [https://cmake.org/download](https://cmake.org/download)
-
-The example below is for x86-64:
-
-```bash
-sudo apt update
-sudo apt-get install -y clang-15 git git-lfs  cmake ccache python3 ninja-build nasm yasm gawk lsb-release wget software-properties-common gnupg libomp-15-dev rustc cargo
-
-git clone --depth=1 --recurse-submodules https://github.com/myscale/MyScaleDB.git
-
-cd MyScaleDB
-export CC=clang-15 CXX=clang++-15 PATH=/usr/lib/llvm-15/bin:$PATH
-
-cmake -S . -DENABLE_RUST=ON -B build
-cmake  --build build
-```
+Please see the [scripts](https://github.com/myscale/MyScaleDB/tree/main/scripts) folder.
 
 The resulting executables will be in `MyScaleDB/build/programs/*`.
 
