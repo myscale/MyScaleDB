@@ -101,6 +101,7 @@
 #include "config_version.h"
 #include <Interpreters/Context.h>
 
+#include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Processors/FusionSortingStep.h>
 
 #if USE_TANTIVY_SEARCH
@@ -678,9 +679,45 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 
         if (query.prewhere() && query.where())
         {
+            GetHybridSearchMatcher::Visitor::Data where_data;
+            GetHybridSearchMatcher::Visitor(where_data).visit(query.where());
+            bool hybrid_search_func_in_where = where_data.vector_scan_funcs.size() > 0 || where_data.text_search_func.size() > 0
+                || where_data.hybrid_search_func.size() > 0;
+
             /// Filter block in WHERE instead to get better performance
             query.setExpression(
                 ASTSelectQuery::Expression::WHERE, makeASTFunction("and", query.prewhere()->clone(), query.where()->clone()));
+
+            /// Hybrid search function in original WHERE clause, remove all ASTFunction in syntax_analyzer_result->hybrid_search_funcs
+            /// and regenerate hybrid_search_funcs from new query_ptr
+            if (hybrid_search_func_in_where)
+            {
+                auto & hybrid_search_funcs = const_cast<std::vector<const ASTFunction *> &>(syntax_analyzer_result->hybrid_search_funcs);
+                hybrid_search_funcs.clear();
+
+                GetHybridSearchVisitor::Data data;
+                GetHybridSearchVisitor(data).visit(query_ptr);
+
+                if (data.vector_scan_funcs.size() >= 1)
+                {
+                    hybrid_search_funcs = data.vector_scan_funcs;
+                    if (data.vector_scan_funcs.size() > 1)
+                    {
+                        /// As for multiple vector scan functions, the order of new hybrid_search_funcs remain the same as original
+                        /// So the vector_scan_metric_types and vector_search_types of TreeRewriterResult no need to reset
+                        for (const auto & vector_scan_func : data.all_multiple_vector_scan_funcs)
+                            vector_scan_func->is_from_multiple_distances = true;
+                    }
+                }
+                else if (data.text_search_func.size() == 1)
+                {
+                    hybrid_search_funcs = data.text_search_func;
+                }
+                else if (data.hybrid_search_func.size() == 1)
+                {
+                    hybrid_search_funcs = data.hybrid_search_func;
+                }
+            }
         }
 
         query_analyzer = std::make_unique<SelectQueryExpressionAnalyzer>(

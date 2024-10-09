@@ -1,0 +1,35 @@
+Vector Search in WHERE
+1
+2
+3
+4
+5
+Multiple Vector Search in WHERE
+3
+4
+Vector Search in PREWHERE
+1
+2
+3
+4
+5
+Vector Search in WHERE and PREWHERE
+0
+1
+2
+3
+4
+Multiple Vector Search in WHERE and SELECT
+1	0	3
+2	3	0
+0	3	12
+3	12	3
+4	27	12
+Text Search in WHERE
+0
+Hybrid Search in WHERE
+0
+1
+2
+3
+4
