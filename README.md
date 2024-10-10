@@ -185,6 +185,23 @@ docker exec -it myscaledb-myscaledb-1 clickhouse-client
 
 5. You can now run SQL statements. See [Executing SQL Queries](https://myscale.com/docs/en/quickstart/#executing-sql-queries).
 
+#### Building from source
+
+The supported build environment is Ubuntu 22.04 with LLVM 15.0.7.
+
+Please see the [scripts](https://github.com/myscale/MyScaleDB/tree/main/scripts) folder.
+
+Example usage:
+
+```bash
+LLVM_VERSION=15 sudo -E bash scripts/install_deps.sh
+sudo apt-get -y install rustc cargo yasm
+bash scripts/config_on_linux.sh
+bash scripts/build_on_linux.sh
+```
+
+The resulting executables will be in `MyScaleDB/build/programs/*`.
+
 ## Tutorial
 
 See [Vector Search Documentation](https://myscale.com/docs/en/vector-search/) for how to create a SQL table with vector index and perform vector search. It's recommended to specify `TYPE SCANN` when creating a vector index in open source MyScaleDB.
