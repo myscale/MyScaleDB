@@ -197,7 +197,7 @@ Example usage:
 LLVM_VERSION=15 sudo -E bash scripts/install_deps.sh
 sudo apt-get -y install rustc cargo yasm
 bash scripts/config_on_linux.sh
-bash ./scripts/build_on_linux.sh
+bash scripts/build_on_linux.sh
 ```
 
 The resulting executables will be in `MyScaleDB/build/programs/*`.
