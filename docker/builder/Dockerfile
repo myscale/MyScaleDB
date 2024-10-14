@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.0 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.0 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.0 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.1 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.1 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.1 bash
 
 FROM ubuntu:22.04
 
@@ -29,8 +29,6 @@ RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
     && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
-    && wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
-    && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list ; fi \
     && apt update \
     && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
     && apt install git git-lfs build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
@@ -56,7 +54,6 @@ RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     libunwind-${LLVM_VERSION} \
     libunwind-${LLVM_VERSION}-dev \
     libomp-${LLVM_VERSION}-dev --yes --verbose-versions \
-    && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then apt install intel-oneapi-mkl-${INTEL_ONEAPI_VERSION} intel-oneapi-mkl-devel-${INTEL_ONEAPI_VERSION} --yes --verbose-versions ; fi \
     && ln -s /usr/bin/lld-${LLVM_VERSION} /usr/bin/ld.lld \
     && ln -s /usr/bin/llvm-symbolizer-${LLVM_VERSION} /usr/bin/llvm-symbolizer \
     && apt clean \
@@ -90,8 +87,9 @@ ENV CARGO_HOME=${WORK_DIRECTORY}/cargo
 ENV PATH="${WORK_DIRECTORY}/cargo/env:${PATH}"
 ENV PATH="${WORK_DIRECTORY}/cargo/bin:${PATH}"
 ENV SCCACHE_DIR="${WORK_DIRECTORY}/.sccache"
+ENV DEFAULT_RUST_TOOLCHAIN_VERSION=1.79.0
 # ENV SCCACHE_CONF="${WORK_DIRECTORY}/.sccache/sccache.conf"
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y \
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain=${DEFAULT_RUST_TOOLCHAIN_VERSION} \
     && chmod 777 -R ${WORK_DIRECTORY}/rustup  \
     && chmod 777 -R ${WORK_DIRECTORY}/cargo  \
     && rustup target add aarch64-unknown-linux-gnu \
@@ -158,15 +156,6 @@ ENV GOPATH=${WORK_DIRECTORY}/go
 ENV GOCACHE=${WORK_DIRECTORY}/go/.cache
 
 RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTORY}
-
-# remove mono-complete dependency in builder:3.1.0, because ubuntu 22.04 does not have mono-complete package
-# RUN export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
-#     && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF \
-#     && echo "deb https://download.mono-project.com/repo/ubuntu stable-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list \
-#     && apt update --yes --fix-missing \
-#     && apt install mono-complete --yes --fix-missing \
-#     && apt clean \
-#     && rm -rfv /var/lib/apt/lists/*
 
 RUN pip install --upgrade clickhouse_driver
 
