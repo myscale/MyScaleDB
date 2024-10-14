@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.1 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.1 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.2 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.2 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.2 bash
 
 FROM ubuntu:22.04
 
@@ -100,6 +100,8 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain=${DEFAULT
     && cargo install sccache \
     && mkdir -p ${SCCACHE_DIR} \
     && rm -fr ${CARGO_HOME}/registry
+
+ADD cargo.config.toml ${CARGO_HOME}/config.toml
 
 # libtapi is required to support .tbh format from recent MacOS SDKs
 RUN git clone --depth 1 https://github.com/tpoechtrager/apple-libtapi.git \
