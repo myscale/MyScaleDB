@@ -1,0 +1,30 @@
+[source.crates-io]
+replace-with = 'ustc'
+
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli = true
+
+# tsinghua
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+# ustc
+[source.ustc]
+registry = "git://mirrors.ustc.edu.cn/crates.io-index"
+
+# sjtu
+[source.sjtu]
+registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"
+
+# rustcc
+[source.rustcc]
+registry = "git://crates.rustcc.cn/crates.io-index"
