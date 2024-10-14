@@ -9,10 +9,6 @@ ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
 
 source /etc/profile
 arch="$(dpkg --print-architecture)"
-if [[ "x$arch" = "xamd64" ]]; then
-    echo "/opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/lib/intel64" >>/etc/ld.so.conf.d/libc.conf
-    ldconfig
-fi
 
 dpkg -i package_folder/clickhouse-common-static_*$arch.deb
 dpkg -i package_folder/clickhouse-common-static-dbg_*$arch.deb
