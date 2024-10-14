@@ -28,10 +28,6 @@ ls -al $TEST_FLOAD
 # source /etc/profile
 # arch="$(dpkg --print-architecture)"
 arch="amd64"
-if [[ "x$arch" = "xamd64" ]]; then
-    echo "/opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/lib/intel64" >>/etc/ld.so.conf.d/libc.conf
-    ldconfig
-fi
 
 mkdir -p $WORKPATH/workspace
 cd $WORKPATH/workspace

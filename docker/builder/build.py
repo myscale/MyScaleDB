@@ -274,9 +274,6 @@ def build(arch: str, build_jobs: int, cmake: Dict[str, str]):
         'LD_LIBRARY_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib:${LD_LIBRARY_PATH}'
     ]
 
-    # if target_arch == "x86_64" and target_os not in ["freebsd"]:
-    #     warp.append('. /opt/intel/oneapi/mkl/${INTEL_ONEAPI_VERSION}/env/vars.sh')
-
     warp.append(" ")  # donot remove
 
     cmd = f"mkdir -pv {BUILD_DIRECTORY}"

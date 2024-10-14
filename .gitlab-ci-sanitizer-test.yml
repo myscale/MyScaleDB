@@ -7,7 +7,7 @@ stress_test_asan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1
   parallel:
     matrix:
       - ARCH: amd64
@@ -34,7 +34,7 @@ stress_test_tsan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1
   parallel:
     matrix:
       - ARCH: amd64
@@ -61,7 +61,7 @@ stress_test_ubsan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1
   parallel:
     matrix:
       - ARCH: amd64
@@ -88,7 +88,7 @@ stress_test_msan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1
   parallel:
     matrix:
       - ARCH: amd64
@@ -144,7 +144,7 @@ vector-test-asan:
 # disable TSAN due to #89
 .vector-test-tsan:
   stage: sanitizer-test
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   needs:
     - job: build_with_sanitizer_tsanbinary
       artifacts: true
@@ -179,7 +179,7 @@ vector-test-asan:
 # disable MSAN due to #89
 .vector-test-msan:
   stage: sanitizer-test
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   needs:
     - job: build_with_sanitizer_msanbinary
       artifacts: true
@@ -210,7 +210,7 @@ vector-test-asan:
 
 vector-test-ubsan:
   stage: sanitizer-test
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   needs:
     - job: build_with_sanitizer_ubsanbinary
       artifacts: true
@@ -246,7 +246,7 @@ fuzzer_test-asan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0.1
   parallel:
     matrix:
       - ARCH: amd64
@@ -272,7 +272,7 @@ fuzzer_test-ubsan:
       artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:2.0.1
   parallel:
     matrix:
       - ARCH: amd64

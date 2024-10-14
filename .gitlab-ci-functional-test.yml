@@ -1,7 +1,7 @@
 ######################################## VECTOR TESTS ########################################
 ######### VECTOR TESTS ###########
 vector_search_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   stage: functional-test
   needs:
     - job: build_binary
@@ -74,7 +74,7 @@ smoke_test:
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
 stateless_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   stage: functional-test
   needs:
     - job: build_binary
@@ -111,7 +111,7 @@ stateless_test:
 
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
   stage: functional-test
   needs:
     - job: build_binary
