@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0 . --push
-FROM  harbor.internal.moqi.ai/mqdb/runtime:2.0
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0.1 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0.1 . --push
+FROM  harbor.internal.moqi.ai/mqdb/runtime:2.0.1
 
 ENV TZ=Europe/Moscow
 RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone

@@ -1,4 +1,4 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:2.0 . --push
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:2.0.1 . --push
 FROM ubuntu:22.04
 
 ARG TARGETARCH
@@ -10,7 +10,6 @@ ENV TZ Asia/Shanghai
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LLVM_VERSION=15
-ENV INTEL_ONEAPI_VERSION=2021.4.0
 
 RUN apt update && apt install ca-certificates pip --yes --verbose-versions \
     && sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list \
@@ -32,14 +31,11 @@ RUN apt update && apt upgrade --yes --verbose-versions \
 
 RUN locale-gen en_US.UTF-8
 
-RUN wget -q -O - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | apt-key add - \
-    && echo "deb https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneapi.list \
-    && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+RUN wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
     && apt update \
-    && apt install libomp5-${LLVM_VERSION} liblapack3 libblas3 --yes \
-    && if [ "x${TARGETARCH:-amd64}" = "xamd64" ] ; then apt install intel-oneapi-mkl-${INTEL_ONEAPI_VERSION} --yes --verbose-versions ; fi \
+    && apt install libomp5-${LLVM_VERSION} libopenblas-dev --yes \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
