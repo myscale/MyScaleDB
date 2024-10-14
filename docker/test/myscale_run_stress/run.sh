@@ -29,10 +29,6 @@ ln -s /usr/share/clickhouse-test/clickhouse-test /usr/bin/clickhouse-test
 source /usr/share/clickhouse-test/ci/stress_tests.lib
 
 arch="$(dpkg --print-architecture)"
-if [[ "x$arch" = "xamd64" ]]; then
-    echo "/opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/lib/intel64" >>/etc/ld.so.conf.d/libc.conf
-    ldconfig
-fi
 
 dpkg -i $WORKPATH/packages/clickhouse-common-static_*$arch.deb
 dpkg -i $WORKPATH/packages/clickhouse-common-static-dbg_*$arch.deb

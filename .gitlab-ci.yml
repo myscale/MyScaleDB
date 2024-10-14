@@ -1,4 +1,4 @@
-image: harbor.internal.moqi.ai/mqdb/builder:3.1.0
+image: harbor.internal.moqi.ai/mqdb/builder:3.1.1
 
 workflow:
   rules:
@@ -131,6 +131,33 @@ build_package:
     - if: $CI_COMMIT_TAG
     - when: manual
       allow_failure: true
+
+# Build the release package ci job.
+# At this stage, it won’t be enabled automatically and can only be triggered manually.
+# [TODO] Reduce the size of myscale release binary and consider retaining debug information
+build_release_package:
+  stage: package
+  when: manual
+  dependencies: ["check_pipeline_already_running"]
+  before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
+    - *init-ssh
+  variables:
+    KUBERNETES_CPU_REQUEST: 8
+    KUBERNETES_CPU_LIMIT: 32
+    KUBERNETES_MEMORY_REQUEST: 16Gi
+    KUBERNETES_MEMORY_LIMIT: 32Gi
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-release"
+    paths:
+      - artifacts/*.tgz
+  retry: 2
+  script:
+    - docker/builder/tools/submodule-update.sh
+    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-x86_64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-aarch64 --package --compiler "clang-15"
 
 build_package_with_license:
   stage: package

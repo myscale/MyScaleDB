@@ -27,7 +27,6 @@
 
 ```bash
 # docker exec -it <name> bash
-# source /opt/intel/oneapi/mkl/$INTEL_ONEAPI_VERSION/env/vars.sh
 # clickhouse-client
 ClickHouse client version 21.11.5.1.
 Connecting to localhost:9000 as user default.
