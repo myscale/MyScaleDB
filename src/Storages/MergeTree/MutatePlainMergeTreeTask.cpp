@@ -109,10 +109,13 @@ bool MutatePlainMergeTreeTask::executeStep()
                 /// There will be insufficient topk problems, Update the content related to the bitmap in the cache.
                 /// If the cache is being loaded, the delete bitmap in the cache will not be updated normally,
                 /// resulting in insufficient topk returned during subsequent searches.
-                if (new_part->lightweight_delete_mask_updated)
+                if (new_part->isDeletedMaskUpdated())
                 {
-                   if (new_part->vector_index.containAnyVIInReady())
-                       new_part->onLightweightDelete();
+                    if (new_part->vector_index.containAnyVIInReady())
+                        new_part->onLightweightDelete();
+
+                    /// Clear deleted row ids
+                    new_part->deleted_row_ids.clear();
                 }
 
                 state = State::NEED_FINISH;
