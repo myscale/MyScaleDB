@@ -27,15 +27,20 @@ enum class DataType;
 namespace DB
 {
 
+const String BATCH_DISTANCE_FUNCTION = "batch_distance";
+const String DISTANCE_FUNCTION = "distance";
+const String TEXT_SEARCH_FUNCTION = "textsearch";
+const String HYBRID_SEARCH_FUNCTION = "hybridsearch";
+
 const String SCORE_COLUMN_NAME = "bm25_score";
 
 /// Different search types
 enum class HybridSearchFuncType
 {
-    VECTOR_SCAN = 0,
+    UNKNOWN_FUNC = 0,
+    VECTOR_SCAN,
     TEXT_SEARCH,
-    HYBRID_SEARCH,
-    UNKNOWN_FUNC
+    HYBRID_SEARCH
 };
 
 class IDataType;
@@ -44,13 +49,13 @@ using DataTypePtr = std::shared_ptr<const IDataType>;
 inline bool isDistance(const String & func)
 {
     String func_to_low = Poco::toLower(func);
-    return func_to_low.find("distance") == 0;
+    return func_to_low.find(DISTANCE_FUNCTION) == 0;
 }
 
 inline bool isBatchDistance(const String & func)
 {
     String func_to_low = Poco::toLower(func);
-    return func_to_low.find("batch_distance") == 0;
+    return func_to_low.find(BATCH_DISTANCE_FUNCTION) == 0;
 }
 
 inline bool isVectorScanFunc(const String & func)
@@ -61,13 +66,13 @@ inline bool isVectorScanFunc(const String & func)
 inline bool isTextSearch(const String & func)
 {
     String func_to_low = Poco::toLower(func);
-    return func_to_low.find("textsearch") == 0;
+    return func_to_low.find(TEXT_SEARCH_FUNCTION) == 0;
 }
 
 inline bool isHybridSearch(const String & func)
 {
     String func_to_low = Poco::toLower(func);
-    return func_to_low.find("hybridsearch") == 0;
+    return func_to_low.find(HYBRID_SEARCH_FUNCTION) == 0;
 }
 
 inline bool isHybridSearchFunc(const String & func)

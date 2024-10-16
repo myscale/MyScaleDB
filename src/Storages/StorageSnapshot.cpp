@@ -5,6 +5,7 @@
 #include <DataTypes/NestedUtils.h>
 #include <Storages/StorageView.h>
 #include <sparsehash/dense_hash_set>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 
 namespace DB
 {
@@ -81,6 +82,10 @@ NamesAndTypesList StorageSnapshot::getColumnsByNames(const GetColumnsOptions & o
         if (isDistance(name) || isTextSearch(name) || isHybridSearch(name) || isScoreColumnName(name))
         {
             res.emplace_back(name, std::make_shared<DataTypeFloat32>());
+        }
+        else if (name == SCORE_TYPE_COLUMN.name)
+        {
+            res.emplace_back(SCORE_TYPE_COLUMN);
         }
         else if (isBatchDistance(name))
         {
@@ -174,6 +179,10 @@ Block StorageSnapshot::getSampleBlockForColumns(const Names & column_names, cons
         {
             auto type = std::make_shared<DataTypeFloat32>();
             res.insert({type->createColumn(), type, column_name});
+        }
+        else if (column_name == SCORE_TYPE_COLUMN.name)
+        {
+            res.insert({SCORE_TYPE_COLUMN.type->createColumn(), SCORE_TYPE_COLUMN.type, SCORE_TYPE_COLUMN.name});
         }
         else if (isBatchDistance(column_name))
         {

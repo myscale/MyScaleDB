@@ -54,12 +54,12 @@ public:
     /// Execute vector scan, text or hybrid search on all parts
     /// For two stage search cases, execute first stage vector scan.
     static VectorAndTextResultInDataParts selectPartsByVectorAndTextIndexes(
-        const RangesInDataParts & parts_with_range,
+        const RangesInDataParts & parts_with_ranges,
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
-        const bool support_two_stage_search,
+        const std::vector<bool> & vec_support_two_stage_searches,
 #if USE_TANTIVY_SEARCH
-        const Statistics & bm25_stats_in_table,
+        const TANTIVY::Statistics & bm25_stats_in_table,
 #endif
         const PrewhereInfoPtr & prewhere_info,
         StorageSnapshotPtr storage_snapshot,
@@ -110,7 +110,6 @@ private:
         MarkRanges mark_ranges,
         const PrewhereInfoPtr & prewhere_info_copy,
         const MergeTreeReaderSettings & reader_settings_,
-        bool use_uncompressed_cache_,
         ContextPtr context_,
         size_t max_streams);
 
@@ -126,7 +125,6 @@ private:
         UInt64 preferred_block_size_bytes_,
         UInt64 preferred_max_column_in_block_size_bytes_,
         const MergeTreeReaderSettings & reader_settings_,
-        bool use_uncompressed_cache_,
         ContextPtr context_,
         size_t max_streams);
 

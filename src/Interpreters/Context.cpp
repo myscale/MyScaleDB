@@ -4151,19 +4151,19 @@ ReadSettings Context::getReadSettings() const
     return res;
 }
 
-std::optional<VSDescription> Context::getVecScanDescription() const
+MutableVSDescriptionsPtr Context::getVecScanDescriptions() const
 {
-    return vector_scan_description;
+    return right_vector_scan_descs;
 }
 
-void Context::setVecScanDescription(VSDescription & vec_scan_desc) const
+void Context::setVecScanDescriptions(MutableVSDescriptionsPtr vec_scan_descs) const
 {
-    vector_scan_description = vec_scan_desc;
+    right_vector_scan_descs = vec_scan_descs;
 }
 
-void Context::resetVecScanDescription() const
+void Context::resetVecScanDescriptions() const
 {
-    vector_scan_description.reset();
+    right_vector_scan_descs.reset();
 }
 
 TextSearchInfoPtr Context::getTextSearchInfo() const

@@ -491,6 +491,22 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
     if (isHybridSearchFunc(name))
     {
         writeString("_func", ostr);
+
+        /// Support multiple distance functions
+        if (is_from_multiple_distances && isDistance(name))
+        {
+            ostr.write('_');
+            if (!alias.empty())
+                writeString(alias, ostr);
+            else
+            {
+                Hash hash = getTreeHash();
+                writeText(hash.first, ostr);
+                ostr.write('_');
+                writeText(hash.second, ostr);
+            }
+        }
+
         return;
     }
 

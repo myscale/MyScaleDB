@@ -131,7 +131,7 @@ void VIBuilderUpdater::removeDroppedVectorIndices(const StorageMetadataPtr & met
             VIParameter params = cache_item.second;
 
             /// Support multiple vector indices
-            /// TODO: Further check whether the paramters are the same.
+            /// TODO: Further check whether the parameters are the same.
             for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
             {
                 if (cache_key.vector_index_name != vec_index_desc.name)

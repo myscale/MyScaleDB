@@ -47,6 +47,10 @@ public:
         std::vector<const ASTFunction *> vector_scan_funcs;
         std::vector<const ASTFunction *> text_search_func;
         std::vector<const ASTFunction *> hybrid_search_func;
+
+        /// Save all vector scan functions including duplicated
+        /// Need to set flag in ASTFunction for multiple distances cases
+        std::vector<const ASTFunction *> all_multiple_vector_scan_funcs;
     };
 
     static bool needChildVisit(const ASTPtr & node, const ASTPtr & child)
@@ -84,11 +88,18 @@ private:
         if (isVectorScanFunc(node.name))
         {
             auto full_name = getFullName(node);
-            if (data.uniq_names.count(full_name))
-                return;
 
             if (data.assert_no_vector_scan)
                 throw Exception(ErrorCodes::ILLEGAL_VECTOR_SCAN, "Vector Scan function {} is found {} in query", full_name, String(data.assert_no_vector_scan));
+
+            /// Save all existing distance funcs
+            if (isDistance(node.name))
+                data.all_multiple_vector_scan_funcs.push_back(&node);
+
+            /// Save duplicated distance functions once
+            if (data.uniq_names.count(full_name))
+                return;
+
             data.vector_scan_funcs.push_back(&node);
             data.uniq_names.insert(full_name);
         }

@@ -39,7 +39,7 @@ void filterMarkRangesByVectorScanResult(MergeTreeData::DataPartPtr part, MergeTr
 
 void filterMarkRangesBySearchResult(MergeTreeData::DataPartPtr part, const Settings & settings, CommonSearchResultPtr common_search_result, MarkRanges & mark_ranges)
 {
-    OpenTelemetry::SpanHolder span("filterMarkRangesByVectorScanResult()");
+    OpenTelemetry::SpanHolder span("filterMarkRangesBySearchResult()");
     MarkRanges res;
 
     if (!common_search_result || !common_search_result->computed)

@@ -116,6 +116,13 @@ public:
         size_t /*max_block_size*/,
         size_t /*num_streams*/) override;
 
+    void readHybridSearch(
+        QueryPlan & query_plan,
+        const StorageSnapshotPtr & storage_snapshot,
+        SelectQueryInfo & query_info,
+        ContextPtr context,
+        QueryProcessingStage::Enum processed_stage);
+
     bool supportsParallelInsert() const override { return true; }
     std::optional<UInt64> totalBytes(const Settings &) const override;
 

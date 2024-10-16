@@ -101,8 +101,11 @@
 #include "config_version.h"
 #include <Interpreters/Context.h>
 
+#include <VectorIndex/Processors/FusionSortingStep.h>
+
 #if USE_TANTIVY_SEARCH
 #    include <VectorIndex/Utils/CommonUtils.h>
+#    include <VectorIndex/Utils/HybridSearchUtils.h>
 #endif
 
 namespace DB
@@ -781,18 +784,35 @@ InterpreterSelectQuery::InterpreterSelectQuery(
     analyze(shouldMoveToPrewhere());
 
 #if USE_TANTIVY_SEARCH
-    if (!options.only_analyze && storage && query_analyzer->getAnalyzedData().text_search_info && context->getSettingsRef().dfs_query_then_fetch)
+    if (!options.only_analyze && storage && context->getSettingsRef().dfs_query_then_fetch)
     {
-        /// Collect global statistics information of all shards used in BM25 calculation when text search is distributed
-        if (auto distributed_storage = std::dynamic_pointer_cast<StorageDistributed>(storage))
+        /// Collect global statistics information of all shards used in BM25 calculation when text/hybrid search is distributed
+        auto distributed_storage = std::dynamic_pointer_cast<StorageDistributed>(storage);
+
+        if (distributed_storage)
         {
-            collectStatisticForBM25Calculation(
-                context,
-                distributed_storage->getClusterName(),
-                distributed_storage->getRemoteDatabaseName(),
-                distributed_storage->getRemoteTableName(),
-                query_analyzer->getAnalyzedData().text_search_info->text_column_name,
-                query_analyzer->getAnalyzedData().text_search_info->query_text);
+            String text_column_name, query_text;
+            if (query_analyzer->getAnalyzedData().text_search_info)
+            {
+                text_column_name = query_analyzer->getAnalyzedData().text_search_info->text_column_name;
+                query_text = query_analyzer->getAnalyzedData().text_search_info->query_text;
+            }
+            else if (query_analyzer->getAnalyzedData().hybrid_search_info)
+            {
+                text_column_name = query_analyzer->getAnalyzedData().hybrid_search_info->text_search_info->text_column_name;
+                query_text = query_analyzer->getAnalyzedData().hybrid_search_info->text_search_info->query_text;
+            }
+
+            if (!text_column_name.empty())
+            {
+                collectStatisticForBM25Calculation(
+                    context,
+                    distributed_storage->getClusterName(),
+                    distributed_storage->getRemoteDatabaseName(),
+                    distributed_storage->getRemoteTableName(),
+                    text_column_name,
+                    query_text);
+            }
         }
     }
 #endif
@@ -1820,7 +1840,16 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
                   */
 
                 if (from_aggregation_stage)
-                    executeMergeSorted(query_plan, "after aggregation stage for ORDER BY");
+                {
+                    if (expressions.need_hybrid_search && query_info.getCluster()->getShardsInfo().size() > 1)
+                    {
+                        executeFusionSorted(query_plan);
+                    }
+                    else
+                    {
+                        executeMergeSorted(query_plan, "after aggregation stage for ORDER BY");
+                    }
+                }
                 else if (!expressions.first_stage
                     && !expressions.need_aggregate
                     && !expressions.has_window
@@ -2403,7 +2432,10 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         
         /// If there is vector scan in the outer query and main table is subquery, save the vector scan description to subquery.
         if (query_analyzer->hasVectorScan())
-            context->setVecScanDescription(query_analyzer->vectorScanDescs().front());
+        {
+            auto vector_scan_desc_ptr = std::make_shared<VSDescriptions>(query_analyzer->vectorScanDescs());
+            context->setVecScanDescriptions(vector_scan_desc_ptr);
+        }
 
         interpreter_subquery = std::make_unique<InterpreterSelectWithUnionQuery>(
             subquery, getSubqueryContext(context),
@@ -2412,7 +2444,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         interpreter_subquery->addStorageLimits(storage_limits);
 
         if (query_analyzer->hasVectorScan())
-            context->resetVecScanDescription();
+            context->resetVecScanDescriptions();
 
         if (query_analyzer->hasAggregation())
             interpreter_subquery->ignoreWithTotals();
@@ -2929,6 +2961,47 @@ void InterpreterSelectQuery::executeOrder(QueryPlan & query_plan, InputOrderInfo
 
     sorting_step->setStepDescription("Sorting for ORDER BY");
     query_plan.addStep(std::move(sorting_step));
+}
+
+void InterpreterSelectQuery::executeFusionSorted(QueryPlan & query_plan)
+{
+    const auto & query = getSelectQuery();
+    SortDescription sort_description = getSortDescription(query, context);
+    UInt64 limit = getLimitForSorting(query, context);
+
+    /// Before Distributed HybridSearch Fusion, ORDER BY SCORE_TYPE_COLUMN ASC, HYBRID_SEARCH_SCORE_COLUMN_NAME DESC
+    SortDescription before_fusion_order_descr;
+    before_fusion_order_descr.push_back(SortColumnDescription(SCORE_TYPE_COLUMN.name, 1, 1));
+    before_fusion_order_descr.push_back(SortColumnDescription(HYBRID_SEARCH_SCORE_COLUMN_NAME, -1, 1));
+
+    const Settings & settings = context->getSettingsRef();
+    SortingStep::Settings sort_settings(*context);
+
+    /// Merge and sort the sorted blocks from different shards that include distance or bm25 score.
+    /// Set limit = 0 to get all global distance and BM25 top-k results.
+    auto sorting_step = std::make_unique<SortingStep>(
+        query_plan.getCurrentDataStream(),
+        before_fusion_order_descr,
+        0,
+        sort_settings,
+        settings.optimize_sorting_by_input_stream_properties);
+
+    sorting_step->setStepDescription("Sorting before HybridSearch Fusion");
+    query_plan.addStep(std::move(sorting_step));
+
+    /// Fuse the sorted blocks to HybridSearch top-k results.
+    auto fusion_sorting = std::make_unique<FusionSortingStep>(
+        query_plan.getCurrentDataStream(),
+        std::move(sort_description),
+        limit,
+        limit * context->getSettingsRef().hybrid_search_top_k_multiple_base,
+        query_info.hybrid_search_info->fusion_type,
+        context->getSettingsRef().hybrid_search_fusion_k,
+        context->getSettingsRef().hybrid_search_fusion_weight,
+        query_info.hybrid_search_info->vector_scan_info->vector_scan_descs[0].direction);
+
+    fusion_sorting->setStepDescription("HybridSearch Fusion and Sorting");
+    query_plan.addStep(std::move(fusion_sorting));
 }
 
 

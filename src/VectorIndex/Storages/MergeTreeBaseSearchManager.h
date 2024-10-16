@@ -38,11 +38,12 @@ public:
     using ReadRanges = MergeTreeRangeReader::ReadResult::ReadRangesInfo;
 
     MergeTreeBaseSearchManager(
-        StorageMetadataPtr metadata_, ContextPtr context_, const String & function_col_name_)
+        StorageMetadataPtr metadata_, ContextPtr context_, const String & function_col_name_ = "")
         : metadata(metadata_)
         , context(context_)
-        , function_col_name(function_col_name_)
     {
+        if (!function_col_name_.empty())
+            search_func_cols_names.emplace_back(function_col_name_);
     }
 
     virtual ~MergeTreeBaseSearchManager() = default;
@@ -62,7 +63,6 @@ public:
         Columns & /* pre_result */,
         size_t & /* read_rows */,
         const ReadRanges & /* read_ranges */,
-        const Search::DenseBitmapPtr /* filter */,
         const ColumnUInt64 * /* part_offset */) {}
 
     /// True if search result is present and computed flag is set to true.
@@ -70,14 +70,16 @@ public:
 
     virtual CommonSearchResultPtr getSearchResult() { return nullptr; }
 
-    String getFuncColumnName() { return function_col_name; }
+    /// Support multiple distance functions
+    Names getSearchFuncColumnNames() { return search_func_cols_names; }
 
     const Settings & getSettings() { return context->getSettingsRef(); }
 
     /// Get top-k vector scan result among all selected parts
     static ScoreWithPartIndexAndLabels getTotalTopKVSResult(
         const VectorAndTextResultInDataParts & vector_results,
-        const VectorScanInfoPtr & vector_scan_info,
+        const size_t vec_res_index,
+        const VSDescription & vector_scan_desc,
         Poco::Logger * log);
 
     static ScoreWithPartIndexAndLabels getTotalTopKTextResult(
@@ -88,7 +90,8 @@ public:
     /// Get num_reorder candidate vector result among all selected parts for two stage search
     static ScoreWithPartIndexAndLabels getTotalCandidateVSResult(
         const VectorAndTextResultInDataParts & parts_with_vector_text_result,
-        const VectorScanInfoPtr & vector_scan_info,
+        const size_t vec_res_index,
+        const VSDescription & vector_scan_desc,
         const UInt64 & num_reorder,
         Poco::Logger * log);
 
@@ -105,7 +108,9 @@ protected:
 
     StorageMetadataPtr metadata;
     ContextPtr context;
-    String function_col_name;  /// search function column name
+    Names search_func_cols_names; /// names of search function columns
+
+    std::vector<bool> was_result_processed;  /// Mark if the result was processed or not.
 
     /// Merge search result with pre_result from read part
     /// Add score/distance of the row id to the corresponding row
@@ -114,7 +119,6 @@ protected:
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         CommonSearchResultPtr tmp_result = nullptr,
-        const Search::DenseBitmapPtr filter = nullptr,
         const ColumnUInt64 * part_offset = nullptr);
 
     /// Get top-k vector or text search result among all selected parts
@@ -125,7 +129,8 @@ protected:
         const UInt64 & top_k,
         const bool & desc_direction,
         Poco::Logger * log,
-        const bool need_vector);
+        const bool need_vector,
+        const size_t vec_res_index = 0);
 
     /// Get label_ids in search result and save in label_ids set.
     static void getLabelsInSearchResult(

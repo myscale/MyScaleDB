@@ -408,7 +408,7 @@ private:
 
     /// TODO: will be enhanced similar as scalars.
     /// Used when vector scan func exists in right joined table
-    mutable std::optional<VSDescription> vector_scan_description;
+    mutable MutableVSDescriptionsPtr right_vector_scan_descs;
 
     mutable TextSearchInfoPtr right_text_search_info;
     mutable HybridSearchInfoPtr right_hybrid_search_info;
@@ -1160,9 +1160,9 @@ public:
     ParallelReplicasMode getParallelReplicasMode() const;
 
     /// Used for vector scan functions
-    std::optional<VSDescription> getVecScanDescription() const;
-    void setVecScanDescription(VSDescription & vec_scan_desc) const;
-    void resetVecScanDescription() const;
+    MutableVSDescriptionsPtr getVecScanDescriptions() const;
+    void setVecScanDescriptions(MutableVSDescriptionsPtr vec_scan_descs) const;
+    void resetVecScanDescriptions() const;
 
     /// Used for text search functions
     TextSearchInfoPtr getTextSearchInfo() const;
