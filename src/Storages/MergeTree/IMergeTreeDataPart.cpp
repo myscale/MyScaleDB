@@ -1533,112 +1533,76 @@ bool IMergeTreeDataPart::supportLightweightDeleteMutate() const
         parent_part == nullptr && projection_parts.empty();
 }
 
-std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
+std::vector<UInt64> IMergeTreeDataPart::getDeleteBitmapFromRowExists() const
 {
+    std::vector<UInt64> del_row_ids; /// Store deleted row ids
+
     if (!supportLightweightDeleteMutate() || !hasLightweightDelete())
-        return std::nullopt;
+        return del_row_ids;
+
+    const size_t total_mark = getMarksCount();
+    if (total_mark == 0)
+    {
+        LOG_WARNING(storage.log, "Skip empty part");
+        return del_row_ids;
+    }
 
     NamesAndTypesList cols;
     cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
 
-    MutableColumns buffered_columns;
-    buffered_columns.resize(1);
-    buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
-
-    MergeTreeReaderSettings reader_settings;
-
-    if (getMarksCount() == 0)
-    {
-        LOG_WARNING(storage.log, "Skip empty part");
-        return std::nullopt;
-    }
-
     MergeTreeReaderPtr reader = getReader(
         cols,
         storage.getInMemoryMetadataPtr(),
-        MarkRanges{MarkRange(0, getMarksCount())},
+        MarkRanges{MarkRange(0, total_mark)},
         nullptr,
         storage.getContext()->getMarkCache().get(),
         std::make_shared<AlterConversions>(),
-        reader_settings,
+        MergeTreeReaderSettings{},
         ValueSizeMap{},
         ReadBufferFromFileBase::ProfileCallback{});
 
     if (!reader)
     {
-        LOG_ERROR(storage.log, "Create reader failed");
-        return std::nullopt;
+        LOG_WARNING(storage.log, "Create reader failed in getDeleteBitmapFromRowExists()");
+        return del_row_ids;
     }
 
     size_t current_mark = 0;
-    const size_t total_mark = getMarksCount();
+    bool continue_reading = false;
+    size_t current_row = 0;
+    size_t max_rows_to_read = DEFAULT_BLOCK_SIZE;
+    UInt64 pos = 0;
 
-    size_t num_rows_read = 0;
-    const size_t num_rows_total = rows_count;
-
-    bool continue_read = false;
-    while (num_rows_read < num_rows_total)
+    while (current_row < rows_count)
     {
-        const size_t remaining_size = num_rows_total - num_rows_read;
+        size_t remaining_rows = rows_count - current_row;
+        size_t rows_to_read = remaining_rows > max_rows_to_read ? max_rows_to_read : remaining_rows;
 
         Columns result;
         result.resize(1);
 
-        size_t num_rows = reader->readRows(current_mark, 0, continue_read, remaining_size, result);
+        size_t rows_read = reader->readRows(current_mark, total_mark, continue_reading, rows_to_read, result);
 
-        LOG_DEBUG(storage.log, "Read {} rows", num_rows);
+        current_row += rows_read;
+        continue_reading = true;
 
-        continue_read = true;
-        num_rows_read += num_rows;
-
-        buffered_columns[0]->insertRangeFrom(*result[0], 0, result[0]->size());
-
-        /// calculate next mark
-        for (size_t mark = 0; mark < total_mark - 1; ++mark)
+        const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(result[0].get());
+        if (!row_exists_col)
         {
-            if (index_granularity.getMarkStartingRow(mark) >= num_rows_read
-                && index_granularity.getMarkStartingRow(mark + 1) < num_rows_read)
-            {
-                current_mark = mark;
-            }
+            LOG_WARNING(storage.log, "Part {} _row_exists column type is not UInt8", name);
+            return del_row_ids;
+        }
+
+        for (UInt8 row_exists : row_exists_col->getData())
+        {
+            if (!row_exists)
+                del_row_ids.push_back(pos);
+
+            pos++;
         }
     }
 
-    buffered_columns[0]->protect();
-
-    Columns ret;
-    ret.assign(
-            std::make_move_iterator(buffered_columns.begin()),
-            std::make_move_iterator(buffered_columns.end())
-    );
-
-    return std::optional<ColumnPtr>(ret[0]);
-}
-
-std::vector<UInt64> IMergeTreeDataPart::getDeleteBitmapFromRowExists() const
-{
-    std::vector<UInt64> del_row_ids; /// Store deleted row ids
-
-    std::optional<ColumnPtr> row_exists_column_opt = readRowExistsColumn();
-    if (!row_exists_column_opt.has_value())
-    {
-        LOG_WARNING(storage.log, "row_exists column is empty in part {}", name);
-        return del_row_ids;
-    }
-
-    const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(row_exists_column_opt.value().get());
-    if (row_exists_col == nullptr)
-    {
-        LOG_WARNING(storage.log, "row_exists column type is not UInt8 in part {}", name);
-        return del_row_ids;
-    }
-
-    const ColumnUInt8::Container & vec_res = row_exists_col->getData();
-    for (size_t pos = 0; pos < vec_res.size(); pos++)
-    {
-        if (!vec_res[pos])
-            del_row_ids.push_back(static_cast<UInt64>(pos));
-    }
+    LOG_DEBUG(storage.log, "Read {} rows from _row_exists column in part {}", rows_count, name);
 
     return del_row_ids;
 }
@@ -1659,6 +1623,10 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
 
     /// Store deleted row ids
     std::vector<UInt64> del_row_ids;
+
+    /// Check if data part has already collected
+    if (deleted_row_ids.size() > 0)
+        del_row_ids = deleted_row_ids;
 
     /// Support multiple vector indices
     for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
