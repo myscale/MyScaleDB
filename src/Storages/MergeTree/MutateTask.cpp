@@ -93,7 +93,7 @@ static bool haveMutationsOfDynamicColumns(const MergeTreeData::DataPartPtr & dat
     return false;
 }
 
-static UInt64 getExistingRowsCount(const Block & block)
+static UInt64 getExistingRowsCount(const Block & block, bool lightweight_delete_updated, UInt64 & part_offset, std::vector<UInt64> & del_row_ids)
 {
     auto column = block.getByName(RowExistsColumn::name).column;
     const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(column.get());
@@ -107,8 +107,18 @@ static UInt64 getExistingRowsCount(const Block & block)
     UInt64 existing_count = 0;
 
     for (UInt8 row_exists : row_exists_col->getData())
+    {
         if (row_exists)
             existing_count++;
+
+        /// Collect deleted row ids when LWD happens
+        if (lightweight_delete_updated)
+        {
+            if (!row_exists)
+                del_row_ids.emplace_back(part_offset);
+            part_offset++;
+        }
+    }
 
     return existing_count;
 }
@@ -1351,6 +1361,9 @@ private:
 
     size_t block_num = 0;
 
+    /// Used for row id when LWD needs to collect deleted row ids
+    UInt64 part_offset = 0;
+
     using ProjectionNameToItsBlocks = std::map<String, MergeTreeData::MutableDataPartsVector>;
     ProjectionNameToItsBlocks projection_parts;
     std::move_iterator<ProjectionNameToItsBlocks::iterator> projection_parts_iterator;
@@ -1405,8 +1418,10 @@ bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
         ctx->out->write(cur_block);
 
         /// TODO: move this calculation to DELETE FROM mutation
+        /// Try to collect deleted row ids when getting existing rows count for LWD
         if (ctx->count_lightweight_deleted_rows)
-            existing_rows_count += MutationHelpers::getExistingRowsCount(cur_block);
+            existing_rows_count += MutationHelpers::getExistingRowsCount(
+                cur_block, ctx->new_data_part->isDeletedMaskUpdated(), part_offset, ctx->new_data_part->deleted_row_ids);
 
         for (size_t i = 0, size = ctx->projections_to_build.size(); i < size; ++i)
         {
@@ -2436,7 +2451,7 @@ bool MutateTask::prepare()
         /// Support part with simple built index and decoupled part with merged old parts' built index files
         /// When any normal delete or ttl command exists, needs to be build vector index for the new data part.
         if (!ctx->need_delete_rows)
-            ctx->new_data_part->setDeletedMaskUpdate();
+            ctx->new_data_part->setDeletedMaskUpdated(true);
     }
     else
     {
