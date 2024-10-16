@@ -231,7 +231,6 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         analyzed_result_ptr_,
         enable_parallel_reading)
 {
-    /// MYSCALE_INTERNAL_CODE_BEGIN
     VectorScanInfoPtr vector_scan_info = nullptr;
     if (query_info.vector_scan_info)
         vector_scan_info = query_info.vector_scan_info;
@@ -239,9 +238,16 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         vector_scan_info = query_info.hybrid_search_info->vector_scan_info;
 
     if (vector_scan_info)
+    {
+        /// Mark for each vector scan description
+        size_t vector_scan_descs_size = vector_scan_info->vector_scan_descs.size();
+        vec_support_two_stage_searches.resize(vector_scan_descs_size, false);
+        vec_num_reorders.resize(vector_scan_descs_size, 0);
+        /// MYSCALE_INTERNAL_CODE_BEGIN
         supportTwoStageSearch(prepared_parts, vector_scan_info, context->getSettingsRef(),
                             metadata_for_reading, data.getSettings()->default_mstg_disk_mode, query_info, log);
-    /// MYSCALE_INTERNAL_CODE_END
+        /// MYSCALE_INTERNAL_CODE_END
+    }
 }
 
 /// MYSCALE_INTERNAL_CODE_BEGIN
@@ -259,10 +265,6 @@ void ReadWithHybridSearch::supportTwoStageSearch(
 
     /// Support multiple distance functions
     size_t vector_scan_descs_size = vector_scan_info_ptr->vector_scan_descs.size();
-
-    /// Mark for each vector scan description
-    vec_support_two_stage_searches.resize(vector_scan_descs_size, false);
-    vec_num_reorders.resize(vector_scan_descs_size, 0);
 
     /// Two stage search is disabled
     if (settings.two_stage_search_option == 0)
