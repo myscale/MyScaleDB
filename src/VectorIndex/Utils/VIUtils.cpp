@@ -405,20 +405,7 @@ const std::vector<UInt64> readDeleteBitmapAccordingSegmentId(const SegmentId seg
     if (!part)
         return del_row_ids;
 
-    auto row_exists_column_opt = part->readRowExistsColumn();
-    if (!row_exists_column_opt.has_value())
-        return del_row_ids;
-
-    const DB::ColumnUInt8 * row_exists_col = typeid_cast<const DB::ColumnUInt8 *>(row_exists_column_opt.value().get());
-    if (row_exists_col == nullptr)
-        return del_row_ids;
-
-    const DB::ColumnUInt8::Container & vec_res = row_exists_col->getData();
-    for (size_t pos = 0; pos < vec_res.size(); pos++)
-    {
-        if (!vec_res[pos])
-            del_row_ids.push_back(static_cast<UInt64>(pos));
-    }
+    del_row_ids = part->getDeleteBitmapFromRowExists();
 
     return del_row_ids;
 }

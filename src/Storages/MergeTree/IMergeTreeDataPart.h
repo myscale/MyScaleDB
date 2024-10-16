@@ -321,9 +321,14 @@ public:
 
     bool isSmallPart() const;
 
-    mutable bool lightweight_delete_mask_updated = false;
+    /// True if mutations contain LWDs
+    bool lightweight_delete_mask_updated = false;
+    void setDeletedMaskUpdated(bool value) { lightweight_delete_mask_updated = value; }
+    bool isDeletedMaskUpdated() const { return lightweight_delete_mask_updated; }
 
-    void setDeletedMaskUpdate() const { lightweight_delete_mask_updated = true; }
+    /// Temporary save deleted row ids for vector index deletebitmap update
+    /// Used in LWD mutation to avoid read _row_exists from file
+    std::vector<UInt64> deleted_row_ids;
 
     /// Convert .vidx2 to .vidx3, remove ready file.
     /// Write vector index checksums file, if old version vector is ready.
@@ -490,8 +495,6 @@ public:
     mutable std::atomic<DataPartRemovalState> removal_state = DataPartRemovalState::NOT_ATTEMPTED;
 
     mutable std::atomic<time_t> last_removal_attemp_time = 0;
-
-    std::optional<ColumnPtr> readRowExistsColumn() const;
 
     std::vector<UInt64> getDeleteBitmapFromRowExists() const;
 
