@@ -25,7 +25,6 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
     size_t & read_rows,
     const ReadRanges & read_ranges,
     CommonSearchResultPtr tmp_result,
-    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
     Poco::Logger * log = &Poco::Logger::get("MergeTreeBaseSearchManager");
@@ -40,8 +39,8 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
     }
 
     /// Initialize was_result_processed
-    if (tmp_result->was_result_processed.size() == 0)
-        tmp_result->was_result_processed.assign(label_column->size(), false);
+    if (was_result_processed.size() == 0)
+        was_result_processed.assign(label_column->size(), false);
 
     auto final_distance_column = DataTypeFloat32().createColumn();
 
@@ -53,149 +52,103 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
         final_result.emplace_back(col->cloneEmpty());
     }
 
-    if (filter)
+    if (part_offset == nullptr)
     {
-        size_t current_column_pos = 0;
-        int range_index = 0;
-        size_t start_pos = read_ranges[range_index].start_row;
-        size_t offset = 0;
-        for (size_t i = 0; i < filter->get_size(); ++i)
+        LOG_DEBUG(log, "No part offset");
+        size_t start_pos = 0;
+        size_t end_pos = 0;
+        size_t prev_row_num = 0;
+
+        for (auto & read_range : read_ranges)
         {
-            if (offset >= read_ranges[range_index].row_num)
+            start_pos = read_range.start_row;
+            end_pos = read_range.start_row + read_range.row_num;
+            for (size_t ind = 0; ind < label_column->size(); ++ind)
             {
-                ++range_index;
-                start_pos = read_ranges[range_index].start_row;
-                offset = 0;
-            }
-            if (filter->unsafe_test(i))
-            {
-                /// for each vector search result, try to find if there is one with label equals to row id.
-                for (size_t ind = 0; ind < label_column->size(); ++ind)
+                if (was_result_processed[ind])
+                    continue;
+
+                const UInt64 label_value = label_column->getUInt(ind);
+                if (label_value >= start_pos && label_value < end_pos)
                 {
-                    /// Skip if this label has already processed
-                    if (tmp_result->was_result_processed[ind])
-                        continue;
-
-                    if (label_column->getUInt(ind) == start_pos + offset)
+                    const size_t index_of_arr = label_value - start_pos + prev_row_num;
+                    for (size_t i = 0; i < final_result.size(); ++i)
                     {
-                        /// LOG_DEBUG(log, "merge result: ind: {}, current_column_pos: {}, filter_id: {}", ind, current_column_pos, i + start_offset);
-                        /// for each result column
-                        for (size_t col = 0; col < final_result.size(); ++col)
-                        {
-                            Field field;
-                            pre_result[col]->get(current_column_pos, field);
-                            final_result[col]->insert(field);
-                        }
-                        final_distance_column->insert(distance_column->getFloat32(ind));
-
-                        tmp_result->was_result_processed[ind] = true;
+                        Field field;
+                        pre_result[i]->get(index_of_arr, field);
+                        final_result[i]->insert(field);
                     }
+
+                    final_distance_column->insert(distance_column->getFloat32(ind));
+
+                    was_result_processed[ind] = true;
                 }
-                ++current_column_pos;
             }
-            ++offset;
+            prev_row_num += read_range.row_num;
         }
     }
-    else
+    else if (part_offset->size() > 0)
     {
-        LOG_DEBUG(log, "No filter statement");
-        if (part_offset == nullptr)
+        LOG_DEBUG(log, "Get part offset");
+
+        /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
+        /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
+        const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
+        size_t part_offset_size = part_offset->size();
+
+        size_t start_pos = 0;
+        size_t end_pos = 0;
+
+        for (auto & read_range : read_ranges)
         {
-            size_t start_pos = 0;
-            size_t end_pos = 0;
-            size_t prev_row_num = 0;
+            start_pos = read_range.start_row;
+            end_pos = read_range.start_row + read_range.row_num;
 
-            for (auto & read_range : read_ranges)
+            for (size_t ind = 0; ind < label_column->size(); ++ind)
             {
-                start_pos = read_range.start_row;
-                end_pos = read_range.start_row + read_range.row_num;
-                for (size_t ind = 0; ind < label_column->size(); ++ind)
-                {
-                    if (tmp_result->was_result_processed[ind])
-                        continue;
+                if (was_result_processed[ind])
+                    continue;
 
-                    const UInt64 label_value = label_column->getUInt(ind);
-                    if (label_value >= start_pos && label_value < end_pos)
+                const UInt64 label_value = label_column->getUInt(ind);
+
+                /// Check if label_value inside this read range
+                if (label_value < start_pos || (label_value >= end_pos))
+                    continue;
+
+                /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
+                int low = 0;
+                int mid;
+                if (part_offset_size - 1 > static_cast<size_t>(std::numeric_limits<int>::max()))
+                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Number of part_offset_size exceeds the limit of int data type");
+                int high = static_cast<int>(part_offset_size - 1);
+
+                /// label_value (row id) = part_offset.
+                /// We can use binary search to quickly locate part_offset for current label.
+                while (low <= high)
+                {
+                    mid = low + (high - low) / 2;
+
+                    if (label_value == offset_raw_value[mid])
                     {
-                        const size_t index_of_arr = label_value - start_pos + prev_row_num;
+                        /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
                         for (size_t i = 0; i < final_result.size(); ++i)
                         {
                             Field field;
-                            pre_result[i]->get(index_of_arr, field);
+                            pre_result[i]->get(mid, field);
                             final_result[i]->insert(field);
                         }
 
                         final_distance_column->insert(distance_column->getFloat32(ind));
 
-                        tmp_result->was_result_processed[ind] = true;
+                        was_result_processed[ind] = true;
+
+                        /// break from binary search loop
+                        break;
                     }
-                }
-                prev_row_num += read_range.row_num;
-            }
-        }
-        else if (part_offset->size() > 0)
-        {
-            LOG_DEBUG(log, "Get part offset");
-
-            /// When lightweight delete applied, the rowid in the label column cannot be used as index of pre_result.
-            /// Match the rowid in the value of label col and the value of part_offset to find the correct index.
-            const ColumnUInt64::Container & offset_raw_value = part_offset->getData();
-            size_t part_offset_size = part_offset->size();
-
-            size_t start_pos = 0;
-            size_t end_pos = 0;
-
-            for (auto & read_range : read_ranges)
-            {
-                start_pos = read_range.start_row;
-                end_pos = read_range.start_row + read_range.row_num;
-
-                for (size_t ind = 0; ind < label_column->size(); ++ind)
-                {
-                    if (tmp_result->was_result_processed[ind])
-                        continue;
-
-                    const UInt64 label_value = label_column->getUInt(ind);
-
-                    /// Check if label_value inside this read range
-                    if (label_value < start_pos || (label_value >= end_pos))
-                        continue;
-
-                    /// read range doesn't consider LWD, hence start_row and row_num in read range cannot be used in this case.
-                    int low = 0;
-                    int mid;
-                    if (part_offset_size - 1 > static_cast<size_t>(std::numeric_limits<int>::max()))
-                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Number of part_offset_size exceeds the limit of int data type");
-                    int high = static_cast<int>(part_offset_size - 1);
-
-                    /// label_value (row id) = part_offset.
-                    /// We can use binary search to quickly locate part_offset for current label.
-                    while (low <= high)
-                    {
-                        mid = low + (high - low) / 2;
-
-                        if (label_value == offset_raw_value[mid])
-                        {
-                            /// Use the index of part_offset to locate other columns in pre_result and fill final_result.
-                            for (size_t i = 0; i < final_result.size(); ++i)
-                            {
-                                Field field;
-                                pre_result[i]->get(mid, field);
-                                final_result[i]->insert(field);
-                            }
-
-                            final_distance_column->insert(distance_column->getFloat32(ind));
-
-                            tmp_result->was_result_processed[ind] = true;
-
-                            /// break from binary search loop
-                            break;
-                        }
-                        else if (label_value > offset_raw_value[mid])
-                            low = mid + 1;
-                        else
-                            high = mid - 1;
-                    }
+                    else if (label_value > offset_raw_value[mid])
+                        low = mid + 1;
+                    else
+                        high = mid - 1;
                 }
             }
         }
@@ -212,15 +165,16 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
     const VectorAndTextResultInDataParts & vector_results,
-    const VectorScanInfoPtr & vector_scan_info,
+    const size_t vec_res_index,
+    const VSDescription & vector_scan_desc,
     Poco::Logger * log)
 {
-    const auto vec_scan_desc = vector_scan_info->vector_scan_descs[0];
+    bool desc_direction = vector_scan_desc.direction == -1;
+    int top_k = vector_scan_desc.topk > 0 ? vector_scan_desc.topk : VectorIndex::DEFAULT_TOPK;
 
-    bool desc_direction = vec_scan_desc.direction == -1;
-    int top_k = vec_scan_desc.topk > 0 ? vec_scan_desc.topk : VectorIndex::DEFAULT_TOPK;
+    LOG_TRACE(log, "Total top k vector scan results for {} with size {}", vector_scan_desc.column_name, top_k);
 
-    return getTotalTopSearchResultImpl(vector_results, static_cast<UInt64>(top_k), desc_direction, log, true);
+    return getTotalTopSearchResultImpl(vector_results, static_cast<UInt64>(top_k), desc_direction, log, true, vec_res_index);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
@@ -229,20 +183,25 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
     Poco::Logger * log)
 {
     int top_k = text_info->topk;
+
+    LOG_TRACE(log, "Total top k text results with size {}", top_k);
+
     return getTotalTopSearchResultImpl(text_results, static_cast<UInt64>(top_k), true, log, false);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalCandidateVSResult(
         const VectorAndTextResultInDataParts & parts_with_vector_text_result,
-        const VectorScanInfoPtr & vector_scan_info,
+        const size_t vec_res_index,
+        const VSDescription & vector_scan_desc,
         const UInt64 & num_reorder,
         Poco::Logger * log)
 {
-    const auto vec_scan_desc = vector_scan_info->vector_scan_descs[0];
-    bool desc_direction = vec_scan_desc.direction == -1;
+    bool desc_direction = vector_scan_desc.direction == -1;
+
+    LOG_TRACE(log, "Total candidate vector scan results for {} with size {}", vector_scan_desc.column_name, num_reorder);
 
     /// Get top num_reorder candidates: part index + label + score
-    return getTotalTopSearchResultImpl(parts_with_vector_text_result, num_reorder, desc_direction, log, true);
+    return getTotalTopSearchResultImpl(parts_with_vector_text_result, num_reorder, desc_direction, log, true, vec_res_index);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultImpl(
@@ -250,7 +209,8 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
     const UInt64 & top_k,
     const bool & desc_direction,
     Poco::Logger * log,
-    const bool need_vector)
+    const bool need_vector,
+    const size_t vec_res_index)
 {
     String search_name = need_vector ? "vector scan" : "text search";
 
@@ -262,11 +222,15 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
         /// part + top-k result in part
         CommonSearchResultPtr search_result;
         if (need_vector)
-            search_result = mix_results_in_part.vector_scan_result;
+        {
+            /// Support multiple distance functions
+            if (vec_res_index < mix_results_in_part.vector_scan_results.size())
+                search_result = mix_results_in_part.vector_scan_results[vec_res_index];
+        }
         else
             search_result = mix_results_in_part.text_search_result;
 
-        const auto & part_index = mix_results_in_part.part_with_ranges.part_index_in_query;
+        const auto & part_index = mix_results_in_part.part_index;
 
         if (search_result && search_result->computed)
         {
@@ -306,6 +270,9 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
     {
         for (auto rit = sorted_score_with_index_labels.rbegin(); rit != sorted_score_with_index_labels.rend(); ++rit)
         {
+            LOG_TRACE(log, "part_index={}, label_id={}, score={}", rit->second.part_index,
+                    rit->second.label_id, rit->second.score);
+
             result_score_with_index_labels.emplace_back(rit->second);
             count++;
 
@@ -317,6 +284,9 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
     {
         for (const auto & [_, score_with_index_label] : sorted_score_with_index_labels)
         {
+            LOG_TRACE(log, "part_index={}, label_id={}, score={}", score_with_index_label.part_index,
+                    score_with_index_label.label_id, score_with_index_label.score);
+
             result_score_with_index_labels.emplace_back(score_with_index_label);
             count++;
 
@@ -335,14 +305,17 @@ std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
     OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::getLabelsInSearchResults()");
     std::set<UInt64> label_ids;
 
-    VectorScanResultPtr vector_result = mix_results.vector_scan_result;
     TextSearchResultPtr text_result = mix_results.text_search_result;
-
-    if (vector_result && vector_result->computed)
-        getLabelsInSearchResult(label_ids, vector_result, log);
 
     if (text_result && text_result->computed)
         getLabelsInSearchResult(label_ids, text_result, log);
+
+    /// Support multiple distance functions
+    for (const auto & vector_scan_result : mix_results.vector_scan_results)
+    {
+        if (vector_scan_result && vector_scan_result->computed)
+            getLabelsInSearchResult(label_ids, vector_scan_result, log);
+    }
 
     return label_ids;
 }
@@ -377,23 +350,26 @@ void MergeTreeBaseSearchManager::filterSearchResultsByFinalLabels(
     std::set<UInt64> & label_ids,
     Poco::Logger * log)
 {
-    LOG_DEBUG(log, "filterSearchResultsByFinalLabels: part = {}", mix_results.part_with_ranges.data_part->name);
+    LOG_DEBUG(log, "filterSearchResultsByFinalLabels: part = {}", mix_results.data_part->name);
 
     if (label_ids.empty())
     {
-        mix_results.vector_scan_result = nullptr;
         mix_results.text_search_result = nullptr;
+        mix_results.vector_scan_results.clear();
         return;
     }
 
-    VectorScanResultPtr vector_result = mix_results.vector_scan_result;
     TextSearchResultPtr text_result = mix_results.text_search_result;
-
-    if (vector_result && vector_result->computed)
-        mix_results.vector_scan_result = filterSearchResultByFinalLabels(vector_result, label_ids, log);
 
     if (text_result && text_result->computed)
         mix_results.text_search_result = filterSearchResultByFinalLabels(text_result, label_ids, log);
+
+    /// Support multiple distance functions
+    for (auto & vector_scan_result : mix_results.vector_scan_results)
+    {
+        if (vector_scan_result && vector_scan_result->computed)
+            vector_scan_result = filterSearchResultByFinalLabels(vector_scan_result, label_ids, log);
+    }
 }
 
 CommonSearchResultPtr MergeTreeBaseSearchManager::filterSearchResultByFinalLabels(
@@ -441,6 +417,9 @@ CommonSearchResultPtr MergeTreeBaseSearchManager::filterSearchResultByFinalLabel
         final_result->computed = true;
         final_result->result_columns[0] = std::move(res_label_column);
         final_result->result_columns[1] = std::move(res_score_column);
+
+        /// Add column name
+        final_result->name = pre_search_result->name;
     }
 
     return final_result;

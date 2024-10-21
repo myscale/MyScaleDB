@@ -28,10 +28,10 @@ namespace DB
 
 #if USE_TANTIVY_SEARCH
 
-using RustVecDocWithFreq = rust::cxxbridge1::Vec<DocWithFreq>;
+using RustVecDocWithFreq = rust::cxxbridge1::Vec<TANTIVY::DocWithFreq>;
 
 /// Support tantivy index on multiple text columns
-using VecTextColumnTokenNums = rust::cxxbridge1::Vec<FieldTokenNums>;
+using VecTextColumnTokenNums = rust::cxxbridge1::Vec<TANTIVY::FieldTokenNums>;
 
 struct BM25InfoInDataPart
 {

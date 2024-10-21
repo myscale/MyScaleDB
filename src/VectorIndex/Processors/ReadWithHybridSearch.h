@@ -65,8 +65,10 @@ public:
 
 private:
 
-    bool support_two_stage_search = false;      /// True if two stage search is used.
-    [[maybe_unused]] UInt64 num_reorder = 0;   /// number of candidates for first stage search
+    /// Support multiple distance functions
+    /// The size of following two vectors are equal to the size of vector scan descriptions
+    std::vector<bool> vec_support_two_stage_searches;          /// True if two stage search is supported
+    [[maybe_unused]] std::vector<UInt64> vec_num_reorders; /// number of candidates for first stage search
 
     ReadWithHybridSearch::HybridAnalysisResult getHybridSearchResult(const RangesInDataParts & parts) const;
 
@@ -79,7 +81,7 @@ private:
     /// Get accurate distance value for candidates by second stage vector index in belonged part
     VectorAndTextResultInDataParts selectPartsBySecondStageVectorIndex(
         const VectorAndTextResultInDataParts & parts_with_candidates,
-        const VectorScanInfoPtr & vec_scan_info,
+        const VSDescription & vector_scan_desc,
         size_t num_streams) const;
 
     Pipe readFromParts(
@@ -95,10 +97,13 @@ private:
 #if USE_TANTIVY_SEARCH
     void getStatisticForTextSearch();
 
-    Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
+    TANTIVY::Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
 #endif
 
-    void performFinal(VectorAndTextResultInDataParts & parts_with_vector_text_result, size_t num_streams) const;
+    void performFinal(
+        const RangesInDataParts & parts_with_ranges,
+        VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        size_t num_streams) const;
 };
 
 }

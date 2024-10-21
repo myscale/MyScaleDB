@@ -59,6 +59,7 @@
 #include "Common/Allocator.h"
 #include <Common/checkStackSize.h>
 #include <Storages/StorageView.h>
+#include <Storages/StorageDistributed.h>
 
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -74,6 +75,7 @@
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
 #include <VectorIndex/Utils/VSUtils.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 
 #include <Parsers/formatAST.h>
 
@@ -902,60 +904,99 @@ using RewriteShardNumVisitor = InDepthNodeVisitor<RewriteShardNum, true>;
 /// Get hybrid search related functions(distance, batch_distance, TextSearch and HybridSearch), remove duplicated functions
 void getHybridSearchFunctions(
     ASTPtr & query,
-    const ASTSelectQuery & select_query,
+    ASTSelectQuery * select_query,
     std::vector<const ASTFunction *> & hybrid_search_functions,
     HybridSearchFuncType & search_func_type)
 {
     GetHybridSearchVisitor::Data data;
     GetHybridSearchVisitor(data).visit(query);
 
+    /// Mark if query contains multiple distances
+    bool has_multiple_distances = false;
+
     size_t hybrid_search_func_count = data.vector_scan_funcs.size() + data.text_search_func.size() + data.hybrid_search_func.size();
     if (hybrid_search_func_count == 0)
         return ;
     else if (hybrid_search_func_count > 1)
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support more than one function among vector scan, text search, or hybrid search in one query now");
+    {
+        /// Support multiple vector scan funcs
+        if (data.vector_scan_funcs.size() != hybrid_search_func_count)
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Only support multiple distance functions in one query now");
+
+        has_multiple_distances = true;
+    }
 
     String search_func_name;
-    if (data.vector_scan_funcs.size() == 1)
+    if (data.vector_scan_funcs.size() >= 1)
     {
         hybrid_search_functions = data.vector_scan_funcs;
         search_func_type = HybridSearchFuncType::VECTOR_SCAN;
-        search_func_name = "distance";
+        search_func_name = DISTANCE_FUNCTION;
+
+        if (has_multiple_distances)
+        {
+            /// multiple distances: need to set mark flag in ASTFunction
+            for (const auto & vector_scan_func : data.all_multiple_vector_scan_funcs)
+                vector_scan_func->is_from_multiple_distances = true;
+        }
     }
     else if (data.text_search_func.size() == 1)
     {
         hybrid_search_functions = data.text_search_func;
         search_func_type = HybridSearchFuncType::TEXT_SEARCH;
-        search_func_name = "TextSearch";
+        search_func_name = TEXT_SEARCH_FUNCTION;
     }
     else if (data.hybrid_search_func.size() == 1)
     {
         hybrid_search_functions = data.hybrid_search_func;
         search_func_type = HybridSearchFuncType::HYBRID_SEARCH;
-        search_func_name = "HybridSearch";
+        search_func_name = HYBRID_SEARCH_FUNCTION;
     }
 
-    if (!select_query.orderBy())
+    /// Remove the restriction that distance() function must exist in order by clause.
+    if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
     {
-        /// TODO: Will be removed when distance functions are implemented
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", search_func_name);
+        /// Add default order by clause if not specified
+        if (!select_query->orderBy())
+        {
+            ASTPtr default_order_by_ast = std::make_shared<ASTExpressionList>();
+
+            auto virtual_part = std::make_shared<ASTOrderByElement>();
+            virtual_part->direction = 1;
+            virtual_part->children.emplace_back(std::make_shared<ASTIdentifier>("_part"));
+
+            auto virtual_row_id = std::make_shared<ASTOrderByElement>();
+            virtual_row_id->direction = 1;
+            virtual_row_id->children.emplace_back(std::make_shared<ASTIdentifier>("_part_offset"));
+
+            default_order_by_ast->children.push_back(std::move(virtual_part));
+            default_order_by_ast->children.push_back(std::move(virtual_row_id));
+
+            select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, std::move(default_order_by_ast));
+        }
+    }
+    else /// TextSearch/HybridSearch
+    {
+        if (!select_query->orderBy())
+        {
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", search_func_name);
+        }
+        else
+        {
+            GetHybridSearchVisitor::Data order_by_data;
+            GetHybridSearchVisitor(order_by_data).visit(select_query->orderBy());
+
+            auto search_func_count = order_by_data.text_search_func.size() + order_by_data.hybrid_search_func.size();
+            if (search_func_count != 1)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", search_func_name);
+        }
     }
 
     bool is_batch = hybrid_search_functions.size() == 1 && isBatchDistance(hybrid_search_functions[0]->getColumnName());
-    if (!is_batch && !select_query.limitLength())
+    if (!is_batch && !select_query->limitLength())
         throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT N clause", search_func_name);
-    else if (is_batch && !select_query.limitByLength())
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch {} function without LIMIT N BY clause", search_func_name);
-
-    if (select_query.orderBy())
-    {
-        GetHybridSearchVisitor::Data order_by_data;
-        GetHybridSearchVisitor(order_by_data).visit(select_query.orderBy());
-
-        auto search_func_count = order_by_data.vector_scan_funcs.size() + order_by_data.text_search_func.size() + order_by_data.hybrid_search_func.size();
-        if (search_func_count != 1)
-            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", search_func_name);
-    }
+    else if (is_batch && !select_query->limitByLength())
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_{} function without LIMIT N BY clause", search_func_name);
 }
 
 void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList & source_columns, ASTSelectQuery * select_query = nullptr)
@@ -1002,7 +1043,7 @@ void addSearchFunctionColumnName(const String & func_col_name, NamesAndTypesList
 }
 
 void checkOrderBySortDirection(
-    String func_name, ASTSelectQuery * select_query, int & sort_direction, int expected_direction,
+    String func_name, ASTSelectQuery * select_query, int expected_direction,
     String metric_type = "", bool is_batch = false)
 {
     if (!select_query)
@@ -1010,7 +1051,10 @@ void checkOrderBySortDirection(
 
     auto order_by = select_query->orderBy();
     if (!order_by)
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", func_name);
+        return; /// order by is already checked and handled by getHybridSearchFunctions()
+
+    int sort_direction = 0;
+    bool find_search_function = false;
 
     /// Find the direction for hybrid search func
     for (const auto & child : order_by->children)
@@ -1020,10 +1064,28 @@ void checkOrderBySortDirection(
             continue;
         ASTPtr order_expression = order_by_element->children.at(0);
 
-        if (!is_batch && isHybridSearchFunc(order_expression->getColumnName()))
+        if (!is_batch)
         {
-            sort_direction = order_by_element->direction;
-            break;
+            /// Check cases when search function column is an argument of other functions
+            if (isHybridSearchFunc(order_expression->getColumnName()))
+            {
+                sort_direction = order_by_element->direction;
+                find_search_function = true;
+                break;
+            }
+            else if (auto * function = order_expression->as<ASTFunction>())
+            {
+                const ASTs & func_arguments = function->arguments->as<ASTExpressionList &>().children;
+                for (const auto & func_arg : func_arguments)
+                {
+                    if (isHybridSearchFunc(func_arg->getColumnName()))
+                    {
+                        sort_direction = order_by_element->direction;
+                        find_search_function = true;
+                        break;
+                    }
+                }
+            }
         }
         else if (is_batch)
         {
@@ -1036,6 +1098,7 @@ void checkOrderBySortDirection(
                     if (func_arguments[1]->getColumnName() == "2")
                     {
                         sort_direction = order_by_element->direction;
+                        find_search_function = true;
                         break;
                     }
                 }
@@ -1043,7 +1106,8 @@ void checkOrderBySortDirection(
         }
    }
 
-    if (sort_direction != expected_direction)
+    /// Only check the direction of search function when found in order by
+    if (find_search_function && sort_direction != expected_direction)
     {
         String vector_scan_error_log = metric_type.empty() ? "" : " when the metric type is " + metric_type;
         throw Exception(ErrorCodes::SYNTAX_ERROR,
@@ -1268,6 +1332,14 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
             const String func_column_name = node->getColumnName();
             addSearchFunctionColumnName(func_column_name, source_columns);
             unknown_required_source_columns.erase(func_column_name);
+
+            /// Add score type column for distributed storage with multiple shards
+            auto * distributed = dynamic_cast<StorageDistributed *>(const_cast<DB::IStorage *>(storage.get()));
+            if (isHybridSearch(func_column_name) && distributed && distributed->getCluster()->getShardsInfo().size() > 1)
+            {
+                source_columns.push_back(SCORE_TYPE_COLUMN);
+                unknown_required_source_columns.erase(SCORE_TYPE_COLUMN.name);
+            }
         }
     }
 
@@ -1513,9 +1585,19 @@ std::optional<NameAndTypePair> TreeRewriterResult::collectSearchColumnType(
     if (!search_column_type)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "search column name: {}, type is not exist", search_col_name);
 
-    /// Check if table with vector index contains the same column as vector scan function column.
+    /// Check if table with vector index contains the same column as search function column.
     if (metadata_snapshot && metadata_snapshot->getColumns().has(func_col_name))
         throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support search function on table with column name '{}'", func_col_name);
+
+    if (hybrid_search_from_right_table)
+    {
+        /// distance func column name should add to right joined table's source columns
+        addSearchFunctionColumnName(func_col_name, analyzed_join->columns_from_joined_table);
+
+        /// Add distance func column to original_names too
+        auto & original_names = analyzed_join->original_names;
+        original_names[func_col_name] = func_col_name;
+    }
 
     return search_column_type;
 }
@@ -1526,122 +1608,152 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
     ContextPtr context)
 {
     /// distance function exists in main query's select caluse
-    if (hybrid_search_funcs.size() == 1)
+    size_t search_funcs_size = hybrid_search_funcs.size();
+    if (search_funcs_size > 0)
     {
         String function_name;
         size_t expected_args_size = 0;
-        bool is_batch = false;
         bool has_vector = false;
         bool has_text = false;
 
-        const ASTFunction * node = hybrid_search_funcs[0];
         if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
         {
             has_vector = true;
             expected_args_size = 2;
-            is_batch = isBatchDistance(node->getColumnName());
-
-            function_name = is_batch ? "batch_distance" : "distance";
         }
         else if (search_func_type == HybridSearchFuncType::TEXT_SEARCH)
         {
             has_text = true;
-            function_name = "TextSearch";
+            function_name = TEXT_SEARCH_FUNCTION;
             expected_args_size = 2;
         }
         else if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH)
         {
             has_vector = true;
             has_text = true;
-            function_name = "HybridSearch";
+            function_name = HYBRID_SEARCH_FUNCTION;
             expected_args_size = 4;
         }
 
-        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
-
-        /// There is no real search function, hence the checks like input paramters are put here.
-        if (arguments.size() != expected_args_size)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in {} function: {}, expected {}", function_name, arguments.size(), expected_args_size);
-
-        /// Get topK from limit N
-        limit_length = getTopKFromLimit(select_query, context, is_batch);
-
-        if (limit_length == 0)
-        {
-            if (is_batch)
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_distance function without LIMIT BY clause");
-            else
-                throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT clause", function_name);
-        }
-
-        String function_col_name = node->getColumnName(); /// column name of search function
-        ASTPtr vector_argument;
-        ASTPtr text_argument;
-
-        /// Use the first argument in search function
-        /// vector column in vector scan and hybrid search, text column in text search
-        if (has_vector)
-        {
-            vector_argument = arguments[0];
-
-            /// hybrid search
-            if (has_text)
-                text_argument = arguments[1];
-        }
-        else
-            text_argument = arguments[0];
-
-        String vector_col_name = vector_argument ? vector_argument->getColumnName() : "";
-        String text_col_name = text_argument ? text_argument->getColumnName() : "";
-
+        /// Support multiple distance functions
+        bool has_multiple_distances = search_funcs_size > 1;
         StorageMetadataPtr metadata_snapshot = nullptr;
         bool table_is_remote = false; /// Mark if the storage with search column is distributed.
 
-        if (has_vector)
+        vector_scan_metric_types.resize(search_funcs_size);
+        vector_search_types.resize(search_funcs_size);
+
+        for (size_t i = 0; i < search_funcs_size; ++i)
         {
-            auto search_vector_column_type = collectSearchColumnType(vector_col_name, function_col_name, tables_with_columns, context,
-                                                vector_argument, metadata_snapshot, table_is_remote);
+            const ASTFunction * node = hybrid_search_funcs[i];
+            bool is_batch = false;
 
-            vector_search_type = getSearchIndexDataType(search_vector_column_type->type);
-
-            vector_scan_metric_type = getMetricType(metadata_snapshot, vector_search_type, vector_col_name, context);
-        }
-
-        if (has_text)
-        {
-            /// Check mappKeys for text column
-            bool is_mapkeys = false;
-            if (const ASTFunction * function = text_argument->as<ASTFunction>())
+            /// Initialize for vector scan function
+            if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
             {
-                if ((function->name == "mapKeys") && function->arguments)
+                is_batch = isBatchDistance(node->getColumnName());
+                function_name = is_batch ? "batch_distance" : "distance";
+            }
+
+            if (has_multiple_distances && (is_batch || search_func_type != HybridSearchFuncType::VECTOR_SCAN))
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Only support multiple distance functions in one query");
+
+            const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
+
+            /// There is no real search function, hence the checks like input parameters are put here.
+            if (arguments.size() != expected_args_size)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "wrong argument number in {} function: {}, expected {}", function_name, arguments.size(), expected_args_size);
+
+            /// Only need to get k in limit for once
+            if (i == 0)
+            {
+                /// Get topK from limit N
+                limit_length = getTopKFromLimit(select_query, context, is_batch);
+
+                if (limit_length == 0)
                 {
-                    const auto & function_arguments_list = function->arguments->as<ASTExpressionList>()->children;
-                    if (function_arguments_list.size() == 1)
-                    {
-                        text_col_name = function_arguments_list[0]->getColumnName();
-                        is_mapkeys = true;
-                    }
+                    if (is_batch)
+                        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch_distance function without LIMIT BY clause");
+                    else
+                        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT clause", function_name);
                 }
             }
-            auto search_text_column_type = collectSearchColumnType(text_col_name, function_col_name, tables_with_columns, context,
-                                                text_argument, metadata_snapshot, table_is_remote);
 
-            checkTextSearchColumnDataType(search_text_column_type->type, is_mapkeys);
+            String function_col_name = node->getColumnName(); /// column name of search function
+            ASTPtr vector_argument;
+            ASTPtr text_argument;
+
+            /// Use the first argument in search function
+            /// vector column in vector scan and hybrid search, text column in text search
+            if (has_vector)
+            {
+                vector_argument = arguments[0];
+
+                /// hybrid search
+                if (has_text)
+                    text_argument = arguments[1];
+            }
+            else
+                text_argument = arguments[0];
+
+            String vector_col_name = vector_argument ? vector_argument->getColumnName() : "";
+            String text_col_name = text_argument ? text_argument->getColumnName() : "";
+            String vector_scan_metric_type;
+
+            if (has_vector)
+            {
+                auto search_vector_column_type = collectSearchColumnType(vector_col_name, function_col_name, tables_with_columns, context,
+                                                    vector_argument, metadata_snapshot, table_is_remote);
+
+                auto vector_search_type = getSearchIndexDataType(search_vector_column_type->type);
+                vector_search_types[i] = vector_search_type;
+
+                vector_scan_metric_type = getMetricType(metadata_snapshot, vector_search_type, vector_col_name, context);
+                vector_scan_metric_types[i] = vector_scan_metric_type;
+            }
+
+            if (has_text)
+            {
+                /// Check mappKeys for text column
+                bool is_mapkeys = false;
+                if (const ASTFunction * function = text_argument->as<ASTFunction>())
+                {
+                    if ((function->name == "mapKeys") && function->arguments)
+                    {
+                        const auto & function_arguments_list = function->arguments->as<ASTExpressionList>()->children;
+                        if (function_arguments_list.size() == 1)
+                        {
+                            text_col_name = function_arguments_list[0]->getColumnName();
+                            is_mapkeys = true;
+                        }
+                    }
+                }
+                auto search_text_column_type = collectSearchColumnType(text_col_name, function_col_name, tables_with_columns, context,
+                                                    text_argument, metadata_snapshot, table_is_remote);
+
+                checkTextSearchColumnDataType(search_text_column_type->type, is_mapkeys);
+            }
+
+            /// The direction of TextSearch/HybridSearch func in order by should be DESC
+            if (has_text)
+                checkOrderBySortDirection(function_name, select_query, -1);
+            else
+            {
+                /// When metric_type = IP in definition of vector index, order by must be DESC.
+                /// Skip the check when table is distributed or query has multiple distance functions
+                if (!table_is_remote && !has_multiple_distances)
+                {
+                    String metric_type = vector_scan_metric_type;
+                    Poco::toUpperInPlace(metric_type);
+                    checkOrderBySortDirection(function_name, select_query, metric_type == "IP" ? -1 : 1, metric_type, is_batch);
+                }
+            }
         }
 
-        /// The direction of TextSearch/HybridSearch func in order by should be DESC
-        if (has_text)
-            checkOrderBySortDirection(function_col_name, select_query, direction, -1);
-        else
+        /// topk in multiple distance functions case should be 3 * k
+        if (has_multiple_distances)
         {
-            /// When metric_type = IP in definition of vector index, order by must be DESC.
-            /// Skip the check when table is distributed.
-            if (!table_is_remote)
-            {
-                String metric_type = vector_scan_metric_type;
-                Poco::toUpperInPlace(metric_type);
-                checkOrderBySortDirection("distance", select_query, direction, metric_type == "IP" ? -1 : 1, metric_type, is_batch);
-            }
+            limit_length = limit_length * context->getSettingsRef().distances_top_k_multiply_factor;
         }
     }
     else
@@ -1650,8 +1762,11 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
         /// Add search func name and type to source columns
         /// Add search func name to select clauses if not exists
         String search_func_col_name;
-        if (auto vector_scan_desc = context->getVecScanDescription())
-            search_func_col_name = vector_scan_desc->column_name;
+        if (auto vector_scan_descs = context->getVecScanDescriptions())
+        {
+            for (const auto & vec_scan_desc : *vector_scan_descs)
+                addSearchFunctionColumnName(vec_scan_desc.column_name, source_columns, select_query);
+        }
         else if (auto text_search_info = context->getTextSearchInfo())
             search_func_col_name = text_search_info->function_column_name;
         else if (auto hybrid_search_info = context->getHybridSearchInfo())
@@ -1774,7 +1889,36 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
             column.name = StorageView::replaceQueryParameterWithValue(column.name, parameter_values, parameter_types);
     }
 
-    getHybridSearchFunctions(query, *select_query, result.hybrid_search_funcs, result.search_func_type);
+    getHybridSearchFunctions(query, select_query, result.hybrid_search_funcs, result.search_func_type);
+
+    /// Add score_type column and fusion id columns for multiple-shard distributed hybrid search
+    /// fusion id columns: _shard_num, _part_index, _part_offset
+    auto * distributed = dynamic_cast<StorageDistributed *>(const_cast<DB::IStorage *>(result.storage.get()));
+    if (result.search_func_type == HybridSearchFuncType::HYBRID_SEARCH && distributed
+        && distributed->getCluster()->getShardsInfo().size() > 1)
+    {
+        auto score_type_identifier = std::make_shared<ASTIdentifier>(SCORE_TYPE_COLUMN.name);
+        select_query->select()->children.push_back(score_type_identifier);
+
+        if (!select_query->orderBy())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Hybrid search requires ORDER BY clause.");
+
+        auto shard_num_element = std::make_shared<ASTOrderByElement>();
+        shard_num_element->direction = 1;
+        shard_num_element->children.emplace_back(makeASTFunction("shardNum"));
+
+        auto part_index_element = std::make_shared<ASTOrderByElement>();
+        part_index_element->direction = 1;
+        part_index_element->children.emplace_back(std::make_shared<ASTIdentifier>("_part_index"));
+
+        auto part_offset_element = std::make_shared<ASTOrderByElement>();
+        part_offset_element->direction = 1;
+        part_offset_element->children.emplace_back(std::make_shared<ASTIdentifier>("_part_offset"));
+
+        select_query->orderBy()->children.push_back(std::move(shard_num_element));
+        select_query->orderBy()->children.push_back(std::move(part_index_element));
+        select_query->orderBy()->children.push_back(std::move(part_offset_element));
+    }
 
     /// Special handling for vector scan, text search and hybrid search function
     result.collectForHybridSearchRelatedFunctions(select_query, tables_with_columns, getContext());

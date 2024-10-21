@@ -40,23 +40,36 @@ class MergeTreeVSManager : public MergeTreeBaseSearchManager
 {
 public:
     MergeTreeVSManager(
-        StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, bool support_two_stage_search_ = false)
-        : MergeTreeBaseSearchManager{metadata_, context_, vector_scan_info_ ? vector_scan_info_->vector_scan_descs[0].column_name : ""}
+        StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, std::vector<bool> vec_support_two_stage_searches_ = {})
+        : MergeTreeBaseSearchManager{metadata_, context_}
         , vector_scan_info(vector_scan_info_)
-        , support_two_stage_search(support_two_stage_search_)
+        , vec_support_two_stage_searches(vec_support_two_stage_searches_)
         , enable_brute_force_search(context_->getSettingsRef().enable_brute_force_vector_search)
+        , max_threads(context_->getSettingsRef().max_threads)
     {
+        for (const auto & desc : vector_scan_info_->vector_scan_descs)
+            search_func_cols_names.emplace_back(desc.column_name);
     }
 
-    MergeTreeVSManager(VectorScanResultPtr vec_scan_result_, VectorScanInfoPtr vector_scan_info_)
-    : MergeTreeBaseSearchManager{nullptr, nullptr, vector_scan_info_ ? vector_scan_info_->vector_scan_descs[0].column_name : ""}
+    /// From hybrid search or batch_distance
+    MergeTreeVSManager(
+        StorageMetadataPtr metadata_, VectorScanInfoPtr vector_scan_info_, ContextPtr context_, bool support_two_stage_search_ = false)
+        : MergeTreeVSManager(metadata_, vector_scan_info_, context_, std::vector<bool>{support_two_stage_search_})
+    {}
+
+    /// Multiple vector scan functions
+    MergeTreeVSManager(const ManyVectorScanResults & vec_scan_results_, VectorScanInfoPtr vector_scan_info_)
+    : MergeTreeBaseSearchManager{nullptr, nullptr}
     , vector_scan_info(nullptr)
-    , vector_scan_result(vec_scan_result_)
+    , vector_scan_results(vec_scan_results_)
     {
-        if (vector_scan_result && vector_scan_result->computed)
+        if (preComputed())
         {
             LOG_DEBUG(log, "Already have precomputed vector scan result, no need to execute search");
         }
+
+        for (const auto & desc : vector_scan_info_->vector_scan_descs)
+            search_func_cols_names.emplace_back(desc.column_name);
     }
 
     ~MergeTreeVSManager() override = default;
@@ -72,40 +85,65 @@ public:
     /// If part doesn't have vector index or real index type doesn't support, just use passed in values.
     static VectorScanResultPtr executeSecondStageVectorScan(
         const MergeTreeData::DataPartPtr & data_part,
-        const VectorScanInfoPtr vector_scan_info_,
+        const VSDescription & vector_scan_desc,
         const VectorScanResultPtr & first_stage_vec_result);
 
     /// Split num_reorder candidates based on part index: part + vector scan results from first stage
     static VectorAndTextResultInDataParts splitFirstStageVSResult(
         const VectorAndTextResultInDataParts & parts_with_mix_results,
         const ScoreWithPartIndexAndLabels & first_stage_top_results,
+        const VSDescription & vector_scan_desc,
+        Poco::Logger * log);
+
+    /// Filter parts using total top-k vector scan results from multiple distance functions
+    /// For every part, select mark ranges to read, and save multiple vector scan results
+    static SearchResultAndRangesInDataParts FilterPartsWithManyVSResults(
+        const RangesInDataParts & parts_with_ranges,
+        const std::unordered_map<String, ScoreWithPartIndexAndLabels> & vector_scan_results_with_part_index,
+        const Settings & settings,
         Poco::Logger * log);
 
     void mergeResult(
         Columns & pre_result,
         size_t & read_rows,
         const ReadRanges & read_ranges,
-        const Search::DenseBitmapPtr filter = nullptr,
         const ColumnUInt64 * part_offset = nullptr) override;
 
     bool preComputed() override
     {
-        return vector_scan_result && vector_scan_result->computed;
+        for (const auto & result : vector_scan_results)
+        {
+            if (result && result->computed)
+                return true;
+        }
+
+        return false;
     }
 
-    CommonSearchResultPtr getSearchResult() override { return vector_scan_result; }
+    /// Return first vector scan result if exists, used for hybrid search
+    CommonSearchResultPtr getSearchResult() override
+    {
+        if (vector_scan_results.size() > 0)
+            return vector_scan_results[0];
+        else
+            return nullptr;
+    }
+
+    /// Return all vector scan results
+    ManyVectorScanResults getVectorScanResults() { return vector_scan_results; }
 
 private:
 
     VectorScanInfoPtr vector_scan_info;
-    bool support_two_stage_search;  /// True if vector index in metadata support two stage search
+    std::vector<bool> vec_support_two_stage_searches;  /// True if vector index in metadata support two stage search
 
     /// Whether brute force search is enabled based on query setting
     bool enable_brute_force_search;
 
-    /// lock vector scan result
-    std::mutex mutex;
-    VectorScanResultPtr vector_scan_result = nullptr;
+    /// Support multiple distance functions
+    ManyVectorScanResults vector_scan_results;
+    std::map<UInt64, std::vector<Float32>> map_labels_distances; /// sorted map with label ids and multiple distances
+    size_t max_threads;
 
     Poco::Logger * log = &Poco::Logger::get("MergeTreeVSManager");
 
@@ -118,7 +156,7 @@ private:
     template <>
     VectorIndex::VectorDatasetPtr<Search::DataType::BinaryVector> generateVectorDataset(bool is_batch, const VSDescription & desc);
 
-    VectorScanResultPtr vectorScan(
+    ManyVectorScanResults vectorScan(
         bool is_batch,
         const MergeTreeData::DataPartPtr & data_part = nullptr,
         const ReadRanges & read_ranges = ReadRanges(),
@@ -142,7 +180,24 @@ private:
         size_t & read_rows,
         const ReadRanges & read_ranges = ReadRanges(),
         VectorScanResultPtr tmp_result = nullptr,
-        const Search::DenseBitmapPtr = nullptr,
+        const ColumnUInt64 * part_offset = nullptr);
+
+    /// Support multiple distance functions
+    /// vector search on a vector column
+    VectorScanResultPtr vectorScanOnSingleColumn(
+    bool is_batch,
+    const MergeTreeData::DataPartPtr & data_part,
+    const VSDescription vector_scan_desc,
+    const ReadRanges & read_ranges,
+    const bool support_two_stage_search,
+    const Search::DenseBitmapPtr filter = nullptr);
+
+    /// Merge multiple vector scan results with other columns
+    void mergeMultipleVectorScanResults(
+        Columns & pre_result,
+        size_t & read_rows,
+        const ReadRanges & read_ranges = ReadRanges(),
+        const ManyVectorScanResults multiple_vector_scan_results = {},
         const ColumnUInt64 * part_offset = nullptr);
 
     template <Search::DataType T>

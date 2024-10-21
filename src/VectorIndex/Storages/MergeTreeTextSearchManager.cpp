@@ -110,14 +110,27 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     bool find_index = false;
     for (const auto & index_desc : metadata->getSecondaryIndices())
     {
-        if (index_desc.type == TANTIVY_INDEX_NAME && ((from_table_function && index_desc.name == text_search_info->index_name)
-                || (!from_table_function && index_desc.column_names.size() == 1 && index_desc.column_names[0] == search_column_name)))
+        if (index_desc.type == TANTIVY_INDEX_NAME)
         {
-            OpenTelemetry::SpanHolder span2("MergeTreeTextSearchManager::textSearch()::find_index::initialize index store");
+            if (from_table_function)
+            {
+                /// Check index name when from table function
+                if (index_desc.name != text_search_info->index_name)
+                    continue;
+            }
+            else /// from hybrid or text search
+            {
+                /// Check if index contains the text column name
+                auto & column_names = index_desc.column_names;
+                if (std::find(column_names.begin(), column_names.end(), search_column_name) == column_names.end())
+                    continue;
+            }
 
+            /// Found matched fts index based index name or text column name
             index_name = index_desc.name;
             suggestion_index_log = "ALTER TABLE " + db_table_name + " MATERIALIZE INDEX " + index_desc.name;
 
+            OpenTelemetry::SpanHolder span2("MergeTreeTextSearchManager::textSearch()::find_index::initialize index store");
             /// Initialize TantivyIndexStore
             auto index_helper = MergeTreeIndexFactory::instance().get(index_desc);
             if (!index_helper->getDeserializedFormat(data_part->getDataPartStorage(), index_helper->getFileName()))
@@ -161,8 +174,13 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
                             index_name, data_part->name, db_table_name, suggestion_index_log);
     }
 
+    /// Initialize vector for text columns names
+    std::vector<String> text_column_names;
+    if (!search_column_name.empty())
+        text_column_names.emplace_back(search_column_name);
+
     /// Find index, load index and do text search
-    rust::cxxbridge1::Vec<RowIdWithScore> search_results;
+    rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> search_results;
     if (filter)
     {
         OpenTelemetry::SpanHolder span3("MergeTreeTextSearchManager::textSearch()::data_part_generate_results_with_filter");
@@ -176,7 +194,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             filter_bitmap_vector.emplace_back(bitmap[i]);
 
         search_results = tantivy_store->bm25SearchWithFilter(
-            text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, filter_bitmap_vector);
+            text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, filter_bitmap_vector, text_column_names);
     }
     else if (data_part->hasLightweightDelete())
     {
@@ -227,19 +245,19 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
         /// Get non empty delete bitmap (from store or data part) OR fail to get delete bitmap from part
         if (u8_delete_bitmap_vec.empty())
         {
-            search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
+            search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, text_column_names);
         }
         else
         {
             search_results = tantivy_store->bm25SearchWithFilter(
-                                text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, u8_delete_bitmap_vec);
+                                text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, u8_delete_bitmap_vec, text_column_names);
         }
     }
     else
     {
         OpenTelemetry::SpanHolder span3("MergeTreeTextSearchManager::textSearch()::data_part_generate_results_no_filter");
         LOG_DEBUG(log, "Text search no filter");
-        search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k);
+        search_results = tantivy_store->bm25Search(text_search_info->query_text, enable_nlq, operator_or, bm25_stats_in_table, k, text_column_names);
     }
 
     for (size_t i = 0; i < search_results.size(); i++)
@@ -264,10 +282,9 @@ void MergeTreeTextSearchManager::mergeResult(
     Columns & pre_result,
     size_t & read_rows,
     const ReadRanges & read_ranges,
-    const Search::DenseBitmapPtr filter,
     const ColumnUInt64 * part_offset)
 {
-    mergeSearchResultImpl(pre_result, read_rows, read_ranges, text_search_result, filter, part_offset);
+    mergeSearchResultImpl(pre_result, read_rows, read_ranges, text_search_result, part_offset);
 }
 
 }
