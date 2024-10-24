@@ -19,7 +19,7 @@ bool ParserDropIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected
     node = query;
 
     ParserKeyword s_drop(Keyword::DROP);
-    ParserKeyword s_vector("VECTOR");
+    ParserKeyword s_vector(Keyword::VECTOR);
     ParserKeyword s_index(Keyword::INDEX);
     ParserKeyword s_on(Keyword::ON);
     ParserKeyword s_if_exists(Keyword::IF_EXISTS);

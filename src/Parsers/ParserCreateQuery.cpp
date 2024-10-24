@@ -405,7 +405,7 @@ bool ParserForeignKeyDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected &
 bool ParserTablePropertyDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserKeyword s_index(Keyword::INDEX);
-    ParserKeyword s_vec_index("VECTOR INDEX");
+    ParserKeyword s_vec_index(Keyword::VECTOR_INDEX);
     ParserKeyword s_constraint(Keyword::CONSTRAINT);
     ParserKeyword s_projection(Keyword::PROJECTION);
     ParserKeyword s_foreign_key(Keyword::FOREIGN_KEY);

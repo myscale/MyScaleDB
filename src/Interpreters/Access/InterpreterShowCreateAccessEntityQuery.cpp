@@ -15,7 +15,6 @@
 #include <Parsers/ExpressionListParsers.h>
 #include <Parsers/formatAST.h>
 #include <Parsers/parseQuery.h>
-#include <Parsers/ASTCreateConnectionQuery.h>
 #include <Access/AccessControl.h>
 #include <Access/EnabledQuota.h>
 #include <Access/Quota.h>
@@ -224,28 +223,6 @@ namespace
 
         return query;
     }
-
-    ASTPtr getCreateQueryImpl(const AWSConnection & conn, const AccessControl *, bool attach_mode)
-    {
-        auto query = std::make_shared<ASTCreateConnectionQuery>();
-        query->name = conn.getName();
-        query->attach = attach_mode;
-
-        if (!conn.provider_name.empty())
-            query->provider_name_value = conn.provider_name;
-
-        if (!conn.aws_role_arn.empty())
-            query->role_arn_value = conn.aws_role_arn;
-
-        if (!conn.aws_role_external_id.empty())
-            query->external_id_value = conn.aws_role_external_id;
-
-        if (conn.aws_role_credential_duration > 0)
-            query->duration_value = conn.aws_role_credential_duration;
-
-        return query;
-    }
-
 
     ASTPtr getCreateQueryImpl(
         const IAccessEntity & entity,

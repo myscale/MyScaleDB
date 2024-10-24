@@ -211,37 +211,6 @@ void writeText(const Tuple & x, WriteBuffer & buf)
     writeFieldText(Field(x), buf);
 }
 
-void readBinary(ObjectToFetch & x, ReadBuffer & buf)
-{
-    size_t size;
-    readBinary(size, buf);
-
-    for (size_t index = 0; index < size; ++index)
-    {
-        UInt8 type;
-        readBinary(type, buf);
-        x.push_back(getBinaryValue(type, buf));
-    }
-}
-
-void writeBinary(const ObjectToFetch & x, WriteBuffer & buf)
-{
-    const size_t size = x.size();
-    writeBinary(size, buf);
-
-    for (const auto & elem : x)
-    {
-        const UInt8 type = elem.getType();
-        writeBinary(type, buf);
-        Field::dispatch([&buf] (const auto & value) { FieldVisitorWriteBinary()(value, buf); }, elem);
-    }
-}
-
-void writeText(const ObjectToFetch & x, WriteBuffer & buf)
-{
-    writeFieldText(Field(x), buf);
-}
-
 void readBinary(Map & x, ReadBuffer & buf)
 {
     size_t size;

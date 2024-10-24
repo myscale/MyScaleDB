@@ -82,11 +82,6 @@ const AccessEntityTypeInfo & AccessEntityTypeInfo::get(AccessEntityType type_)
             static const auto info = make_info("QUOTA", "QUOTAS", 'Q', ErrorCodes::UNKNOWN_QUOTA);
             return info;
         }
-        case AccessEntityType::CONNECTION:
-        {
-            static const auto info = make_info("CONNECTION", "CONNECTIONS", 'C', ErrorCodes::UNKNOWN_CONNECTION);
-            return info;
-        }
         case AccessEntityType::MAX: break;
     }
     throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown type: {}", static_cast<size_t>(type_));

@@ -21,10 +21,10 @@ namespace DB
 
 bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    ParserKeyword s_type("TYPE");
+    ParserKeyword s_type(Keyword::TYPE);
 
     ParserCompoundIdentifier column_p;
-    ParserDataType data_type_p;
+    ParserExpressionWithOptionalArguments data_type_p;
 
     ASTPtr column;
     ASTPtr type;
@@ -138,7 +138,7 @@ bool ParserCreateIndexQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expect
     node = query;
 
     ParserKeyword s_create(Keyword::CREATE);
-    ParserKeyword s_vector("VECTOR");
+    ParserKeyword s_vector(Keyword::VECTOR);
     ParserKeyword s_unique(Keyword::UNIQUE);
     ParserKeyword s_index(Keyword::INDEX);
     ParserKeyword s_if_not_exists(Keyword::IF_NOT_EXISTS);

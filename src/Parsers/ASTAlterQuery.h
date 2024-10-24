@@ -182,12 +182,12 @@ public:
 
     /** The ADD VECTOR INDEX query stores the IndexDeclaration there.
      */
-    ASTPtr vec_index_decl;
+    IAST * vec_index_decl;
 
     /** The ADD VECTOR INDEX query stores the name of the index following AFTER.
      *  The DROP VECTOR INDEX query stores the name for deletion.
      */
-    ASTPtr vec_index;
+    IAST * vec_index;
 
     /** In ALTER CHANNEL, ADD, DROP, SUSPEND, RESUME, REFRESH, MODIFY queries, the list of live views is stored here
      */

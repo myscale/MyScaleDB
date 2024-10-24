@@ -125,8 +125,8 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
     ParserToken parser_closing_round_bracket(TokenType::ClosingRoundBracket);
 
     // vector index related
-    ParserKeyword s_add_vec_index("ADD VECTOR INDEX");
-    ParserKeyword s_drop_vec_index("DROP VECTOR INDEX");
+    ParserKeyword s_add_vec_index(Keyword::ADD_VECTOR_INDEX);
+    ParserKeyword s_drop_vec_index(Keyword::DROP_VECTOR_INDEX);
     ASTPtr command_vector_index_decl;
     ASTPtr command_vector_index;
 

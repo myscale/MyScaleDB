@@ -8,7 +8,6 @@
 #include <Parsers/ASTCheckQuery.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTCreateFunctionQuery.h>
-#include <Parsers/ASTCreateConnectionQuery.h>
 #include <Parsers/ASTCreateIndexQuery.h>
 #include <Parsers/ASTDeleteQuery.h>
 #include <Parsers/ASTDropFunctionQuery.h>
@@ -282,10 +281,6 @@ InterpreterFactory::InterpreterPtr InterpreterFactory::get(ASTPtr & query, Conte
     else if (query->as<ASTCreateSettingsProfileQuery>())
     {
         interpreter_name = "InterpreterCreateSettingsProfileQuery";
-    }
-    else if (query->as<ASTCreateConnectionQuery>())
-    {
-        return std::make_unique<InterpreterCreateConnectionQuery>(query, context);
     }
     else if (query->as<ASTDropAccessEntityQuery>())
     {

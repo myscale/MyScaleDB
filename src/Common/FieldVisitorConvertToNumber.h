@@ -40,11 +40,6 @@ public:
         throw Exception(ErrorCodes::CANNOT_CONVERT_TYPE, "Cannot convert Tuple to {}", demangle(typeid(T).name()));
     }
 
-    T operator() (const ObjectToFetch &) const
-    {
-        throw Exception(ErrorCodes::CANNOT_CONVERT_TYPE, "Cannot convert ObjectToFetch to {}", demangle(typeid(T).name()));
-    }
-
     T operator() (const Map &) const
     {
         throw Exception(ErrorCodes::CANNOT_CONVERT_TYPE, "Cannot convert Map to {}", demangle(typeid(T).name()));

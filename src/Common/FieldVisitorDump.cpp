@@ -81,22 +81,6 @@ String FieldVisitorDump::operator() (const Tuple & x) const
     return wb.str();
 }
 
-String FieldVisitorDump::operator() (const ObjectToFetch & x) const
-{
-    WriteBufferFromOwnString wb;
-
-    wb << "ObjectToFetch_(";
-    for (auto it = x.begin(); it != x.end(); ++it)
-    {
-        if (it != x.begin())
-            wb << ", ";
-        wb << applyVisitor(*this, *it);
-    }
-    wb << ')';
-
-    return wb.str();
-}
-
 String FieldVisitorDump::operator() (const Map & x) const
 {
     WriteBufferFromOwnString wb;
