@@ -70,11 +70,10 @@ struct IndicesDescription : public std::vector<IndexDescription>, IHints<1, Indi
     String toString() const;
 
 #if USE_CUSTOM_SKIP_INDEX
-    /// Has FTS
     bool hasFTS() const;
-#endif
 
     bool hasSparse() const;
+#endif
 
     /// Parse description from string
     static IndicesDescription parse(const String & str, const ColumnsDescription & columns, ContextPtr context);

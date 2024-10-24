@@ -14,8 +14,8 @@
 
 #if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/MergeTreeIndexSparse.h>
 #endif
-#include <Storages/MergeTree/MergeTreeIndexSparse.h>
 
 namespace DB
 {
@@ -199,7 +199,6 @@ bool IndicesDescription::hasFTS() const
     }
     return false;
 }
-#endif
 
 bool IndicesDescription::hasSparse() const
 {
@@ -212,4 +211,5 @@ bool IndicesDescription::hasSparse() const
     }
     return false;
 }
+#endif
 }
