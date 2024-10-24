@@ -24,6 +24,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeIndexUtils.h>
 #include <Storages/MergeTree/RPNBuilder.h>
+#include <Storages/MergeTree/SkipIndex/Common/IndexSettings.h>
 #include <Poco/Logger.h>
 
 
@@ -124,12 +125,10 @@ MergeTreeIndexAggregatorTantivy::MergeTreeIndexAggregatorTantivy(
     , granule(std::make_shared<MergeTreeIndexGranuleTantivy>(index_name, index_columns.size(), params))
 {
     /// Process relevant parameters from the Tantivy Parameter to initialize the Store.
-    TantivyIndexSettings index_settings;
-    // TODO: 记录下来索引的 json 配置
-    index_settings.index_json_parameter = params.index_json_parameter;
-    index_settings.indexed_columns = index_columns_;
-    // TODO: 将索引的列名传递给 tantivy_search
-    store->setTantivyIndexSettings(index_settings);
+    TantivyIndexSettingsPtr index_settings = std::make_shared<TantivyIndexSettings>();
+    index_settings->json_parameter = params.index_json_parameter;
+    index_settings->indexed_columns = index_columns_;
+    store->setIndexSettings(index_settings);
 }
 
 MergeTreeIndexGranulePtr MergeTreeIndexAggregatorTantivy::getGranuleAndReset()

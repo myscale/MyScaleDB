@@ -234,7 +234,7 @@ public:
     static bool hasInvertedIndex(const StorageInMemoryMetadata & metadata);
 
     /// Check if commands have any tantivy index
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     static bool hasTantivyIndex(const StorageInMemoryMetadata & metadata);
 #endif
 

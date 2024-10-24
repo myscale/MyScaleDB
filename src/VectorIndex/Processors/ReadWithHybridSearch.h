@@ -4,8 +4,8 @@
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <VectorIndex/Utils/VSUtils.h>
 
-#if USE_TANTIVY_SEARCH
-#include <tantivy_search.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <tantivy_search.h>
 #endif
 
 namespace DB
@@ -79,7 +79,7 @@ private:
         Names required_columns,
         bool use_uncompressed_cache);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     void getStatisticForTextSearch();
 
     TANTIVY::Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table

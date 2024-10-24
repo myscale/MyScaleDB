@@ -69,10 +69,12 @@ struct IndicesDescription : public std::vector<IndexDescription>, IHints<1, Indi
     /// Convert description to string
     String toString() const;
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     /// Has FTS
     bool hasFTS() const;
 #endif
+
+    bool hasSparse() const;
 
     /// Parse description from string
     static IndicesDescription parse(const String & str, const ColumnsDescription & columns, ContextPtr context);

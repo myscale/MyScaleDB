@@ -8,6 +8,10 @@
 #include <Compression/CompressedReadBuffer.h>
 #include <Compression/CompressedWriteBuffer.h>
 #include <Storages/MergeTree/IDataPartStorage.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <Storages/MergeTree/SkipIndex/Store/SparseIndexStore.h>
+#    include <Storages/MergeTree/SkipIndex/Store/TantivyIndexStore.h>
+#endif
 
 
 namespace DB
@@ -49,8 +53,15 @@ void MergeTreeDataPartChecksum::checkSize(const IDataPartStorage & storage, cons
     /// Skip inverted and fts index files, these have a default MergeTreeDataPartChecksum with file_size == 0
     if (name.ends_with(".gin_dict") || name.ends_with(".gin_post") || name.ends_with(".gin_seg") || name.ends_with(".gin_sid"))
         return;
-    if (name.ends_with(".data") || name.ends_with(".meta"))
+#if USE_CUSTOM_SKIP_INDEX
+    if (name.ends_with(TANTIVY_INDEX_META_FILE_SUFFIX) || name.ends_with(TANTIVY_INDEX_DATA_FILE_SUFFIX))
         return;
+#endif
+    if (name.ends_with(SPARSE_INDEX_META_FILE_SUFFIX) || name.ends_with(SPARSE_INDEX_DATA_FILE_SUFFIX))
+    {
+        return;
+    }
+
 
     if (!storage.exists(name))
         throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "{} doesn't exist", fs::path(storage.getRelativePath()) / name);

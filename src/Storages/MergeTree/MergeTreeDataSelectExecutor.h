@@ -100,7 +100,7 @@ private:
         UncompressedCache * uncompressed_cache,
         Poco::Logger * log);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     static MarkRanges generateMarkRangesFromTantivy(
         MergeTreeIndexPtr index_helper,
         MergeTreeIndexConditionPtr condition,

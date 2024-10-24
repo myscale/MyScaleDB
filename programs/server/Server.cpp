@@ -98,7 +98,7 @@
 #include <VectorIndex/Common/VIBuildMemoryUsageHelper.h>
 #include <VectorIndex/Common/VICommon.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <tantivy_search.h>
 #endif
 
@@ -499,7 +499,7 @@ void tantivy_log_integration(Poco::Util::AbstractConfiguration & config)
 {
     std::string tantivy_search_log_level = config.getString("logger.tantivy_search_log_level", config.getString("logger.level", "info"));
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     tantivy_search_log4rs_initialize_with_callback(
         "", // Path for storing the `tantivy-search` log file.
         tantivy_search_log_level.c_str(), // Sets the log level for `tantivy-search`, defaulting to the same log level as ClickHouse.
@@ -542,7 +542,7 @@ void Server::initialize(Poco::Util::Application & self)
 {
     BaseDaemon::initialize(self);
     logger().information("starting up");
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     tantivy_log_integration(config());
 #endif
     LOG_INFO(&logger(), "OS name: {}, version: {}, architecture: {}",
@@ -1161,13 +1161,19 @@ try
         fs::create_directories(vector_index_cache_path);
     }
 
+#if USE_CUSTOM_SKIP_INDEX
     {
-#if USE_TANTIVY_SEARCH
         std::string tantivy_index_cache_path = config().getString("tantivy_index_cache_path", path / "tantivy_index_cache/");
         global_context->setTantivyIndexCachePath(tantivy_index_cache_path);
         fs::create_directories(tantivy_index_cache_path);
-#endif
     }
+
+    {
+        std::string sparse_index_cache_path = config().getString("sparse_index_cache_path", path / "sparse_index_cache/");
+        global_context->setSparseIndexCachePath(sparse_index_cache_path);
+        fs::create_directories(sparse_index_cache_path);
+    }
+#endif
 
     /// top_level_domains_lists
     {
@@ -1364,7 +1370,7 @@ try
             // in a lot of places. For now, disable updating log configuration without server restart.
             //setTextLog(global_context->getTextLog());
             updateLevels(*config, logger());
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
             tantivy_log_integration(*config);
 #endif
             global_context->setClustersConfig(config, has_zookeeper);

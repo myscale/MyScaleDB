@@ -1118,7 +1118,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     const StorageMetadataPtr & metadata_snapshot,
     const SelectQueryInfo & query_info,
     const std::vector<bool> & vec_support_two_stage_searches,
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     const TANTIVY::Statistics & bm25_stats_in_table,
 #endif
     const PrewhereInfoPtr & prewhere_info_,
@@ -1162,7 +1162,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         {
             auto hybrid_search_mgr = std::make_shared<MergeTreeHybridSearchManager>(metadata_snapshot, query_info.hybrid_search_info,
                                             context, vec_support_two_stage_searches[0]);
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
             hybrid_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan and text search
@@ -1195,7 +1195,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         else if (query_info.text_search_info)
         {
             auto text_search_mgr = std::make_shared<MergeTreeTextSearchManager>(metadata_snapshot, query_info.text_search_info, context);
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
             text_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan

@@ -4901,9 +4901,11 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
         clearVectorNvmeCache(preload_indices);
         /// MYSCALE_INTERNAL_CODE_END
 
-#if USE_TANTIVY_SEARCH
-        updateTantivyIndexCache();
+#if USE_CUSTOM_SKIP_INDEX
+        updateCustomSkipIndexCache(SkipIndexType::TantivyIndex);
+        updateCustomSkipIndexCache(SkipIndexType::SparseIndex);
 #endif
+
         /// Initilize vector index build status for each index
         for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
             addVectorIndexBuildStatus(vec_index_desc.name);

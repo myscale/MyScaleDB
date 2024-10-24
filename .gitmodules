@@ -344,3 +344,10 @@
 [submodule "rust/supercrate/libs/tantivy_search"]
 	path = rust/supercrate/libs/tantivy_search
 	url = git@git.moqi.ai:mqdb/tantivy-search.git
+[submodule "rust/supercrate/libs/sparse_index"]
+	path = rust/supercrate/libs/sparse_index
+	url = git@git.moqi.ai:mqdb/sparse-index.git
+
+[submodule "rust/supercrate/contrib/corrosion-rs"]
+	path = rust/supercrate/contrib/corrosion-rs
+	url = https://github.com/corrosion-rs/corrosion.git

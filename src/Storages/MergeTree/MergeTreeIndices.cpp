@@ -135,10 +135,15 @@ MergeTreeIndexFactory::MergeTreeIndexFactory()
     registerCreator("inverted", invertedIndexCreator);
     registerValidator("inverted", invertedIndexValidator);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     registerCreator("fts", ftsIndexCreator);
     registerValidator("fts", ftsIndexValidator);
 #endif
+
+    // #if USE_SPARSE_INDEX
+    registerCreator("sparse", sparseIndexCreator);
+    registerValidator("sparse", sparseIndexValidator);
+    // #endif
 }
 
 MergeTreeIndexFactory & MergeTreeIndexFactory::instance()

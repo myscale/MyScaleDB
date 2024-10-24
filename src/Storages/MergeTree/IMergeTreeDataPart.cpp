@@ -2,8 +2,8 @@
 #include "Storages/MergeTree/IDataPartStorage.h"
 
 #include <optional>
-#include <string_view>
 #include <regex>
+#include <string_view>
 #include <Compression/getCompressionCodecForFile.h>
 #include <Core/Defines.h>
 #include <Core/NamesAndTypes.h>
@@ -24,8 +24,10 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
 #include <Storages/MergeTree/PartMetadataManagerWithCache.h>
+#include <Storages/MergeTree/SkipIndex/Common/CacheDirectoryHelper.h>
 #include <Storages/MergeTree/checkDataPart.h>
 #include <Storages/MergeTree/localBackup.h>
+
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <base/JSON.h>
 #include <boost/algorithm/string/join.hpp>
@@ -39,7 +41,6 @@
 #include <VectorIndex/Common/SegmentId.h>
 #include <VectorIndex/Common/VIMetadata.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
-
 
 namespace CurrentMetrics
 {
@@ -369,6 +370,7 @@ std::optional<size_t> IMergeTreeDataPart::getColumnPosition(const String & colum
 
 void IMergeTreeDataPart::setState(MergeTreeDataPartState new_state) const
 {
+    // MergeTreeDataPartState preState = state;
     decrementStateMetric(state);
     state = new_state;
     incrementStateMetric(state);
@@ -376,6 +378,23 @@ void IMergeTreeDataPart::setState(MergeTreeDataPartState new_state) const
     /// Remove vector_memory_size_metric in vector index info
     if (state != MergeTreeDataPartState::PreActive && state != MergeTreeDataPartState::Active)
         vector_index.removeAllVectorIndexInfo();
+
+#if USE_CUSTOM_SKIP_INDEX
+        // if ((preState==MergeTreeDataPartState::Active || preState==MergeTreeDataPartState::PreActive)
+        //     && state == MergeTreeDataPartState::Outdated)
+        // {
+        //     auto metadata = this->storage.getInMemoryMetadataPtr();
+        //     if(metadata->hasSecondaryIndices()){
+        //         if(metadata->getSecondaryIndices().hasFTS()){
+        //             TantivyIndexFactory::instance().freeIdleStoreReader(this->getDataPartStoragePtr(), metadata->getSecondaryIndices().getAllRegisteredNames());
+        //         }
+        //         if(metadata->getSecondaryIndices().hasSparse()){
+        //             TantivyIndexFactory::instance().freeIdleStoreReader(this->getDataPartStoragePtr(), metadata->getSecondaryIndices().getAllRegisteredNames());
+        //         }
+        //     }
+        // }
+
+#endif
 }
 
 MergeTreeDataPartState IMergeTreeDataPart::getState() const
@@ -2007,20 +2026,42 @@ void IMergeTreeDataPart::remove()
 
     GinIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath());
 
-#if USE_TANTIVY_SEARCH
-
-    auto metadata = storage.getInMemoryMetadataPtr();
-    if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+#if USE_CUSTOM_SKIP_INDEX
     {
-        auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
-        LOG_INFO(
-            storage.log,
-            "try remove part {}, part_rel_path: {}, will update FTS store map",
-            getNameWithState(),
-            getDataPartStoragePtr()->getRelativePath());
-        size_t removed = TantivyIndexStoreFactory::instance().remove(getDataPartStoragePtr()->getRelativePath(), index_names);
-        if (removed == 0)
-            TantivyIndexFilesManager::removeDataPartInCache(getDataPartStoragePtr()->getRelativePath());
+        auto metadata = storage.getInMemoryMetadataPtr();
+
+        if (metadata->hasSecondaryIndices())
+        {
+            auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+
+            if (metadata->getSecondaryIndices().hasFTS())
+            {
+                LOG_INFO(
+                    storage.log,
+                    "try remove part {}, part_rel_path: {}, will update FTS store map",
+                    getNameWithState(),
+                    getDataPartStoragePtr()->getRelativePath());
+                size_t removed = TantivyIndexFactory::instance().remove(getDataPartStoragePtr()->getRelativePath(), index_names);
+                // `removed==0` means that index cache doesn't managed by IndexStore.
+                if (removed == 0)
+                    CacheDirectoryHelper::removePartRelativePathInCacheForward(
+                        getDataPartStoragePtr()->getRelativePath(), SkipIndexType::TantivyIndex);
+            }
+
+            if (metadata->getSecondaryIndices().hasSparse())
+            {
+                LOG_INFO(
+                    storage.log,
+                    "try remove part {}, part_rel_path: {}, will update Sparse store map",
+                    getNameWithState(),
+                    getDataPartStoragePtr()->getRelativePath());
+                size_t removed = SparseIndexFactory::instance().remove(getDataPartStoragePtr()->getRelativePath(), index_names);
+                // `removed==0` means that index cache doesn't managed by IndexStore.
+                if (removed == 0)
+                    CacheDirectoryHelper::removePartRelativePathInCacheForward(
+                        getDataPartStoragePtr()->getRelativePath(), SkipIndexType::SparseIndex);
+            }
+        }
     }
 #endif
 

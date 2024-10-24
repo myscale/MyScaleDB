@@ -69,7 +69,7 @@ void registerTableFunctionFullTextSearch(TableFunctionFactory & factory);
 
 void registerTableFunctions();
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 void registerTableFunctionFtsIndex(TableFunctionFactory & factory);
 #endif
 

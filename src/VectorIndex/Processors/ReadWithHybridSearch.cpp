@@ -20,10 +20,10 @@
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Processors/ReadWithHybridSearch.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
-#    include <Storages/MergeTree/TantivyIndexStore.h>
-#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#    include <Storages/MergeTree/SkipIndex/Factory/SparseIndexFactory.h>
+#    include <Storages/MergeTree/SkipIndex/Factory/TantivyIndexFactory.h>
 #    include <VectorIndex/Common/BM25InfoInDataParts.h>
 #    include <VectorIndex/Utils/CommonUtils.h>
 #endif
@@ -70,7 +70,7 @@ static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_inf
                                  : query_info.prewhere_info;
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 void ReadWithHybridSearch::getStatisticForTextSearch()
 {
     BM25InfoInDataParts parts_with_bm25_info;
@@ -140,8 +140,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
             "[getStatisticForTextSearch] part_rel_path: {}, part_status: {}",
             part->getDataPartStoragePtr()->getRelativePath(),
             part->getNameWithState());
-        auto tantivy_store
-            = TantivyIndexStoreFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
+        auto tantivy_store = TantivyIndexFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
 
         if (tantivy_store)
         {
@@ -351,7 +350,7 @@ void ReadWithHybridSearch::supportTwoStageSearch(
 void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
 {
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::initializePipeline()");
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     OpenTelemetry::SpanHolder span_text_stats("ReadWithHybridSearch getStatisticForTextSearch()");
 
     /// As for Distributd table, the statistic info is already collected in the sclalar block
@@ -652,7 +651,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         metadata_snapshot,
         query_info,
         vec_support_two_stage_searches,
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
         bm25_stats_in_table,
 #endif
         prewhere_info,

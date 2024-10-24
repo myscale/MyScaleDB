@@ -1,0 +1,9 @@
+[submodule "libs/sparse_index"]
+	path = libs/sparse_index
+	url = git@git.moqi.ai:mqdb/sparse-index.git
+[submodule "libs/tantivy_search"]
+	path = libs/tantivy_search
+	url = git@git.moqi.ai:mqdb/tantivy-search.git
+[submodule "contrib/corrosion-rs"]
+	path = contrib/corrosion-rs
+	url = https://github.com/corrosion-rs/corrosion.git

@@ -12,9 +12,10 @@
 
 #include <Core/Defines.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
 #endif
+#include <Storages/MergeTree/MergeTreeIndexSparse.h>
 
 namespace DB
 {
@@ -186,7 +187,7 @@ Names IndicesDescription::getAllRegisteredNames() const
     return result;
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 bool IndicesDescription::hasFTS() const
 {
     for (const auto & index : *this)
@@ -199,4 +200,16 @@ bool IndicesDescription::hasFTS() const
     return false;
 }
 #endif
+
+bool IndicesDescription::hasSparse() const
+{
+    for (const auto & index : *this)
+    {
+        if (index.type == SPARSE_INDEX_NAME)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 }

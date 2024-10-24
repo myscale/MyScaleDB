@@ -11,7 +11,7 @@
 #include <VectorIndex/Storages/VSDescription.h>
 #include <VectorIndex/Utils/CommonUtils.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Columns/ColumnConst.h>
 #    include <Columns/ColumnString.h>
 #    include <Columns/IColumn.h>
@@ -119,7 +119,7 @@ void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys)
     }
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 
 /*
  * Build an AST for collecting BM25 statistics with the following structure:

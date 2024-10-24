@@ -164,8 +164,9 @@ protected:
 
     GinIndexStoreFactory::GinIndexStores gin_index_stores;
 
-#if USE_TANTIVY_SEARCH
-    std::set<String> tantivy_index_store_keys;
+#if USE_CUSTOM_SKIP_INDEX
+    std::unordered_set<StoreKey, KeyHash<StoreKey>> tantivy_index_store_keys;
+    std::unordered_set<StoreKey, KeyHash<StoreKey>> sparse_index_store_keys;
 #endif
 
 private:

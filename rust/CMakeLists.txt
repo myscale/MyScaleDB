@@ -98,4 +98,5 @@ endfunction()
 
 # supercrate combines all the Rust libraries into one static library, 
 # which can avoid symbol conflicts that occur when ClickHouse links multiple Rust static libraries.
+set(BUILD_RUST_FOR_CK TRUE)
 add_rust_subdirectory (supercrate)

@@ -13,8 +13,8 @@
 
 #include <Common/logger_useful.h>
 
-#if USE_TANTIVY_SEARCH
-#include <tantivy_search.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <tantivy_search.h>
 #endif
 
 namespace DB
@@ -63,7 +63,7 @@ public:
 
     CommonSearchResultPtr getSearchResult() override { return text_search_result; }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     void setBM25Stats(const TANTIVY::Statistics & bm25_stats_in_table_)
     {
         bm25_stats_in_table = bm25_stats_in_table_;
@@ -74,7 +74,7 @@ private:
 
     TextSearchInfoPtr text_search_info;
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     TANTIVY::Statistics bm25_stats_in_table; /// total bm25 info from all parts in a table
 #endif
 

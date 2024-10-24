@@ -43,7 +43,7 @@ public:
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
         const std::vector<bool> & vec_support_two_stage_searches,
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
         const TANTIVY::Statistics & bm25_stats_in_table,
 #endif
         const PrewhereInfoPtr & prewhere_info,

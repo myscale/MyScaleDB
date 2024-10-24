@@ -68,7 +68,7 @@ void registerTableFunctions()
     registerTableFunctionFormat(factory);
     registerTableFunctionExplain(factory);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     registerTableFunctionFtsIndex(factory);
 #endif
 

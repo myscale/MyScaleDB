@@ -5,7 +5,7 @@
 namespace DB
 {
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 UInt64 BM25InfoInDataPart::getTotalDocsCount() const
 {
     return total_docs;

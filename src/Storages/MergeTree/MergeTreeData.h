@@ -672,8 +672,8 @@ public:
     void clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices = {}) const;
     /// MYSCALE_INTERNAL_CODE_END
 
-#if USE_TANTIVY_SEARCH
-    void updateTantivyIndexCache();
+#if USE_CUSTOM_SKIP_INDEX
+    void updateCustomSkipIndexCache(SkipIndexType skip_index_type);
 #endif
 
     /// Delete WAL files containing parts, that all already stored on disk.

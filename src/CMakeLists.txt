@@ -268,14 +268,34 @@ add_object_library(clickhouse_storages_mysql Storages/MySQL)
 add_object_library(clickhouse_storages_distributed Storages/Distributed)
 add_object_library(clickhouse_storages_mergetree Storages/MergeTree)
 
+add_headers_and_sources(dbms Storages/MergeTree/SkipIndex/)
+add_headers_and_sources(dbms Storages/MergeTree/SkipIndex/Cache)
+add_headers_and_sources(dbms Storages/MergeTree/SkipIndex/Common)
+add_headers_and_sources(dbms Storages/MergeTree/SkipIndex/Store)
+add_headers_and_sources(dbms Storages/MergeTree/SkipIndex/Factory)
+
 if (NOT ENABLE_RUST)
+    # TODO refine
+    # remove_specific_files(clickhouse_storages_mergetree 
+    #     "Storages/MergeTree/SkipIndex/Cache/"
+    #     "Storages/MergeTree/SkipIndex/Factory/"
+    #     "Storages/MergeTree/SkipIndex/Store/"
+    # )
     remove_specific_files(clickhouse_storages_mergetree 
-        "Storages/MergeTree/TantivyIndexStore.h"
-        "Storages/MergeTree/TantivyIndexStore.cpp"
-        "Storages/MergeTree/TantivyIndexStoreFactory.h"
-        "Storages/MergeTree/TantivyIndexStoreFactory.cpp"
-        "Storages/MergeTree/MergeTreeIndexTantivy.h"
-        "Storages/MergeTree/MergeTreeIndexTantivy.cpp"
+        "Storages/MergeTree/SkipIndex/Cache/IndexStoreCache.h"
+        "Storages/MergeTree/SkipIndex/Cache/MutateRecordCache.h"
+        "Storages/MergeTree/SkipIndex/Cache/SparseIndexStoreCache.h"
+        "Storages/MergeTree/SkipIndex/Cache/TantivyIndexStoreCache.h"
+        "Storages/MergeTree/SkipIndex/Factory/IndexStoreFactory.h"
+        "Storages/MergeTree/SkipIndex/Factory/IndexStoreFactoryImpl.h"
+        "Storages/MergeTree/SkipIndex/Factory/SparseIndexFactory.h"
+        "Storages/MergeTree/SkipIndex/Factory/TantivyIndexFactory.h"
+        "Storages/MergeTree/SkipIndex/Store/IndexStore.h"
+        "Storages/MergeTree/SkipIndex/Store/IndexStore.cpp"
+        "Storages/MergeTree/SkipIndex/Store/SparseIndexStore.h"
+        "Storages/MergeTree/SkipIndex/Store/SparseIndexStore.cpp"
+        "Storages/MergeTree/SkipIndex/Store/TantivyIndexStore.h"
+        "Storages/MergeTree/SkipIndex/Store/TantivyIndexStore.cpp"
     )
 endif()
 

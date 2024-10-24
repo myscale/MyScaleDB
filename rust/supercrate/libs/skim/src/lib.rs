@@ -3,9 +3,9 @@ use term::terminfo::TermInfo;
 use cxx::{CxxString, CxxVector};
 
 #[cxx::bridge]
-mod ffi {
+pub mod ffi {
     extern "Rust" {
-        fn skim(prefix: &CxxString, words: &CxxVector<CxxString>) -> Result<String>;
+        pub fn skim(prefix: &CxxString, words: &CxxVector<CxxString>) -> Result<String>;
     }
 }
 

@@ -14,18 +14,12 @@
 #include <Interpreters/RenameColumnVisitor.h>
 #include <Interpreters/TreeRewriter.h>
 #include <Interpreters/addTypeConversionToAST.h>
-
-#if USE_TANTIVY_SEARCH
-#    include <Interpreters/TantivyFilter.h>
-#endif
-
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTConstraintDeclaration.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTIndexDeclaration.h>
-#include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTProjectionDeclaration.h>
 #include <Parsers/ASTSetQuery.h>
@@ -1105,15 +1099,10 @@ bool AlterCommands::hasInvertedIndex(const StorageInMemoryMetadata & metadata)
     return false;
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 bool AlterCommands::hasTantivyIndex(const StorageInMemoryMetadata & metadata)
 {
-    for (const auto & index : metadata.secondary_indices)
-    {
-        if (index.type == TANTIVY_INDEX_NAME)
-            return true;
-    }
-    return false;
+    return metadata.secondary_indices.hasFTS();
 }
 #endif
 

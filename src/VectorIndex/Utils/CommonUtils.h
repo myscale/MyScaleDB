@@ -88,7 +88,7 @@ void checkVectorDimension(const Search::DataType & search_type, const uint64_t &
 
 void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 void collectStatisticForBM25Calculation(ContextMutablePtr & context, String cluster_name, String database_name, String table_name, String query_column_name, String query_text);
 void parseBM25StaisiticsInfo(const Block & block, size_t row, UInt64 & total_docs, std::map<UInt32, UInt64> & total_tokens_map, std::map<std::pair<UInt32, String>, UInt64> & terms_freq_map);
 #endif

@@ -14,7 +14,7 @@
 #include <VectorIndex/Storages/StorageFullTextSearch.h>
 #include <VectorIndex/Utils/CommonUtils.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
 #endif
 
@@ -35,7 +35,7 @@ inline void checkTantivyIndex([[maybe_unused]]const StoragePtr & storage, [[mayb
 {
     bool find_tantivy_index = false;
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     auto metadata_snapshot =  storage ? storage->getInMemoryMetadataPtr() : nullptr;
 
     if (metadata_snapshot)
