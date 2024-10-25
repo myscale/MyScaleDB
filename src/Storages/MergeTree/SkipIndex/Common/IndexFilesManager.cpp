@@ -209,6 +209,7 @@ ChecksumPairs IndexFilesManager::serialize()
 
 void IndexFilesManager::deserialize()
 {
+    DB::OpenTelemetry::SpanHolder span("index_files_manager::deserialize");
     std::shared_lock<std::shared_mutex> lock(this->full_index_path_lock);
     String index_files_directory = this->full_index_path_in_cache;
 

@@ -540,7 +540,22 @@ The server successfully detected this situation and will download merged part fr
     M(CreatedLogEntryForBuildVIndex, "Successfully created log entry to build vector index for part in ReplicatedMergeTree.") \
     M(NotCreatedLogEntryForBuildVIndex, "Log entry to to build vector index for part in ReplicatedMergeTree is not created due to concurrent log update by another replica.") \
     M(ReplicatedPartVectorIndexFetches, "Number of times a vector index in a data part was downloaded from replica of a ReplicatedMergeTree table.") \
-    M(ReplicatedPartVectorIndexFailedFetches, "Number of times a vector index in a data part was failed to download from replica of a ReplicatedMergeTree table.")
+    M(ReplicatedPartVectorIndexFailedFetches, "Number of times a vector index in a data part was failed to download from replica of a ReplicatedMergeTree table.") \
+    \
+    M(SI_RemoveCache_Milliseconds, "Time elapsed for remove skip index cache") \
+    M(SI_RemoveCache_Counts, "Number of remove skip index cache") \
+    M(SI_RenamePart_Milliseconds, "Time elapsed for skip index consume when renaming parts") \
+    M(SI_RenamePart_Counts, "Number of skip index consume when renaming parts") \
+    M(SI_DropIndex_Milliseconds, "Time elapsed for drop custom skip index cache") \
+    M(SI_DropIndex_Counts, "Time elapsed for drop custom skip index cache") \
+    M(SI_GetForBuild_Milliseconds, "Time elapsed for get exists store_ptr for build") \
+    M(SI_GetForBuild_Counts, "Count of get exists store_ptr for build") \
+    M(SI_GetInitForBuild_Milliseconds, "Time elapsed for init store_ptr for build") \
+    M(SI_GetInitForBuild_Counts, "Number of init store_ptr for build") \
+    M(SI_Mutate_Milliseconds, "Time elapsed for record mutate") \
+    M(SI_Mutate_Counts, "Number of record mutate") \
+    M(SI_GetLoadForSearch_Counts, "Number of load store_ptr for search.") \
+    M(SI_GetLoadForSearch_Milliseconds, "Time elapsed for load store_ptr for search.")
 
 namespace ProfileEvents
 {

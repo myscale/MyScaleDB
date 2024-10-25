@@ -156,7 +156,7 @@ bool IndexStore::freeIndexWriter()
 
 bool IndexStore::loadIndexReader()
 {
-    DB::OpenTelemetry::SpanHolder span("IndexStore::load_index_reader");
+    DB::OpenTelemetry::SpanHolder span("index_store::load_index_reader");
     String index_files_cache_path = this->index_files_manager->getFullIndexPathInCache();
     if (!this->index_reader_status)
     {

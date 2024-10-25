@@ -73,6 +73,8 @@ static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_inf
 #if USE_CUSTOM_SKIP_INDEX
 void ReadWithHybridSearch::getStatisticForTextSearch()
 {
+    OpenTelemetry::SpanHolder span("read_with_hybrid_search::get_statistics_for_text_search()");
+
     BM25InfoInDataParts parts_with_bm25_info;
 
     /// Find inverted index desc on the search column from metadata
@@ -144,6 +146,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
 
         if (tantivy_store)
         {
+            OpenTelemetry::SpanHolder span2("read_with_hybrid_search::get_statistics_for_text_search()-workload-single-part");
             auto total_docs = tantivy_store->getTotalNumDocs();
             auto total_num_tokens = tantivy_store->getTotalNumTokens();
             auto term_with_doc_nums = tantivy_store->getDocFreq(query_text);
@@ -154,6 +157,8 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
     };
 
     size_t num_threads = std::min<size_t>(requested_num_streams, prepared_parts.size());
+
+    OpenTelemetry::SpanHolder span2("read_with_hybrid_search::get_statistics_for_text_search()-all-parts");
 
     if (num_threads <= 1)
     {
@@ -356,6 +361,7 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
     /// As for Distributd table, the statistic info is already collected in the sclalar block
     if (getContext()->hasScalar("_fts_statistic_info"))
     {
+        OpenTelemetry::SpanHolder span_text_stats("read_with_hybrid_search get_statistics_for_text_search()-distributed");
         Block block = getContext()->getScalar("_fts_statistic_info");
         if (block.rows() != 1)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Got the wrong Fts statistics info for Distributed BM25 calculation");

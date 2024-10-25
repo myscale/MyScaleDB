@@ -1,6 +1,26 @@
 #pragma once
 
 #include <Storages/MergeTree/SkipIndex/Factory/IndexStoreFactory.h>
+#include <Common/Stopwatch.h>
+
+namespace ProfileEvents
+{
+    extern const Event SI_RemoveCache_Milliseconds;
+    extern const Event SI_RenamePart_Milliseconds;
+    extern const Event SI_DropIndex_Milliseconds;
+    extern const Event SI_GetForBuild_Milliseconds;
+    extern const Event SI_GetInitForBuild_Milliseconds;
+    extern const Event SI_Mutate_Milliseconds;
+    extern const Event SI_GetLoadForSearch_Milliseconds;
+
+    extern const Event SI_RemoveCache_Counts;
+    extern const Event SI_RenamePart_Counts;
+    extern const Event SI_DropIndex_Counts;
+    extern const Event SI_GetForBuild_Counts;
+    extern const Event SI_GetInitForBuild_Counts;
+    extern const Event SI_Mutate_Counts;
+    extern const Event SI_GetLoadForSearch_Counts;
+}
 
 namespace DB
 {
@@ -23,13 +43,24 @@ template <typename CacheType, typename StoreType, typename StoreTypePtr>
 StoreTypePtr
 IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getForBuild(const String & skp_index_name, const DataPartStoragePtr storage)
 {
-    return this->cache->getStore(std::make_pair(storage->getRelativePath(), skp_index_name));
+    Stopwatch watch;
+
+    auto res = this->cache->getStore(std::make_pair(storage->getRelativePath(), skp_index_name));
+
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_GetForBuild_Milliseconds, watch.elapsedMilliseconds());
+    ProfileEvents::increment(ProfileEvents::SI_GetForBuild_Counts);
+    return res;
 }
 
 template <typename CacheType, typename StoreType, typename StoreTypePtr>
 StoreTypePtr
 IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrLoadForSearch(const String & skp_index_name, const DataPartStoragePtr storage)
 {
+    DB::OpenTelemetry::SpanHolder span("index_store_factory::get_or_load_for_search");
+    Stopwatch watch;
+    ProfileEvents::increment(ProfileEvents::SI_GetLoadForSearch_Counts);
+
     auto store_key = std::make_pair(storage->getRelativePath(), skp_index_name);
     // First check
     StoreTypePtr res = this->cache->getStore(store_key);
@@ -41,6 +72,8 @@ IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrLoadForSearch(const 
             store_key.first,
             store_key.second,
             res->getFullIndexPathInCache());
+        watch.stop();
+        ProfileEvents::increment(ProfileEvents::SI_GetLoadForSearch_Milliseconds, watch.elapsedMilliseconds());
         return res;
     }
 
@@ -50,7 +83,11 @@ IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrLoadForSearch(const 
     // Second check
     res = this->cache->getStore(store_key);
     if (res != nullptr)
+    {
+        watch.stop();
+        ProfileEvents::increment(ProfileEvents::SI_GetLoadForSearch_Milliseconds, watch.elapsedMilliseconds());
         return res;
+    }
 
     // Ensure only one thread can generate store object, avoid index files corrupt.
     StoreTypePtr new_store = std::make_shared<StoreType>(skp_index_name, storage);
@@ -64,6 +101,8 @@ IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrLoadForSearch(const 
         new_store.use_count(),
         this->cache->count(),
         this->mutate_to_from->count());
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_GetLoadForSearch_Milliseconds, watch.elapsedMilliseconds());
     return new_store;
 }
 
@@ -72,6 +111,9 @@ template <typename CacheType, typename StoreType, typename StoreTypePtr>
 StoreTypePtr IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrInitForBuild(
     const String & skp_index_name, const DataPartStoragePtr storage, MutableDataPartStoragePtr storage_builder)
 {
+    Stopwatch watch;
+    ProfileEvents::increment(ProfileEvents::SI_GetInitForBuild_Counts);
+
     auto store_key = std::make_pair(storage->getRelativePath(), skp_index_name);
 
     // First check
@@ -84,6 +126,8 @@ StoreTypePtr IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrInitFor
             store_key.first,
             store_key.second,
             res->getFullIndexPathInCache());
+        watch.stop();
+        ProfileEvents::increment(ProfileEvents::SI_GetInitForBuild_Milliseconds, watch.elapsedMilliseconds());
         return res;
     }
 
@@ -93,7 +137,11 @@ StoreTypePtr IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrInitFor
     // Second check
     res = this->cache->getStore(store_key);
     if (res != nullptr)
+    {
+        watch.stop();
+        ProfileEvents::increment(ProfileEvents::SI_GetInitForBuild_Milliseconds, watch.elapsedMilliseconds());
         return res;
+    }
 
     // Ensure only one thread can generate store object, avoid index files corrupt.
     StoreTypePtr new_store = std::make_shared<StoreType>(skp_index_name, storage, storage_builder);
@@ -107,6 +155,8 @@ StoreTypePtr IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrInitFor
         new_store.use_count(),
         this->cache->count(),
         this->mutate_to_from->count());
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_GetInitForBuild_Milliseconds, watch.elapsedMilliseconds());
     return new_store;
 }
 
@@ -114,11 +164,9 @@ StoreTypePtr IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::getOrInitFor
 template <typename CacheType, typename StoreType, typename StoreTypePtr>
 size_t IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::remove(const String & data_part_relative_path, const DB::Names & index_names)
 {
-    // std::vector<String> removed_keys;
+    Stopwatch watch;
     size_t hitted = 0;
-
-    // std::ostringstream oss;
-    // oss << "[";
+    ProfileEvents::increment(ProfileEvents::SI_RemoveCache_Counts);
 
     for (size_t i = 0; i < index_names.size(); i++)
     {
@@ -128,21 +176,19 @@ size_t IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::remove(const Strin
         {
             hitted++;
             this->cache->removeStore(store_key);
-            // oss << "(" << store_key.first << "," << store_key.second << "),";
         }
     }
-    // oss << "]";
-
 
     LOG_INFO(
         this->log,
-        // "[remove] part_rel_path: {}, removed keys: {}, `stores` size: {}, `mutate_to_from` size: {}",
         "[remove] part_rel_path: {}, removed: {}, `stores` size: {}, `mutate_to_from` size: {}",
         data_part_relative_path,
-        // oss.str(),
         hitted,
         this->cache->count(),
         this->mutate_to_from->count());
+
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_RemoveCache_Milliseconds, watch.elapsedMilliseconds());
     return hitted;
 }
 
@@ -150,6 +196,9 @@ template <typename CacheType, typename StoreType, typename StoreTypePtr>
 void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::mutate(
     const String & source_part_relative_path, const String & target_part_relative_path)
 {
+    Stopwatch watch;
+    ProfileEvents::increment(ProfileEvents::SI_Mutate_Counts);
+
     this->mutate_to_from->insert(target_part_relative_path, source_part_relative_path);
     LOG_INFO(
         this->log,
@@ -157,12 +206,17 @@ void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::mutate(
         source_part_relative_path,
         target_part_relative_path,
         this->mutate_to_from->count());
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_Mutate_Milliseconds, watch.elapsedMilliseconds());
 }
 
 template <typename CacheType, typename StoreType, typename StoreTypePtr>
 void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::renamePart(
     const String & data_part_relative_path_before_rename, const DataPartStoragePtr storage, const DB::Names & index_names)
 {
+    Stopwatch watch;
+    ProfileEvents::increment(ProfileEvents::SI_RenamePart_Counts);
+
     auto context = Context::getGlobalContextInstance();
     auto data_part_relative_path_after_rename = storage->getRelativePath();
 
@@ -219,6 +273,8 @@ void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::renamePart(
             this->cache->count(),
             this->mutate_to_from->count());
     }
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_RenamePart_Milliseconds, watch.elapsedMilliseconds());
 }
 
 
@@ -226,6 +282,9 @@ void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::renamePart(
 template <typename CacheType, typename StoreType, typename StoreTypePtr>
 void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::dropIndex(const String & skp_index_name, const DataPartStoragePtr storage)
 {
+    Stopwatch watch;
+    ProfileEvents::increment(ProfileEvents::SI_DropIndex_Counts);
+
     try
     {
         // storage->getRelativePath(): store/069/069cd2be-0a8f-4091-ad82-38015b19bdef/all_1_1_0
@@ -247,6 +306,8 @@ void IndexStoreFactory<CacheType, StoreType, StoreTypePtr>::dropIndex(const Stri
             storage->getRelativePath(),
             e.what());
     }
+    watch.stop();
+    ProfileEvents::increment(ProfileEvents::SI_DropIndex_Milliseconds, watch.elapsedMilliseconds());
 }
 
 
