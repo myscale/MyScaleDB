@@ -16,16 +16,18 @@ const String BATCH_DISTANCE_FUNCTION = "batch_distance";
 const String DISTANCE_FUNCTION = "distance";
 const String TEXT_SEARCH_FUNCTION = "textsearch";
 const String HYBRID_SEARCH_FUNCTION = "hybridsearch";
+const String SPARSE_SEARCH_FUNCTION = "sparsesearch";
 
 const String SCORE_COLUMN_NAME = "bm25_score";
 
-/// Different search types
-enum class HybridSearchFuncType
+/// Different special search types
+enum class SpecialSearchFuncType
 {
     UNKNOWN_FUNC = 0,
     VECTOR_SCAN,
     TEXT_SEARCH,
-    HYBRID_SEARCH
+    HYBRID_SEARCH,
+    SPARSE_SEARCH
 };
 
 class IDataType;
@@ -60,9 +62,15 @@ inline bool isHybridSearch(const String & func)
     return func_to_low.find(HYBRID_SEARCH_FUNCTION) == 0;
 }
 
-inline bool isHybridSearchFunc(const String & func)
+inline bool isSparseSearch(const String & func)
 {
-    return isVectorScanFunc(func) || isTextSearch(func) || isHybridSearch(func);
+    String func_to_low = Poco::toLower(func);
+    return func_to_low.find(SPARSE_SEARCH_FUNCTION) == 0;
+}
+
+inline bool isSpecialSearchFunc(const String & func)
+{
+    return isVectorScanFunc(func) || isTextSearch(func) || isHybridSearch(func) || isSparseSearch(func);
 }
 
 inline bool isRelativeScoreFusion(const String & fusion_type)
@@ -87,6 +95,8 @@ Search::DataType getSearchIndexDataType(DataTypePtr &data_type);
 void checkVectorDimension(const Search::DataType & search_type, const uint64_t & dim);
 
 void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys);
+
+void checkSparseSearchColumnDataType(DataTypePtr & data_type);
 
 #if USE_CUSTOM_SKIP_INDEX
 void collectStatisticForBM25Calculation(ContextMutablePtr & context, String cluster_name, String database_name, String table_name, String query_column_name, String query_text);

@@ -149,7 +149,7 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
-    const VectorAndTextResultInDataParts & vector_results,
+    const SpecialSearchResultInDataParts & vector_results,
     const size_t vec_res_index,
     const VSDescription & vector_scan_desc,
     Poco::Logger * log)
@@ -159,11 +159,12 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
 
     LOG_TRACE(log, "Total top k vector scan results for {} with size {}", vector_scan_desc.column_name, top_k);
 
-    return getTotalTopSearchResultImpl(vector_results, static_cast<UInt64>(top_k), desc_direction, log, true, vec_res_index);
+    return getTotalTopSearchResultImpl(
+        vector_results, static_cast<UInt64>(top_k), desc_direction, log, SpecialSearchFuncType::VECTOR_SCAN, vec_res_index);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
-    const VectorAndTextResultInDataParts & text_results,
+    const SpecialSearchResultInDataParts & text_results,
     const TextSearchInfoPtr & text_info,
     Poco::Logger * log)
 {
@@ -171,11 +172,11 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
 
     LOG_TRACE(log, "Total top k text results with size {}", top_k);
 
-    return getTotalTopSearchResultImpl(text_results, static_cast<UInt64>(top_k), true, log, false);
+    return getTotalTopSearchResultImpl(text_results, static_cast<UInt64>(top_k), true, log, SpecialSearchFuncType::TEXT_SEARCH);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalCandidateVSResult(
-        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        const SpecialSearchResultInDataParts & parts_with_special_result,
         const size_t vec_res_index,
         const VSDescription & vector_scan_desc,
         const UInt64 & num_reorder,
@@ -186,34 +187,65 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalCandidateVSResul
     LOG_TRACE(log, "Total candidate vector scan results for {} with size {}", vector_scan_desc.column_name, num_reorder);
 
     /// Get top num_reorder candidates: part index + label + score
-    return getTotalTopSearchResultImpl(parts_with_vector_text_result, num_reorder, desc_direction, log, true, vec_res_index);
+    return getTotalTopSearchResultImpl(
+        parts_with_special_result, num_reorder, desc_direction, log, SpecialSearchFuncType::VECTOR_SCAN, vec_res_index);
+}
+
+ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKSparseResult(
+    const SpecialSearchResultInDataParts & sparse_results, const SparseSearchInfoPtr & sparse_search_info, Poco::Logger * log)
+{
+    LOG_INFO(log, "Total top k sparse results with size {}", sparse_search_info->topk);
+
+    return getTotalTopSearchResultImpl(sparse_results, static_cast<UInt64>(sparse_search_info->topk), true, log, SpecialSearchFuncType::SPARSE_SEARCH);
 }
 
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultImpl(
-    const VectorAndTextResultInDataParts & vector_text_results,
+    const SpecialSearchResultInDataParts & special_search_results,
     const UInt64 & top_k,
     const bool & desc_direction,
     Poco::Logger * log,
-    const bool need_vector,
+    const SpecialSearchFuncType & special_search_type,
     const size_t vec_res_index)
 {
-    String search_name = need_vector ? "vector scan" : "text search";
+    String search_name;
+    switch (special_search_type)
+    {
+        case SpecialSearchFuncType::VECTOR_SCAN:
+            search_name = "vector scan";
+            break;
+        case SpecialSearchFuncType::TEXT_SEARCH:
+            search_name = "text search";
+            break;
+        case SpecialSearchFuncType::SPARSE_SEARCH:
+            search_name = "sparse search";
+            break;
+        default:
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported special search type to get total top-k result: {}", special_search_type);
+    }
 
     /// Sort search results from selected parts based on score to get total top-k result.
     std::multimap<Float32, ScoreWithPartIndexAndLabel> sorted_score_with_index_labels;
 
-    for (const auto & mix_results_in_part : vector_text_results)
+    for (const auto & mix_results_in_part : special_search_results)
     {
         /// part + top-k result in part
         CommonSearchResultPtr search_result;
-        if (need_vector)
+        switch (special_search_type)
         {
-            /// Support multiple distance functions
-            if (vec_res_index < mix_results_in_part.vector_scan_results.size())
-                search_result = mix_results_in_part.vector_scan_results[vec_res_index];
+            case SpecialSearchFuncType::VECTOR_SCAN:
+                /// Support multiple distance functions
+                if (vec_res_index < mix_results_in_part.vector_scan_results.size())
+                    search_result = mix_results_in_part.vector_scan_results[vec_res_index];
+                break;
+            case SpecialSearchFuncType::TEXT_SEARCH:
+                search_result = mix_results_in_part.text_search_result;
+                break;
+            case SpecialSearchFuncType::SPARSE_SEARCH:
+                search_result = mix_results_in_part.sparse_search_result;
+                break;
+            default:
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported special search type to get total top-k result: {}", special_search_type);
         }
-        else
-            search_result = mix_results_in_part.text_search_result;
 
         const auto & part_index = mix_results_in_part.part_index;
 
@@ -284,7 +316,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
 }
 
 std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
-    const VectorAndTextResultInDataPart & mix_results,
+    const SpecialSearchResultInDataPart & mix_results,
     Poco::Logger * log)
 {
     OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::getLabelsInSearchResults()");
@@ -331,7 +363,7 @@ void MergeTreeBaseSearchManager::getLabelsInSearchResult(
 }
 
 void MergeTreeBaseSearchManager::filterSearchResultsByFinalLabels(
-    VectorAndTextResultInDataPart & mix_results,
+    SpecialSearchResultInDataPart & mix_results,
     std::set<UInt64> & label_ids,
     Poco::Logger * log)
 {

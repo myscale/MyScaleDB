@@ -488,7 +488,7 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
     writeString(name, ostr);
 
     /// todo: how to generate unique name for each AST node?
-    if (isHybridSearchFunc(name))
+    if (isSpecialSearchFunc(name))
     {
         writeString("_func", ostr);
 

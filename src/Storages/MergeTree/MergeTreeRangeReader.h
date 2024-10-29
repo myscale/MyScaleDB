@@ -212,6 +212,7 @@ public:
         friend class MergeTreeBaseSearchManager;
         friend class MergeTreeVSManager;
         friend class MergeTreeTextSearchManager;
+        friend class MergeTreeSparseSearchManager;
         friend class MergeTreeSelectWithHybridSearchProcessor;
 
         using NumRows = std::vector<size_t>;

@@ -15,9 +15,9 @@ class ReadWithHybridSearch final : public ReadFromMergeTree
 {
 public:
 
-    struct HybridAnalysisResult
+    struct SpecialAnalysisResult
     {
-        /// result ranges on parts after top-k hybrid/vector scan/full-text search on all parts
+        /// result ranges on parts after top-k hybrid/vector/text/sparse search on all parts
         SearchResultAndRangesInDataParts parts_with_hybrid_and_ranges;
     };
 
@@ -55,17 +55,17 @@ private:
     std::vector<bool> vec_support_two_stage_searches;          /// True if two stage search is supported
     [[maybe_unused]] std::vector<UInt64> vec_num_reorders; /// number of candidates for first stage search
 
-    ReadWithHybridSearch::HybridAnalysisResult getHybridSearchResult(const RangesInDataParts & parts) const;
+    ReadWithHybridSearch::SpecialAnalysisResult getSpecialSearchResult(const RangesInDataParts & parts) const;
 
-    /// Get total top-k hybrid result and save them in belonged part
-    ReadWithHybridSearch::HybridAnalysisResult selectTotalHybridResult(
+    /// Get total top-k result and save them in belonged part
+    ReadWithHybridSearch::SpecialAnalysisResult selectTotalSpecialSearchResult(
         const RangesInDataParts & parts_with_ranges,
         const StorageMetadataPtr & metadata_snapshot,
         size_t num_streams) const;
 
     /// Get accurate distance value for candidates by second stage vector index in belonged part
-    VectorAndTextResultInDataParts selectPartsBySecondStageVectorIndex(
-        const VectorAndTextResultInDataParts & parts_with_candidates,
+    SpecialSearchResultInDataParts selectPartsBySecondStageVectorIndex(
+        const SpecialSearchResultInDataParts & parts_with_candidates,
         const VSDescription & vector_scan_desc,
         size_t num_streams) const;
 
@@ -98,7 +98,7 @@ private:
 
     void performFinal(
         const RangesInDataParts & parts_with_ranges,
-        VectorAndTextResultInDataParts & parts_with_vector_text_result,
+        SpecialSearchResultInDataParts & parts_with_special_result,
         size_t num_streams) const;
 };
 

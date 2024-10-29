@@ -1104,6 +1104,11 @@ bool AlterCommands::hasTantivyIndex(const StorageInMemoryMetadata & metadata)
 {
     return metadata.secondary_indices.hasFTS();
 }
+
+bool AlterCommands::hasSparseIndex(const StorageInMemoryMetadata & metadata)
+{
+    return metadata.secondary_indices.hasSparse();
+}
 #endif
 
 std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMetadata & metadata, ContextPtr context) const

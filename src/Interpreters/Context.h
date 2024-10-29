@@ -412,6 +412,7 @@ private:
 
     mutable TextSearchInfoPtr right_text_search_info;
     mutable HybridSearchInfoPtr right_hybrid_search_info;
+    mutable SparseSearchInfoPtr right_sparse_search_info;
 
 public:
     /// Some counters for current query execution.
@@ -1175,6 +1176,11 @@ public:
     HybridSearchInfoPtr getHybridSearchInfo() const;
     void setHybridSearchInfo(HybridSearchInfoPtr hybrid_search_info) const;
     void resetHybridSearchInfo() const;
+
+    /// Used for sparse search functions
+    SparseSearchInfoPtr getSparseSearchInfo() const;
+    void setSparseSearchInfo(SparseSearchInfoPtr sparse_search_info) const;
+    void resetSparseSearchInfo() const;
 
 private:
     std::unique_lock<std::recursive_mutex> getLock() const;

@@ -46,7 +46,7 @@ void splitHybridSearchAST(
         for (auto & child : select_vector_query->select()->children)
         {
             auto function = child->as<ASTFunction>();
-            if (function && isHybridSearchFunc(function->name))
+            if (function && isSpecialSearchFunc(function->name))
             {
                 child = makeASTFunction(
                     DISTANCE_FUNCTION, function->arguments->children[0]->clone(), function->arguments->children[2]->clone());
@@ -74,7 +74,7 @@ void splitHybridSearchAST(
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Bad ORDER BY expression AST");
 
             auto function = order_by_element->children.at(0)->as<ASTFunction>();
-            if (function && isHybridSearchFunc(function->name))
+            if (function && isSpecialSearchFunc(function->name))
             {
                 order_by_element->children.at(0) = makeASTFunction(
                     DISTANCE_FUNCTION, function->arguments->children[0]->clone(), function->arguments->children[2]->clone());
@@ -98,7 +98,7 @@ void splitHybridSearchAST(
         for (auto & child : select_text_query->select()->children)
         {
             auto function = child->as<ASTFunction>();
-            if (function && isHybridSearchFunc(function->name))
+            if (function && isSpecialSearchFunc(function->name))
             {
                 std::shared_ptr<ASTFunction> text_search_function = makeASTFunction(
                     TEXT_SEARCH_FUNCTION, function->arguments->children[1]->clone(), function->arguments->children[3]->clone());
@@ -129,7 +129,7 @@ void splitHybridSearchAST(
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Bad ORDER BY expression AST");
 
             auto function = order_by_element->children.at(0)->as<ASTFunction>();
-            if (function && isHybridSearchFunc(function->name))
+            if (function && isSpecialSearchFunc(function->name))
             {
                 std::shared_ptr<ASTFunction> text_search_function = makeASTFunction(
                     TEXT_SEARCH_FUNCTION, function->arguments->children[1]->clone(), function->arguments->children[3]->clone());

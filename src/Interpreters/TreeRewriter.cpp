@@ -72,7 +72,7 @@
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <VectorIndex/Common/VICommon.h>
-#include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
+#include <VectorIndex/Interpreters/GetSpecialSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
 #include <VectorIndex/Utils/VSUtils.h>
 #include <VectorIndex/Utils/HybridSearchUtils.h>
@@ -450,8 +450,8 @@ void removeUnneededColumnsFromSelectClause(ASTSelectQuery * select_query, const 
                     new_elements.push_back(elem);
             }
 
-            /// Removing hybrid search related function can change number of rows.
-            if (func && isHybridSearchFunc(func->name))
+            /// Removing special search related function (distance, batch_distance, TextSearch, HybridSearch, SparseSearch) can change number of rows.
+            if (func && isSpecialSearchFunc(func->name))
                 new_elements.push_back(elem);
         }
     }
@@ -778,6 +778,7 @@ std::vector<const ASTFunction *> getAggregates(ASTPtr & query, const ASTSelectQu
                 assertNoVectorScan(arg, "inside an aggregate function");
                 assertNoTextSearch(arg, "inside an aggregate function");
                 assertNoHybridSearch(arg, "inside an aggregate function");
+                assertNoSparseSearch(arg, "inside an aggregate function");
             }
         }
     }
@@ -901,20 +902,20 @@ struct RewriteShardNum
 };
 using RewriteShardNumVisitor = InDepthNodeVisitor<RewriteShardNum, true>;
 
-/// Get hybrid search related functions(distance, batch_distance, TextSearch and HybridSearch), remove duplicated functions
-void getHybridSearchFunctions(
+/// Get special search related functions(distance, batch_distance, TextSearch, HybridSearch, SparseSearch), remove duplicated functions
+void getSpecialSearchFunctions(
     ASTPtr & query,
     ASTSelectQuery * select_query,
-    std::vector<const ASTFunction *> & hybrid_search_functions,
-    HybridSearchFuncType & search_func_type)
+    std::vector<const ASTFunction *> & special_search_functions,
+    SpecialSearchFuncType & search_func_type)
 {
-    GetHybridSearchVisitor::Data data;
-    GetHybridSearchVisitor(data).visit(query);
+    GetSpecialSearchVisitor::Data data;
+    GetSpecialSearchVisitor(data).visit(query);
 
     /// Mark if query contains multiple distances
     bool has_multiple_distances = false;
 
-    size_t hybrid_search_func_count = data.vector_scan_funcs.size() + data.text_search_func.size() + data.hybrid_search_func.size();
+    size_t hybrid_search_func_count = data.vector_scan_funcs.size() + data.text_search_func.size() + data.hybrid_search_func.size() + data.sparse_search_func.size();
     if (hybrid_search_func_count == 0)
         return ;
     else if (hybrid_search_func_count > 1)
@@ -929,8 +930,8 @@ void getHybridSearchFunctions(
     String search_func_name;
     if (data.vector_scan_funcs.size() >= 1)
     {
-        hybrid_search_functions = data.vector_scan_funcs;
-        search_func_type = HybridSearchFuncType::VECTOR_SCAN;
+        special_search_functions = data.vector_scan_funcs;
+        search_func_type = SpecialSearchFuncType::VECTOR_SCAN;
         search_func_name = DISTANCE_FUNCTION;
 
         if (has_multiple_distances)
@@ -942,19 +943,25 @@ void getHybridSearchFunctions(
     }
     else if (data.text_search_func.size() == 1)
     {
-        hybrid_search_functions = data.text_search_func;
-        search_func_type = HybridSearchFuncType::TEXT_SEARCH;
+        special_search_functions = data.text_search_func;
+        search_func_type = SpecialSearchFuncType::TEXT_SEARCH;
         search_func_name = TEXT_SEARCH_FUNCTION;
     }
     else if (data.hybrid_search_func.size() == 1)
     {
-        hybrid_search_functions = data.hybrid_search_func;
-        search_func_type = HybridSearchFuncType::HYBRID_SEARCH;
+        special_search_functions = data.hybrid_search_func;
+        search_func_type = SpecialSearchFuncType::HYBRID_SEARCH;
         search_func_name = HYBRID_SEARCH_FUNCTION;
+    }
+    else if (data.sparse_search_func.size() == 1)
+    {
+        special_search_functions = data.sparse_search_func;
+        search_func_type = SpecialSearchFuncType::SPARSE_SEARCH;
+        search_func_name = SPARSE_SEARCH_FUNCTION;
     }
 
     /// Remove the restriction that distance() function must exist in order by clause.
-    if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
+    if (search_func_type == SpecialSearchFuncType::VECTOR_SCAN)
     {
         /// Add default order by clause if not specified
         if (!select_query->orderBy())
@@ -975,7 +982,7 @@ void getHybridSearchFunctions(
             select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, std::move(default_order_by_ast));
         }
     }
-    else /// TextSearch/HybridSearch
+    else /// TextSearch/HybridSearch/SparseSearch
     {
         if (!select_query->orderBy())
         {
@@ -983,16 +990,16 @@ void getHybridSearchFunctions(
         }
         else
         {
-            GetHybridSearchVisitor::Data order_by_data;
-            GetHybridSearchVisitor(order_by_data).visit(select_query->orderBy());
+            GetSpecialSearchVisitor::Data order_by_data;
+            GetSpecialSearchVisitor(order_by_data).visit(select_query->orderBy());
 
-            auto search_func_count = order_by_data.text_search_func.size() + order_by_data.hybrid_search_func.size();
+            auto search_func_count = order_by_data.text_search_func.size() + order_by_data.hybrid_search_func.size() + order_by_data.sparse_search_func.size();
             if (search_func_count != 1)
                 throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", search_func_name);
         }
     }
 
-    bool is_batch = hybrid_search_functions.size() == 1 && isBatchDistance(hybrid_search_functions[0]->getColumnName());
+    bool is_batch = special_search_functions.size() == 1 && isBatchDistance(special_search_functions[0]->getColumnName());
     if (!is_batch && !select_query->limitLength())
         throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT N clause", search_func_name);
     else if (is_batch && !select_query->limitByLength())
@@ -1051,7 +1058,7 @@ void checkOrderBySortDirection(
 
     auto order_by = select_query->orderBy();
     if (!order_by)
-        return; /// order by is already checked and handled by getHybridSearchFunctions()
+        return; /// order by is already checked and handled by getSpecialSearchFunctions()
 
     int sort_direction = 0;
     bool find_search_function = false;
@@ -1067,7 +1074,7 @@ void checkOrderBySortDirection(
         if (!is_batch)
         {
             /// Check cases when search function column is an argument of other functions
-            if (isHybridSearchFunc(order_expression->getColumnName()))
+            if (isSpecialSearchFunc(order_expression->getColumnName()))
             {
                 sort_direction = order_by_element->direction;
                 find_search_function = true;
@@ -1078,7 +1085,7 @@ void checkOrderBySortDirection(
                 const ASTs & func_arguments = function->arguments->as<ASTExpressionList &>().children;
                 for (const auto & func_arg : func_arguments)
                 {
-                    if (isHybridSearchFunc(func_arg->getColumnName()))
+                    if (isSpecialSearchFunc(func_arg->getColumnName()))
                     {
                         sort_direction = order_by_element->direction;
                         find_search_function = true;
@@ -1196,8 +1203,8 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
 
                 required.erase(name);
             }
-            /// Add vector scan, text search and hybrid search function column name when exists in right joined table
-            else if (isHybridSearchFunc(name))
+            /// Add vector scan, text search, hybrid search or sparse search function column name when exists in right joined table
+            else if (isSpecialSearchFunc(name))
                 analyzed_join->addJoinedColumn(joined_column);
         }
     }
@@ -1324,10 +1331,10 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
         }
     }
 
-    /// insert vector scan / TextSearch / HybridSearch func columns into source columns here
-    if (!hybrid_search_funcs.empty() && !hybrid_search_from_right_table)
+    /// insert vector scan / TextSearch / HybridSearch / SparseSearch func columns into source columns here
+    if (!special_search_funcs.empty() && !hybrid_search_from_right_table)
     {
-        for (auto node : hybrid_search_funcs)
+        for (auto node : special_search_funcs)
         {
             const String func_column_name = node->getColumnName();
             addSearchFunctionColumnName(func_column_name, source_columns);
@@ -1602,37 +1609,43 @@ std::optional<NameAndTypePair> TreeRewriterResult::collectSearchColumnType(
     return search_column_type;
 }
 
-void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
+void TreeRewriterResult::collectForSpecialSearchRelatedFunctions(
     ASTSelectQuery * select_query,
     const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
     ContextPtr context)
 {
     /// distance function exists in main query's select caluse
-    size_t search_funcs_size = hybrid_search_funcs.size();
+    size_t search_funcs_size = special_search_funcs.size();
     if (search_funcs_size > 0)
     {
         String function_name;
         size_t expected_args_size = 0;
         bool has_vector = false;
         bool has_text = false;
+        bool has_sparse = false;
 
-        if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
+        if (search_func_type == SpecialSearchFuncType::VECTOR_SCAN)
         {
             has_vector = true;
             expected_args_size = 2;
         }
-        else if (search_func_type == HybridSearchFuncType::TEXT_SEARCH)
+        else if (search_func_type == SpecialSearchFuncType::TEXT_SEARCH)
         {
             has_text = true;
             function_name = TEXT_SEARCH_FUNCTION;
             expected_args_size = 2;
         }
-        else if (search_func_type == HybridSearchFuncType::HYBRID_SEARCH)
+        else if (search_func_type == SpecialSearchFuncType::HYBRID_SEARCH)
         {
             has_vector = true;
             has_text = true;
             function_name = HYBRID_SEARCH_FUNCTION;
             expected_args_size = 4;
+        }
+        else if (search_func_type == SpecialSearchFuncType::SPARSE_SEARCH)
+        {
+            has_sparse = true;
+            expected_args_size = 2;
         }
 
         /// Support multiple distance functions
@@ -1645,17 +1658,17 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
 
         for (size_t i = 0; i < search_funcs_size; ++i)
         {
-            const ASTFunction * node = hybrid_search_funcs[i];
+            const ASTFunction * node = special_search_funcs[i];
             bool is_batch = false;
 
             /// Initialize for vector scan function
-            if (search_func_type == HybridSearchFuncType::VECTOR_SCAN)
+            if (search_func_type == SpecialSearchFuncType::VECTOR_SCAN)
             {
                 is_batch = isBatchDistance(node->getColumnName());
                 function_name = is_batch ? "batch_distance" : "distance";
             }
 
-            if (has_multiple_distances && (is_batch || search_func_type != HybridSearchFuncType::VECTOR_SCAN))
+            if (has_multiple_distances && (is_batch || search_func_type != SpecialSearchFuncType::VECTOR_SCAN))
                 throw Exception(ErrorCodes::SYNTAX_ERROR, "Only support multiple distance functions in one query");
 
             const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
@@ -1682,6 +1695,7 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
             String function_col_name = node->getColumnName(); /// column name of search function
             ASTPtr vector_argument;
             ASTPtr text_argument;
+            ASTPtr sparse_argument;
 
             /// Use the first argument in search function
             /// vector column in vector scan and hybrid search, text column in text search
@@ -1693,12 +1707,16 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
                 if (has_text)
                     text_argument = arguments[1];
             }
-            else
+            else if (has_text)
                 text_argument = arguments[0];
+            else if (has_sparse)
+                sparse_argument = arguments[0];
+
+            String vector_scan_metric_type;
 
             String vector_col_name = vector_argument ? vector_argument->getColumnName() : "";
             String text_col_name = text_argument ? text_argument->getColumnName() : "";
-            String vector_scan_metric_type;
+            String sparse_col_name = sparse_argument ? sparse_argument->getColumnName() : "";
 
             if (has_vector)
             {
@@ -1734,8 +1752,16 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
                 checkTextSearchColumnDataType(search_text_column_type->type, is_mapkeys);
             }
 
-            /// The direction of TextSearch/HybridSearch func in order by should be DESC
-            if (has_text)
+            if (has_sparse)
+            {
+                auto search_sparse_column_type = collectSearchColumnType(
+                    sparse_col_name, function_col_name, tables_with_columns, context, sparse_argument, metadata_snapshot, table_is_remote);
+
+                checkSparseSearchColumnDataType(search_sparse_column_type->type);
+            }
+
+            /// The direction of TextSearch/HybridSearch/SparseSearch func in order by should be DESC
+            if (has_text || has_sparse)
                 checkOrderBySortDirection(function_name, select_query, -1);
             else
             {
@@ -1771,6 +1797,8 @@ void TreeRewriterResult::collectForHybridSearchRelatedFunctions(
             search_func_col_name = text_search_info->function_column_name;
         else if (auto hybrid_search_info = context->getHybridSearchInfo())
             search_func_col_name = hybrid_search_info->function_column_name;
+        else if (auto sparse_search_info = context->getSparseSearchInfo())
+            search_func_col_name = sparse_search_info->function_column_name;
 
         if (!search_func_col_name.empty())
             addSearchFunctionColumnName(search_func_col_name, source_columns, select_query);
@@ -1889,12 +1917,12 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
             column.name = StorageView::replaceQueryParameterWithValue(column.name, parameter_values, parameter_types);
     }
 
-    getHybridSearchFunctions(query, select_query, result.hybrid_search_funcs, result.search_func_type);
+    getSpecialSearchFunctions(query, select_query, result.special_search_funcs, result.search_func_type);
 
     /// Add score_type column and fusion id columns for multiple-shard distributed hybrid search
     /// fusion id columns: _shard_num, _part_index, _part_offset
     auto * distributed = dynamic_cast<StorageDistributed *>(const_cast<DB::IStorage *>(result.storage.get()));
-    if (result.search_func_type == HybridSearchFuncType::HYBRID_SEARCH && distributed
+    if (result.search_func_type == SpecialSearchFuncType::HYBRID_SEARCH && distributed
         && distributed->getCluster()->getShardsInfo().size() > 1)
     {
         auto score_type_identifier = std::make_shared<ASTIdentifier>(SCORE_TYPE_COLUMN.name);
@@ -1920,8 +1948,8 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
         select_query->orderBy()->children.push_back(std::move(part_offset_element));
     }
 
-    /// Special handling for vector scan, text search and hybrid search function
-    result.collectForHybridSearchRelatedFunctions(select_query, tables_with_columns, getContext());
+    /// Special handling for vector scan, text search, hybrid search and sparse search function
+    result.collectForSpecialSearchRelatedFunctions(select_query, tables_with_columns, getContext());
 
     result.collectUsedColumns(query, true, settings.query_plan_optimize_primary_key);
 

@@ -114,6 +114,9 @@ private:
         size_t & total_granules,
         const Settings & settings,
         Poco::Logger * log);
+
+    /// TODO by libaoy
+    // static MarkRanges generateMarkRangesFromSparse
 #endif
 
     static MarkRanges filterMarksUsingMergedIndex(

@@ -63,8 +63,8 @@ void MergeTreeWhereOptimizer::optimize(SelectQueryInfo & select_query_info, cons
     where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().move_all_conditions_to_prewhere;
     where_optimizer_context.is_final = select.final();
 
-    /// Move as much as possible where conditions to prewhere for vector / text / hybrid search function or full_text_search table function
-    if (!where_optimizer_context.move_all_conditions_to_prewhere && select_query_info.has_hybrid_search)
+    /// Move as much as possible where conditions to prewhere for vector / text / hybrid / sparse search function or full_text_search table function
+    if (!where_optimizer_context.move_all_conditions_to_prewhere && select_query_info.has_special_search)
         where_optimizer_context.move_all_conditions_to_prewhere = context->getSettingsRef().optimize_move_to_prewhere_for_vector_search;
 
     RPNBuilderTreeContext tree_context(context, std::move(block_with_constants), {} /*prepared_sets*/);
@@ -130,8 +130,8 @@ static void collectColumns(const RPNBuilderTreeNode & node, const NameSet & colu
 
     auto function_node = node.toFunctionNode();
 
-    /// Get function name for text / vector / hybrid search
-    if (isHybridSearchFunc(function_node.getFunctionName()))
+    /// Get function name for text / vector / hybrid / sparse search
+    if (isSpecialSearchFunc(function_node.getFunctionName()))
     {
         has_invalid_column = true;
         return;

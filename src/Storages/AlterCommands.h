@@ -233,9 +233,12 @@ public:
     /// Check if commands have any inverted index
     static bool hasInvertedIndex(const StorageInMemoryMetadata & metadata);
 
-    /// Check if commands have any tantivy index
 #if USE_CUSTOM_SKIP_INDEX
+    /// Check if commands have any tantivy index
     static bool hasTantivyIndex(const StorageInMemoryMetadata & metadata);
+
+    /// Check if commands have any sparse index
+    static bool hasSparseIndex(const StorageInMemoryMetadata & metadata);
 #endif
 
     VICommands getVICommands(StorageInMemoryMetadata metadata, ContextPtr context) const;

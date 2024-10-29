@@ -16,6 +16,7 @@
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeSparseSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeVSManager.h>
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Processors/ReadWithHybridSearch.h>
@@ -231,6 +232,7 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         analyzed_result_ptr_,
         enable_parallel_reading)
 {
+    LOG_INFO(log, "ReadWithHybridSearch constructor");
     VectorScanInfoPtr vector_scan_info = nullptr;
     if (query_info.vector_scan_info)
         vector_scan_info = query_info.vector_scan_info;
@@ -393,7 +395,7 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
     OpenTelemetry::SpanHolder span_skip_index("ReadWithHybridSearch getAnalysisResult()");
     /// Referenced from ReadFromMergeTree::initializePipeline(). Add logic for mark range optimization based on where conditions.
     auto result = getAnalysisResult();
-    LOG_DEBUG(
+    LOG_INFO(
         log,
         "Selected {}/{} parts by partition key, {} parts by primary key, {}/{} marks by primary key, {} marks to read from {} ranges",
         result.parts_before_pk,
@@ -484,16 +486,14 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
             std::move(result.parts_with_ranges),
             column_names_to_read);
     }
-    else if (query_info.has_hybrid_search)
+    else if (query_info.has_special_search)
     {
         /// The result of hybrid search on multiple parts are identical or similar as one part cases.
         /// Hence, for hybrid search, first we need to get top k result for vector search and text search from all selected parts,
         /// Second do the fusion on table level, final read other columns on parts to merge result.
-        HybridAnalysisResult hybrid_result = getHybridSearchResult(std::move(result.parts_with_ranges));
+        SpecialAnalysisResult special_search_result = getSpecialSearchResult(std::move(result.parts_with_ranges));
 
-        pipe = createReadProcessorsAmongParts(
-            std::move(hybrid_result.parts_with_hybrid_and_ranges),
-            column_names_to_read);
+        pipe = createReadProcessorsAmongParts(std::move(special_search_result.parts_with_hybrid_and_ranges), column_names_to_read);
     }
 
     if (pipe.empty())
@@ -513,7 +513,6 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
 }
 
 /// Reference from ReadFromMergeTree::spreadMarkRangesAmongStreams()
-///
 Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
     RangesInDataParts parts_with_range,
     const Names & column_names)
@@ -637,21 +636,21 @@ Pipe ReadWithHybridSearch::readFromParts(
     return pipe;
 }
 
-ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::getHybridSearchResult(const RangesInDataParts & parts_with_ranges) const
+ReadWithHybridSearch::SpecialAnalysisResult ReadWithHybridSearch::getSpecialSearchResult(const RangesInDataParts & parts_with_ranges) const
 {
-    return selectTotalHybridResult(parts_with_ranges, metadata_for_reading, requested_num_streams);
+    return selectTotalSpecialSearchResult(parts_with_ranges, metadata_for_reading, requested_num_streams);
 }
 
-ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybridResult(
+ReadWithHybridSearch::SpecialAnalysisResult ReadWithHybridSearch::selectTotalSpecialSearchResult(
     const RangesInDataParts & parts_with_ranges,
     const StorageMetadataPtr & metadata_snapshot,
     size_t num_streams) const
 {
-    OpenTelemetry::SpanHolder span("ReadWithHybridSearch::selectTotalHybridResult()");
-    HybridAnalysisResult hybrid_result;
+    OpenTelemetry::SpanHolder span("ReadWithHybridSearch::selectTotalSpecialSearchResult()");
+    SpecialAnalysisResult special_search_result;
 
-    /// Get vector scan and full-text search result for all selected parts
-    auto parts_with_vector_text_result = MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes(
+    /// Get vector scan, full-text search and sparse search result for all selected parts
+    auto parts_with_special_result = MergeTreeSelectWithHybridSearchProcessor::selectPartsBySpecialIndexes(
         parts_with_ranges,
         metadata_snapshot,
         query_info,
@@ -667,9 +666,10 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         data,
         reader_settings);
 
-    /// Mark if vector scan or full-text search is needed.
+    /// Mark if vector scan, text search or sparse search is needed.
     VectorScanInfoPtr vector_scan_info = query_info.vector_scan_info;
     TextSearchInfoPtr text_search_info = query_info.text_search_info;
+    SparseSearchInfoPtr sparse_search_info = query_info.sparse_search_info;
     bool hybrid = false;
     String log_name;
 
@@ -680,17 +680,27 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         vector_scan_info = query_info.hybrid_search_info->vector_scan_info;
         text_search_info = query_info.hybrid_search_info->text_search_info;
     }
-    else
-        log_name = vector_scan_info ? "selectTotalVectorScanResult" : "selectTotalTextResult";
-
-    /// If final is used, remove duplicate results from vector scan and/or full-text search results of all selected parts
-    if(isFinal(query_info) && parts_with_vector_text_result.size() > 1)
+    else if (vector_scan_info)
     {
-        LOG_DEBUG(log, "Perform final on search results from parts");
-        performFinal(parts_with_ranges, parts_with_vector_text_result, num_streams);
+        log_name = "selectTotalVectorScanResult";
+    }
+    else if (text_search_info)
+    {
+        log_name = "selectTotalTextSearchResult";
+    }
+    else if (sparse_search_info)
+    {
+        log_name = "selectTotalSparseSearchResult";
     }
 
-    Poco::Logger * hybrid_log = &Poco::Logger::get(log_name);
+    Poco::Logger * special_search_log = &Poco::Logger::get(log_name);
+
+    /// If final is used, remove duplicate results from vector scan and/or full-text search results of all selected parts
+    if(isFinal(query_info) && parts_with_special_result.size() > 1)
+    {
+        LOG_DEBUG(log, "Perform final on search results from parts");
+        performFinal(parts_with_ranges, parts_with_special_result, num_streams);
+    }
 
     std::unordered_map<String, ScoreWithPartIndexAndLabels> multiple_distances_topk_results_map;
     if (vector_scan_info)
@@ -712,17 +722,17 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
             bool support_two_stage_search = vec_support_two_stage_searches[desc_index];
             if (support_two_stage_search)
             {
-                OpenTelemetry::SpanHolder span2("ReadWithHybridSearch::selectTotalHybridResult(): vector two stage search");
+                OpenTelemetry::SpanHolder span2("ReadWithHybridSearch::selectTotalSpecialSearchResult(): vector two stage search");
                 /// Second stage: get actual top k result
 
                 UInt64 num_reorder = vec_num_reorders[desc_index];
                 /// Get top num_reorder candidates: score + part_index + label_id
                 auto first_stage_top_candidates = MergeTreeBaseSearchManager::getTotalCandidateVSResult(
-                            parts_with_vector_text_result, desc_index, vector_scan_desc, num_reorder, hybrid_log);
+                            parts_with_special_result, desc_index, vector_scan_desc, num_reorder, special_search_log);
 
                 /// Split num_reorder candidates based on part index: part + vector scan results
                 auto parts_with_first_stage_top_results = MergeTreeVSManager::splitFirstStageVSResult(
-                    parts_with_vector_text_result, first_stage_top_candidates, vector_scan_desc, hybrid_log);
+                    parts_with_special_result, first_stage_top_candidates, vector_scan_desc, special_search_log);
 
                 /// Get accurate distance for candidates from all selected part
                 auto parts_with_second_stage_vector_result = selectPartsBySecondStageVectorIndex(
@@ -732,11 +742,11 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
 
                 /// Get final top k result
                 vec_scan_topk_results = MergeTreeBaseSearchManager::getTotalTopKVSResult(
-                            parts_with_second_stage_vector_result, 0, vector_scan_desc, hybrid_log);
+                            parts_with_second_stage_vector_result, 0, vector_scan_desc, special_search_log);
             }
             else   /// MYSCALE_INTERNAL_CODE_END
                 vec_scan_topk_results = MergeTreeBaseSearchManager::getTotalTopKVSResult(
-                    parts_with_vector_text_result, desc_index, vector_scan_desc, hybrid_log);
+                    parts_with_special_result, desc_index, vector_scan_desc, special_search_log);
 
             /// Save the topk results for this vector scan
             distances_topk_results_vector[desc_index] = vec_scan_topk_results;
@@ -774,14 +784,20 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
     /// Combine text search results from selected parts to get top-k result for text search.
     ScoreWithPartIndexAndLabels text_search_topk_results;
     if (text_search_info)
-        text_search_topk_results = MergeTreeBaseSearchManager::getTotalTopKTextResult(parts_with_vector_text_result, text_search_info, hybrid_log);
+        text_search_topk_results = MergeTreeBaseSearchManager::getTotalTopKTextResult(parts_with_special_result, text_search_info, special_search_log);
 
     /// hybrid search or text search
-    if (text_search_info)
+    if (text_search_info || sparse_search_info)
     {
         ScoreWithPartIndexAndLabels hybrid_topk_results;
 
-        if (hybrid)
+        /// TODO: libaoy
+        /// refactor getTotalTopKSparseResult to support sparse search
+        if (sparse_search_info)
+        {
+            hybrid_topk_results = MergeTreeBaseSearchManager::getTotalTopKSparseResult(parts_with_special_result, sparse_search_info, special_search_log);
+        }
+        else if (hybrid)
         {
             /// Only has one vector scan for hybrid search
             ScoreWithPartIndexAndLabels vec_scan_topk_results;
@@ -789,7 +805,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
                 vec_scan_topk_results = multiple_distances_topk_results_map.begin()->second;
 
             /// Do the fusion on the total top-k result of vector scan and text search from all selected parts, based on (part_index, label_id).
-            hybrid_topk_results = MergeTreeHybridSearchManager::hybridSearch(vec_scan_topk_results, text_search_topk_results, query_info.hybrid_search_info, hybrid_log);
+            hybrid_topk_results = MergeTreeHybridSearchManager::hybridSearch(vec_scan_topk_results, text_search_topk_results, query_info.hybrid_search_info, special_search_log);
         }
         else
         {
@@ -798,23 +814,23 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         }
 
         /// Filter parts with final top-k hybrid result, and save hybrid result with belonged part
-        hybrid_result.parts_with_hybrid_and_ranges = MergeTreeHybridSearchManager::FilterPartsWithHybridResults(
-                                                        parts_with_ranges, hybrid_topk_results, context->getSettingsRef(), hybrid_log);
+        special_search_result.parts_with_hybrid_and_ranges = MergeTreeHybridSearchManager::FilterPartsWithHybridResults(
+            parts_with_ranges, hybrid_topk_results, context->getSettingsRef(), special_search_log);
     }
     else
     {
         /// Support multiple distance functions
         /// Filter parts with final top-k vector scan results from multiple distance funcs
-        hybrid_result.parts_with_hybrid_and_ranges = MergeTreeVSManager::FilterPartsWithManyVSResults(
-                                                        parts_with_ranges, multiple_distances_topk_results_map, context->getSettingsRef(), hybrid_log);
+        special_search_result.parts_with_hybrid_and_ranges = MergeTreeVSManager::FilterPartsWithManyVSResults(
+            parts_with_ranges, multiple_distances_topk_results_map, context->getSettingsRef(), special_search_log);
     }
 
-    return hybrid_result;
+    return special_search_result;
 }
 
 void ReadWithHybridSearch::performFinal(
     const RangesInDataParts & parts_with_ranges,
-    VectorAndTextResultInDataParts & parts_with_vector_text_result,
+    SpecialSearchResultInDataParts & parts_with_special_result,
     size_t num_streams) const
 {
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::performFinal()");
@@ -822,15 +838,15 @@ void ReadWithHybridSearch::performFinal(
 
     /// Construct a local RangesInDataParts based on top k search results
     RangesInDataParts parts_for_final_ranges;
-    parts_for_final_ranges.resize(parts_with_vector_text_result.size());
+    parts_for_final_ranges.resize(parts_with_special_result.size());
 
     /// Save all labels in top-k results of one part
     std::vector<std::pair<String, std::set<UInt64>>> vec_original_labels_in_parts;
-    vec_original_labels_in_parts.resize(parts_with_vector_text_result.size());
+    vec_original_labels_in_parts.resize(parts_with_special_result.size());
 
     auto process_part = [&](size_t part_index)
     {
-        auto & part_with_mix_results = parts_with_vector_text_result[part_index];
+        auto & part_with_mix_results = parts_with_special_result[part_index];
         String part_name = part_with_mix_results.data_part->name;
 
         /// Get all labels from vector scan result and/or text result
@@ -850,11 +866,11 @@ void ReadWithHybridSearch::performFinal(
         }
     };
 
-    size_t num_threads = std::min<size_t>(num_streams, parts_with_vector_text_result.size());
+    size_t num_threads = std::min<size_t>(num_streams, parts_with_special_result.size());
 
     if (num_threads <= 1)
     {
-        for (size_t part_index = 0; part_index < parts_with_vector_text_result.size(); ++part_index)
+        for (size_t part_index = 0; part_index < parts_with_special_result.size(); ++part_index)
             process_part(part_index);
     }
     else
@@ -865,7 +881,7 @@ void ReadWithHybridSearch::performFinal(
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
             num_threads);
 
-        for (size_t part_index = 0; part_index < parts_with_vector_text_result.size(); ++part_index)
+        for (size_t part_index = 0; part_index < parts_with_special_result.size(); ++part_index)
             pool.scheduleOrThrowOnError([&, part_index, thread_group = CurrentThread::getGroup()]
             {
                 SCOPE_EXIT_SAFE(
@@ -890,7 +906,7 @@ void ReadWithHybridSearch::performFinal(
             ++it;
     }
 
-    /// search result inside parts_with_vector_text_result may be empty (computed = false).
+    /// search result inside parts_with_special_result may be empty (computed = false).
     if (parts_for_final_ranges.empty())
     {
         LOG_DEBUG(log, "parts_for_final_ranges is empty");
@@ -1001,9 +1017,9 @@ void ReadWithHybridSearch::performFinal(
     }
 
     OpenTelemetry::SpanHolder span3("ReadWithHybridSearch::performFinal(): filterSearchResultsByFinalLabels");
-    /// Filter top-k results in parts_with_vector_text_result
+    /// Filter top-k results in parts_with_special_result
     /// For a result in a part, remove it if not exists in final results of this part
-    for (auto & part_with_mix_results : parts_with_vector_text_result)
+    for (auto & part_with_mix_results : parts_with_special_result)
     {
         String part_name = part_with_mix_results.data_part->name;
 
@@ -1021,13 +1037,13 @@ void ReadWithHybridSearch::performFinal(
     }
 }
 
-VectorAndTextResultInDataParts ReadWithHybridSearch::selectPartsBySecondStageVectorIndex(
-    const VectorAndTextResultInDataParts & parts_with_candidates,
+SpecialSearchResultInDataParts ReadWithHybridSearch::selectPartsBySecondStageVectorIndex(
+    const SpecialSearchResultInDataParts & parts_with_candidates,
     const VSDescription & vector_scan_desc,
     size_t num_streams) const
 {
     OpenTelemetry::SpanHolder span3("ReadWithHybridSearch::selectPartsBySecondStageVectorIndex()");
-    VectorAndTextResultInDataParts parts_with_vector_result;
+    SpecialSearchResultInDataParts parts_with_vector_result;
     parts_with_vector_result.resize(parts_with_candidates.size());
 
     /// Execute second stage vector scan in this part.
@@ -1036,7 +1052,7 @@ VectorAndTextResultInDataParts ReadWithHybridSearch::selectPartsBySecondStageVec
         auto & part_with_candidates = parts_with_candidates[part_index];
         auto & data_part = part_with_candidates.data_part;
 
-        VectorAndTextResultInDataPart vector_result(part_with_candidates.part_index, data_part);
+        SpecialSearchResultInDataPart vector_result(part_with_candidates.part_index, data_part);
 
         auto two_stage_vector_scan_result = MergeTreeVSManager::executeSecondStageVectorScan(data_part, vector_scan_desc, part_with_candidates.vector_scan_results[0]);
         vector_result.vector_scan_results.emplace_back(two_stage_vector_scan_result);
@@ -1109,7 +1125,7 @@ Pipe ReadWithHybridSearch::readFromParts(
 {
     Pipes pipes;
 
-    if (!query_info.has_hybrid_search)
+    if (!query_info.has_special_search)
         return {};
 
     for (const auto & part_with_hybrid : parts_with_hybrid_ranges)
@@ -1137,6 +1153,8 @@ Pipe ReadWithHybridSearch::readFromParts(
             search_manager = std::make_shared<MergeTreeVSManager>(part_with_hybrid.multiple_vector_scan_results, query_info.vector_scan_info);
         else if (query_info.text_search_info)
             search_manager = std::make_shared<MergeTreeTextSearchManager>(part_with_hybrid.search_result, query_info.text_search_info);
+        else if (query_info.sparse_search_info)
+            search_manager = std::make_shared<MergeTreeSparseSearchManager>(part_with_hybrid.search_result, query_info.sparse_search_info);
 
         if (!search_manager)
         {

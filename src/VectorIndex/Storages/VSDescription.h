@@ -139,4 +139,56 @@ struct HybridSearchInfo
 
 using HybridSearchInfoPtr = std::shared_ptr<const HybridSearchInfo>;
 
+struct SparseSearchInfo
+{
+    enum class SearchMode
+    {
+        USE_PRUNING = 0,
+        BRUTE_FORCE
+    };
+    String getSparseSearchMode() const
+    {
+        switch (search_mode)
+        {
+            case SearchMode::USE_PRUNING:
+                return "use_pruning";
+            case SearchMode::BRUTE_FORCE:
+                return "brute_force";
+        }
+    }
+    static SearchMode stringToSparseSearchMode(const String & mode)
+    {
+        String mode_to_low = Poco::toLower(mode);
+        if (mode_to_low == "use_pruning")
+            return SearchMode::USE_PRUNING;
+        else if (mode_to_low == "brute_force")
+            return SearchMode::BRUTE_FORCE;
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown sparse search mode: {}", mode);
+    }
+
+    String sparse_column_name;
+    std::unordered_map<UInt32, Float32> query_sparse_vector;
+    String function_column_name;
+
+    int topk = -1;
+    SearchMode search_mode;
+
+    SparseSearchInfo(
+        const String & sparse_col_name_,
+        const std::unordered_map<UInt32, Float32> & query_sparse_vector_,
+        const String & func_col_name_,
+        int topk_,
+        SearchMode search_mode_ = SearchMode::USE_PRUNING)
+        : sparse_column_name(sparse_col_name_)
+        , query_sparse_vector(query_sparse_vector_)
+        , function_column_name(func_col_name_)
+        , topk(topk_)
+        , search_mode(search_mode_)
+    {
+    }
+};
+
+using SparseSearchInfoPtr = std::shared_ptr<const SparseSearchInfo>;
+
 }

@@ -116,7 +116,7 @@ NameSet injectRequiredColumns(
         if (!storage_snapshot->tryGetColumn(options, columns[i]))
         {
             /// skip hybrid search related columns after check existance in table
-            if (isHybridSearchFunc(columns[i]) || isScoreColumnName(columns[i]))
+            if (isSpecialSearchFunc(columns[i]) || isScoreColumnName(columns[i]))
                 continue;
 
             throw Exception(ErrorCodes::NO_SUCH_COLUMN_IN_TABLE, "There is no physical column or subcolumn {} in table", columns[i]);
