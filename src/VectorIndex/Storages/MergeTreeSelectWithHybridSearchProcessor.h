@@ -36,9 +36,9 @@ public:
 
     String getName() const override { return "MergeTreeReadWithHybridSearch"; }
 
-    /// Execute vector scan, text or hybrid search on all parts
+    /// Execute vector, text, hybrid or sparse search on all parts
     /// For two stage search cases, execute first stage vector scan.
-    static VectorAndTextResultInDataParts selectPartsByVectorAndTextIndexes(
+    static SpecialSearchResultInDataParts selectPartsBySpecialIndexes(
         const RangesInDataParts & parts_with_ranges,
         const StorageMetadataPtr & metadata_snapshot,
         const SelectQueryInfo & query_info,
@@ -113,7 +113,7 @@ private:
         ContextPtr context_,
         size_t max_streams);
 
-    /// Shared_ptr for base class, the dynamic type may be derived class TextSearch/VectorScan/HybridSearch
+    /// Shared_ptr for base class, the dynamic type may be derived class TextSearch/VectorScan/HybridSearch/SparseSearch
     MergeTreeBaseSearchManagerPtr base_search_manager = nullptr;
 
     ContextPtr context;

@@ -773,6 +773,16 @@ void TableJoin::setHybridSearchInfoPtr(HybridSearchInfoPtr hybrid_search_info) c
     right_hybrid_search_info = hybrid_search_info;
 }
 
+SparseSearchInfoPtr TableJoin::getSparseSearchInfoPtr() const
+{
+    return right_sparse_search_info;
+}
+
+void TableJoin::setSparseSearchInfoPtr(SparseSearchInfoPtr sparse_search_info) const
+{
+    right_sparse_search_info = sparse_search_info;
+}
+
 bool TableJoin::allowParallelHashJoin() const
 {
     if (!right_storage_name.empty() || !join_algorithm.isSet(JoinAlgorithm::PARALLEL_HASH))

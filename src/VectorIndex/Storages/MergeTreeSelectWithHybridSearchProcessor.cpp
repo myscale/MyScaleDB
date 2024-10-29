@@ -17,6 +17,7 @@
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
+#include <VectorIndex/Storages/MergeTreeSparseSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeThreadSelectWithFilterAlgorithm.h>
 #include <VectorIndex/Utils/VSUtils.h>
 #include <VectorIndex/Cache/PKCacheManager.h>
@@ -35,8 +36,8 @@ namespace ErrorCodes
     extern const int MEMORY_LIMIT_EXCEEDED;
 }
 
-/// Check if only select primary key column, _part_offset and vector search/text search/hybrid search functions. 
-static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const std::vector<String> & read_col_names)
+/// Check if only select primary key column, _part_offset and vector/text/hybrid/sparse search functions.
+static bool isSpecialSearchByPk(const std::vector<String> & pk_col_names, const std::vector<String> & read_col_names)
 {
     size_t pk_col_nums = pk_col_names.size();
     size_t read_col_nums = read_col_names.size();
@@ -51,7 +52,7 @@ static bool isHybridSearchByPk(const std::vector<String> & pk_col_names, const s
     for (const auto & read_col_name : read_col_names)
     {
         if ((read_col_name == pk_col_name) || read_col_name == "_part_offset"
-            || isHybridSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
+            || isSpecialSearchFunc(read_col_name) || isScoreColumnName(read_col_name))
             continue;
         else
         {
@@ -141,10 +142,10 @@ void MergeTreeSelectWithHybridSearchProcessor::initializeRangeReadersWithHybridS
 
     /// consider cache if and only if
     /// 1. this task is vector search and no prewhere info
-    /// 2. primary key is only a column, and select columns are (pk, hybrid_search_func)
+    /// 2. primary key is only a column, and select columns are (pk, special_search_func)
     /// 3. primary key's value is represented by number
     use_primary_key_cache = enable_primary_key_cache && PKCacheManager::isSupportedPrimaryKey(primary_key)
-            && isHybridSearchByPk(primary_key.column_names, ordered_names);
+        && isSpecialSearchByPk(primary_key.column_names, ordered_names);
 
     /// Add _part_offset to non_const_virtual_column_names if part has lightweight delete
     /// prewhere info will be apply on read result
@@ -813,7 +814,7 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     bool can_skip_peform_prefilter = canSkipPrewhereForPart(data_part_, prewhere_info_copy, storage_,
                                         storage_snapshot_->getMetadataForQuery(), context_);
 
-    /// perform vector scan
+    /// perform special search
     if (!prewhere_info_copy || can_skip_peform_prefilter)
     {
         search_manager->executeSearchBeforeRead(data_part_);
@@ -822,7 +823,7 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     {
         /// try to process prewhere here, get part_offset columns
         /// 1 read, then get the filtered part_offsets
-        /// 2 perform vector scan based on part_offsets
+        /// 2 perform special search based on part_offsets
         auto filter = performPrefilter(mark_ranges, prewhere_info_copy, storage_, storage_snapshot_, data_part_,
                                 alter_conversions_, max_block_size, preferred_block_size_bytes_,
                                 preferred_max_column_in_block_size_bytes_, reader_settings_,
@@ -1113,7 +1114,7 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     return filter;
 }
 
-VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes(
+SpecialSearchResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectPartsBySpecialIndexes(
     const RangesInDataParts & parts_with_ranges,
     const StorageMetadataPtr & metadata_snapshot,
     const SelectQueryInfo & query_info,
@@ -1129,9 +1130,9 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     const MergeTreeData & data,
     const MergeTreeReaderSettings & reader_settings_)
 {
-    OpenTelemetry::SpanHolder span("MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes()");
-    VectorAndTextResultInDataParts parts_with_mix_results;
-    if (!query_info.has_hybrid_search)
+    OpenTelemetry::SpanHolder span("MergeTreeSelectWithHybridSearchProcessor::selectPartsBySpecialIndexes()");
+    SpecialSearchResultInDataParts parts_with_mix_results;
+    if (!query_info.has_special_search)
         return parts_with_mix_results;
 
     size_t parts_with_ranges_size = parts_with_ranges.size();
@@ -1147,7 +1148,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
 
     auto & settings = context->getSettingsRef();
 
-    /// Execute vector scan and text search in this part.
+    /// Execute special search in this part.
     auto process_part = [&](size_t part_index)
     {
         auto & part_with_range = parts_with_ranges[part_index];
@@ -1155,9 +1156,9 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         auto & mark_ranges = part_with_range.ranges;
 
         /// Save part_index in parts_with_ranges
-        VectorAndTextResultInDataPart mix_results(part_index, data_part);
+        SpecialSearchResultInDataPart mix_results(part_index, data_part);
 
-        /// Handle three cases: vector scan, full-text seach and hybrid search
+        /// Handle four cases: hybrid search, vector scan, text search and sparse search
         if (query_info.hybrid_search_info)
         {
             auto hybrid_search_mgr = std::make_shared<MergeTreeHybridSearchManager>(metadata_snapshot, query_info.hybrid_search_info,
@@ -1198,7 +1199,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
 #if USE_CUSTOM_SKIP_INDEX
             text_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
-            /// Get vector scan
+            /// Get text search result
             executeSearch(text_search_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
                         max_block_size, settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
                         mark_ranges, prewhere_info_copy, reader_settings_,
@@ -1206,6 +1207,19 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
 
             if (text_search_mgr && text_search_mgr->preComputed())
                 mix_results.text_search_result = text_search_mgr->getSearchResult();
+        }
+        else if (query_info.sparse_search_info)
+        {
+            auto sparse_search_mgr = std::make_shared<MergeTreeSparseSearchManager>(metadata_snapshot, query_info.sparse_search_info, context);
+
+            /// Get sparse search result
+            executeSearch(sparse_search_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
+                        max_block_size, settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
+                        mark_ranges, prewhere_info_copy, reader_settings_,
+                        context, num_streams);
+
+            if (sparse_search_mgr && sparse_search_mgr->preComputed())
+                mix_results.sparse_search_result = sparse_search_mgr->getSearchResult();
         }
 
         parts_with_mix_results[part_index] = std::move(mix_results);

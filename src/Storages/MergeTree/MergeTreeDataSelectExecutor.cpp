@@ -1367,7 +1367,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
 
     selectColumnNames(column_names_to_return, data, real_column_names, virt_column_names, sample_factor_column_queried);
 
-    if (query_info.has_hybrid_search)
+    if (query_info.has_special_search)
     {
         return std::make_unique<ReadWithHybridSearch>(
             std::move(parts),

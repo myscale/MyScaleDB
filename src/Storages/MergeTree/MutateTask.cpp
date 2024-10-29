@@ -709,9 +709,10 @@ static NameToNameVector collectFilesForRenames(
 #if USE_CUSTOM_SKIP_INDEX
             static const std::vector<String> tantivy_suffixes
                 = {TANTIVY_INDEX_META_FILE_SUFFIX, TANTIVY_INDEX_DATA_FILE_SUFFIX}; // tantivy index files
-#endif
+
             static const std::vector<String> sparse_suffixes
                 = {SPARSE_INDEX_META_FILE_SUFFIX, SPARSE_INDEX_DATA_FILE_SUFFIX}; // sparse index files
+#endif
 
             for (const auto & suffix : suffixes)
             {
@@ -739,13 +740,14 @@ static NameToNameVector collectFilesForRenames(
                 if (source_part->checksums.has(filename))
                     rename_vector.emplace_back(filename, "");
             }
-#endif
+
             for (const auto & sparse_suffix : sparse_suffixes)
             {
                 const String filename = INDEX_FILE_PREFIX + command.column_name + sparse_suffix;
                 if (source_part->checksums.has(filename))
                     rename_vector.emplace_back(filename, "");
             }
+#endif
         }
         else if (command.type == MutationCommand::Type::DROP_PROJECTION)
         {

@@ -89,6 +89,9 @@ struct ExpressionAnalyzerData
     bool has_hybrid_search = false;
     HybridSearchInfoPtr hybrid_search_info;
 
+    bool has_sparse_search = false;
+    SparseSearchInfoPtr sparse_search_info;
+
     WindowDescriptions window_descriptions;
     NamesAndTypesList window_columns;
 
@@ -192,7 +195,7 @@ protected:
     const NamesAndTypesList & sourceColumns() const { return syntax->required_source_columns; }
     const std::vector<const ASTFunction *> & aggregates() const { return syntax->aggregates; }
 
-    const std::vector<const ASTFunction *> & hybrid_search_funcs() const { return syntax->hybrid_search_funcs; }
+    const std::vector<const ASTFunction *> & special_search_funcs() const { return syntax->special_search_funcs; }
 
     /// Find global subqueries in the GLOBAL IN/JOIN sections. Fills in external_tables.
     void initGlobalSubqueriesAndExternalTables(bool do_global, bool is_explain);
@@ -225,6 +228,9 @@ protected:
     void analyzeTextSearch(ActionsDAGPtr & temp_actions);
     bool makeTextSearchInfo(ActionsDAGPtr & actions);
 
+    void analyzeSparseSearch(ActionsDAGPtr & temp_actions);
+    bool makeSparseSearchInfo(ActionsDAGPtr & actions);
+
     /// Common logic to generate text search info for hybrid search and text search
     TextSearchInfoPtr commonMakeTextSearchInfo(
         const String & search_name,
@@ -232,6 +238,15 @@ protected:
         const String & function_col_name,
         ASTPtr query_column,
         ASTPtr query_text,
+        int topk,
+        const Array & parameters);
+
+    /// Common logic to generate sparse search info for sparse search
+    SparseSearchInfoPtr commonMakeSparseSearchInfo(
+        const String & search_name,
+        const String & function_col_name,
+        ASTPtr query_column,
+        ASTPtr query_sparse,
         int topk,
         const Array & parameters);
 
@@ -277,6 +292,7 @@ struct ExpressionAnalysisResult
     bool need_vector_scan = false;
     bool need_text_search = false;
     bool need_hybrid_search = false;
+    bool need_sparse_search = false;
     bool has_order_by   = false;
     bool has_window = false;
 
@@ -389,6 +405,7 @@ public:
     bool hasVectorScan() const { return has_vector_scan; }
     bool hasTextSearch() const { return has_text_search; }
     bool hasHybridSearch() const { return has_hybrid_search; }
+    bool hasSparseSearch() const { return has_sparse_search; }
     bool hasWindow() const { return !syntax->window_function_asts.empty(); }
     bool hasGlobalSubqueries() { return has_global_subqueries; }
     bool hasTableJoin() const { return syntax->ast_join; }
@@ -410,6 +427,7 @@ public:
     VSDescriptions & vectorScanDescs() { return vector_scan_descriptions; }
     TextSearchInfoPtr & textSearchInfoPtr() { return text_search_info; }
     HybridSearchInfoPtr & hybridSearchInfoPtr() { return hybrid_search_info; }
+    SparseSearchInfoPtr & sparseSearchInfoPtr() { return sparse_search_info; }
 
     std::unique_ptr<QueryPlan> getJoinedPlan();
 

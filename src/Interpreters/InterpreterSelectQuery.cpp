@@ -101,7 +101,7 @@
 #include "config_version.h"
 #include <Interpreters/Context.h>
 
-#include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
+#include <VectorIndex/Interpreters/GetSpecialSearchVisitor.h>
 #include <VectorIndex/Processors/FusionSortingStep.h>
 
 #if USE_CUSTOM_SKIP_INDEX
@@ -658,10 +658,10 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                                     metadata_snapshot->getColumns().getAllPhysical(), [](const NameAndTypePair & col) { return col.name; })};
                     table_columns.erase(SCORE_COLUMN_NAME);
 
-                    current_info.has_hybrid_search = true;
+                    current_info.has_special_search = true;
                 }
-                else if (syntax_analyzer_result && !syntax_analyzer_result->hybrid_search_funcs.empty())
-                    current_info.has_hybrid_search = true;
+                else if (syntax_analyzer_result && !syntax_analyzer_result->special_search_funcs.empty())
+                    current_info.has_special_search = true;
 
                 Names queried_columns = syntax_analyzer_result->requiredSourceColumns();
                 const auto & supported_prewhere_columns = storage->supportedPrewhereColumns();
@@ -679,8 +679,8 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 
         if (query.prewhere() && query.where())
         {
-            GetHybridSearchMatcher::Visitor::Data where_data;
-            GetHybridSearchMatcher::Visitor(where_data).visit(query.where());
+            GetSpecialSearchVisitor::Data where_data;
+            GetSpecialSearchVisitor(where_data).visit(query.where());
             bool hybrid_search_func_in_where = where_data.vector_scan_funcs.size() > 0 || where_data.text_search_func.size() > 0
                 || where_data.hybrid_search_func.size() > 0;
 
@@ -688,22 +688,22 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             query.setExpression(
                 ASTSelectQuery::Expression::WHERE, makeASTFunction("and", query.prewhere()->clone(), query.where()->clone()));
 
-            /// Hybrid search function in original WHERE clause, remove all ASTFunction in syntax_analyzer_result->hybrid_search_funcs
-            /// and regenerate hybrid_search_funcs from new query_ptr
+            /// Hybrid search function in original WHERE clause, remove all ASTFunction in syntax_analyzer_result->special_search_funcs
+            /// and regenerate special_search_funcs from new query_ptr
             if (hybrid_search_func_in_where)
             {
-                auto & hybrid_search_funcs = const_cast<std::vector<const ASTFunction *> &>(syntax_analyzer_result->hybrid_search_funcs);
-                hybrid_search_funcs.clear();
+                auto & special_search_funcs = const_cast<std::vector<const ASTFunction *> &>(syntax_analyzer_result->special_search_funcs);
+                special_search_funcs.clear();
 
-                GetHybridSearchVisitor::Data data;
-                GetHybridSearchVisitor(data).visit(query_ptr);
+                GetSpecialSearchVisitor::Data data;
+                GetSpecialSearchVisitor(data).visit(query_ptr);
 
                 if (data.vector_scan_funcs.size() >= 1)
                 {
-                    hybrid_search_funcs = data.vector_scan_funcs;
+                    special_search_funcs = data.vector_scan_funcs;
                     if (data.vector_scan_funcs.size() > 1)
                     {
-                        /// As for multiple vector scan functions, the order of new hybrid_search_funcs remain the same as original
+                        /// As for multiple vector scan functions, the order of new special_search_funcs remain the same as original
                         /// So the vector_scan_metric_types and vector_search_types of TreeRewriterResult no need to reset
                         for (const auto & vector_scan_func : data.all_multiple_vector_scan_funcs)
                             vector_scan_func->is_from_multiple_distances = true;
@@ -711,11 +711,15 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 }
                 else if (data.text_search_func.size() == 1)
                 {
-                    hybrid_search_funcs = data.text_search_func;
+                    special_search_funcs = data.text_search_func;
                 }
                 else if (data.hybrid_search_func.size() == 1)
                 {
-                    hybrid_search_funcs = data.hybrid_search_func;
+                    special_search_funcs = data.hybrid_search_func;
+                }
+                else if (data.sparse_search_func.size() == 1)
+                {
+                    special_search_funcs = data.sparse_search_func;
                 }
             }
         }
@@ -2509,17 +2513,22 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         if (analysis_result.need_vector_scan)
         {
             query_info.vector_scan_info = std::make_shared<VectorScanInfo>(query_analyzer->vectorScanDescs());
-            query_info.has_hybrid_search = true;
+            query_info.has_special_search = true;
         }
         if (analysis_result.need_text_search)
         {
             query_info.text_search_info = query_analyzer->textSearchInfoPtr();
-            query_info.has_hybrid_search = true;
+            query_info.has_special_search = true;
         }
         if (analysis_result.need_hybrid_search)
         {
             query_info.hybrid_search_info = query_analyzer->hybridSearchInfoPtr();
-            query_info.has_hybrid_search = true;
+            query_info.has_special_search = true;
+        }
+        if (analysis_result.need_sparse_search)
+        {
+            query_info.sparse_search_info = query_analyzer->sparseSearchInfoPtr();
+            query_info.has_special_search = true;
         }
 
         /// Create optimizer with prepared actions.

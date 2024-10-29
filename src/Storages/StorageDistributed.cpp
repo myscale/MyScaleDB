@@ -1055,7 +1055,7 @@ void StorageDistributed::read(
         throw Exception(ErrorCodes::ILLEGAL_FINAL, "Final modifier is not allowed together with parallel reading from replicas feature");
 
     // Distributed HybridSearch need to split query into vector search and text search
-    if (query_info.has_hybrid_search && query_info.hybrid_search_info && getShardCount() > 1)
+    if (query_info.has_special_search && query_info.hybrid_search_info && getShardCount() > 1)
     {
         return readHybridSearch(query_plan, storage_snapshot, query_info, local_context, processed_stage);
     }

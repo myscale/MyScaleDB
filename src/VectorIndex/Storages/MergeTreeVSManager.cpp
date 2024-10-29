@@ -530,8 +530,8 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
     return tmp_vector_scan_result;
 }
 
-VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
-    const VectorAndTextResultInDataParts & parts_with_mix_results,
+SpecialSearchResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
+    const SpecialSearchResultInDataParts & parts_with_mix_results,
     const ScoreWithPartIndexAndLabels & first_stage_top_results,
     const VSDescription & vector_scan_desc,
     Poco::Logger * log)
@@ -545,7 +545,7 @@ VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
         part_index_merged_map[part_index].emplace_back(score_with_part_index_label);
     }
 
-    VectorAndTextResultInDataParts parts_with_vector_result;
+    SpecialSearchResultInDataParts parts_with_vector_result;
 
     /// Construct new vector scan result for data part existing in top candidates
     for (const auto & mix_results_in_part : parts_with_mix_results)
@@ -584,7 +584,7 @@ VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
                 /// Add result column name
                 tmp_vector_scan_result->name = vector_scan_desc.column_name;
 
-                VectorAndTextResultInDataPart part_with_vector(part_index, mix_results_in_part.data_part);
+                SpecialSearchResultInDataPart part_with_vector(part_index, mix_results_in_part.data_part);
                 part_with_vector.vector_scan_results.emplace_back(tmp_vector_scan_result);
 
                 parts_with_vector_result.emplace_back(std::move(part_with_vector));

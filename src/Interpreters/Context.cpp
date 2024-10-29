@@ -4212,6 +4212,21 @@ void Context::resetHybridSearchInfo() const
     right_hybrid_search_info = nullptr;
 }
 
+SparseSearchInfoPtr Context::getSparseSearchInfo() const
+{
+    return right_sparse_search_info;
+}
+
+void Context::setSparseSearchInfo(SparseSearchInfoPtr sparse_search_info) const
+{
+    right_sparse_search_info = sparse_search_info;
+}
+
+void Context::resetSparseSearchInfo() const
+{
+    right_sparse_search_info = nullptr;
+}
+
 WriteSettings Context::getWriteSettings() const
 {
     WriteSettings res;

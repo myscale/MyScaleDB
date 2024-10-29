@@ -97,7 +97,7 @@ void StorageFullTextSearch::read(
 
     query_info.text_search_info = std::make_shared<TextSearchInfo>(
                 true, index_name, query_text, score_column_name, static_cast<int>(limit_length), text_operator, enable_nlq);
-    query_info.has_hybrid_search = true;
+    query_info.has_special_search = true;
 
     /// Add score column name in result if not exists
     Names new_column_names = column_names;

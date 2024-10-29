@@ -10,12 +10,14 @@ namespace DB
 class IMergeTreeDataPart;
 using DataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
 
-/// Common search result for vector scan, text search and hybrid search
+/// Common search result for vector, text, hybrid and sparse search
 struct CommonSearchResult
 {
     bool computed = false;
     MutableColumns result_columns;
-    String name; /// vector scan function (distance) result column name
+
+    /// Search result column name
+    String name;
 };
 
 using CommonSearchResultPtr = std::shared_ptr<CommonSearchResult>;
@@ -25,13 +27,14 @@ using ManyVectorScanResults = std::vector<VectorScanResultPtr>;
 
 using TextSearchResultPtr = std::shared_ptr<CommonSearchResult>;
 using HybridSearchResultPtr = std::shared_ptr<CommonSearchResult>;
+using SparseSearchResultPtr = std::shared_ptr<CommonSearchResult>;
 
-/// Extend RangesInDataPart to include search result for hybrid, vector scan or text search
+/// Extend RangesInDataPart to include search result for hybrid/vector/text/sparse search
 struct SearchResultAndRangesInDataPart
 {
     RangesInDataPart part_with_ranges;
 
-    /// Valid for text, hybrid search
+    /// Valid for text, hybrid, sparse search
     CommonSearchResultPtr search_result = nullptr;
 
     /// Support multiple distance functions
@@ -57,9 +60,10 @@ struct SearchResultAndRangesInDataPart
 
 using SearchResultAndRangesInDataParts = std::vector<SearchResultAndRangesInDataPart>;
 
-/// Internal structure of intermediate results
-/// Save vector scan and/or text search result for a part
-struct VectorAndTextResultInDataPart
+/// Internal structure of intermediate results for a data part
+/// Save vector scan and text search result for hybrid search
+/// Save vector scan results or text search result or sparse search result for vector/text/sparse search
+struct SpecialSearchResultInDataPart
 {
     /// Other data part info can be accessed by part_index from parts_with_ranges
     size_t part_index;
@@ -68,19 +72,22 @@ struct VectorAndTextResultInDataPart
     /// Valid for text and hybrid search
     TextSearchResultPtr text_search_result = nullptr;
 
+    /// Valid for sparse search
+    SparseSearchResultPtr sparse_search_result = nullptr;
+
     /// Support multiple distance functions
     /// Use the first element for hybrid search and second stage of two-stage vector search
     ManyVectorScanResults vector_scan_results = {};
 
-    VectorAndTextResultInDataPart() = default;
+    SpecialSearchResultInDataPart() = default;
 
-    VectorAndTextResultInDataPart(const size_t part_index_, const DataPartPtr & data_part_)
+    SpecialSearchResultInDataPart(const size_t part_index_, const DataPartPtr & data_part_)
         : part_index{part_index_}
         , data_part{data_part_}
     {}
 };
 
-using VectorAndTextResultInDataParts = std::vector<VectorAndTextResultInDataPart>;
+using SpecialSearchResultInDataParts = std::vector<SpecialSearchResultInDataPart>;
 
 /// Internal struct for a search result with part index and label id
 struct ScoreWithPartIndexAndLabel

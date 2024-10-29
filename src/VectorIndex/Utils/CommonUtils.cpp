@@ -119,6 +119,25 @@ void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys)
     }
 }
 
+void checkSparseSearchColumnDataType(DataTypePtr & data_type)
+{
+    const DataTypeMap * map_type = typeid_cast<const DataTypeMap *>(data_type.get());
+    if (map_type)
+    {
+        WhichDataType which_key(map_type->getKeyType());
+        WhichDataType which_value(map_type->getValueType());
+
+        if (!which_key.isUInt32() || !which_value.isFloat32())
+        {
+            throw Exception(ErrorCodes::INCORRECT_DATA, "The key of the sparse search query vector Map must be `UInt32` and the value must be `Float32`");
+        }
+    }
+    else
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Sparse search can only be used with `Map(UInt32, Float32)` column");
+    }
+}
+
 #if USE_CUSTOM_SKIP_INDEX
 
 /*

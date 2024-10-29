@@ -157,6 +157,8 @@ private:
     mutable TextSearchInfoPtr right_text_search_info;
     /// hybrid search info from joined table
     mutable HybridSearchInfoPtr right_hybrid_search_info;
+    /// sparse search info from joined table
+    mutable SparseSearchInfoPtr right_sparse_search_info;
 
     /// Target type to convert key columns before join
     NameToTypeMap left_type_map;
@@ -375,6 +377,10 @@ public:
     /// Used for hybrid search function
     HybridSearchInfoPtr getHybridSearchInfoPtr() const;
     void setHybridSearchInfoPtr(HybridSearchInfoPtr hybrid_search_info) const;
+
+    /// Used for sparse search function
+    SparseSearchInfoPtr getSparseSearchInfoPtr() const;
+    void setSparseSearchInfoPtr(SparseSearchInfoPtr sparse_search_info) const;
 };
 
 }

@@ -74,8 +74,8 @@ public:
         const VectorScanResultPtr & first_stage_vec_result);
 
     /// Split num_reorder candidates based on part index: part + vector scan results from first stage
-    static VectorAndTextResultInDataParts splitFirstStageVSResult(
-        const VectorAndTextResultInDataParts & parts_with_mix_results,
+    static SpecialSearchResultInDataParts splitFirstStageVSResult(
+        const SpecialSearchResultInDataParts & parts_with_mix_results,
         const ScoreWithPartIndexAndLabels & first_stage_top_results,
         const VSDescription & vector_scan_desc,
         Poco::Logger * log);

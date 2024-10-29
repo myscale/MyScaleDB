@@ -114,8 +114,8 @@ void optimizeGroupBy(ASTSelectQuery * select_query, ContextPtr context)
     {
         if (const auto * function = group_exprs[i]->as<ASTFunction>())
         {
-            /// Skip vector scan, text search and hybrid search function
-            if (isHybridSearchFunc(function->name))
+            /// Skip some special functions (vector scan, text search, hybrid search and sparse search)
+            if (isSpecialSearchFunc(function->name))
             {
                 ++i;
                 continue;

@@ -45,6 +45,9 @@ using TextSearchInfoPtr = std::shared_ptr<const TextSearchInfo>;
 struct HybridSearchInfo;
 using HybridSearchInfoPtr = std::shared_ptr<const HybridSearchInfo>;
 
+struct SparseSearchInfo;
+using SparseSearchInfoPtr = std::shared_ptr<const SparseSearchInfo>;
+
 struct TreeRewriterResult;
 using TreeRewriterResultPtr = std::shared_ptr<const TreeRewriterResult>;
 
@@ -243,9 +246,10 @@ struct SelectQueryInfo
     VectorScanInfoPtr vector_scan_info;
     TextSearchInfoPtr text_search_info;
     HybridSearchInfoPtr hybrid_search_info;
+    SparseSearchInfoPtr sparse_search_info;
 
-    /// If query has one of text search, vector scan and hybrid search functions
-    bool has_hybrid_search = false;
+    /// If query has one of vector / text / hybrid / sparse search functions
+    bool has_special_search = false;
 
     /// Prepared sets are used for indices by storage engine.
     /// Example: x IN (1, 2, 3)

@@ -51,8 +51,9 @@ struct TreeRewriterResult
     std::vector<const ASTFunction *> window_function_asts;
 
     std::vector<const ASTFunction *> expressions_with_window_function;
-    std::vector<const ASTFunction *> hybrid_search_funcs;
-    HybridSearchFuncType search_func_type = HybridSearchFuncType::UNKNOWN_FUNC;
+
+    std::vector<const ASTFunction *> special_search_funcs;
+    SpecialSearchFuncType search_func_type = SpecialSearchFuncType::UNKNOWN_FUNC;
 
     /// Save vector scan metric_type
     std::vector<String> vector_scan_metric_types;
@@ -110,8 +111,8 @@ struct TreeRewriterResult
     NameSet getArrayJoinSourceNameSet() const;
     const Scalars & getScalars() const { return scalars; }
 
-    /// Special handings for vector scan / text / hybrid search funcs: get limit_length, cases when search func in right joined table
-    void collectForHybridSearchRelatedFunctions(
+    /// Special handlings for vector scan / text / hybrid / sparse search funcs: get limit_length, cases when search func in right joined table
+    void collectForSpecialSearchRelatedFunctions(
         ASTSelectQuery * select_query,
         const std::vector<TableWithColumnNamesAndTypes> & tables_with_columns,
         ContextPtr context);

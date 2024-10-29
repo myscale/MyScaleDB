@@ -86,11 +86,12 @@
 #include <Common/logger_useful.h>
 
 #include <VectorIndex/Common/VICommon.h>
-#include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
+#include <VectorIndex/Interpreters/GetSpecialSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
 #include <VectorIndex/Utils/VIUtils.h>
 #include <VectorIndex/Utils/HybridSearchUtils.h>
 #include <AggregateFunctions/parseAggregateFunctionParameters.h>
+#include <Storages/MergeTree/MergeTreeIndexSparse.h>
 
 namespace DB
 {
@@ -108,6 +109,7 @@ namespace ErrorCodes
     extern const int NOT_IMPLEMENTED;
     extern const int UNKNOWN_IDENTIFIER;
     extern const int UNKNOWN_TYPE_OF_AST_NODE;
+    extern const int ILLEGAL_SPARSE_SEARCH;
 }
 
 namespace
@@ -160,6 +162,31 @@ inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage
     if (!find_tantivy_index)
     {
         throw Exception(ErrorCodes::ILLEGAL_TEXT_SEARCH, "The column {} has no fts index for text search", text_column_name);
+    }
+}
+
+inline void checkSparseIndex([[maybe_unused]] const StorageSnapshotPtr & storage_snapshot, [[maybe_unused]] const String & sparse_column_name)
+{
+    bool find_sparse_index = false;
+#if USE_CUSTOM_SKIP_INDEX
+    if (storage_snapshot && storage_snapshot->metadata)
+    {
+        auto metadata_snapshot = storage_snapshot->metadata;
+
+        for (const auto & index_desc : metadata_snapshot->getSecondaryIndices())
+        {
+            /// Find sparse index on the search column
+            if (index_desc.type == SPARSE_INDEX_NAME && index_desc.column_names.size() == 1 && index_desc.column_names[0] == sparse_column_name)
+            {
+                find_sparse_index = true;
+                break;
+            }
+        }
+    }
+#endif
+    if (!find_sparse_index)
+    {
+        throw Exception(ErrorCodes::ILLEGAL_SPARSE_SEARCH, "The column {} has no sparse index for sparse search", sparse_column_name);
     }
 }
 
@@ -320,6 +347,7 @@ ExpressionAnalyzer::ExpressionAnalyzer(
     analyzeHybridSearch(temp_actions);
     analyzeVectorScan(temp_actions);
     analyzeTextSearch(temp_actions);
+    analyzeSparseSearch(temp_actions);
 }
 
 NamesAndTypesList ExpressionAnalyzer::getColumnsAfterArrayJoin(ActionsDAGPtr & actions, const NamesAndTypesList & src_columns)
@@ -565,7 +593,7 @@ void ExpressionAnalyzer::analyzeAggregation(ActionsDAGPtr & temp_actions)
 /// put vector scan ops column name into aggregated_columns
 void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
 {
-    if (syntax->search_func_type == HybridSearchFuncType::VECTOR_SCAN && !syntax->hybrid_search_funcs.empty())
+    if (syntax->search_func_type == SpecialSearchFuncType::VECTOR_SCAN && !syntax->special_search_funcs.empty())
         has_vector_scan = makeVectorScanDescriptions(temp_actions);
     else if (auto vec_scan_descs = getContext()->getVecScanDescriptions())
     {
@@ -588,7 +616,7 @@ void ExpressionAnalyzer::analyzeVectorScan(ActionsDAGPtr & temp_actions)
 
 void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
 {
-    if (syntax->search_func_type == HybridSearchFuncType::TEXT_SEARCH && !syntax->hybrid_search_funcs.empty())
+    if (syntax->search_func_type == SpecialSearchFuncType::TEXT_SEARCH && !syntax->special_search_funcs.empty())
     {
         has_text_search = makeTextSearchInfo(temp_actions);
     }
@@ -608,9 +636,31 @@ void ExpressionAnalyzer::analyzeTextSearch(ActionsDAGPtr & temp_actions)
         checkTantivyIndex(syntax->storage_snapshot, text_search_info->text_column_name);
 }
 
+void ExpressionAnalyzer::analyzeSparseSearch(ActionsDAGPtr & temp_actions)
+{
+    if (syntax->search_func_type == SpecialSearchFuncType::SPARSE_SEARCH && !syntax->special_search_funcs.empty())
+    {
+        has_sparse_search = makeSparseSearchInfo(temp_actions);
+    }
+    else if (auto right_sparse_search_info = getContext()->getSparseSearchInfo())
+    {
+        if (syntax->storage_snapshot)
+        {
+            LOG_DEBUG(getLogger(), "[analyzeSparseSearch] Get sparse search function from right table");
+            sparse_search_info = right_sparse_search_info;
+            has_sparse_search = true;
+        }
+    }
+
+    /// Sparse search cannot be performed when no sparse index exists
+    /// Skip the sparse index check when table is distributed.
+    if (!syntax->is_remote_storage && has_sparse_search)
+        checkSparseIndex(syntax->storage_snapshot, sparse_search_info->sparse_column_name);
+}
+
 void ExpressionAnalyzer::analyzeHybridSearch(ActionsDAGPtr & temp_actions)
 {
-    if (syntax->search_func_type == HybridSearchFuncType::HYBRID_SEARCH && !syntax->hybrid_search_funcs.empty())
+    if (syntax->search_func_type == SpecialSearchFuncType::HYBRID_SEARCH && !syntax->special_search_funcs.empty())
         has_hybrid_search = makeHybridSearchInfo(temp_actions);
     else if (auto right_hybrid_search_info = getContext()->getHybridSearchInfo())
     {
@@ -965,9 +1015,9 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
 /// create vector scan descriptions, mainly record the column name and parameters
 bool ExpressionAnalyzer::makeVectorScanDescriptions(ActionsDAGPtr & actions)
 {
-    for (size_t i = 0; i < hybrid_search_funcs().size(); ++i)
+    for (size_t i = 0; i < special_search_funcs().size(); ++i)
     {
-        const ASTFunction * node = hybrid_search_funcs()[i];
+        const ASTFunction * node = special_search_funcs()[i];
 
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
 
@@ -1116,11 +1166,122 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
     return std::make_shared<TextSearchInfo>(text_column_name, query_text_value, function_col_name, topk, text_operator, enable_natural_language_query);
 }
 
+/// create sparse search info, used by SparseSearch
+SparseSearchInfoPtr ExpressionAnalyzer::commonMakeSparseSearchInfo(
+    const String & search_name,
+    const String & function_col_name,
+    ASTPtr query_column,
+    ASTPtr query_sparse,
+    int topk,
+    const Array & parameters)
+{
+    String sparse_column_name;
+    if (auto * identifier = query_column->as<ASTIdentifier>())
+        sparse_column_name = identifier->shortName();
+    else
+        sparse_column_name = query_column->getColumnName();
+
+    std::unordered_map<UInt32, Float32> query_sparse_vector;
+
+    /// The query sparse vector only can be created by map or mapFromArrays function
+    /// Execute the ASTFunction to get the query sparse vector column
+    if (query_sparse->as<ASTFunction>())
+    {
+        Block temp_block = {{DataTypeUInt8().createColumnConst(1, 0), std::make_shared<DataTypeUInt8>(), "_dummy"}};
+        ColumnPtr query_sparse_column;
+        try
+        {
+            auto function_ast = query_sparse->clone();
+            auto syntax_result = TreeRewriter(getContext()).analyze(function_ast, {{"_dummy", std::make_shared<DataTypeUInt8>()}});
+            auto tmp_actions = ExpressionAnalyzer(function_ast, syntax_result, getContext()).getActions(false);
+
+            tmp_actions->execute(temp_block, false);
+            auto query_sparse_column_with_type = temp_block.findByName(query_sparse->getColumnName());
+
+            if (!isColumnConst(*query_sparse_column_with_type->column))
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "Wrong const query sparse vector type for argument {} in SparseSearch function",
+                    query_sparse->getColumnName());
+
+            const ColumnConst * query_sparse_column_const = assert_cast<const ColumnConst *>(query_sparse_column_with_type->column.get());
+            query_sparse_column = query_sparse_column_const->getDataColumnPtr();
+        }
+        catch (...)
+        {
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "An exception occurred while executing the argument {} in SparseSearch function",
+                query_sparse->getColumnName());
+        }
+
+        const ColumnMap * map_column = checkAndGetColumn<ColumnMap>(query_sparse_column.get());
+
+        if (!map_column)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query sparse vector type in SparseSearch function, expected const Map type.");
+
+        const ColumnTuple & nested_data = map_column->getNestedData();
+        const auto & key_column = nested_data.getColumn(0);
+        const auto & val_column = nested_data.getColumn(1);
+
+        WhichDataType key_type(key_column.getDataType());
+        WhichDataType val_type(val_column.getDataType());
+        if ((key_type.isUInt8() || key_type.isUInt16() || key_type.isUInt32()) && val_type.isFloat())
+        {
+            for (size_t i = 0; i < key_column.size(); ++i)
+            {
+                query_sparse_vector[static_cast<UInt32>(key_column.getUInt(i))] = val_column.getFloat32(i);
+            }
+        }
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query sparse vector type in SparseSearch function, expected const Map<UInt32, Float32> type.");
+    }
+    else
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query sparse vector type in SparseSearch function, expected const Map type.");
+
+    LOG_DEBUG(
+        getLogger(),
+        "[commonMakeSparseSearchInfo] sparse search_column: {}, query_column: {}",
+        sparse_column_name,
+        query_sparse->getColumnName());
+
+    SparseSearchInfo::SearchMode search_mode;
+    for (const auto & arg : parameters)
+    {
+        if (arg.getType() != Field::Types::String)
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "All parameters inside {} function must be key-value format string, separated by `=`.",
+                search_name);
+
+        String param_str = arg.get<String>();
+        auto pos = param_str.find('=');
+        if (pos == std::string::npos || pos == 0 || pos == param_str.length())
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "The parameter {} inside {} function should be key-value format string, separated by `=`.",
+                param_str,
+                search_name);
+
+        String param_key = param_str.substr(0, pos);
+        String param_value = param_str.substr(pos + 1);
+
+        if (param_key == "search_mode")
+        {
+            search_mode = SparseSearchInfo::strToSparseMode(param_value);
+        }
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown parameter {} for SparseSearch", param_key);
+    }
+
+    return std::make_shared<SparseSearchInfo>(sparse_column_name, query_sparse_vector, function_col_name, topk, search_mode);
+}
+
 bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
 {
-    if (hybrid_search_funcs().size() == 1 && hybrid_search_funcs()[0])
+    if (special_search_funcs().size() == 1 && special_search_funcs()[0])
     {
-        const ASTFunction * node = hybrid_search_funcs()[0];
+        const ASTFunction * node = special_search_funcs()[0];
 
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
         if (arguments.size() != 2)
@@ -1147,12 +1308,45 @@ bool ExpressionAnalyzer::makeTextSearchInfo(ActionsDAGPtr & actions)
     return text_search_info != nullptr;
 }
 
+bool ExpressionAnalyzer::makeSparseSearchInfo(ActionsDAGPtr & actions)
+{
+    if (special_search_funcs().size() == 1 && special_search_funcs()[0])
+    {
+        const ASTFunction * node = special_search_funcs()[0];
+
+        const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
+        if (arguments.size() != 2)
+        {
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS, "Wrong argument number in SparseSearch function: expected 2, got {}", arguments.size());
+        }
+
+        Array parameters = (node->parameters) ? getAggregateFunctionParametersArray(node->parameters, "", getContext()) : Array();
+
+        /// Only need actions for the second argument, the first argument is used for search index.
+        getRootActionsNoMakeSet(arguments[1], actions);
+
+        auto tmp_sparse_search_info = commonMakeSparseSearchInfo(
+            "SparseSearch", node->getColumnName(), arguments[0], arguments[1], static_cast<int>(syntax->limit_length), parameters);
+        LOG_DEBUG(getLogger(), "[makeSparseSearchInfo] create sparse search function: {}", node->name);
+
+        if (syntax->hybrid_search_from_right_table)
+        {
+            analyzedJoin().setSparseSearchInfoPtr(tmp_sparse_search_info);
+        }
+        else
+            sparse_search_info = tmp_sparse_search_info;
+    }
+
+    return sparse_search_info != nullptr;
+}
+
 /// create hybrid search info, mainly record the column name and parameters
 bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAGPtr & actions)
 {
-    if (hybrid_search_funcs().size() == 1 && hybrid_search_funcs()[0])
+    if (special_search_funcs().size() == 1 && special_search_funcs()[0])
     {
-        const ASTFunction * node = hybrid_search_funcs()[0];
+        const ASTFunction * node = special_search_funcs()[0];
 
         const ASTs & arguments = node->arguments ? node->arguments->children : ASTs();
         if (arguments.size() != 4)
@@ -1778,6 +1972,14 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
        context->setHybridSearchInfo(hybrid_search_info);
     }
 
+    /// Add sparse search info to Context for subquery of joined table
+    bool has_sparse_search = false;
+    if (auto sparse_search_info = analyzed_join.getSparseSearchInfoPtr())
+    {
+        has_sparse_search = true;
+        context->setSparseSearchInfo(sparse_search_info);
+    }
+
     /// Actions which need to be calculated on joined block.
     auto joined_block_actions = createJoinedBlockActions(context, analyzed_join);
     NamesWithAliases required_columns_with_aliases = analyzed_join.getRequiredColumns(
@@ -1829,6 +2031,8 @@ static std::unique_ptr<QueryPlan> buildJoinedPlan(
         context->resetTextSearchInfo();
     else if (has_hybrid_search)
         context->resetHybridSearchInfo();
+    else if (has_sparse_search)
+        context->resetSparseSearchInfo();
 
     return joined_plan;
 }
@@ -2533,6 +2737,7 @@ ExpressionAnalysisResult::ExpressionAnalysisResult(
     , need_vector_scan(query_analyzer.hasVectorScan())
     , need_text_search(query_analyzer.hasTextSearch())
     , need_hybrid_search(query_analyzer.hasHybridSearch())
+    , need_sparse_search(query_analyzer.hasSparseSearch())
     , has_window(query_analyzer.hasWindow())
     , use_grouping_set_key(query_analyzer.useGroupingSetKey())
 {

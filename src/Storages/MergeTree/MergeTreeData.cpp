@@ -3136,6 +3136,13 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
             ErrorCodes::SUPPORT_IS_DISABLED,
             "Experimental Fts Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
     }
+
+    if (commands.hasSparseIndex(new_metadata) && !settings.allow_experimental_inverted_index)
+    {
+        throw Exception(
+            ErrorCodes::SUPPORT_IS_DISABLED,
+            "Experimental Sparse Index feature is not enabled (turn on setting 'allow_experimental_inverted_index')");
+    }
 #endif
 
     /// Set of columns that shouldn't be altered.
