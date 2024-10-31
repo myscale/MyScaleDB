@@ -361,7 +361,6 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
     /// As for Distributd table, the statistic info is already collected in the sclalar block
     if (getContext()->hasScalar("_fts_statistic_info"))
     {
-        OpenTelemetry::SpanHolder span_text_stats("read_with_hybrid_search get_statistics_for_text_search()-distributed");
         Block block = getContext()->getScalar("_fts_statistic_info");
         if (block.rows() != 1)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Got the wrong Fts statistics info for Distributed BM25 calculation");

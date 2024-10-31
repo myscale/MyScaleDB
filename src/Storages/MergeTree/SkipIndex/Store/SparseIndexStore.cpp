@@ -82,4 +82,42 @@ bool SparseIndexStore::indexSparseVector(
     return true;
 }
 
+rust::Vec<SPARSE::TupleElement> mapToVector(const std::unordered_map<uint32_t, float> & sparse_vector)
+{
+    rust::Vec<SPARSE::TupleElement> vector;
+    vector.reserve(sparse_vector.size()); // Pre-allocate memory for efficiency
+
+    for (const auto & pair : sparse_vector)
+    {
+        SPARSE::TupleElement element;
+        element.dim_id = pair.first;
+        element.weight_f32 = pair.second;
+        element.weight_u8 = 0; // not used in this context
+        element.weight_u32 = 0; // not used in this context
+        element.value_type = 0; // indicating float type is used
+
+        vector.push_back(element);
+    }
+
+    return vector;
+}
+
+rust::Vec<SPARSE::ScoredPointOffset> SparseIndexStore::sparseSearch(
+    const std::unordered_map<uint32_t, float> & sparse_vector, uint32_t topk, const rust::Vec<uint8_t> & u8_alived_bitmap)
+{
+    DB::OpenTelemetry::SpanHolder span("sparse_index_store::sparse_search");
+    if (!this->index_reader_status)
+        this->loadIndexReader();
+
+    // rust::cxxbridge1::Vec<uint8_t> u8_alived_bitmap = {};
+
+    SPARSE::FFIScoreResult result = SPARSE::ffi_sparse_search(
+        this->index_files_manager->getFullIndexPathInCache(), mapToVector(sparse_vector), u8_alived_bitmap, topk);
+
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::SPARSE_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
+}
 }

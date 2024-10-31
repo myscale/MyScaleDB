@@ -133,7 +133,7 @@ rust::cxxbridge1::Vec<std::uint8_t> TantivyIndexStore::termsQueryBitmap(String c
 }
 
 rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> TantivyIndexStore::bm25Search(
-    String /* sentence */, bool /* enable_nlq */, bool /* operator_or */, TANTIVY::Statistics & /* statistics */, size_t /* topk */, std::vector<String> /* column_names */)
+    String sentence, bool enable_nlq, bool operator_or, TANTIVY::Statistics & statistics, size_t topk, std::vector<String> column_names)
 {
     DB::OpenTelemetry::SpanHolder span("tantivy_index_store::bm25_search");
     if (!this->index_reader_status)
@@ -141,74 +141,67 @@ rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> TantivyIndexStore::bm25Search(
 
     std::vector<uint8_t> u8_alived_bitmap;
 
-    TANTIVY::FFIVecRowIdWithScoreResult emptyResult;
-    return emptyResult.result;
+    TANTIVY::FFIVecRowIdWithScoreResult result = TANTIVY::ffi_bm25_search(
+        this->index_files_manager->getFullIndexPathInCache(),
+        sentence,
+        column_names,
+        static_cast<uint32_t>(topk),
+        u8_alived_bitmap,
+        false,
+        enable_nlq,
+        operator_or,
+        statistics);
 
-    // TANTIVY::FFIVecRowIdWithScoreResult result = TANTIVY::ffi_bm25_search(
-    //     this->index_files_manager->getFullIndexPathInCache(),
-    //     sentence,
-    //     column_names,
-    //     static_cast<uint32_t>(topk),
-    //     u8_alived_bitmap,
-    //     false,
-    //     enable_nlq,
-    //     operator_or,
-    //     statistics);
-
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
 }
 
 rust::cxxbridge1::Vec<TANTIVY::RowIdWithScore> TantivyIndexStore::bm25SearchWithFilter(
-    String /* sentence */,
-    bool /* enable_nlq */,
-    bool /* operator_or */,
-    TANTIVY::Statistics & /* statistics */,
-    size_t /* topk */,
-    const std::vector<uint8_t> & /* u8_alived_bitmap */,
-    std::vector<String> /* column_names */)
+    String sentence,
+    bool enable_nlq,
+    bool operator_or,
+    TANTIVY::Statistics & statistics,
+    size_t topk,
+    const std::vector<uint8_t> & u8_alived_bitmap,
+    std::vector<String> column_names)
 {
-    DB::OpenTelemetry::SpanHolder span("TantivyIndexStore::bm25_search_with_filter");
     if (!this->index_reader_status)
         this->loadIndexReader();
 
-    TANTIVY::FFIVecRowIdWithScoreResult emptyResult;
-    return emptyResult.result;
-    
-    // TANTIVY::FFIVecRowIdWithScoreResult result = TANTIVY::ffi_bm25_search(
-    //     this->index_files_manager->getFullIndexPathInCache(),
-    //     sentence,
-    //     column_names,
-    //     static_cast<uint32_t>(topk),
-    //     u8_alived_bitmap,
-    //     true,
-    //     enable_nlq,
-    //     operator_or,
-    //     statistics);
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    {
+        DB::OpenTelemetry::SpanHolder span("TantivyIndexStore::bm25_search_with_filter");
+        TANTIVY::FFIVecRowIdWithScoreResult result = TANTIVY::ffi_bm25_search(
+            this->index_files_manager->getFullIndexPathInCache(),
+            sentence,
+            column_names,
+            static_cast<uint32_t>(topk),
+            u8_alived_bitmap,
+            true,
+            enable_nlq,
+            operator_or,
+            statistics);
+        if (result.error.is_error)
+        {
+            throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+        }
+        return result.result;
+    }
 }
 
-rust::cxxbridge1::Vec<TANTIVY::DocWithFreq> TantivyIndexStore::getDocFreq(String /* sentence */)
+rust::cxxbridge1::Vec<TANTIVY::DocWithFreq> TantivyIndexStore::getDocFreq(String sentence)
 {
     if (!this->index_reader_status)
         this->loadIndexReader();
 
-    TANTIVY::FFIVecDocWithFreqResult emptyResult;
-    return emptyResult.result;
-
-    // TANTIVY::FFIVecDocWithFreqResult result = TANTIVY::ffi_get_doc_freq(this->index_files_manager->getFullIndexPathInCache(), sentence);
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    TANTIVY::FFIVecDocWithFreqResult result = TANTIVY::ffi_get_doc_freq(this->index_files_manager->getFullIndexPathInCache(), sentence);
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
 }
 
 UInt64 TantivyIndexStore::getTotalNumDocs()
@@ -216,15 +209,12 @@ UInt64 TantivyIndexStore::getTotalNumDocs()
     if (!this->index_reader_status)
         this->loadIndexReader();
 
-    TANTIVY::FFIU64Result emptyResult;
-    return emptyResult.result;
-
-    // TANTIVY::FFIU64Result result = TANTIVY::ffi_get_total_num_docs(this->index_files_manager->getFullIndexPathInCache());
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    TANTIVY::FFIU64Result result = TANTIVY::ffi_get_total_num_docs(this->index_files_manager->getFullIndexPathInCache());
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
 }
 
 rust::cxxbridge1::Vec<TANTIVY::FieldTokenNums> TantivyIndexStore::getTotalNumTokens()
@@ -232,15 +222,12 @@ rust::cxxbridge1::Vec<TANTIVY::FieldTokenNums> TantivyIndexStore::getTotalNumTok
     if (!this->index_reader_status)
         this->loadIndexReader();
 
-    TANTIVY::FFIFieldTokenNumsResult emptyResult;
-    return emptyResult.result;
-
-    // TANTIVY::FFIFieldTokenNumsResult result = TANTIVY::ffi_get_total_num_tokens(this->index_files_manager->getFullIndexPathInCache());
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    TANTIVY::FFIFieldTokenNumsResult result = TANTIVY::ffi_get_total_num_tokens(this->index_files_manager->getFullIndexPathInCache());
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
 }
 
 UInt64 TantivyIndexStore::getIndexedDocsNum()
@@ -248,15 +235,12 @@ UInt64 TantivyIndexStore::getIndexedDocsNum()
     if (!this->index_reader_status)
         this->loadIndexReader();
 
-    TANTIVY::FFIU64Result emptyResult;
-    return emptyResult.result;
-
-    // TANTIVY::FFIU64Result result = TANTIVY::ffi_get_indexed_doc_counts(this->index_files_manager->getFullIndexPathInCache());
-    // if (result.error.is_error)
-    // {
-    //     throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
-    // }
-    // return result.result;
+    TANTIVY::FFIU64Result result = TANTIVY::ffi_get_indexed_doc_counts(this->index_files_manager->getFullIndexPathInCache());
+    if (result.error.is_error)
+    {
+        throw DB::Exception(ErrorCodes::TANTIVY_SEARCH_INTERNAL_ERROR, "{}", std::string(result.error.message));
+    }
+    return result.result;
 }
 
 }
