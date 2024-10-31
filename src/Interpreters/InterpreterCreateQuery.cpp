@@ -2024,7 +2024,6 @@ BlockIO InterpreterCreateQuery::execute()
 {
     FunctionNameNormalizer::visit(query_ptr.get());
     auto & create = query_ptr->as<ASTCreateQuery &>();
-    // LOG_DEBUG(log, "[create] query: {}", create.dumpTree());
     bool is_create_database = create.database && !create.table;
     if (!create.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {

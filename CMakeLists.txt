@@ -512,8 +512,8 @@ endfunction (add_native_target)
 set(CONFIG_INCLUDE_PATH ${CMAKE_CURRENT_BINARY_DIR}/includes/configs CACHE INTERNAL "Path to generated configuration files.")
 include_directories(${CONFIG_INCLUDE_PATH})
 
-find_package(OpenMP REQUIRED)
-link_libraries(OpenMP::OpenMP_CXX)
+# find_package(OpenMP REQUIRED)
+# link_libraries(OpenMP::OpenMP_CXX)
 
 # Add as many warnings as possible for our own code.
 include (cmake/warnings.cmake)

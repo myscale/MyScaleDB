@@ -73,7 +73,6 @@ AccessEntityPtr deserializeAccessEntityImpl(const String & definition)
     std::shared_ptr<RowPolicy> policy;
     std::shared_ptr<Quota> quota;
     std::shared_ptr<SettingsProfile> profile;
-    std::shared_ptr<AWSConnection> connection;
     AccessEntityPtr res;
 
     for (const auto & query : queries)

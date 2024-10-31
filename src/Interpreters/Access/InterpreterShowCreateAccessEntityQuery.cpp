@@ -23,7 +23,6 @@
 #include <Access/RowPolicy.h>
 #include <Access/SettingsProfile.h>
 #include <Access/User.h>
-#include <Access/AWSConnection.h>
 #include <Columns/ColumnString.h>
 #include <Common/StringUtils.h>
 #include <Core/Defines.h>
@@ -416,11 +415,6 @@ AccessRightsElements InterpreterShowCreateAccessEntityQuery::getRequiredAccess()
         case AccessEntityType::QUOTA:
         {
             res.emplace_back(AccessType::SHOW_QUOTAS);
-            return res;
-        }
-        case AccessEntityType::CONNECTION: 
-        {
-            res.emplace_back(AccessType::SHOW_CONNECTIONS);
             return res;
         }
         case AccessEntityType::MAX:

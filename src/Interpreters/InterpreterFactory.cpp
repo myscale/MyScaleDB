@@ -57,7 +57,6 @@
 #include <Parsers/ASTDescribeCacheQuery.h>
 
 #include <Interpreters/InterpreterFactory.h>
-#include <Interpreters/InterpreterCreateConnectionQuery.h>
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>

@@ -102,19 +102,13 @@
 #include <Common/checkStackSize.h>
 #include <Common/scope_guard_safe.h>
 #include <Common/typeid_cast.h>
-
-<<<<<<< HEAD
+#include <Interpreters/Context.h>
 
 namespace ProfileEvents
 {
     extern const Event SelectQueriesWithSubqueries;
     extern const Event QueriesWithSubqueries;
 }
-=======
-#include "config_version.h"
-#include <Interpreters/Context.h>
-
->>>>>>> f87df602ff6... squash of 1-664
 
 namespace DB
 {

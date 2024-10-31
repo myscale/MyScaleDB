@@ -135,7 +135,5 @@ private:
 
     mutable String as_database_saved;
     mutable String as_table_saved;
-
-    Poco::Logger * log = &Poco::Logger::get("InterpreterCreateQuery");
 };
 }

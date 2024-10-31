@@ -110,13 +110,6 @@ String InterpreterShowAccessEntitiesQuery::getRewrittenQuery() const
             }
             break;
         }
-
-        case AccessEntityType::CONNECTION:
-        {
-            origin = "connections";
-            expr = "name";
-            break;
-        }
  
         case AccessEntityType::MAX:
             break;
