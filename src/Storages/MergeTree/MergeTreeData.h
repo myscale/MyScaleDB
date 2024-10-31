@@ -240,7 +240,6 @@ public:
     using DataPartsVector = std::vector<DataPartPtr>;
 
     DataPartsLock lockParts() const { return DataPartsLock(data_parts_mutex); }
-    DataPartsLock tryLockParts() const { return DataPartsLock(data_parts_mutex, std::try_to_lock); }
 
     using OperationDataPartsLock = std::unique_lock<std::mutex>;
     OperationDataPartsLock lockOperationsWithParts() const { return OperationDataPartsLock(operation_with_data_parts_mutex); }

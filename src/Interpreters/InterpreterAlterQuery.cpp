@@ -209,6 +209,7 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
                 }
             }
 
+            auto metadata_snapshot = table->getInMemoryMetadataPtr();
             if (mut_command->type == MutationCommand::DELETE && metadata_snapshot->hasVectorIndices())
                 throw Exception(ErrorCodes::QUERY_NOT_ALLOWED,
                     "ALTER TABLE ... DELETE is not allowed for table {} with vector index. Please use DELETE FROM instead",

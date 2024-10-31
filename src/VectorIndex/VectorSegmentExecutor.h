@@ -221,7 +221,7 @@ public:
         auto new_ids = result->getResultIndices();
 
         std::vector<UInt64> real_row_ids;
-        std::vector<DB::Float32> distances;
+        std::vector<Float32> distances;
         for (int i = 0; i < result->getNumCandidates(); i++)
         {
             auto new_row_id = new_ids[i];

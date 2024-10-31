@@ -1394,7 +1394,18 @@ void IMergeTreeDataPart::loadVectorIndexChecksums(bool need_convert_index_file)
                     assertEOF(*buf);
 
                 /// check vector index files consistency
-                vector_index_checksums.checkSizes(getDataPartStorage());
+                const auto & data_part_storage = getDataPartStorage();
+                for (const auto & [filename, vector_index_checksum] : vector_index_checksums.files)
+                {
+                    try
+                    {
+                        vector_index_checksum.checkSize(data_part_storage, filename);
+                    }
+                    catch (const Exception &)
+                    {
+                        throw;
+                    }
+                }
 
                 LOG_DEBUG(storage.log, "Fill vector index {} checksums for part {}", vector_index_name, name);
                 {
@@ -2350,16 +2361,14 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
         return std::nullopt;
 
     NamesAndTypesList cols;
-    cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
+    cols.emplace_back(RowExistsColumn::name, RowExistsColumn::type);
 
     MutableColumns buffered_columns;
     buffered_columns.resize(1);
-    buffered_columns[0] = LightweightDeleteDescription::FILTER_COLUMN.type->createColumn();
+    buffered_columns[0] = RowExistsColumn::type->createColumn();
 
     StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
     StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr, storage.getContext());
-
-    MergeTreeReaderSettings reader_settings;
 
     if (getMarksCount() == 0)
     {
@@ -2369,11 +2378,13 @@ std::optional<ColumnPtr> IMergeTreeDataPart::readRowExistsColumn() const
 
     MergeTreeReaderPtr reader = getReader(
             cols,
-            storage_snapshot_ptr->metadata,
+            storage_snapshot_ptr,
             MarkRanges{MarkRange(0, getMarksCount())},
+            /*virtual_fields=*/ {},
             nullptr,
             storage.getContext()->getMarkCache().get(),
-            reader_settings,
+            std::make_shared<AlterConversions>(),
+            MergeTreeReaderSettings{},
             ValueSizeMap{},
             ReadBufferFromFileBase::ProfileCallback{});
 

@@ -543,11 +543,6 @@ public:
                           const MergeTreeData::DataPartPtr & right,
                           PreformattedMessage & out_reason) const;
 
-    /// Can we merge two parts with vector index?
-    static bool canMergeWithVectorIndex(const MergeTreeData::DataPartPtr & left,
-                                 const MergeTreeData::DataPartPtr & right,
-                                 String * out_reason = nullptr);
-
     /// Can we assign a merge this part and some other part?
     /// For example a merge of a part and itself is needed for TTL.
     /// This predicate is checked for the first part of each range.
@@ -585,6 +580,11 @@ class LocalMergePredicate : public BaseMergePredicate<ActiveDataPartSet, Replica
 {
 public:
     explicit LocalMergePredicate(ReplicatedMergeTreeQueue & queue_);
+
+    /// Can we merge two parts with vector index?
+    static bool canMergeWithVectorIndex(const MergeTreeData::DataPartPtr & left,
+                                 const MergeTreeData::DataPartPtr & right,
+                                 PreformattedMessage & out_reason);
 };
 
 class ReplicatedMergeTreeMergePredicate : public BaseMergePredicate<ActiveDataPartSet, ReplicatedMergeTreeQueue>

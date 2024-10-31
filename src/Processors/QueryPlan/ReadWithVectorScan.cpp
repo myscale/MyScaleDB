@@ -1,5 +1,6 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTSelectQuery.h>
+#include <Processors/ConcatProcessor.h>
 #include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/QueryPlan/ReadWithVectorScan.h>
 #include <Processors/Sources/NullSource.h>
@@ -12,19 +13,22 @@
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeVectorScanManager.h>
 #include <Storages/MergeTree/MergeTreeSelectWithVectorScanProcessor.h>
-#include <Storages/MergeTree/MergeTreeSource.h>
+#include <Storages/MergeTree/MergeTreeWithVectorScanSource.h>
 
 namespace ProfileEvents
 {
     extern const Event SelectedParts;
+    extern const Event SelectedPartsTotal;
     extern const Event SelectedRanges;
     extern const Event SelectedMarks;
+    extern const Event SelectedMarksTotal;
 }
 
 namespace DB
 {
 
-static MergeTreeReaderSettings getMergeTreeReaderSettings(const ContextPtr & context)
+static MergeTreeReaderSettings getMergeTreeReaderSettings(
+    const ContextPtr & context, const SelectQueryInfo & query_info)
 {
     const auto & settings = context->getSettingsRef();
     return
@@ -32,69 +36,48 @@ static MergeTreeReaderSettings getMergeTreeReaderSettings(const ContextPtr & con
         .read_settings = context->getReadSettings(),
         .save_marks_in_cache = true,
         .checksum_on_read = settings.checksum_on_read,
+        .read_in_order = query_info.input_order_info != nullptr,
+        .apply_deleted_mask = settings.apply_deleted_mask,
+        .use_asynchronous_read_from_pool = settings.allow_asynchronous_read_from_io_pool_for_merge_tree
+            && (settings.max_streams_to_max_threads_ratio > 1 || settings.max_streams_for_merge_tree_reading > 1),
+        .enable_multiple_prewhere_read_steps = settings.enable_multiple_prewhere_read_steps,
     };
-}
-
-static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_info)
-{
-    return query_info.projection ? query_info.projection->prewhere_info
-                                 : query_info.prewhere_info;
 }
 
 ReadWithVectorScan::ReadWithVectorScan(
     MergeTreeData::DataPartsVector parts_,
-    Names real_column_names_,
-    Names virt_column_names_,
+    std::vector<AlterConversionsPtr> alter_conversions_,
+    Names all_column_names_,
     const MergeTreeData & data_,
     const SelectQueryInfo & query_info_,
     StorageSnapshotPtr storage_snapshot_,
     ContextPtr context_,
     size_t max_block_size_,
     size_t num_streams_,
-    bool sample_factor_column_queried_,
     std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
-    Poco::Logger * log_,
-    bool enable_parallel_reading)
-    : SourceStepWithFilter(DataStream{.header = IMergeTreeSelectAlgorithm::transformHeader(
-        storage_snapshot_->getSampleBlockForColumns(real_column_names_),
-        getPrewhereInfo(query_info_),
-        data_.getPartitionValueType(),
-        virt_column_names_)})
-    , reader_settings(getMergeTreeReaderSettings(context_))
+    LoggerPtr log_)
+    : SourceStepWithFilter(DataStream{.header = MergeTreeSelectProcessor::transformHeader(
+        storage_snapshot_->getSampleBlockForColumns(all_column_names_),
+        query_info_.prewhere_info)}, all_column_names_, query_info_, storage_snapshot_, context_)
+    , reader_settings(getMergeTreeReaderSettings(context_, query_info_))
     , prepared_parts(std::move(parts_))
-    , real_column_names(std::move(real_column_names_))
-    , virt_column_names(std::move(virt_column_names_))
+    , alter_conversions_for_parts(std::move(alter_conversions_))
+    , all_column_names(std::move(all_column_names_))
     , data(data_)
-    , query_info(query_info_)
-    , prewhere_info(getPrewhereInfo(query_info))
     , actions_settings(ExpressionActionsSettings::fromContext(context_))
-    , storage_snapshot(std::move(storage_snapshot_))
-    , metadata_for_reading(storage_snapshot->getMetadataForQuery())
-    , context(std::move(context_))
-    , max_block_size(max_block_size_)
+    , block_size{
+        .max_block_size_rows = max_block_size_,
+        .preferred_block_size_bytes = context->getSettingsRef().preferred_block_size_bytes,
+        .preferred_max_column_in_block_size_bytes = context->getSettingsRef().preferred_max_column_in_block_size_bytes}
     , requested_num_streams(num_streams_)
-    , preferred_block_size_bytes(context->getSettingsRef().preferred_block_size_bytes)
-    , preferred_max_column_in_block_size_bytes(context->getSettingsRef().preferred_max_column_in_block_size_bytes)
-    , sample_factor_column_queried(sample_factor_column_queried_)
     , max_block_numbers_to_read(std::move(max_block_numbers_to_read_))
-    , log(log_)
+    , log(std::move(log_))
 {
-    if (sample_factor_column_queried)
-    {
-        /// Only _sample_factor virtual column is added by ReadFromMergeTree
-        /// Other virtual columns are added by MergeTreeBaseSelectProcessor.
-        auto type = std::make_shared<DataTypeFloat64>();
-        output_stream->header.insert({type->createColumn(), type, "_sample_factor"});
-    }
-
-    if (enable_parallel_reading)
-        read_task_callback = context->getMergeTreeReadTaskCallback();
-
     /// Determine if we can use two stage search
-    if (context->getSettingsRef().two_stage_search_option > 0 && !metadata_for_reading->vec_indices.empty())
+    if (context->getSettingsRef().two_stage_search_option > 0 && !storage_snapshot->metadata->vec_indices.empty())
     {
         /// Currently support one vector index
-        auto vector_index = metadata_for_reading->vec_indices[0];
+        auto vector_index = storage_snapshot->metadata->vec_indices[0];
 
         /// Check vector index type
         Search::IndexType type;
@@ -148,7 +131,7 @@ ReadWithVectorScan::ReadWithVectorScan(
             /// Add virtual columns which are needed for two stage seach
             if (support_two_stage_search)
             {
-                for (auto & name : virt_column_names)
+                for (auto & name : all_column_names)
                 {
                     if (name == "_part")
                     {
@@ -163,40 +146,39 @@ ReadWithVectorScan::ReadWithVectorScan(
                 }
 
                 if (need_remove_part_virual_column)
-                    virt_column_names.emplace_back("_part");
+                    all_column_names.emplace_back("_part");
 
                 if (need_remove_part_offset_column)
-                    virt_column_names.emplace_back("_part_offset");
+                    all_column_names.emplace_back("_part_offset");
             }
         }
     }
 }
 
-MergeTreeDataSelectAnalysisResultPtr ReadWithVectorScan::selectRangesToRead(MergeTreeData::DataPartsVector parts) const
+ReadFromMergeTree::AnalysisResultPtr ReadWithVectorScan::selectRangesToRead(bool find_exact_ranges) const
 {
+    std::optional<ReadFromMergeTree::Indexes> emptyOptional = std::nullopt;
     return ReadFromMergeTree::selectRangesToRead(
-        std::move(parts),
-        prewhere_info,
-        filter_nodes,
+        std::move(prepared_parts),
+        std::move(alter_conversions_for_parts),
         storage_snapshot->metadata,
-        storage_snapshot->getMetadataForQuery(),
         query_info,
         context,
         requested_num_streams,
         max_block_numbers_to_read,
         data,
-        real_column_names,
-        sample_factor_column_queried,
-        log);
+        all_column_names,
+        log,
+        /*indexes*/ emptyOptional,
+        find_exact_ranges);
 }
 
 ReadFromMergeTree::AnalysisResult ReadWithVectorScan::getAnalysisResult() const
 {
-    auto result_ptr = analyzed_result_ptr ? analyzed_result_ptr : selectRangesToRead(prepared_parts);
-    if (std::holds_alternative<std::exception_ptr>(result_ptr->result))
-        std::rethrow_exception(std::get<std::exception_ptr>(result_ptr->result));
+    if (!analyzed_result_ptr)
+        analyzed_result_ptr = selectRangesToRead();
 
-    return std::get<ReadFromMergeTree::AnalysisResult>(result_ptr->result);
+    return *analyzed_result_ptr;
 }
 
 void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
@@ -215,8 +197,10 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         result.selected_ranges);
 
     ProfileEvents::increment(ProfileEvents::SelectedParts, result.selected_parts);
+    ProfileEvents::increment(ProfileEvents::SelectedPartsTotal, result.total_parts);
     ProfileEvents::increment(ProfileEvents::SelectedRanges, result.selected_ranges);
     ProfileEvents::increment(ProfileEvents::SelectedMarks, result.selected_marks);
+    ProfileEvents::increment(ProfileEvents::SelectedMarksTotal, result.total_marks_pk);
 
     auto query_id_holder = MergeTreeDataSelectExecutor::checkLimits(data, result, context);
 
@@ -230,9 +214,8 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
     selected_rows = result.selected_rows;
     selected_parts = result.selected_parts;
 
-    Pipe pipe;
-
-    Names column_names_to_read = std::move(result.column_names_to_read);
+    /// Reference spreadMarkRange()
+    Names column_names_to_read = result.column_names_to_read;
 
     /// If there are only virtual columns in the query, should be wrong, just return.
     if (column_names_to_read.empty())
@@ -242,9 +225,9 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
         return;
     }
 
-    /// Reference spreadMarkRangesAmongStreams()
-    pipe = createReadProcessorsAmongParts(
+    Pipe pipe = createReadProcessorsAmongParts(
         std::move(result.parts_with_ranges),
+        requested_num_streams,
         column_names_to_read);
 
     if (pipe.empty())
@@ -260,53 +243,30 @@ void ReadWithVectorScan::initializePipeline(QueryPipelineBuilder & pipeline, con
     }
 
     pipeline.init(std::move(pipe));
-
+    pipeline.addContext(context);
     // Attach QueryIdHolder if needed
     if (query_id_holder)
         pipeline.setQueryIdHolder(std::move(query_id_holder));
 }
 
-
-/// Reference from ReadFromMergeTree::spreadMarkRangesAmongStreams()
-/// 
 Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
-    RangesInDataParts parts_with_range,
+    RangesInDataParts && parts_with_ranges,
+    size_t num_streams,
     const Names & column_names)
 {
-    if (parts_with_range.size() == 0)
+    if (parts_with_ranges.size() == 0)
         return {};
 
     const auto & settings = context->getSettingsRef();
 
-    size_t num_streams = requested_num_streams;
     if (num_streams > 1)
     {
         /// Reduce the number of num_streams if the data is small.
-        if (parts_with_range.size() < num_streams)
-            num_streams = parts_with_range.size();
+        if (parts_with_ranges.size() < num_streams)
+            num_streams = parts_with_ranges.size();
     }
 
-/*
-   /// Comment following code, since in two stage search we fail to parallel reading with additional sort transform
-    Pipes res;
-    const size_t min_parts_per_stream = (parts_with_range.size() - 1) / num_streams + 1;
-    for (size_t i = 0; i < num_streams && !parts_with_range.empty(); ++i)
-    {
-        RangesInDataParts new_parts;
-        for (size_t need_parts = min_parts_per_stream; need_parts > 0 && !parts_with_range.empty(); need_parts--)
-        {
-            new_parts.push_back(parts_with_range.back());
-            parts_with_range.pop_back();
-        }
-
-        res.emplace_back(readFromParts(std::move(new_parts), column_names, settings.use_uncompressed_cache));
-    }
-
-
-    auto pipe = Pipe::unitePipes(std::move(res));
-    */
-
-    auto pipe = readFromParts(std::move(parts_with_range), column_names, settings.use_uncompressed_cache);
+    auto pipe = readFromParts(std::move(parts_with_ranges), column_names, settings.use_uncompressed_cache);
 
     /// Add transforms for two search stage
     if (support_two_stage_search)
@@ -329,7 +289,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
         pipe.addSimpleTransform([&](const Block & header)
         {
             return std::make_shared<MergeSortingTransform>(
-                header, sort_description, max_block_size, num_reorder, false, 0, 0, 0, nullptr, 0);
+                header, sort_description, block_size.max_block_size_rows, 0, num_reorder, false, 0, 0, 0, nullptr, 0);
         });
 
         /// Second sort rows from different pipes
@@ -339,7 +299,8 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
                     pipe.getHeader(),
                     pipe.numOutputPorts(),
                     sort_description,
-                    max_block_size,
+                    block_size.max_block_size_rows,
+                    0,
                     SortingQueueStrategy::Batch,
                     num_reorder /// limit
                     );
@@ -374,7 +335,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
             for (auto * port : ports)
             {
                 auto vector_scan_manager =
-                    std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context, support_two_stage_search);
+                    std::make_shared<MergeTreeVectorScanManager>(storage_snapshot->metadata, vector_scan_info_ptr, context, support_two_stage_search);
                 auto reorder = std::make_shared<VectorScanRecomputeTransform>(
                         input_header,
                         output_header,
@@ -393,7 +354,7 @@ Pipe ReadWithVectorScan::createReadProcessorsAmongParts(
 }
 
 Pipe ReadWithVectorScan::readFromParts(
-    const RangesInDataParts & parts,
+    RangesInDataParts parts_with_ranges,
     Names required_columns,
     bool use_uncompressed_cache)
 {
@@ -401,8 +362,6 @@ Pipe ReadWithVectorScan::readFromParts(
     auto vector_scan_info_ptr = query_info.vector_scan_info;
     if (!vector_scan_info_ptr)
         return {};
-
-    const auto & client_info = context->getClientInfo();
 
     /// Prewhere info should not be changed, because it is shared by parts.
     if (prewhere_info)
@@ -412,50 +371,38 @@ Pipe ReadWithVectorScan::readFromParts(
         prewhere_info->need_filter = true;
     }
 
-    for (const auto & part : parts)
+    for (const auto & part_with_ranges : parts_with_ranges)
     {
         auto vector_scan_manager =
-            std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context, support_two_stage_search);
-
-        /// ToConfirm
-        std::optional<ParallelReadingExtension> extension;
-        if (read_task_callback)
-        {
-            extension = ParallelReadingExtension
-            {
-                .callback = read_task_callback.value(),
-                .count_participating_replicas = client_info.count_participating_replicas,
-                .number_of_current_replica = client_info.number_of_current_replica,
-                .colums_to_read = required_columns
-            };
-        }
+            std::make_shared<MergeTreeVectorScanManager>(storage_snapshot->metadata, vector_scan_info_ptr, context, support_two_stage_search);
 
         auto algorithm = std::make_unique<MergeTreeSelectWithVectorScanProcessor>(
             data,
             storage_snapshot,
-            part.data_part,
-            max_block_size,
-            preferred_block_size_bytes,
-            preferred_max_column_in_block_size_bytes,
+            part_with_ranges,
+            shared_virtual_fields,
             required_columns,
-            part.ranges,
             use_uncompressed_cache,
             prewhere_info,
             actions_settings,
+            block_size,
             reader_settings,
-            nullptr,
-            virt_column_names,
-            0UL,
-            false,
             vector_scan_manager);
 
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+        auto source = std::make_shared<MergeTreeWithVectorScanSource>(std::move(algorithm), data.getLogName());
 
         pipes.emplace_back(Pipe(std::move(source)));
     }
 
     auto pipe = Pipe::unitePipes(std::move(pipes));
+
+    /// Use ConcatProcessor to concat sources together.
+    /// It is needed to read in parts order (and so in PK order) if single thread is used.
+    if (pipe.numOutputPorts() > 1)
+        pipe.addTransform(std::make_shared<ConcatProcessor>(pipe.getHeader(), pipe.numOutputPorts()));
+
     return pipe;
+
 }
 
 }

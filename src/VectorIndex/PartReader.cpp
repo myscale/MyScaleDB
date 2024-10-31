@@ -21,12 +21,15 @@ PartReader::PartReader(
     , enforce_fixed_array(enforce_fixed_array_)
 {
     DB::MergeTreeReaderSettings reader_settings;
+    StorageSnapshotPtr storage_snapshot_ptr = std::make_shared<StorageSnapshot>(part->storage, metadata_snapshot_);
     reader = part->getReader(
         cols,
-        metadata_snapshot_,
+        storage_snapshot_ptr,
         DB::MarkRanges{DB::MarkRange(0, total_mask)},
+        /*vitual_fields = */ {},
         /* uncompressed_cache = */ nullptr,
         mark_cache_,
+        std::make_shared<AlterConversions>(),
         reader_settings,
         {},
         {});

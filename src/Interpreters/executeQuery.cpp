@@ -384,6 +384,7 @@ QueryLogElement logQueryStart(
 
 void logQueryFinish(
     QueryLogElement & elem,
+    VectorIndexEventLogElement & vec_elem,
     const ContextMutablePtr & context,
     const ASTPtr & query_ast,
     const QueryPipeline & query_pipeline,
@@ -408,6 +409,14 @@ void logQueryFinish(
         elem.type = QueryLogElementType::QUERY_FINISH;
 
         addStatusInfoToQueryLogElement(elem, info, query_ast, context);
+
+        if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+        {
+            if (auto vec_index_event_log = context->getVectorIndexEventLog())
+            {
+                vec_index_event_log->add(vec_elem);
+            }
+        }
 
         if (pulling_pipeline)
         {
@@ -580,6 +589,34 @@ void logQueryException(
     }
 }
 
+VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
+{
+    if(ast)
+    {
+        auto * create_query = ast->as<ASTCreateQuery>();
+        auto * alter_query = ast->as<ASTAlterQuery>();
+        if (create_query &&
+            !create_query->attach &&
+            create_query->columns_list &&
+            create_query->columns_list->vec_indices &&
+            !create_query->columns_list->vec_indices->children.empty())
+        {
+            return VectorIndexEventLogElement::DEFINITION_CREATED;
+        }
+        else if (alter_query)
+        {
+            for (const auto & command : alter_query->command_list->children)
+            {
+                if ( command->as<ASTAlterCommand&>().type == ASTAlterCommand::ADD_VECTOR_INDEX )
+                    return VectorIndexEventLogElement::DEFINITION_CREATED;
+                else if (command->as<ASTAlterCommand&>().type == ASTAlterCommand::DROP_VECTOR_INDEX)
+                    return VectorIndexEventLogElement::DEFINITION_DROPPED;
+            }
+        }
+    }
+    return VectorIndexEventLogElement::DEFAULT;
+}
+
 void logExceptionBeforeStart(
     const String & query_for_logging,
     ContextPtr context,
@@ -730,34 +767,6 @@ void validateAnalyzerSettings(ASTPtr ast, bool context_value)
                 nodes_to_process.push_back(std::move(child));
         }
     }
-}
-
-VectorIndexEventLogElement::Type getQueryWithVectorType(ASTPtr ast)
-{
-    if(ast)
-    {
-        auto * create_query = ast->as<ASTCreateQuery>();
-        auto * alter_query = ast->as<ASTAlterQuery>();
-        if (create_query && 
-            !create_query->attach && 
-            create_query->columns_list && 
-            create_query->columns_list->vec_indices && 
-            !create_query->columns_list->vec_indices->children.empty())
-        {
-            return VectorIndexEventLogElement::DEFINITION_CREATED;
-        }
-        else if (alter_query)
-        {
-            for (const auto & command : alter_query->command_list->children)
-            {
-                if ( command->as<ASTAlterCommand&>().type == ASTAlterCommand::ADD_VECTOR_INDEX )
-                    return VectorIndexEventLogElement::DEFINITION_CREATED;
-                else if (command->as<ASTAlterCommand&>().type == ASTAlterCommand::DROP_VECTOR_INDEX)
-                    return VectorIndexEventLogElement::DEFINITION_DROPPED;
-            }
-        }
-    }
-    return VectorIndexEventLogElement::DEFAULT;
 }
 
 static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
@@ -1101,8 +1110,6 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         {
             if (context->getCurrentTransaction() && settings.throw_on_unsupported_query_inside_transaction)
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts inside transactions are not supported");
-            if (settings.atomic_insert && settings.throw_on_unsupported_query_inside_transaction)
-                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Async inserts with 'atomic_insert' are not supported");
 
             /// Let's agree on terminology and say that a mini-INSERT is an asynchronous INSERT
             /// which typically contains not a lot of data inside and a big-INSERT in an INSERT
@@ -1383,6 +1390,21 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 query_database,
                 query_table,
                 async_insert);
+
+            VectorIndexEventLogElement vec_elem;
+
+            vec_elem.part_name = "";
+            vec_elem.partition_id = "";
+            vec_elem.event_time = timeInSeconds(query_start_time);
+            vec_elem.event_time_microseconds = timeInMicroseconds(query_start_time);
+            vec_elem.event_type = VectorIndexEventLogElement::DEFAULT;
+            if (query_database == "")
+                vec_elem.database_name = context->getCurrentDatabase();
+            else
+                vec_elem.database_name = query_database;
+            vec_elem.table_name = query_table;
+            vec_elem.event_type = getQueryWithVectorType(ast);
+
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem,
                                     vec_elem,
@@ -1401,14 +1423,14 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     /// partial/garbage results in case of exceptions during query execution.
                     query_pipeline.finalizeWriteInQueryCache();
 
-                logQueryFinish(elem, context, ast, query_pipeline, pulling_pipeline, query_span, query_cache_usage, internal);
+                logQueryFinish(elem, vec_elem, context, ast, query_pipeline, pulling_pipeline, query_span, query_cache_usage, internal);
 
                 if (*implicit_txn_control)
                     execute_implicit_tcl_query(context, ASTTransactionControl::COMMIT);
             };
 
             auto exception_callback =
-                [start_watch, elem, context, ast, internal, my_quota(quota), implicit_txn_control, execute_implicit_tcl_query, query_span](
+                [start_watch, elem, vec_elem, context, ast, internal, my_quota(quota), implicit_txn_control, execute_implicit_tcl_query, query_span](
                     bool log_error) mutable
             {
                 if (*implicit_txn_control)
@@ -1418,6 +1440,15 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
                 if (my_quota)
                     my_quota->used(QuotaType::ERRORS, 1, /* check_exceeded = */ false);
+
+                if (vec_elem.event_type != VectorIndexEventLogElement::DEFAULT)
+                {
+                    vec_elem.event_type = VectorIndexEventLogElement::DEFINITION_ERROR;
+                    if (auto vec_index_event_log = context->getVectorIndexEventLog())
+                    {
+                        vec_index_event_log->add(vec_elem);
+                    }
+                }
 
                 logQueryException(elem, context, start_watch, ast, query_span, internal, log_error);
             };

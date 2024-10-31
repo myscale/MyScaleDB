@@ -953,6 +953,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
     {
         return std::make_unique<ReadWithVectorScan>(
             std::move(parts),
+            std::move(alter_conversions),
             column_names_to_return,
             data,
             query_info,
@@ -961,9 +962,7 @@ QueryPlanStepPtr MergeTreeDataSelectExecutor::readFromParts(
             max_block_size,
             num_streams,
             max_block_numbers_to_read,
-            log,
-            enable_parallel_reading
-        );
+            log);
     }
 
     return std::make_unique<ReadFromMergeTree>(

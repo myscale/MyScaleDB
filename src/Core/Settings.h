@@ -73,29 +73,13 @@ class IColumn;
     M(Milliseconds, hedged_connection_timeout_ms, 50, "Connection timeout for establishing connection with replica for Hedged requests", 0) \
     M(Milliseconds, receive_data_timeout_ms, 2000, "Connection timeout for receiving first packet of data or packet with positive progress from replica", 0) \
     M(Bool, use_hedged_requests, true, "Use hedged requests for distributed queries", 0) \
-    M(Bool, \
-      allow_changing_replica_until_first_data_packet, \
-      false, \
-      "Allow HedgedConnections to change replica until receiving first data packet", \
-      0) \
-    M(Milliseconds, \
-      queue_max_wait_ms, \
-      0, \
-      "The wait time in the request queue, if the number of concurrent requests exceeds the maximum.", \
-      0) \
+    M(Bool, allow_changing_replica_until_first_data_packet, false, "Allow HedgedConnections to change replica until receiving first data packet", 0) \
+    M(Milliseconds, queue_max_wait_ms, 0, "The wait time in the request queue, if the number of concurrent requests exceeds the maximum.", 0) \
     M(Milliseconds, connection_pool_max_wait_ms, 0, "The wait time when the connection pool is full.", 0) \
-    M(Milliseconds, \
-      replace_running_query_max_wait_ms, \
-      5000, \
-      "The wait time for running query with the same query_id to finish when setting 'replace_running_query' is active.", \
-      0) \
+    M(Milliseconds, replace_running_query_max_wait_ms, 5000, "The wait time for running query with the same query_id to finish when setting 'replace_running_query' is active.", 0) \
     M(Milliseconds, kafka_max_wait_ms, 5000, "The wait time for reading from Kafka before retry.", 0) \
     M(Milliseconds, rabbitmq_max_wait_ms, 5000, "The wait time for reading from RabbitMQ before retry.", 0) \
-    M(UInt64, \
-      poll_interval, \
-      DBMS_DEFAULT_POLL_INTERVAL, \
-      "Block at the query wait loop on the server for the specified number of seconds.", \
-      0) \
+    M(UInt64, poll_interval, DBMS_DEFAULT_POLL_INTERVAL, "Block at the query wait loop on the server for the specified number of seconds.", 0) \
     M(UInt64, idle_connection_timeout, 3600, "Close idle TCP connections after specified number of seconds.", 0) \
     M(UInt64, distributed_connections_pool_size, 1024, "Maximum number of connections with one remote server in the pool.", 0) \
     M(UInt64, connections_with_failover_max_tries, 3, "The maximum number of attempts to connect to replicas.", 0) \
@@ -164,6 +148,11 @@ class IColumn;
     M(Bool, extremes, false, "Calculate minimums and maximums of the result columns. They can be output in JSON-formats.", IMPORTANT) \
     M(Bool, use_uncompressed_cache, false, "Whether to use the cache of uncompressed blocks.", 0) \
     M(Bool, replace_running_query, false, "Whether the running request should be canceled with the same id as the new one.", 0) \
+    M(UInt64, max_remote_read_network_bandwidth, 0, "The maximum speed of data exchange over the network in bytes per second for read.", 0) \
+    M(UInt64, max_remote_write_network_bandwidth, 0, "The maximum speed of data exchange over the network in bytes per second for write.", 0) \
+    M(UInt64, max_local_read_bandwidth, 0, "The maximum speed of local reads in bytes per second.", 0) \
+    M(UInt64, max_local_write_bandwidth, 0, "The maximum speed of local writes in bytes per second.", 0) \
+    M(Bool, stream_like_engine_allow_direct_select, false, "Allow direct SELECT query for Kafka, RabbitMQ, FileLog, Redis Streams, and NATS engines. In case there are attached materialized views, SELECT query is not allowed even if this setting is enabled.", 0) \
     M(UInt64, max_build_index_train_block_size, 100 * 1024 * 1024, "Maximum block size in bytes for training in build index", 0) \
     M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
     M(Bool, optimize_move_to_prewhere_for_vector_search, true, "Enables or disables special PREWHERE optimization for vector search in SELECT queries which move all viable WHERE to PREWHERE.", 0) \
@@ -236,11 +225,7 @@ class IColumn;
     M(UInt64, force_optimize_skip_unused_shards_nesting, 0, "Same as force_optimize_skip_unused_shards, but accept nesting level until which it will work.", 0) \
     \
     M(Bool, input_format_parallel_parsing, true, "Enable parallel parsing for some data formats.", 0) \
-    M(UInt64, \
-      min_chunk_bytes_for_parallel_parsing, \
-      (10 * 1024 * 1024), \
-      "The minimum chunk size in bytes, which each thread will parse in parallel.", \
-      0) \
+    M(UInt64, min_chunk_bytes_for_parallel_parsing, (10 * 1024 * 1024), "The minimum chunk size in bytes, which each thread will parse in parallel.", 0) \
     M(Bool, output_format_parallel_formatting, true, "Enable parallel formatting for some data formats.", 0) \
     M(UInt64, output_format_compression_level, 3, "Default compression level if query output is compressed. The setting is applied when `SELECT` query has `INTO OUTFILE` or when inserting to table function `file`, `url`, `hdfs`, `s3`, and `azureBlobStorage`.", 0) \
     M(UInt64, output_format_compression_zstd_window_log, 0, "Can be used when the output compression method is `zstd`. If greater than `0`, this setting explicitly sets compression window size (power of `2`) and enables a long-range mode for zstd compression.", 0) \
@@ -287,11 +272,7 @@ class IColumn;
     M(Int64, zstd_window_log_max, 0, "Allows you to select the max window log of ZSTD (it will not be used for MergeTree family)", 0) \
     \
     M(UInt64, priority, 0, "Priority of the query. 1 - the highest, higher value - lower priority; 0 - do not use priorities.", 0) \
-    M(Int64, \
-      os_thread_priority, \
-      0, \
-      "If non zero - set corresponding 'nice' value for query processing threads. Can be used to adjust query priority for OS scheduler.", \
-      0) \
+    M(Int64, os_thread_priority, 0, "If non zero - set corresponding 'nice' value for query processing threads. Can be used to adjust query priority for OS scheduler.", 0) \
 \
     M(Bool, log_queries, true, "Log requests and write the log to the system table.", 0) \
     M(Bool, log_formatted_queries, false, "Log formatted queries and write the log to the system table.", 0) \
@@ -312,40 +293,12 @@ class IColumn;
     M(UInt64Auto, insert_quorum, 0, "For INSERT queries in the replicated table, wait writing for the specified number of replicas and linearize the addition of the data. 0 - disabled, 'auto' - use majority", 0) \
     M(Milliseconds, insert_quorum_timeout, 600000, "If the quorum of replicas did not meet in specified time (in milliseconds), exception will be thrown and insertion is aborted.", 0) \
     M(Bool, insert_quorum_parallel, true, "For quorum INSERT queries - enable to make parallel inserts without linearizability", 0) \
-    M(UInt64, \
-      select_sequential_consistency, \
-      0, \
-      "For SELECT queries from the replicated table, throw an exception if the replica does not have a chunk written with the quorum; do " \
-      "not read the parts that have not yet been written with the quorum.", \
-      0) \
-    M(UInt64, \
-      table_function_remote_max_addresses, \
-      1000, \
-      "The maximum number of different shards and the maximum number of replicas of one shard in the `remote` function.", \
-      0) \
-    M(Milliseconds, \
-      read_backoff_min_latency_ms, \
-      1000, \
-      "Setting to reduce the number of threads in case of slow reads. Pay attention only to reads that took at least that much time.", \
-      0) \
-    M(UInt64, \
-      read_backoff_max_throughput, \
-      1048576, \
-      "Settings to reduce the number of threads in case of slow reads. Count events when the read bandwidth is less than that many bytes " \
-      "per second.", \
-      0) \
-    M(Milliseconds, \
-      read_backoff_min_interval_between_events_ms, \
-      1000, \
-      "Settings to reduce the number of threads in case of slow reads. Do not pay attention to the event, if the previous one has passed " \
-      "less than a certain amount of time.", \
-      0) \
-    M(UInt64, \
-      read_backoff_min_events, \
-      2, \
-      "Settings to reduce the number of threads in case of slow reads. The number of events after which the number of threads will be " \
-      "reduced.", \
-      0) \
+    M(UInt64, select_sequential_consistency, 0, "For SELECT queries from the replicated table, throw an exception if the replica does not have a chunk written with the quorum; do not read the parts that have not yet been written with the quorum.", 0) \
+    M(UInt64, table_function_remote_max_addresses, 1000, "The maximum number of different shards and the maximum number of replicas of one shard in the `remote` function.", 0) \
+    M(Milliseconds, read_backoff_min_latency_ms, 1000, "Setting to reduce the number of threads in case of slow reads. Pay attention only to reads that took at least that much time.", 0) \
+    M(UInt64, read_backoff_max_throughput, 1048576, "Settings to reduce the number of threads in case of slow reads. Count events when the read bandwidth is less than that many bytes per second.", 0) \
+    M(Milliseconds, read_backoff_min_interval_between_events_ms, 1000, "Settings to reduce the number of threads in case of slow reads. Do not pay attention to the event, if the previous one has passed less than a certain amount of time.", 0) \
+    M(UInt64, read_backoff_min_events, 2, "Settings to reduce the number of threads in case of slow reads. The number of events after which the number of threads will be reduced.", 0) \
 \
     M(UInt64, read_backoff_min_concurrency, 1, "Settings to try keeping the minimal number of threads in case of slow reads.", 0) \
     \
@@ -423,11 +376,7 @@ class IColumn;
     M(Bool, analyze_index_with_space_filling_curves, true, "If a table has a space-filling curve in its index, e.g. `ORDER BY mortonEncode(x, y)`, and the query has conditions on its arguments, e.g. `x >= 10 AND x <= 20 AND y >= 20 AND y <= 30`, use the space-filling curve for index analysis.", 0) \
     M(Bool, joined_subquery_requires_alias, true, "Force joined subqueries and table functions to have aliases for correct name qualification.", 0) \
     M(Bool, empty_result_for_aggregation_by_empty_set, false, "Return empty result when aggregating without keys on empty set.", 0) \
-    M(Bool, \
-      empty_result_for_aggregation_by_constant_keys_on_empty_set, \
-      true, \
-      "Return empty result when aggregating by constant keys on empty set.", \
-      0) \
+    M(Bool, empty_result_for_aggregation_by_constant_keys_on_empty_set, true, "Return empty result when aggregating by constant keys on empty set.", 0) \
     M(Bool, allow_distributed_ddl, true, "If it is set to true, then a user is allowed to executed distributed DDL queries.", 0) \
     M(Bool, allow_suspicious_codecs, false, "If it is set to true, allow to specify meaningless compression codecs.", 0) \
     M(Bool, enable_deflate_qpl_codec, false, "Enable/disable the DEFLATE_QPL codec.", 0) \
@@ -435,12 +384,7 @@ class IColumn;
     M(UInt64, query_profiler_real_time_period_ns, QUERY_PROFILER_DEFAULT_SAMPLE_RATE_NS, "Period for real clock timer of query profiler (in nanoseconds). Set 0 value to turn off the real clock query profiler. Recommended value is at least 10000000 (100 times a second) for single queries or 1000000000 (once a second) for cluster-wide profiling.", 0) \
     M(UInt64, query_profiler_cpu_time_period_ns, QUERY_PROFILER_DEFAULT_SAMPLE_RATE_NS, "Period for CPU clock timer of query profiler (in nanoseconds). Set 0 value to turn off the CPU clock query profiler. Recommended value is at least 10000000 (100 times a second) for single queries or 1000000000 (once a second) for cluster-wide profiling.", 0) \
     M(Bool, metrics_perf_events_enabled, false, "If enabled, some of the perf events will be measured throughout queries' execution.", 0) \
-    M(String, \
-      metrics_perf_events_list, \
-      "", \
-      "Comma separated list of perf metrics that will be measured throughout queries' execution. Empty means all events. See " \
-      "PerfEventInfo in sources for the available events.", \
-      0) \
+    M(String, metrics_perf_events_list, "", "Comma separated list of perf metrics that will be measured throughout queries' execution. Empty means all events. See PerfEventInfo in sources for the available events.", 0) \
     M(Float, opentelemetry_start_trace_probability, 0., "Probability to start an OpenTelemetry trace for an incoming query.", 0) \
     M(Bool, opentelemetry_trace_processors, false, "Collect OpenTelemetry spans for processors.", 0) \
     M(Bool, prefer_column_name_to_alias, false, "Prefer using column names instead of aliases if possible.", 0) \
@@ -456,18 +400,8 @@ class IColumn;
       * Almost all limits apply to each stream individually. \
       */ \
 \
-    M(UInt64, \
-      max_rows_to_read, \
-      0, \
-      "Limit on read rows from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is " \
-      "only checked on a remote server.", \
-      0) \
-    M(UInt64, \
-      max_bytes_to_read, \
-      0, \
-      "Limit on read bytes (after decompression) from the most 'deep' sources. That is, only in the deepest subquery. When reading from " \
-      "a remote server, it is only checked on a remote server.", \
-      0) \
+    M(UInt64, max_rows_to_read, 0, "Limit on read rows from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is only checked on a remote server.", 0) \
+    M(UInt64, max_bytes_to_read, 0, "Limit on read bytes (after decompression) from the most 'deep' sources. That is, only in the deepest subquery. When reading from a remote server, it is only checked on a remote server.", 0) \
     M(OverflowMode, read_overflow_mode, OverflowMode::THROW, "What to do when the limit is exceeded.", 0) \
     \
     M(UInt64, max_rows_to_read_leaf, 0, "Limit on read rows on the leaf nodes for distributed queries. Limit is applied for local reads only, excluding the final merge stage on the root node. Note, the setting is unstable with prefer_localhost_replica=1.", 0) \
@@ -590,12 +524,7 @@ class IColumn;
     M(Bool, allow_push_predicate_when_subquery_contains_with, true, "Allows push predicate when subquery contains WITH clause", 0) \
 \
     M(UInt64, low_cardinality_max_dictionary_size, 8192, "Maximum size (in rows) of shared global dictionary for LowCardinality type.", 0) \
-    M(Bool, \
-      low_cardinality_use_single_dictionary_for_part, \
-      false, \
-      "LowCardinality type serialization setting. If is true, than will use additional keys when global dictionary overflows. Otherwise, " \
-      "will create several shared dictionaries.", \
-      0) \
+    M(Bool, low_cardinality_use_single_dictionary_for_part, false, "LowCardinality type serialization setting. If is true, than will use additional keys when global dictionary overflows. Otherwise, will create several shared dictionaries.", 0) \
     M(Bool, decimal_check_overflow, true, "Check overflow of decimal arithmetic/comparison operations", 0) \
     M(Bool, allow_custom_error_code_in_throwif, false, "Enable custom error code in function throwIf(). If true, thrown exceptions may have unexpected error codes.", 0) \
     \
@@ -606,12 +535,7 @@ class IColumn;
     M(Bool, enable_job_stack_trace, false, "Output stack trace of a job creator when job results in exception", 0) \
     M(Bool, allow_ddl, true, "If it is set to true, then a user is allowed to executed DDL queries.", 0) \
     M(Bool, parallel_view_processing, false, "Enables pushing to attached views concurrently instead of sequentially.", 0) \
-    M(Bool, \
-      enable_unaligned_array_join, \
-      false, \
-      "Allow ARRAY JOIN with multiple arrays that have different sizes. When this settings is enabled, arrays will be resized to the " \
-      "longest one.", \
-      0) \
+    M(Bool, enable_unaligned_array_join, false, "Allow ARRAY JOIN with multiple arrays that have different sizes. When this settings is enabled, arrays will be resized to the longest one.", 0) \
     M(Bool, optimize_read_in_order, true, "Enable ORDER BY optimization for reading data in corresponding order in MergeTree tables.", 0) \
     M(Bool, optimize_read_in_window_order, true, "Enable ORDER BY optimization in window clause for reading data in corresponding order in MergeTree tables.", 0) \
     M(Bool, optimize_aggregation_in_order, false, "Enable GROUP BY optimization for aggregating data in corresponding order in MergeTree tables.", 0) \
@@ -792,6 +716,10 @@ class IColumn;
     M(Bool, database_replicated_allow_explicit_arguments, true, "Allow to create Replicated database with explicit arguments", 0) \
     M(Bool, database_replicated_allow_replicated_engine_arguments, true, "Allow to create only Replicated tables in database with engine Replicated with explicit arguments", 0) \
     M(Bool, database_replicated_allow_heavy_create, false, "Allow long-running DDL queries (CREATE AS SELECT and POPULATE) in Replicated database engine. Note that it can block DDL queue for a long time.", 0) \
+    M(Bool, database_replicated_always_convert_table_to_replicated, false, "Always convert tables to Replicated tables in database with engine Replicated", 0) \
+    M(Bool, database_replicated_always_execute_with_on_cluster, false, "Always create or drop the Replicated database on all replicas of the cluster", 0) \
+    M(String, database_replicated_default_cluster_name, "", "The name of the cluster on which the Replicated database is created or dropped", 0) \
+    M(String, database_replicated_default_zk_path_prefix, "", "Fill Replicated database engine zk_path with this prefix + database name when creating a database. If empty, zk_path will not be set automatically", 0) \
     M(Bool, cloud_mode, false, "Only available in ClickHouse Cloud", 0) \
     M(UInt64, cloud_mode_engine, 1, "Only available in ClickHouse Cloud", 0) \
     M(DistributedDDLOutputMode, distributed_ddl_output_mode, DistributedDDLOutputMode::THROW, "Format of distributed DDL query result, one of: 'none', 'throw', 'null_status_on_timeout', 'never_throw', 'none_only_active', 'throw_only_active', 'null_status_on_timeout_only_active'", 0) \

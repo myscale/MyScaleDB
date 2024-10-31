@@ -3986,7 +3986,7 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                 if (vector_index_entry)
                 {
                     create_result = createLogEntryToBuildVIndexForPart(
-                                vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred.getVersion(), slow_mode);
+                                vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred->getVersion(), slow_mode);
 
                     /// Only add when create log entry successfully.
                     if(create_result == CreateMergeEntryResult::Ok)
@@ -4501,7 +4501,7 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
 
     {
         address.fromString(zookeeper->get(fs::path(source_replica_path) / "host"));
-        timeouts = getFetchPartHTTPTimeouts(getContext());
+        timeouts = ConnectionTimeouts::getFetchPartHTTPTimeouts(getContext()->getServerSettings(), getContext()->getSettingsRef());
 
         credentials = getContext()->getInterserverCredentials();
         interserver_scheme = getContext()->getInterserverScheme();
@@ -4514,6 +4514,7 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
 
             return fetcher.fetchVectorIndex(
                 future_part,
+                getContext(),
                 part_name,
                 vec_index_name,
                 source_replica_path,
@@ -4590,7 +4591,7 @@ bool StorageReplicatedMergeTree::fetchVectorIndex(
                 {
                     /// for decouple, skip remove checksums itself, since the checksums file is new.
                     if (future_part->containRowIdsMaps())
-                        VectorIndex::removeRowIdsMaps(future_part, vec_index_name, true, log);
+                        VectorIndex::removeRowIdsMaps(future_part, vec_index_name, true, log.load().get());
 
                     const_pointer_cast<IMergeTreeDataPart>(future_part)->loadVectorIndexChecksums();
                     future_part->addVectorIndex(vec_index.name + "_" + vec_index.column);
@@ -11325,7 +11326,7 @@ void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
             LOG_INFO(log, "Wait for replica syncing, target queue size: {}", queue_size);
 
             watch.start();
-            synced = waitForProcessingQueue(getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), true);
+            synced = waitForProcessingQueue(getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), SyncReplicaMode::DEFAULT, {});
             watch.stop();
         }
         catch (Exception & e)

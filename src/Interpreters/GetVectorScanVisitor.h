@@ -23,7 +23,7 @@ public:
     {
         const char * assert_no_vector_scan = nullptr;
         std::unordered_set<String> uniq_names {};
-        std::vector<const ASTFunction *> vector_scan_funcs;
+        std::vector<const ASTFunction *> vector_scan_funcs {};
     };
 
     static bool needChildVisit(const ASTPtr & node, const ASTPtr & child)

@@ -41,9 +41,10 @@ public:
     }
 
     bool executeStep() override;
-    StorageID getStorageID() override;
-    UInt64 getPriority() override;
+    StorageID getStorageID() const override;
+    Priority getPriority() const override;
     void onCompleted() override;
+    String getQueryId() const override { return getStorageID().getShortName() + "::" + "VectorIndex::" + vector_index_entry->part_name; }
 
     ~VectorIndexMergeTreeTask() override;
 

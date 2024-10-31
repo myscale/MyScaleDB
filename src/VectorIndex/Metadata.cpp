@@ -15,13 +15,13 @@ void Metadata::readText(DB::ReadBuffer & buf)
     DB::assertChar('\n', buf);
 
     DB::assertString("type: ", buf);
-    DB::String type_str;
+    String type_str;
     DB::readString(type_str, buf);
     Search::findEnumByName(type_str, type);
     DB::assertChar('\n', buf);
 
     DB::assertString("metric: ", buf);
-    DB::String metric_str;
+    String metric_str;
     DB::readString(metric_str, buf);
     Search::findEnumByName(metric_str, metric);
     DB::assertChar('\n', buf);
@@ -38,22 +38,22 @@ void Metadata::readText(DB::ReadBuffer & buf)
     DB::readBoolText(fallback_to_flat, buf);
     DB::assertChar('\n', buf);
 
-    DB::String current_part_name;
+    String current_part_name;
     DB::assertString("current_part_name: ", buf);
     DB::readString(current_part_name, buf);
     DB::assertChar('\n', buf);
 
-    DB::String owner_part_name;
+    String owner_part_name;
     DB::assertString("owner_part_name: ", buf);
     DB::readString(owner_part_name, buf);
     DB::assertChar('\n', buf);
 
-    DB::String vector_index_name;
+    String vector_index_name;
     DB::assertString("vector_index_name: ", buf);
     DB::readString(vector_index_name, buf);
     DB::assertChar('\n', buf);
 
-    DB::String column_name;
+    String column_name;
     DB::assertString("column_name: ", buf);
     DB::readString(column_name, buf);
     DB::assertChar('\n', buf);

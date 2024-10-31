@@ -12,7 +12,7 @@ namespace ErrorCodes
 }
 
 
-StorageID VectorIndexMergeTreeTask::getStorageID()
+StorageID VectorIndexMergeTreeTask::getStorageID() const
 {
     return storage.getStorageID();
 }
@@ -40,9 +40,9 @@ bool VectorIndexMergeTreeTask::executeStep()
     return false;
 }
 
-UInt64 VectorIndexMergeTreeTask::getPriority()
+Priority VectorIndexMergeTreeTask::getPriority() const
 {
-    return 0;
+    return Priority{0};
 }
 
 void VectorIndexMergeTreeTask::onCompleted()

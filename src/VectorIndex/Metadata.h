@@ -15,7 +15,7 @@ public:
 
     Metadata(
         const SegmentId & segment_id_,
-        DB::String version_,
+        String version_,
         Search::IndexType type_,
         Search::Metric metric_,
         size_t dimension_,
@@ -39,7 +39,7 @@ public:
     void writeText(DB::WriteBuffer & buf) const;
 
     const SegmentId & segment_id;
-    DB::String version;
+    String version;
     Search::IndexType type;
     Search::Metric metric;
     size_t dimension;

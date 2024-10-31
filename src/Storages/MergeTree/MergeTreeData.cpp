@@ -2704,9 +2704,8 @@ void MergeTreeData::clearCachedVectorIndex(const DataPartsVector & parts, bool f
 
                     bool can_do_clear = false;
                     {
-                        auto lock = tryLockParts();
-                        if (lock.owns_lock() == true)
-                            can_do_clear = true;
+                        auto lock = lockParts();
+                        can_do_clear = true;
                     }
 
                     if (can_do_clear)

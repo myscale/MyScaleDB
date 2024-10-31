@@ -1035,7 +1035,7 @@ String Context::getFilesystemCacheUser() const
 
 String Context::getVectorIndexCachePath() const
 {
-    auto lock = getLock();
+    SharedLockGuard lock(shared->mutex);
     return shared->vector_index_cache_path;
 }
 
@@ -1317,7 +1317,7 @@ void Context::setUserScriptsPath(const String & path)
 
 void Context::setVectorIndexCachePath(const String & path)
 {
-    auto lock = getLock();
+    std::lock_guard lock(shared->mutex);
     shared->vector_index_cache_path = path;
 }
 
@@ -3172,14 +3172,14 @@ void Context::clearIndexUncompressedCache() const
 
 void Context::setPrimaryKeyCacheSize(size_t max_size_in_bytes)
 {
-    auto lock = getLock();
+    std::lock_guard lock(shared->mutex);
     shared->primary_key_cache_size = max_size_in_bytes;
 }
 
 
 size_t Context::getPrimaryKeyCacheSize() const
 {
-    auto lock = getLock();
+    std::lock_guard lock(shared->mutex);
     return shared->primary_key_cache_size;
 }
 
@@ -4290,7 +4290,7 @@ std::shared_ptr<TransactionsInfoLog> Context::getTransactionsInfoLog() const
 
 std::shared_ptr<VectorIndexEventLog> Context::getVectorIndexEventLog(const String & part_database) const
 {
-    auto lock = getLock();
+    SharedLockGuard lock(shared->mutex);
 
     if (!shared->system_logs)
         return {};

@@ -16,6 +16,7 @@
 
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+#include <Storages/MergeTree/MergeTreeVirtualColumns.h>
 #include <VectorIndex/BruteForceSearch.h>
 #include <VectorIndex/MergeUtils.h>
 #include <VectorIndex/Status.h>
@@ -1065,7 +1066,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     /// only consider no prewhere case
     if (part->storage.hasLightweightDeletedMask())
     {
-        cols.emplace_back(LightweightDeleteDescription::FILTER_COLUMN);
+        cols.emplace_back(RowExistsColumn::name, RowExistsColumn::type);
     }
 
     VectorScanResultPtr tmp_vector_scan_result = std::make_shared<VectorScanResult>();
@@ -1080,18 +1081,23 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
     tmp_vector_scan_result->top_k = k;
     tmp_vector_scan_result->query_vector_num = static_cast<int>(nq);
 
-    MergeTreeReaderSettings reader_settings = {.save_marks_in_cache = true};
+    MergeTreeReaderSettings reader_settings{};
+    reader_settings.save_marks_in_cache = true;
+
+    StorageSnapshotPtr storage_snapshot_ptr = std::make_shared<StorageSnapshot>(part->storage, metadata);
 
     /// create part reader to read vector column
     auto reader = part->getReader(
         cols,
-        this->metadata,
+        storage_snapshot_ptr,
         MarkRanges{MarkRange(0, part->getMarksCount())},
+        /*vitual_fields = */ {},
         /* uncompressed_cache = */ nullptr,
         part->storage.getContext()->getMarkCache().get(),
+        std::make_shared<AlterConversions>(),
         reader_settings,
-        {},
-        {});
+        /*ValueSizeMap*/ {},
+        ReadBufferFromFileBase::ProfileCallback{});
 
     size_t current_mark = 0;
     size_t total_rows_in_part = part->rows_count;
@@ -1243,7 +1249,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
 
                 if (vector_raw_data.empty())
                 {
-                    ASSERT(mark_left_rows == 0)
+                    assert(mark_left_rows == 0);
                     continue;
                 }
 
@@ -1252,7 +1258,7 @@ VectorScanResultPtr MergeTreeVectorScanManager::vectorScanWithoutIndex(
                     static_cast<int32_t>(dim),
                     const_cast<float *>(vector_raw_data.data()));
 
-                ASSERT(vector_raw_data.size() == mark_left_rows * dim)
+                assert(vector_raw_data.size() == mark_left_rows * dim);
 
                 Search::DenseBitmapPtr row_exists = std::make_shared<Search::DenseBitmap>(mark_left_rows, true);
 

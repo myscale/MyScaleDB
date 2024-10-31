@@ -43,6 +43,7 @@
 #include <Storages/StorageFactory.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
+#include <Storages/MergeTree/MergeTreeVirtualColumns.h>
 #include <Common/typeid_cast.h>
 #include <Common/randomSeed.h>
 #include <Common/logger_useful.h>
@@ -138,7 +139,7 @@ if (metadata.hasSettingsChanges())
         const auto & new_value = changed_setting.value;
         if (setting_name == "vector_index_parameter_check")
         {
-            use_parameter_check = new_value.get<bool>();
+            use_parameter_check = new_value.safeGet<bool>();
             LOG_TRACE(
                 &Poco::Logger::get("AlterCommand"),
                 "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
@@ -537,7 +538,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
         AlterCommand command;
         command.ast = command_ast->clone();
-        command.vec_index_decl = command_ast->vec_index_decl;
+        command.vec_index_decl = command_ast->vec_index_decl->clone();
         command.type = AlterCommand::ADD_VECTOR_INDEX;
 
         const auto & ast_vec_index_decl = command_ast->vec_index_decl->as<ASTVectorIndexDeclaration &>();
@@ -561,7 +562,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
             command.clear = true;
 
         if (command_ast->partition)
-            command.partition = command_ast->partition;
+            command.partition = command_ast->partition->clone();
 
         return command;
     }
@@ -1571,7 +1572,7 @@ void AlterCommands::validate(const StoragePtr & table, ContextPtr context) const
         {
             if (all_columns.has(command.column_name) ||
                 all_columns.hasNested(command.column_name) ||
-                (command.clear && column_name == LightweightDeleteDescription::FILTER_COLUMN.name))
+                (command.clear && column_name == RowExistsColumn::name))
             {
                 if (!command.if_not_exists)
                     throw Exception(ErrorCodes::DUPLICATE_COLUMN,

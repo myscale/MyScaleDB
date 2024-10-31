@@ -52,7 +52,7 @@ VectorIndexInfo::VectorIndexInfo(
     }
     catch (...)
     {
-        status = VectorIndexStatus::ERROR;
+        status = VectorIndexStatus::V_ERROR;
         err_msg = getCurrentExceptionMessage(false);
     }
 }

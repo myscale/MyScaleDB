@@ -2713,7 +2713,7 @@ bool BaseMergePredicate<VirtualPartsT, MutationsStateT>::canMergeTwoParts(
     }
 
     /// Checks related to vector index
-    if (!canMergeWithVectorIndex(left, right, out_reason))
+    if (!LocalMergePredicate::canMergeWithVectorIndex(left, right, out_reason))
         return false;
 
     return MergeTreeData::partsContainSameProjections(left, right, out_reason);
@@ -2762,30 +2762,10 @@ bool BaseMergePredicate<VirtualPartsT, MutationsStateT>::canMergeSinglePart(
 }
 
 
-bool ReplicatedMergeTreeMergePredicate::partParticipatesInReplaceRange(const MergeTreeData::DataPartPtr & part, PreformattedMessage & out_reason) const
-{
-    std::lock_guard lock(queue.state_mutex);
-    for (const auto & entry : queue.queue)
-    {
-        if (entry->type != ReplicatedMergeTreeLogEntry::REPLACE_RANGE)
-            continue;
-
-        for (const auto & part_name : entry->replace_range_entry->new_part_names)
-        {
-            if (part->info.isDisjoint(MergeTreePartInfo::fromPartName(part_name, queue.format_version)))
-                continue;
-
-            out_reason = PreformattedMessage::create("Part {} participates in REPLACE_RANGE {} ({})", part_name, entry->new_part_name, entry->znode_name);
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
+bool LocalMergePredicate::canMergeWithVectorIndex(
     const MergeTreeData::DataPartPtr & left,
     const MergeTreeData::DataPartPtr & right,
-    String * out_reason)
+    PreformattedMessage & out_reason)
 {
     /// No need to check if there is no vector index on the table.
     auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
@@ -2795,8 +2775,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
     /// Check if part contains merged vector index
     if (left->containRowIdsMaps() || right->containRowIdsMaps())
     {
-        if (out_reason)
-            *out_reason = "source part " + left->name + " or " + right->name + " is a decouple part";
+        out_reason = PreformattedMessage::create("source part {} or {} is a decouple part", left->name, right->name);
         return false;
     }
 
@@ -2808,8 +2787,7 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
             auto info = MergeTreePartInfo::fromPartName(part_name, left->storage.format_version);
             if (left->info.isFromSamePart(info) || right->info.isFromSamePart(info))
             {
-                if (out_reason)
-                    *out_reason = "source part " + left->name + " or " + right->name + " is currently building vector index";
+                out_reason = PreformattedMessage::create("source part {} or {} is currently building vector index", left->name, right->name);
                 return false;
             }
         }
@@ -2828,14 +2806,34 @@ bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
         }
         else
         {
-            if (out_reason)
-                *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
+            out_reason = PreformattedMessage::create("source part {} or {} doesn't contain the same built vector index", left->name, right->name);
             can_merge = false;
             break;
         }
     }
 
     return can_merge;
+}
+
+
+bool ReplicatedMergeTreeMergePredicate::partParticipatesInReplaceRange(const MergeTreeData::DataPartPtr & part, PreformattedMessage & out_reason) const
+{
+    std::lock_guard lock(queue.state_mutex);
+    for (const auto & entry : queue.queue)
+    {
+        if (entry->type != ReplicatedMergeTreeLogEntry::REPLACE_RANGE)
+            continue;
+
+        for (const auto & part_name : entry->replace_range_entry->new_part_names)
+        {
+            if (part->info.isDisjoint(MergeTreePartInfo::fromPartName(part_name, queue.format_version)))
+                continue;
+
+            out_reason = PreformattedMessage::create("Part {} participates in REPLACE_RANGE {} ({})", part_name, entry->new_part_name, entry->znode_name);
+            return true;
+        }
+    }
+    return false;
 }
 
 

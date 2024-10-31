@@ -76,6 +76,7 @@
 #include <Storages/StorageInMemoryMetadata.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/parseVectorScanParameters.h>
 #include <VectorIndex/VectorIndexCommon.h>
 

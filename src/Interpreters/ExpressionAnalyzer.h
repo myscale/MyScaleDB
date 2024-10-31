@@ -171,8 +171,9 @@ protected:
         bool is_explain_,
         PreparedSetsPtr prepared_sets_,
         bool is_create_parameterized_view_ = false);
+
     // txh added
-    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalyzer");
+    Poco::Logger * m_log = &Poco::Logger::get("ExpressionAnalyzer");
 
     ASTPtr query;
     const ExtractedSettings settings;
@@ -212,8 +213,8 @@ protected:
     void analyzeAggregation(ActionsDAG & temp_actions);
     void makeAggregateDescriptions(ActionsDAG & actions, AggregateDescriptions & descriptions);
 
-    void analyzeVectorScan(ActionsDAGPtr & temp_actions);
-    bool makeVectorScanDescriptions(ActionsDAGPtr & actions);
+    void analyzeVectorScan(ActionsDAG & temp_actions);
+    bool makeVectorScanDescriptions(ActionsDAG & actions);
 
     const ASTSelectQuery * getSelectQuery() const;
 

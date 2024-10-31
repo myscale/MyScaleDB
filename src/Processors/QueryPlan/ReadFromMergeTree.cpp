@@ -569,16 +569,6 @@ Pipe ReadFromMergeTree::readInOrder(
             context);
     }
 
-    for (auto & col : required_columns)
-    {
-        LOG_DEBUG(log, "[createSource] required_column: {}", col);
-    }
-
-    for (auto & col : virt_column_names)
-    {
-        LOG_DEBUG(log, "[createSource] virt_column: {}", col);
-    }
-
     /// Actually it means that parallel reading from replicas enabled
     /// and we have to collaborate with initiator.
     /// In this case we won't set approximate rows, because it will be accounted multiple times.
@@ -2003,47 +1993,6 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     selected_marks = result.selected_marks;
     selected_rows = result.selected_rows;
     selected_parts = result.selected_parts;
-
-    auto vector_scan_info_ptr = query_info.vector_scan_info;
-
-    if (vector_scan_info_ptr)
-    {
-        LOG_DEBUG(log, "[initializePipeline] need to process vector scan");
-        for (auto & part : result.parts_with_ranges)
-        {
-            part.vector_scan_manager = std::make_shared<MergeTreeVectorScanManager>(metadata_for_reading, vector_scan_info_ptr, context);
-            /// no prewhere info, first perform vector scan
-            if (!prewhere_info)
-            {
-                /// TODO: we can use vector scan result to further decrease mark range size
-                part.vector_scan_manager->executeBeforeRead(part.data_part->getDataPartStorage().getFullPath(), part.data_part);
-            }
-        }
-
-        if (!prewhere_info)
-        {
-            LOG_DEBUG(log, "[initializePipeline] try to filter mark ranges by vector scan result");
-            filterPartsMarkRangesByVectorScanResult(result.parts_with_ranges, vector_scan_info_ptr->vector_scan_descs);
-
-            size_t sum_marks = 0;
-            size_t sum_ranges = 0;
-            size_t sum_rows = 0;
-
-            for (const auto & part : result.parts_with_ranges)
-            {
-                sum_ranges += part.ranges.size();
-                sum_marks += part.getMarksCount();
-                sum_rows += part.getRowsCount();
-            }
-            LOG_DEBUG(
-                log,
-                "After filterByVectorScan: {} parts, {} marks to read from {} ranges, read {} rows",
-                result.parts_with_ranges.size(),
-                sum_marks,
-                sum_ranges,
-                sum_rows);
-        }
-    }
 
     /// Projection, that needed to drop columns, which have appeared by execution
     /// of some extra expressions, and to allow execute the same expressions later.

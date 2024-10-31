@@ -235,7 +235,7 @@ String MergeTreePartInfo::getPartNameWithoutMutation() const
     writeChar('_', wb);
     writeIntText(max_block, wb);
     writeChar('_', wb);
-    if (use_leagcy_max_level)
+    if (use_legacy_max_level)
     {
         assert(level == MAX_LEVEL);
         writeIntText(LEGACY_MAX_LEVEL, wb);

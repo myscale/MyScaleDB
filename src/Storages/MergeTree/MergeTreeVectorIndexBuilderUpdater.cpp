@@ -13,7 +13,8 @@
 #include <Common/ActionBlocker.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
+#include <Core/Settings.h>
 
 namespace ProfileEvents
 {
@@ -665,7 +666,7 @@ BuildVectorIndexStatus MergeTreeVectorIndexBuilderUpdater::buildVectorIndexForOn
                 else
                     LOG_DEBUG(log, "seri_status is not fine, vector_tmp_relative_path doesn't exist {}", vector_tmp_relative_path);
 
-                throw Exception(seri_status.getCode(), seri_status.getMessage().data());
+                throw Exception(seri_status.getCode(), "{}", seri_status.getMessage());
             }
 
             /// Done with writing vector index files to temporary directory.

@@ -4,6 +4,7 @@
 
 #include <Columns/ColumnsNumber.h>
 
+#include <Core/Settings.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeRangeReader.h>
 #include <Storages/MergeTree/VectorScanResult.h>

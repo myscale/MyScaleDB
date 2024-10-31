@@ -930,6 +930,7 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> Fetcher::fetchSelected
 /// Referenced from fetchSelectedPart()
 String Fetcher::fetchVectorIndex(
     const MergeTreeData::DataPartPtr & future_part,
+    ContextPtr context,
     const String & source_part_name,
     const String & vec_index_name,
     const String & replica_path,
@@ -1026,15 +1027,17 @@ String Fetcher::fetchVectorIndex(
         creds.setPassword(password);
     }
 
-    std::unique_ptr<PooledReadWriteBufferFromHTTP> in = std::make_unique<PooledReadWriteBufferFromHTTP>(
-        uri,
-        Poco::Net::HTTPRequest::HTTP_POST,
-        nullptr,
-        timeouts,
-        creds,
-        DBMS_DEFAULT_BUFFER_SIZE,
-        0, /* no redirects */
-        static_cast<uint64_t>(data_settings->replicated_max_parallel_fetches_for_host));
+    ReadSettings read_settings = context->getReadSettings();
+    /// Disable retries for fetches, this will be done by the engine itself.
+    read_settings.http_max_tries = 1;
+
+    auto in = BuilderRWBufferFromHTTP(uri)
+                  .withConnectionGroup(HTTPConnectionGroupType::HTTP)
+                  .withMethod(Poco::Net::HTTPRequest::HTTP_POST)
+                  .withTimeouts(timeouts)
+                  .withSettings(read_settings)
+                  .withDelayInit(false)
+                  .create(creds);
 
     int server_protocol_version = parse<int>(in->getResponseCookie("server_protocol_version", "0"));
 
@@ -1137,7 +1140,7 @@ String Fetcher::fetchVectorIndex(
             temporary_directory_lock = {};
 
             /// Try again but without zero-copy
-            return fetchVectorIndex(future_part, source_part_name, vec_index_name, replica_path, host, port, timeouts,
+            return fetchVectorIndex(future_part, context, source_part_name, vec_index_name, replica_path, host, port, timeouts,
                 user, password, interserver_scheme, throttler, tmp_prefix, false, disk);
         }
     }
@@ -1161,66 +1164,6 @@ String Fetcher::fetchVectorIndex(
     return downloadVectorIndexInPartToDisk(
         future_part, vec_index_name, replica_path, tmp_prefix,
         disk, false, *in, output_buffer_getter, throttler, false);
-}
-
-MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToMemory(
-    MutableDataPartStoragePtr data_part_storage,
-    const String & part_name,
-    const MergeTreePartInfo & part_info,
-    const UUID & part_uuid,
-    const StorageMetadataPtr & metadata_snapshot,
-    ContextPtr context,
-    PooledReadWriteBufferFromHTTP & in,
-    size_t projections,
-    bool is_projection,
-    ThrottlerPtr throttler)
-{
-    auto new_data_part = std::make_shared<MergeTreeDataPartInMemory>(data, part_name, part_info, data_part_storage);
-
-    for (size_t i = 0; i < projections; ++i)
-    {
-        String projection_name;
-        readStringBinary(projection_name, in);
-
-        MergeTreePartInfo new_part_info("all", 0, 0, 0);
-        auto projection_part_storage = data_part_storage->getProjection(projection_name + ".proj");
-
-        auto new_projection_part = downloadPartToMemory(
-            projection_part_storage, projection_name,
-            new_part_info, part_uuid, metadata_snapshot,
-            context, in, 0, true, throttler);
-
-        new_data_part->addProjectionPart(projection_name, std::move(new_projection_part));
-    }
-
-    MergeTreeData::DataPart::Checksums checksums;
-    if (!checksums.read(in))
-        throw Exception(ErrorCodes::CORRUPTED_DATA, "Cannot deserialize checksums");
-
-    NativeReader block_in(in, 0);
-    auto block = block_in.read();
-    throttler->add(block.bytes());
-
-    new_data_part->setColumns(block.getNamesAndTypesList(), {});
-
-    if (!is_projection)
-    {
-        new_data_part->version.setCreationTID(Tx::PrehistoricTID, nullptr);
-        new_data_part->uuid = part_uuid;
-        new_data_part->is_temp = true;
-        new_data_part->minmax_idx->update(block, data.getMinMaxColumnsNames(metadata_snapshot->getPartitionKey()));
-        new_data_part->partition.create(metadata_snapshot, block, 0, context);
-    }
-
-    MergedBlockOutputStream part_out(
-        new_data_part, metadata_snapshot, block.getNamesAndTypesList(), {},
-        CompressionCodecFactory::instance().get("NONE", {}), NO_TRANSACTION_PTR);
-
-    part_out.write(block);
-    part_out.finalizePart(new_data_part, false);
-    new_data_part->checksums.checkEqual(checksums, /* have_uncompressed = */ true);
-
-    return new_data_part;
 }
 
 void Fetcher::downloadBaseOrProjectionPartToDisk(
@@ -1459,7 +1402,7 @@ String Fetcher::downloadVectorIndexInPartToDisk(
     const String & tmp_prefix,
     DiskPtr disk,
     bool to_remote_disk,
-    PooledReadWriteBufferFromHTTP & in,
+    ReadWriteBufferFromHTTP & in,
     OutputBufferGetter output_buffer_getter,
     ThrottlerPtr throttler,
     bool sync)

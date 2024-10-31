@@ -38,6 +38,8 @@
 #include <Processors/Transforms/DistinctSortedTransform.h>
 #include <Processors/Transforms/DistinctTransform.h>
 #include <Processors/QueryPlan/CreatingSetsStep.h>
+#include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
+#include <Processors/QueryPlan/QueryPlan.h>
 #include <Interpreters/PreparedSets.h>
 #include <Interpreters/MergeTreeTransaction.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
@@ -407,13 +409,9 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
         /// TODO: duplicate code optimize
         if (!ctx->rows_sources_write_buf)
         {
-            ctx->rows_sources_file = createTemporaryFile(ctx->tmp_disk->getPath());
-            ctx->rows_sources_uncompressed_write_buf = ctx->tmp_disk->writeFile(fileName(ctx->rows_sources_file->path()));
+            ctx->rows_sources_uncompressed_write_buf = ctx->tmp_disk->createRawStream();
             ctx->rows_sources_write_buf = std::make_unique<CompressedWriteBuffer>(*ctx->rows_sources_uncompressed_write_buf);
         }
-
-        /// keep this file
-        ctx->rows_sources_file->keep();
 
         /// create inverted row ids map
         global_ctx->inverted_row_ids_map_file_path
@@ -426,7 +424,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
                 + global_ctx->future_part->parts[i]->name + "-row_ids_map" + VECTOR_INDEX_FILE_SUFFIX;
             global_ctx->row_ids_map_files.emplace_back(row_ids_map_file);
         }
-        global_ctx->inverted_row_sources_map_file_path = ctx->rows_sources_file->path();
+        global_ctx->inverted_row_sources_map_file_path = ctx->rows_sources_uncompressed_write_buf->getFileName();
     }
 
     /// If merge is vertical we cannot calculate it
@@ -641,49 +639,42 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         return false;
 
     const auto & primary_key = global_ctx->metadata_snapshot->getPrimaryKey();
-    Names primary_key_columns = primary_key.column_names;
+    Names columns_to_read = primary_key.column_names;
+    columns_to_read.emplace_back("_part_offset");
 
-    Names system_columns{"_part_offset"};
     size_t old_parts_num = global_ctx->future_part->parts.size();
     std::vector<std::vector<UInt64>> part_offsets(old_parts_num);
 
+    auto pipeline_settings = BuildQueryPipelineSettings::fromContext(global_ctx->context);
+    auto optimization_settings = QueryPlanOptimizationSettings::fromContext(global_ctx->context);
+
     for (size_t part_num = 0; part_num < old_parts_num; ++part_num)
     {
-        ExpressionActionsSettings actions_settings;
-        MergeTreeReaderSettings reader_settings;
-        MarkRanges ranges;
-        if (global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount() != 0)
-            ranges.emplace_back(0, global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount());
-        else
+        if (global_ctx->future_part->parts[part_num]->index_granularity.getMarksCount() == 0)
             continue;
 
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
+        auto plan_for_part = std::make_unique<QueryPlan>();
+        createReadFromPartStep(
+            MergeTreeSequentialSourceType::Mutation,
+            *plan_for_part,
             *global_ctx->data,
             global_ctx->storage_snapshot,
             global_ctx->future_part->parts[part_num],
-            global_ctx->context->getSettingsRef().max_block_size,
-            global_ctx->context->getSettingsRef().preferred_block_size_bytes,
-            global_ctx->context->getSettingsRef().preferred_max_column_in_block_size_bytes,
-            primary_key_columns,
-            ranges,
-            false,
-            nullptr,
-            actions_settings,
-            reader_settings,
-            nullptr,
-            system_columns);
+            columns_to_read,
+            /*apply_deleted_mask=*/ false,
+            std::nullopt,
+            global_ctx->context,
+            getLogger("generateRowIdsMap"));
 
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+        auto builder = plan_for_part->buildQueryPipeline(optimization_settings, pipeline_settings);
 
-        Pipe pipe(std::move(source));
-
-        QueryPipeline filter_pipeline(std::move(pipe));
+        QueryPipeline filter_pipeline(QueryPipelineBuilder::getPipeline(std::move(*builder)));
         PullingPipelineExecutor filter_executor(filter_pipeline);
 
         Block block;
         while (filter_executor.pull(block))
         {
-            const PaddedPODArray<UInt64>& col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+            const PaddedPODArray<UInt64>& col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column).getData();
             for (size_t i = 0; i < block.rows(); ++i)
             {
                 part_offsets[part_num].emplace_back(col_data[i]);
@@ -699,8 +690,8 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
 
     size_t rows_sources_count = ctx->rows_sources_write_buf->count();
     /// get rows sources info from local file
-    auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(ctx->tmp_disk->readFile(fileName(ctx->rows_sources_file->path())));
-    LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_file->path(), rows_sources_count);
+    auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(global_ctx->context->getTempDataOnDisk()->getVolume()->getDisk()->readFile(ctx->rows_sources_uncompressed_write_buf->getFileName()));
+    LOG_DEBUG(ctx->log, "Try to read from rows_sources_file: {}, rows_sources_count: {}", ctx->rows_sources_uncompressed_write_buf->getFileName(), rows_sources_count);
     rows_sources_read_buf->seek(0, 0);
 
     /// inverted_row_ids_map file write buffer
@@ -864,7 +855,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
 
     if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
     {
-        ctx->rows_sources_file.reset();
         ctx->rows_sources_write_buf.reset();
         ctx->rows_sources_uncompressed_write_buf.reset();
     }
@@ -1278,7 +1268,7 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
 
         /// finalize row sources map info to new data part dir
         auto rows_sources_read_buf = std::make_unique<CompressedReadBufferFromFile>(
-            global_ctx->context->getTemporaryVolume()->getDisk()->readFile(fileName(global_ctx->inverted_row_sources_map_file_path)));
+            global_ctx->context->getTempDataOnDisk()->getVolume()->getDisk()->readFile(global_ctx->inverted_row_sources_map_file_path));
         rows_sources_read_buf->seek(0, 0);
 
         String inverted_row_sources_file_path
@@ -1291,9 +1281,6 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
         inverted_row_sources_map_buf->finalize();
         inverted_row_sources_map_uncompressed_buf->next();
         inverted_row_sources_map_uncompressed_buf->finalize();
-
-        /// Previously we marked this tmp file to be kept
-        global_ctx->context->getTemporaryVolume()->getDisk()->removeFile(global_ctx->inverted_row_sources_map_file_path);
 
         /// add merged-inverted_row_ids_map and merged-inverted_row_sources_map to vector_index_checksums_map
         NameSet index_map_filenames

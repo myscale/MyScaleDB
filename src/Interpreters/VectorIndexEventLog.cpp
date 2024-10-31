@@ -10,6 +10,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Interpreters/VectorIndexEventLog.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/executeQuery.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 
@@ -18,7 +19,7 @@
 namespace DB
 {
 
-NamesAndTypesList VectorIndexEventLogElement::getNamesAndTypes()
+ColumnsDescription VectorIndexEventLogElement::getColumnsDescription()
 {
     auto event_type_datatype = std::make_shared<DataTypeEnum8>(
         DataTypeEnum8::Values
@@ -41,24 +42,25 @@ NamesAndTypesList VectorIndexEventLogElement::getNamesAndTypes()
             {"Cleared",      static_cast<Int8>(CLEARED)},
         }
     );
-    // ColumnsWithTypeAndName columns_with_type_and_name;
 
-    return {
-        {"database", std::make_shared<DataTypeString>()},
-        {"table", std::make_shared<DataTypeString>()},
-        {"part_name", std::make_shared<DataTypeString>()},
-        {"current_part_name", std::make_shared<DataTypeString>()},
-        {"partition_id", std::make_shared<DataTypeString>()},
-        {"thread_id", std::make_shared<DataTypeString>()},
+    ColumnsDescription result;
 
-        {"event_type", std::move(event_type_datatype)},
-        {"event_date", std::make_shared<DataTypeDate>()},
-        {"event_time", std::make_shared<DataTypeDateTime>()},
-        {"event_time_microseconds", std::make_shared<DataTypeDateTime64>(6)},
+    result.add({"database", std::make_shared<DataTypeString>(), "Database name."});
+    result.add({"table", std::make_shared<DataTypeString>(), "Table name."});
+    result.add({"part_name", std::make_shared<DataTypeString>()}, "Part name.");
+    result.add({"current_part_name", std::make_shared<DataTypeString>()}, "Current part name.");
+    result.add({"partition_id", std::make_shared<DataTypeString>()}, "Partition id.");
+    result.add({"thread_id", std::make_shared<DataTypeString>()}, "Thread id.");
 
-        {"error", std::make_shared<DataTypeUInt16>()},
-        {"exception", std::make_shared<DataTypeString>()},
-    };
+    result.add({"event_type", std::move(event_type_datatype)}, "Event type.");
+    result.add({"event_date", std::make_shared<DataTypeDate>()}, "Event date.");
+    result.add({"event_time", std::make_shared<DataTypeDateTime>()}, "Event time.");
+    result.add({"event_time_microseconds", std::make_shared<DataTypeDateTime64>(6)}, "Event time with microseconds resolution.");
+
+    result.add({"error", std::make_shared<DataTypeUInt16>()}, "Error.");
+    result.add({"exception", std::make_shared<DataTypeString>()}, "Exception.");
+
+    return result;
 };
 
 void VectorIndexEventLogElement::appendToBlock(MutableColumns & columns) const
@@ -143,7 +145,7 @@ void VectorIndexEventLog::addEventLog(
     }
     catch (...)
     {
-        tryLogCurrentException(log_entry ? log_entry->log : &Poco::Logger::get("VectorIndexEventLog"), __PRETTY_FUNCTION__);
+        tryLogCurrentException(log_entry ? log_entry->log : getLogger("VectorIndexEventLog"), __PRETTY_FUNCTION__);
     }
 }
 
@@ -169,7 +171,7 @@ void VectorIndexEventLog::addEventLog(
     }
     catch (...)
     {
-        tryLogCurrentException(log_entry ? log_entry->log : &Poco::Logger::get("VectorIndexEventLog"), __PRETTY_FUNCTION__);
+        tryLogCurrentException(log_entry ? log_entry->log : getLogger("VectorIndexEventLog"), __PRETTY_FUNCTION__);
     }
 }
 
@@ -203,7 +205,7 @@ void VectorIndexEventLog::addEventLog(
     }
     catch (...)
     {
-        tryLogCurrentException(log_entry ? log_entry->log : &Poco::Logger::get("VectorIndexEventLog"), __PRETTY_FUNCTION__);
+        tryLogCurrentException(log_entry ? log_entry->log : getLogger("VectorIndexEventLog"), __PRETTY_FUNCTION__);
     }
 }
 

@@ -60,7 +60,7 @@ static std::unordered_map<String, DB::MergeTreeDataPartChecksums> moveVectorInde
                 auto read_buf = old_storage.readFile(old_file_path, /* settings */ {}, /* read_hint */ {}, /* file_size */ {});
                 auto size = read_buf->getFileSize();
                 auto write_buf = new_storage.writeFile(
-                    new_file_path, std::min<size_t>(size, DBMS_DEFAULT_BUFFER_SIZE), /* mode */ {}, /* settings */ {});
+                    new_file_path, std::min<size_t>(size, DB::DBMS_DEFAULT_BUFFER_SIZE), /* mode */ {}, /* settings */ {});
 
                 DB::copyData(*read_buf, *write_buf, size);
                 write_buf->finalize();

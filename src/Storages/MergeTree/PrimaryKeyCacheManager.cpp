@@ -1,6 +1,7 @@
 #include <memory>
 #include <optional>
 #include <Interpreters/Context.h>
+#include <Common/logger_useful.h>
 
 #include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 

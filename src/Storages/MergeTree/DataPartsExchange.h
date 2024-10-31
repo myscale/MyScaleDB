@@ -90,6 +90,7 @@ public:
     /// Downloads vector index files to tmp_directory, then moves to target part.
     String fetchVectorIndex(
         const MergeTreeData::DataPartPtr & future_part,
+        ContextPtr context,
         const String & source_part_name,
         const String & vec_index_name,
         const String & replica_path,
@@ -150,7 +151,7 @@ private:
             const String & tmp_prefix,
             DiskPtr disk,
             bool to_remote_disk,
-            PooledReadWriteBufferFromHTTP & in,
+            ReadWriteBufferFromHTTP & in,
             OutputBufferGetter output_buffer_getter,
             ThrottlerPtr throttler,
             bool sync);

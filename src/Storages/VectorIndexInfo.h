@@ -32,7 +32,7 @@ enum VectorIndexStatus
     BUILDING,
     BUILT,
     LOADED,
-    ERROR
+    V_ERROR
 };
 
 const String MEMORY_USAGE_BYTES = "memory_usage_bytes";
@@ -96,7 +96,7 @@ public:
 
     void onError(const String & err = "")
     {
-        status = ERROR;
+        status = V_ERROR;
         err_msg = err;
     }
 

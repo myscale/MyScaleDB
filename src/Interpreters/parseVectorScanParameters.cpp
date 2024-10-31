@@ -1,3 +1,4 @@
+#include <numeric>
 #include <Core/Field.h>
 #include <Interpreters/parseVectorScanParameters.h>
 
@@ -230,11 +231,11 @@ String parseVectorScanParameters(const ASTFunction * node, ContextPtr context, c
     /// transfer array param to vector string param
     String param_str;
     /// parse JSON str
-    if (parameters.size() == 1 && (parameters[0].get<String>().find('=')) == String::npos)
+    if (parameters.size() == 1 && (parameters[0].safeGet<String>().find('=')) == String::npos)
     {
-        param_str = parameters[0].get<String>();
+        param_str = parameters[0].safeGet<String>();
         if ((param_str.find('{')) == String::npos || (param_str.find('}')) == String::npos)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "JSON parameters to vector index must must have a `{` and `}`");
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "JSON parameters to vector index must must have a `{}` and `{}`", "{", "}");
         //LOG_DEBUG(&Poco::Logger::get("test parse arg"), param_str);
     }
     else
@@ -242,7 +243,7 @@ String parseVectorScanParameters(const ASTFunction * node, ContextPtr context, c
         param_str = "{ ";
         for (auto & arg : parameters)
         {
-            String argument = arg.get<String>();
+            String argument = arg.safeGet<String>();
             param_str += parse_arg(argument, index_type, check_parameter);
         }
         param_str += " }";

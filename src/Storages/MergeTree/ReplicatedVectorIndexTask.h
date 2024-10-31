@@ -38,9 +38,11 @@ public:
     }
 
     bool executeStep() override;
-    StorageID getStorageID() override;
-    UInt64 getPriority() override { return priority; }
+    StorageID getStorageID() const override;
+    Priority getPriority() const override { return priority; }
     void onCompleted() override;
+    String getQueryId() const override { return getStorageID().getShortName() + "::" + "VectorIndex::" + entry.source_parts.at(0); }
+
 
     ~ReplicatedVectorIndexTask() override;
 
@@ -48,7 +50,7 @@ private:
     /// result, need_to_fetch
     std::pair<bool, bool> prepare();
 
-    UInt64 priority{0};
+    Priority priority{0};
 
     StorageReplicatedMergeTree & storage;
     StorageMetadataPtr metadata_snapshot;

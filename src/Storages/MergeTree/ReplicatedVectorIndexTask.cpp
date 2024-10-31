@@ -12,7 +12,7 @@ namespace ErrorCodes
 }
 
 
-StorageID ReplicatedVectorIndexTask::getStorageID()
+StorageID ReplicatedVectorIndexTask::getStorageID() const
 {
     return storage.getStorageID();
 }

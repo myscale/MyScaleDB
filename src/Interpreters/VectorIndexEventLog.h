@@ -6,6 +6,7 @@
 #include <Core/NamesAndAliases.h>
 #include <IO/ReadBufferFromMemory.h>
 #include <IO/ReadHelpers.h>
+#include <Storages/ColumnsDescription.h>
 
 namespace DB
 {
@@ -51,10 +52,9 @@ struct VectorIndexEventLogElement
 
     static std::string name() { return "VectorIndexEventLog"; }
 
-    static NamesAndTypesList getNamesAndTypes();
+    static ColumnsDescription getColumnsDescription();
     static NamesAndAliases getNamesAndAliases() { return {}; }
     void appendToBlock(MutableColumns & columns) const;
-    static const char * getCustomColumnList() { return nullptr; }
 };
 
 class VectorIndexEventLog : public SystemLog<VectorIndexEventLogElement>

@@ -153,12 +153,11 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
     Poco::JSON::Object::Ptr sass_index_obj = sass_index_params.extract<Poco::JSON::Object::Ptr>();
     Poco::Dynamic::Var body = sass_index_obj->get(Poco::toUpper(result.type));
     /// parse JSON str
-    if (result.arguments.size() == 1 && (result.arguments[0].get<String>().find('=')) == String::npos)
+    if (result.arguments.size() == 1 && (result.arguments[0].safeGet<String>().find('=')) == String::npos)
     {
-        param_str = result.arguments[0].get<String>();
+        param_str = result.arguments[0].safeGet<String>();
         if ( (param_str.find('{')) == String::npos || (param_str.find('}')) == String::npos)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "JSON parameters to vector index must must have a `{` and `}`");
-        //LOG_DEBUG(&Poco::Logger::get("test parse arg"), param_str);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "JSON parameters to vector index must must have a `{}` and `{}`", "{", "}");
     }
     /// parse key-value str
     else
@@ -166,7 +165,7 @@ VectorIndexDescription VectorIndexDescription::getVectorIndexFromAST(
         param_str = "{ ";
         for (auto & arg : result.arguments)
         {
-            String argument = arg.get<String>();
+            String argument = arg.safeGet<String>();
             param_str += result.parse_arg(argument, body.toString(), result.type, result.dim, check_parameter);
         }
         param_str += " }";
@@ -429,7 +428,7 @@ String VectorIndicesDescription::toString() const
     for (const auto & index : *this)
         list.children.push_back(index.definition_ast);
 
-    return serializeAST(list, true);
+    return serializeAST(list);
 }
 
 
@@ -440,7 +439,7 @@ VectorIndicesDescription VectorIndicesDescription::parse(const String & str, con
         return result;
 
     ParserVectorIndexDeclarationList parser;
-    ASTPtr list = parseQuery(parser, str, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH);
+    ASTPtr list = parseQuery(parser, str, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
 
     for (const auto & index : list->children)
         result.emplace_back(VectorIndexDescription::getVectorIndexFromAST(index, columns));
