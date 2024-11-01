@@ -47,9 +47,9 @@ BoolWithMessage SparseIndexStore::loadIndexReaderImpl(const String & full_index_
 
 BoolWithMessage SparseIndexStore::loadIndexWriterImpl(const String & full_index_path)
 {
-    // SparseIndexSettingsPtr sparse_index_settings = std::static_pointer_cast<SparseIndexSettings>(index_settings);
-    SPARSE::FFIBoolResult free_status = SPARSE::ffi_load_index_reader(full_index_path);
-    return FFI_BOOL_CONVERT(free_status);
+    SparseIndexSettingsPtr sparse_index_settings = std::dynamic_pointer_cast<SparseIndexSettings>(this->index_settings);
+    SPARSE::FFIBoolResult create_status = SPARSE::ffi_create_index_with_parameter(full_index_path, sparse_index_settings->json_parameter);
+    return FFI_BOOL_CONVERT(create_status);
 }
 
 bool SparseIndexStore::indexSparseVector(
