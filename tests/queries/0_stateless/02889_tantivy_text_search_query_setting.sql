@@ -3,7 +3,7 @@
 SET allow_experimental_inverted_index = 1;
 SET log_queries = 1;
 SET mutations_sync = 1;
-SET enbale_fts_index_for_string_functions = 1;
+SET enable_fts_index_for_string_functions = 1;
 
 
 DROP TABLE IF EXISTS tb sync;
@@ -53,7 +53,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE col1 == 'Dont put all your eggs' SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE col1 == 'Dont put all your eggs' SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -86,7 +86,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE equals(col2, 'A stitch in time saves') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE equals(col2, 'A stitch in time saves') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -108,7 +108,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE notEquals(col3, 'Hope for best prepare worst') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE notEquals(col3, 'Hope for best prepare worst') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -136,7 +136,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE hasToken(col1, 'grease') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE hasToken(col1, 'grease') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -159,7 +159,7 @@ SELECT read_rows from system.query_log
     LIMIT 1;
 
 
-SELECT count(*) FROM tb WHERE not hasToken(col1, 'grease') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE not hasToken(col1, 'grease') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -204,7 +204,7 @@ SELECT read_rows from system.query_log
     LIMIT 1;
 
 
-SELECT count(*) FROM tb WHERE hasTokenOrNull(col3, 'Practice') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE hasTokenOrNull(col3, 'Practice') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -231,7 +231,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE col1 like '%Dont%' SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE col1 like '%Dont%' SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -255,7 +255,7 @@ SELECT read_rows from system.query_log
     LIMIT 1;
 
 
-SELECT count(*) FROM tb WHERE col1 like '%dont%' SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE col1 like '%dont%' SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log
     WHERE query_kind ='Select'
@@ -279,7 +279,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE col1 not like '%Dont%' SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE col1 not like '%Dont%' SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
@@ -303,7 +303,7 @@ SELECT read_rows from system.query_log
     LIMIT 1;
 
 
-SELECT count(*) FROM tb WHERE col1 not like '%dont%' SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE col1 not like '%dont%' SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log
     WHERE query_kind ='Select'
@@ -330,7 +330,7 @@ SELECT read_rows from system.query_log
     ORDER BY query_start_time_microseconds DESC
     LIMIT 1;
 
-SELECT count(*) FROM tb WHERE startsWith(col2, 'Rome') SETTINGS enbale_fts_index_for_string_functions=0;
+SELECT count(*) FROM tb WHERE startsWith(col2, 'Rome') SETTINGS enable_fts_index_for_string_functions=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows from system.query_log 
     WHERE query_kind ='Select'
