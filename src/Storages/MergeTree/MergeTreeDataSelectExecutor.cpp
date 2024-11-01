@@ -1677,9 +1677,9 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
         return index_ranges;
     }
     // Boundary
-    UInt64 enbale_fts_index_for_string_functions = settings.enbale_fts_index_for_string_functions;
-    LOG_DEBUG(log, "enbale_fts_index_for_string_functions: {}", enbale_fts_index_for_string_functions);
-    if (enbale_fts_index_for_string_functions == 0)
+    UInt64 enable_fts_index_for_string_functions = settings.enable_fts_index_for_string_functions;
+    LOG_DEBUG(log, "enable_fts_index_for_string_functions: {}", enable_fts_index_for_string_functions);
+    if (enable_fts_index_for_string_functions == 0)
     {
         return index_ranges;
     }
