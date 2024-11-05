@@ -580,11 +580,6 @@ class LocalMergePredicate : public BaseMergePredicate<ActiveDataPartSet, Replica
 {
 public:
     explicit LocalMergePredicate(ReplicatedMergeTreeQueue & queue_);
-
-    /// Can we merge two parts with vector index?
-    static bool canMergeWithVectorIndex(const MergeTreeData::DataPartPtr & left,
-                                 const MergeTreeData::DataPartPtr & right,
-                                 PreformattedMessage & out_reason);
 };
 
 class ReplicatedMergeTreeMergePredicate : public BaseMergePredicate<ActiveDataPartSet, ReplicatedMergeTreeQueue>

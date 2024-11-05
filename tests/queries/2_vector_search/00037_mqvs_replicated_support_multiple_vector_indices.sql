@@ -11,10 +11,7 @@ SETTINGS min_bytes_to_build_vector_index=10000;
 
 INSERT INTO test_multi_replica SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500);
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v2' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v2' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v2' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_replica;
 SELECT '-- Check build status for multiple vector indices';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi_replica';
 
@@ -27,20 +24,14 @@ SELECT part, name, status FROM system.vector_index_segments WHERE database = cur
 
 ALTER TABLE test_multi_replica ADD VECTOR INDEX v1 v1 TYPE MSTG;
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_replica;
 SELECT '-- After add a second index on VPart, check build status for multiple vector indices';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi_replica';
 
 SELECT '-- Insert a new part for the test of VParts -> DPart';
 INSERT INTO test_multi_replica SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500,5500);
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_replica;
 SELECT 'Before decouple, two VParts with multiple vector indices';
 SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi_replica';
 
@@ -55,10 +46,7 @@ SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM syste
 
 SYSTEM START BUILD VECTOR INDICES test_multi_replica;
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_multi_replica' and name = 'v1' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_replica;
 SELECT '-- DPart->VPart, check system table vector_indices';
 SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi_replica';
 

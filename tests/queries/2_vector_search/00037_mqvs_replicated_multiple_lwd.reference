@@ -1,8 +1,5 @@
 -- Test LWD with multiple vector indices
 -- Build multiple vector indices on MPart with LWD
-0
-0
-0
 -- Original VPart, Select on v1
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -26,7 +23,6 @@
 9	[109,109,109]	237.6301
 10	[110,110,110]	294.0301
 -- LWD on VPart with multiple vector indices
-0
 -- After LWD on VPart, select on v1
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -50,9 +46,6 @@
 10	[110,110,110]	294.0301
 11	[111,111,111]	356.4301
 -- Decouple part on Vpart with multiple vector indices
-0
-0
-0
 -- Before decouple part, select on v1
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998

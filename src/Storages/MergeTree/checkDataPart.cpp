@@ -19,6 +19,8 @@
 #include <IO/AzureBlobStorage/isRetryableAzureException.h>
 #include <Poco/Net/NetException.h>
 
+#include <VectorIndex/Common/VICommon.h>
+
 
 namespace CurrentMetrics
 {

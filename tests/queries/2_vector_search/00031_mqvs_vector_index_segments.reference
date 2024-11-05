@@ -1,9 +1,3 @@
-0
-0
-0
-0
-0
-0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- detach
 --- attach
@@ -19,36 +13,17 @@ all_1_1_0	all_1_1_0	0	vec_ind	BUILT
 7	68.69
 8	99.89
 9	137.09
-0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- drop vector index
 --- add vector index
-0
-0
-0
-0
-0
-0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- truncate
 0
 --- insert
-0
-0
-0
-0
-0
-0
 all_2_2_0	all_2_2_0	0	vec_ind	LOADED
 --- lightweight delete
 all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
 --- insert
-0
-0
-0
-0
-0
-0
 all_2_2_0_3	all_2_2_0_3	0	vec_ind	LOADED
 all_4_4_0	all_4_4_0	0	vec_ind	LOADED
 --- merge
@@ -66,7 +41,6 @@ all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 8	99.89
 9	137.09
 10	180.29
-0
 all_2_4_1_3	all_2_4_1_3	0	vec_ind	PENDING
 all_2_4_1_3	all_2_2_0_3	0	vec_ind	LOADED
 all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
@@ -74,27 +48,9 @@ all_2_4_1_3	all_4_4_0	1	vec_ind	LOADED
 0
 --- test auto build after merge
 --- insert part 1
-0
-0
-0
-0
-0
-0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 --- insert part 2
-0
-0
-0
-0
-0
-0
 all_1_1_0	all_1_1_0	0	vec_ind	LOADED
 all_2_2_0	all_2_2_0	0	vec_ind	LOADED
 --- merge
-0
-0
-0
-0
-0
-0
 0	vec_ind	LOADED

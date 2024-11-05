@@ -1,5 +1,3 @@
-0
-0
 --- Original topK result
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -12,7 +10,6 @@
 8	[8,8,8]	187.23
 9	[9,9,9]	237.62997
 --- Lightweight delete on parts with vector index
-0
 --- After lightweight, select from test_vector limit 10
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -36,7 +33,6 @@
 15	[15,15,15]	666.02997
 16	[16,16,16]	758.42993
 --- Decoupled part when source parts contain lightweight delete
-0
 --- After optimize, select from test_vector limit 10
 0	[0,0,0]	0.030000001
 1	[1,1,1]	2.4299998
@@ -60,7 +56,6 @@
 15	[15,15,15]	666.02997
 16	[16,16,16]	758.42993
 --- lightweight delete on decoupled part
-0
 test_vector	v1	HNSWFLAT	1	InProgress
 --- After lightweight, select from test_vector limit 10
 0	[0,0,0]	0.030000001

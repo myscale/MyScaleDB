@@ -3,7 +3,6 @@
 #include <iostream>
 #include <vector>
 
-#include <boost/algorithm/string.hpp>
 #include <sys/resource.h>
 
 #include <Common/ErrorCodes.h>
@@ -20,9 +19,9 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
 
-#include <VectorIndex/Common/SegmentId.h>
+#include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Common/VICommon.h>
-#include <VectorIndex/Common/VIWithDataPart.h>
+#include <VectorIndex/Common/MergedPartNameAndId.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
 #include <VectorIndex/Storages/VSDescription.h>
 #include <VectorIndex/Utils/VIUtils.h>
@@ -60,7 +59,7 @@ MergeTreeDataPartChecksums moveVectorIndexFiles(
 
     /// move and rename vector index files,
     /// combine vector index checksums and fill it to map
-    DB::MergeTreeDataPartChecksums old_index_checksums = getVectorIndexChecksums(old_data_part->getDataPartStoragePtr(), vec_index_name);
+    DB::MergeTreeDataPartChecksums old_index_checksums = VectorIndex::getVectorIndexChecksums(old_data_part->getDataPartStoragePtr(), vec_index_name);
 
     /// No need to move when no vector index files
     if (old_index_checksums.empty())
@@ -148,104 +147,8 @@ MergeTreeDataPartChecksums calculateVectorIndexChecksums(
 }
 namespace VectorIndex
 {
-String cutMutVer(const String & part_name)
-{
-    std::vector<String> tokens;
-    boost::split(tokens, part_name, boost::is_any_of("_"));
-    if (tokens.size() <= 4) /// without mutation version
-    {
-        return part_name;
-    }
-    else
-        return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
-}
-
-String cutPartitionID(const String & part_name)
-{
-    std::vector<String> tokens;
-    boost::split(tokens, part_name, boost::is_any_of("_"));
-    return tokens[0];
-}
-
-String cutTableUUIDFromCacheKey(const String & cache_key)
-{
-    std::vector<String> tokens;
-    boost::split(tokens, cache_key, boost::is_any_of("/"));
-    return tokens[tokens.size() - 3];
-}
-
-String cutPartNameFromCacheKey(const String & cache_key)
-{
-    std::vector<String> tokens;
-    boost::split(tokens, cache_key, boost::is_any_of("/"));
-    return tokens[tokens.size() - 2];
-}
 
 /// [TODO] replace with index segment ptr
-std::vector<SegmentId>
-getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const String & index_name)
-{
-    auto column_index_opt = data_part->vector_index.getColumnIndex(index_name);
-    if (!column_index_opt.has_value())
-        return {};
-    auto column_index = column_index_opt.value();
-
-    return getAllSegmentIds(data_part->getDataPartStoragePtr(), data_part->name, *column_index->getIndexSegmentMetadata());
-}
-
-std::vector<SegmentId>
-getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata)
-{
-    return getAllSegmentIds(data_part->getDataPartStoragePtr(), data_part->name, vector_index_segment_metadata);
-}
-
-std::vector<SegmentId>
-getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata)
-{
-    return getAllSegmentIds(data_part.getDataPartStoragePtr(), data_part.name, vector_index_segment_metadata);
-}
-
-std::vector<SegmentId> getAllSegmentIds(
-    const DB::DataPartStoragePtr part_storage,
-    const String & current_part_name,
-    const DB::VISegmentMetadata & vector_index_segment_metadata)
-{
-    std::vector<SegmentId> segment_ids;
-
-    if (!vector_index_segment_metadata.is_ready.load())
-        return segment_ids;
-
-    /// If no merged old parts' index files, decide whether we have simple built vector index.
-    if (!vector_index_segment_metadata.is_decouple_index)
-    {
-        SegmentId segment_id(part_storage, current_part_name, vector_index_segment_metadata.index_name, vector_index_segment_metadata.column_name);
-        segment_ids.emplace_back(std::move(segment_id));
-    }
-    else
-    {
-        for (const auto & old_part : vector_index_segment_metadata.merge_source_parts)
-        {
-            /// empty part merge without vector index
-            if (!old_part.with_index)
-                continue;
-
-            SegmentId segment_id(
-                part_storage,
-                current_part_name,
-                old_part.name,
-                vector_index_segment_metadata.index_name,
-                vector_index_segment_metadata.column_name,
-                old_part.id);
-            segment_ids.emplace_back(std::move(segment_id));
-        }
-    }
-
-    if (!vector_index_segment_metadata.is_ready.load())
-        segment_ids.clear();
-
-    return segment_ids;
-}
-
 DB::NameSet
 getVectorIndexFileNamesInChecksums(const DB::DataPartStoragePtr & part_storage, const String & index_name, bool need_checksums_file)
 {
@@ -306,7 +209,28 @@ getVectorIndexChecksums(const DB::DataPartStoragePtr & part_storage, const Strin
         throw DB::Exception(DB::ErrorCodes::INVALID_VECTOR_INDEX, "Read empty checksums for file {}", checksums_filename);
 
     return vector_index_checksums;
+}
 
+DB::MergeTreeDataPartChecksums
+getVectorIndexChecksums(const DB::DiskPtr disk, const String & index_name, const String & vi_file_path_prefix)
+{
+    String checksums_filename = VectorIndex::getVectorIndexChecksumsFileName(index_name);
+    if (!disk->exists(vi_file_path_prefix + checksums_filename))
+        throw DB::Exception(
+            DB::ErrorCodes::INVALID_VECTOR_INDEX,
+            "Checksums file {} in path {} does not exists.",
+            checksums_filename,
+            vi_file_path_prefix);
+
+    DB::MergeTreeDataPartChecksums vector_index_checksums;
+    auto buf = disk->readFile(vi_file_path_prefix + checksums_filename);
+    if (vector_index_checksums.read(*buf))
+        assertEOF(*buf);
+
+    if (vector_index_checksums.empty())
+        throw DB::Exception(DB::ErrorCodes::INVALID_VECTOR_INDEX, "Read empty checksums for file {}", checksums_filename);
+
+    return vector_index_checksums;
 }
 
 void removeVectorIndexFilesFromFileLists(const DB::DataPartStoragePtr & part_storage, const DB::Names & index_files_list)
@@ -377,95 +301,6 @@ bool checkConsistencyForVectorIndex(const DB::DataPartStoragePtr & part_storage,
     }
 
     return true;
-}
-
-const std::vector<UInt64> readDeleteBitmapAccordingSegmentId(const SegmentId segment_id)
-{
-    // Get mergedatapart information according to context
-    auto local_context = DB::Context::createCopy(DB::Context::getGlobalContextInstance());
-    DB::UUID table_uuid = DB::VIEventLog::parseUUID(segment_id.getCacheKey().getTableUUID());
-
-    // Get database and table name
-    if (!DB::DatabaseCatalog::instance().tryGetByUUID(table_uuid).second)
-        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to get table and database by table uuid");
-    auto table_id = DB::DatabaseCatalog::instance().tryGetByUUID(table_uuid).second->getStorageID();
-    if (!table_id)
-        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to get table and database by table uuid");
-
-    // Get MergeTree Data Storage
-    DB::StoragePtr table = DB::DatabaseCatalog::instance().tryGetTable({table_id.database_name, table_id.table_name}, local_context);
-    DB::MergeTreeData * merge_tree = dynamic_cast<DB::MergeTreeData *>(table.get());
-    if (!merge_tree)
-        throw DB::Exception(DB::ErrorCodes::CORRUPTED_DATA, "Unable to fetch MergeTree Data Storage");
-
-    std::vector<UInt64> del_row_ids; /// Store deleted row ids
-
-    // Get the part corresponding to the current segment, Whether to allow reading delete bitmap from part in outdated state?
-    auto part = merge_tree->getPartIfExists(segment_id.current_part_name, {DB::MergeTreeDataPartState::Active, DB::MergeTreeDataPartState::Outdated});
-    if (!part)
-        return del_row_ids;
-
-    del_row_ids = part->getDeleteBitmapFromRowExists();
-
-    return del_row_ids;
-}
-
-void convertBitmap(
-    const SegmentId & segment_id,
-    const std::vector<UInt64> & part_deleted_row_ids,
-    VIBitmapPtr index_deleted_row_ids,
-    const std::shared_ptr<RowIds> & /*row_ids_map*/,
-    const std::shared_ptr<RowIds> & inverted_row_ids_map,
-    const std::shared_ptr<RowSource> & inverted_row_sources_map)
-{
-    if (segment_id.fromMergedParts())
-        if (!inverted_row_sources_map || !inverted_row_ids_map)
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Inverted Row Id Data corruption");
-
-    if (segment_id.fromMergedParts())
-    {
-        for (auto & new_row_id : part_deleted_row_ids)
-        {
-            if (segment_id.getOwnPartId() == (*inverted_row_sources_map)[new_row_id])
-            {
-                UInt64 old_row_id = (*inverted_row_ids_map)[new_row_id];
-                if (index_deleted_row_ids->is_member(old_row_id))
-                {
-                    index_deleted_row_ids->unset(old_row_id);
-                }
-            }
-        }
-    }
-    else
-    {
-        for (auto & del_row_id : part_deleted_row_ids)
-        {
-            if (index_deleted_row_ids->is_member(del_row_id))
-            {
-                index_deleted_row_ids->unset(del_row_id);
-            }
-        }
-    }
-}
-
-VIBitmapPtr getRealBitmap(
-    const VIBitmapPtr filter,
-    const VIWithMeta & index_with_meta)
-{
-    if (!index_with_meta.inverted_row_ids_map || index_with_meta.inverted_row_ids_map->empty())
-        return filter;
-
-    VIBitmapPtr real_filter = std::make_shared<VIBitmap>(index_with_meta.total_vec);
-
-    for (auto & new_row_id : filter->to_vector())
-        {
-            if (index_with_meta.own_id == (*(index_with_meta.inverted_row_sources_map))[new_row_id])
-            {
-                real_filter->set((*(index_with_meta.inverted_row_ids_map))[new_row_id]);
-            }
-        }
-
-    return real_filter;
 }
 
 std::vector<DB::MergedPartNameAndId>
@@ -549,75 +384,6 @@ void printMemoryInfo(const Poco::Logger * log, std::string msg)
 #endif
 }
 
-void updateBitMap(SegmentId & segment_id, const std::vector<UInt64> & deleted_row_ids)
-{
-    VICacheManager * mgr = VICacheManager::getInstance();
-    IndexWithMetaHolderPtr index_holder = mgr->get(segment_id.getCacheKey());
-
-    if (!index_holder)
-        return;
-    if (!segment_id.fromMergedParts())
-        updateSingleBitMap(index_holder->value(), deleted_row_ids);
-    else
-        updateMergedBitMap(index_holder->value(), deleted_row_ids);
-}
-
-void updateSingleBitMap(VIWithMeta & index_with_meta, const std::vector<UInt64> & deleted_row_ids)
-{
-    if (deleted_row_ids.empty() || index_with_meta.row_ids_map)
-        return;
-
-    VIBitmapPtr delete_bitmap = std::make_shared<VIBitmap>(*(index_with_meta.getDeleteBitmap().get()));
-
-    /// Map new deleted row ids to row ids in old part and update delete bitmap
-    bool need_update = false;
-    for (auto & del_row_id : deleted_row_ids)
-    {
-        if (delete_bitmap->is_member(del_row_id))
-        {
-            delete_bitmap->unset(del_row_id);
-
-            if (!need_update)
-                need_update = true;
-        }
-    }
-
-    if (!need_update)
-        return;
-
-    index_with_meta.setDeleteBitmap(delete_bitmap);
-}
-
-void updateMergedBitMap(VIWithMeta & index_with_meta, const std::vector<UInt64> & deleted_row_ids)
-{
-    if (deleted_row_ids.empty() || !index_with_meta.row_ids_map || index_with_meta.row_ids_map->empty())
-        return;
-
-    VIBitmapPtr delete_bitmap = std::make_shared<VIBitmap>(*(index_with_meta.getDeleteBitmap().get()));
-
-    /// Map new deleted row ids to row ids in old part and update delete bitmap
-    bool need_update = false;
-    for (auto & new_row_id : deleted_row_ids)
-    {
-        if (index_with_meta.own_id == (*(index_with_meta.inverted_row_sources_map))[new_row_id])
-        {
-            UInt64 old_row_id = (*(index_with_meta.inverted_row_ids_map))[new_row_id];
-            if (delete_bitmap->is_member(old_row_id))
-            {
-                delete_bitmap->unset(old_row_id);
-
-                if (!need_update)
-                    need_update = true;
-            }
-        }
-    }
-
-    if (!need_update)
-        return;
-
-    index_with_meta.setDeleteBitmap(delete_bitmap);
-}
-
 uint64_t getVectorDimension(const Search::DataType &search_type, const DB::StorageInMemoryMetadata &metadata, const String &column_name)
 {
     std::optional<DB::NameAndTypePair> search_column_type = metadata.columns.getAllPhysical().tryGetByName(column_name);
@@ -661,6 +427,226 @@ size_t getEachVectorBytes(const Search::DataType &search_type, const size_t dime
         default:
             throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupported vector search type");
     }
+}
+
+std::vector<String> splitString(const String &str, const char &delim)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, str, boost::is_any_of(String(1, delim)));
+    return tokens;
+}
+
+void convertIndexFileForUpgrade(const DB::IMergeTreeDataPart & part)
+{
+    auto log = &Poco::Logger::get("VIUtils");
+    if (part.getState() >= DB::MergeTreeDataPartState::Active)
+    {
+        LOG_WARNING(log, "The part {} is already active, no need to convert", part.name);
+        return;
+    }
+    /// [TODO] convert index file for upgrade
+    DB::IDataPartStorage & part_storage = const_cast<DB::IDataPartStorage &>(part.getDataPartStorage());
+
+    /// If checksums file needs to be generated.
+    bool has_intact_old_version_vector_index = false;
+
+    /// Only supports either all index versions are in V1, or all versions are in V2
+    String old_vector_index_ready_v1 = DB::toString("vector_index_ready") + VECTOR_INDEX_FILE_OLD_SUFFIX;
+    String old_vector_index_ready_v2 = DB::toString("vector_index_ready_v2") + VECTOR_INDEX_FILE_OLD_SUFFIX;
+    String old_index_description_v2 = DB::toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_OLD_SUFFIX;
+
+    /// Support multiple vector indices
+    auto metadata_snapshot = part.storage.getInMemoryMetadataPtr();
+    auto vec_indices = metadata_snapshot->getVectorIndices();
+
+    /// Only one vector index is supported before upgrade to support multiple.
+    /// Use the first vector index description.
+    auto vector_index_desc = vec_indices[0];
+    String current_index_description_name = DB::toString(VECTOR_INDEX_DESCRIPTION) + VECTOR_INDEX_FILE_SUFFIX;
+    String current_checksums_file_name = getVectorIndexChecksumsFileName(vector_index_desc.name);
+    String new_description_file_name = getVectorIndexDescriptionFileName(vector_index_desc.name);
+
+    /// Quick check the existence of new description file with index name.
+    bool from_checksums = false;
+    if (part_storage.exists(current_checksums_file_name))
+    {
+        from_checksums = true;
+        /// remove other incomplate index files based on checksums
+        auto exclude_index_file = getVectorIndexFileNamesInChecksums(part.getDataPartStoragePtr(), vector_index_desc.name, true);
+        for (auto it = part_storage.iterate(); it->isValid(); it->next())
+        {
+            if ((!endsWith(it->name(), VECTOR_INDEX_FILE_SUFFIX) && !endsWith(it->name(), VECTOR_INDEX_FILE_OLD_SUFFIX))
+                || exclude_index_file.count(it->name()) != 0)
+                continue;
+
+            if (!startsWith(it->name(), vector_index_desc.name + "-"))
+                continue;
+
+            part_storage.removeFileIfExists(it->name());
+        }
+
+        if (part_storage.exists(new_description_file_name))
+        {
+            /// The current version file already exists locally, no need to convert
+            LOG_DEBUG(log, "The current version file already exists locally, does not need to convert");
+            return;
+        }
+    }
+
+    /// Used for upgrade from checksums version, need update checksums with new file names.
+    std::unordered_map<String, String> converted_files_map;
+    for (auto it = part_storage.iterate(); it->isValid(); it->next())
+    {
+        String file_name = it->name();
+
+        /// v1, v2 or checksums
+        if (from_checksums)
+        {
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                continue;
+        }
+        else if (!(endsWith(file_name, VECTOR_INDEX_FILE_OLD_SUFFIX)))
+            continue;
+
+        /// vector index description file need to update name.
+        bool is_description = false;
+
+        /// Check for checksums first
+        if (from_checksums)
+        {
+            if (endsWith(file_name, current_index_description_name))
+            {
+                /// Lastest desciption file name with index name
+                if (endsWith(file_name, new_description_file_name))
+                {
+                    LOG_DEBUG(log, "The current version file already exists locally, does not need to convert");
+                    return;
+                }
+
+                has_intact_old_version_vector_index = true;
+                is_description = true;
+            }
+            else if (file_name == current_checksums_file_name)
+                continue;
+        }
+        else if (endsWith(file_name, old_vector_index_ready_v2)) /// v2 ready file
+        {
+            has_intact_old_version_vector_index = true;
+
+            LOG_DEBUG(log, "Delete ready file {}", file_name);
+            part_storage.removeFile(file_name);
+
+            continue;
+        }
+        else if (endsWith(file_name, old_index_description_v2))
+        {
+            is_description = true;
+        }
+        else if (endsWith(file_name, old_vector_index_ready_v1)) /// v1 ready file
+        {
+            has_intact_old_version_vector_index = true;
+            is_description = true; /// ready will be updated to description file.
+        }
+
+        /// There are some common codes to get new description file name.
+        if (is_description)
+        {
+            String new_file_name = file_name;
+            if (endsWith(file_name, VECTOR_INDEX_FILE_OLD_SUFFIX))
+                new_file_name = fs::path(file_name).replace_extension(VECTOR_INDEX_FILE_SUFFIX).string();
+
+            /// Replace vector_index_description to <index_name>-vector_index_description
+            /// Replace merged-<part_id>-<part_name>-vector_index_description to merged-<part_id>-<part_name>-<index_name>-vector_index_description
+            new_file_name = std::regex_replace(new_file_name, std::regex("vector"), vector_index_desc.name + "-vector");
+            converted_files_map[file_name] = new_file_name;
+        }
+        else
+        {
+            /// For other vector index files (exclude ready, checksum, or description files), update vector index file extension to latest.
+            /// Support multiple vector indices feature changes the vector index file name by removing column name.
+            /// e.g. <index_name>-<column_name>-id_list will be updated to <index_name>-id_list
+
+            /// old vector index name
+            String old_vector_index_column_name = vector_index_desc.name + "-" + vector_index_desc.column;
+            if (file_name.find(old_vector_index_column_name) == std::string::npos)
+            {
+                /// Just check suffix
+                if (!from_checksums && endsWith(file_name, VECTOR_INDEX_FILE_OLD_SUFFIX))
+                {
+                    String new_file_name = fs::path(file_name).replace_extension(VECTOR_INDEX_FILE_SUFFIX).string();
+                    converted_files_map[file_name] = new_file_name;
+                }
+                continue;
+            }
+
+            /// Replace "<index_name>-<column_name>" to "<index_name>"
+            String new_file_name = std::regex_replace(file_name, std::regex(old_vector_index_column_name), vector_index_desc.name);
+
+            if (!from_checksums && endsWith(new_file_name, VECTOR_INDEX_FILE_OLD_SUFFIX))
+                new_file_name = fs::path(new_file_name).replace_extension(VECTOR_INDEX_FILE_SUFFIX).string();
+
+            /// for faiss index file, contain "<index_name>-<index_name>.vidx3" file, replcace "<index_name>-<index_name>.vidx3" to "<index_name>-data_bin.vidx3"
+            String faiss_index_old_suffix = vector_index_desc.name + VECTOR_INDEX_FILE_SUFFIX;
+            String faiss_index_new_suffix = String("data_bin") + VECTOR_INDEX_FILE_SUFFIX;
+            if (new_file_name.find(faiss_index_old_suffix) != std::string::npos)
+                new_file_name =  std::regex_replace(new_file_name, std::regex(faiss_index_old_suffix), faiss_index_new_suffix);
+
+            converted_files_map[file_name] = new_file_name;
+        }
+    }
+
+    /// Support multiple vector indices
+    /// No vector index files in part or incomplete vector index files
+    if (!has_intact_old_version_vector_index)
+        return;
+
+    /// Here we collect converted files and upgrade is needed.
+    for (auto const & [old_name_, new_name_] : converted_files_map)
+    {
+        part_storage.moveFile(old_name_, new_name_);
+        LOG_DEBUG(log, "Convert vector index file {} to {}", old_name_, new_name_);
+    }
+
+    /// Old version vector index files have ready file, will generate checksums file.
+    DB::MergeTreeDataPartChecksums vector_index_checksums;
+    if (!from_checksums)
+        vector_index_checksums = calculateVectorIndexChecksums(part.getDataPartStoragePtr(), part_storage.getRelativePath());
+    else if (!converted_files_map.empty())
+    {
+        if (!part_storage.exists(current_checksums_file_name))
+        {
+            LOG_WARNING(log, "checksums file '{}' doesn't exist in part {}, will not update it", current_checksums_file_name, part.name);
+            return;
+        }
+
+        /// Multiple vector indices feature changes vector file names
+        DB::MergeTreeDataPartChecksums old_checksums;
+        auto buf = part_storage.readFile(current_checksums_file_name, {}, std::nullopt, std::nullopt);
+        if (old_checksums.read(*buf))
+            assertEOF(*buf);
+
+        for (auto const & [name_, checksum_] : old_checksums.files)
+        {
+            String new_name_;
+            if (converted_files_map.contains(name_))
+            {
+                new_name_ = converted_files_map[name_];
+            }
+            else
+            {
+                new_name_ = name_;
+            }
+            vector_index_checksums.addFile(new_name_, checksum_.file_size, checksum_.file_hash);
+        }
+
+        part_storage.removeFile(current_checksums_file_name);
+    }
+
+    LOG_DEBUG(log, "write vector index {} checksums file for part {}", vector_index_desc.name, part.name);
+    auto out_checksums = part_storage.writeFile(current_checksums_file_name, 4096, {});
+    vector_index_checksums.write(*out_checksums);
+    out_checksums->finalize();
+    /// Incomplete vector index files will be removed when loading checksums file.
 }
 
 }

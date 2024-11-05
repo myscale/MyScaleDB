@@ -51,6 +51,7 @@
 #include <ranges>
 
 #include <VectorIndex/Parsers/ASTVIDeclaration.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace DB
 {

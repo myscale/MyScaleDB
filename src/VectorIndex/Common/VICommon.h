@@ -121,13 +121,15 @@ using SearchVectorIndex = Search::VectorIndex<VectorIndexIStream, VectorIndexOSt
 using VectorIndexPtr = std::shared_ptr<SearchVectorIndex>;
 */
 
-using FloatVI = Search::VectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::FloatVector>;
-using FloatVIPtr = std::shared_ptr<FloatVI>;
+/// [TODO] Convert the smart pointer type from shared_ptr to unique_ptr to prevent potential memory problems.
+/// This change requires modifying search-index simultaneously.
+using FloatInnerSegment = Search::VectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::FloatVector>;
+using FloatInnerSegmentPtr = std::shared_ptr<FloatInnerSegment>;
 
-using BinaryVI = Search::VectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::BinaryVector>;
-using BinaryVIPtr = std::shared_ptr<BinaryVI>;
+using BinaryInnerSegment = Search::VectorIndex<VectorIndexIStream, VectorIndexOStream, VIBitmap, VIDataType::BinaryVector>;
+using BinaryInnerSegmentPtr = std::shared_ptr<BinaryInnerSegment>;
 
-using VIVariantPtr = std::variant<FloatVIPtr, BinaryVIPtr>;
+using InnerSegmentVariantPtr = std::variant<FloatInnerSegmentPtr, BinaryInnerSegmentPtr>;
 
 /// SearchIndexDataTypeMap maps Search::DataType enum values actual types
 template <Search::DataType>
@@ -141,7 +143,7 @@ struct SearchIndexDataTypeMap<Search::DataType::FloatVector>
 {
     using VectorDatasetType = float;
     using IndexDatasetType = float;
-    using VectorIndexPtr = FloatVIPtr;
+    using VectorIndexPtr = FloatInnerSegmentPtr;
 };
 
 template <>
@@ -149,7 +151,7 @@ struct SearchIndexDataTypeMap<Search::DataType::BinaryVector>
 {
     using VectorDatasetType = uint8_t;
     using IndexDatasetType = bool;
-    using VectorIndexPtr = BinaryVIPtr;
+    using VectorIndexPtr = BinaryInnerSegmentPtr;
 };
 
 const int DEFAULT_TOPK = 30;

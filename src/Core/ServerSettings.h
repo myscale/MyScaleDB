@@ -169,6 +169,9 @@ namespace DB
     M(Bool, disable_insertion_and_mutation, false, "Disable all insert/alter/delete queries. This setting will be enabled if someone needs read-only nodes to prevent insertion and mutation affect reading performance.", 0) \
     M(UInt64, background_vector_pool_size, 1, "Number of threads for vector index building", 0)      \
     M(UInt64, background_slow_mode_vector_pool_size, 3, "Number of threads for slow mode vector index building", 0)      \
+    M(UInt64, max_build_index_train_block_size, 100 * 1024 * 1024, "Maximum block size in bytes for training in build index", 0) \
+    M(UInt64, max_build_binary_vector_index_train_block_size, 2 * 1024 * 1024, "Maximum block size in bytes for training Binary vectors in build index", 0) \
+    M(UInt64, max_build_index_add_block_size, 10 * 1024 * 1024, "Maximum block size in bytes for adding vectors in one round of build index", 0) \
     M(UInt64, vector_index_cache_size, 100, "number of vector index to cache", 0)      \
     M(Float, vector_index_cache_size_ratio_of_memory, 0.3f, "Memory limit (ratio of total memory) for vector index search cache", 0) \
     M(Float, vector_index_build_size_ratio_of_memory, 0.6f, "Memory limit (ratio of total memory) for vector index building", 0) \

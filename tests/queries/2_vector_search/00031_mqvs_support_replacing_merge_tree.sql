@@ -17,19 +17,19 @@ INSERT INTO replacing_test SELECT
     number,
     [number + 4, number + 4, number + 4],
     toDate('2023-04-01', 'UTC')
-FROM numbers(1000);
+FROM numbers(10000);
 
 INSERT INTO replacing_test SELECT
     number,
     [number + 3, number + 3, number + 3],
     toDate('2023-03-01', 'UTC')
-FROM numbers(1000);
+FROM numbers(10000);
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES replacing_test;
 
 OPTIMIZE TABLE replacing_test FINAL;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES replacing_test;
 
 SELECT
     id,
@@ -66,20 +66,20 @@ INSERT INTO replacing_test SELECT
     [number + 4, number + 4, number + 4],
     toDate('2023-04-01', 'UTC'),
     number%2
-FROM numbers(1000);
+FROM numbers(10000);
 
 INSERT INTO replacing_test SELECT
     number,
     [number + 3, number + 3, number + 3],
     toDate('2023-03-01', 'UTC'),
     (number+1)%2
-FROM numbers(1000);
+FROM numbers(10000);
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES replacing_test;
 
 OPTIMIZE TABLE replacing_test FINAL;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES replacing_test;
 
 SELECT
     id,

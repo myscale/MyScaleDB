@@ -5,7 +5,7 @@
 #include <Core/Names.h>
 
 #include <Storages/MergeTree/IExecutableTask.h>
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
+#include <VectorIndex/Common/VectorIndicesMgr.h>
 #include <VectorIndex/Storages/VIEntry.h>
 
 #include <Common/logger_useful.h>
@@ -26,7 +26,7 @@ public:
     template <class Callback>
     VITaskBase(
         MergeTreeData & storage_,
-        VIBuilderUpdater & builder_,
+        VectorIndicesMgr & builder_,
         Callback && task_result_callback_,
         const String & part_name_,
         const String & vector_index_name_,
@@ -51,7 +51,7 @@ public:
 protected:
     void recordBuildStatus();
 
-    virtual VIBuiltStatus prepare() { return VIBuiltStatus{VIBuiltStatus::SUCCESS}; }
+    virtual VectorIndex::SegmentBuiltStatus prepare() { return VectorIndex::SegmentBuiltStatus{VectorIndex::SegmentBuiltStatus::SUCCESS}; }
 
     virtual void remove_processed_entry() { }
 
@@ -68,9 +68,9 @@ protected:
 
     MergeTreeData & storage;
     StorageMetadataPtr metadata_snapshot;
-    VIBuilderUpdater & builder;
+    VectorIndicesMgr & builder;
     std::unique_ptr<Stopwatch> stopwatch;
-    VIBuiltStatus build_status{VIBuiltStatus::SUCCESS};
+    VectorIndex::SegmentBuiltStatus build_status{VectorIndex::SegmentBuiltStatus::SUCCESS};
     IExecutableTask::TaskResultCallback task_result_callback;
     const String part_name;
     const String vector_index_name;

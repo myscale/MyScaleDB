@@ -14,7 +14,7 @@ INSERT INTO test_with_clause_process_function SELECT number, [number,number,numb
 
 ALTER TABLE test_with_clause_process_function ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_with_clause_process_function;
 
 SELECT 'Lambda function in distance function';
 SELECT id, distance(vector, arrayMap(x -> (x / 1.), range(1, 4))) AS d

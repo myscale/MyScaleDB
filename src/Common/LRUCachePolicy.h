@@ -5,11 +5,6 @@
 #include <list>
 #include <unordered_map>
 
-namespace VectorIndex
-{
-class VectorIndexCache;
-}
-
 namespace DB
 {
 /// Cache policy LRU evicts entries which are not used for a long time. Also see cache policy SLRU for reference.
@@ -172,8 +167,6 @@ public:
 private:
     using LRUQueue = std::list<Key>;
     using LRUQueueIterator = typename LRUQueue::iterator;
-
-    friend class VectorIndex::VectorIndexCache;
 
     LRUQueue queue;
 

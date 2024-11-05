@@ -30,6 +30,10 @@
 #include <base/sort.h>
 #include <random>
 
+#include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
+#include <VectorIndex/Utils/VIUtils.h>
+
 namespace fs = std::filesystem;
 
 namespace CurrentMetrics
@@ -135,7 +139,7 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
     String vec_index_name;
     if (client_protocol_version == REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)
     {
-        vec_index_name = params.get("vector_index");
+        vec_index_name = params.get("vector_index_name");
 
         response.addCookie({"server_protocol_version", toString(client_protocol_version)});
         is_fetch_vector_index = true;
@@ -194,21 +198,13 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             }
 
             /// Get vector files from part.
-            auto column_index_opt = part->vector_index.getColumnIndex(vec_index_name);
-            if (!column_index_opt.has_value()
-                || column_index_opt.value()->isShutdown())
-            {
-                LOG_DEBUG(log, "Vector index {} not found on {}.", vec_index_name, part->name);
-                response.addCookie({"vector_index_build_status", "fail"});
-            }
-
-            auto column_index = column_index_opt.value();
-            if (column_index->isBuildCancelled() || column_index->getVectorIndexState() == VIState::ERROR)
+            auto vi_status = part->segments_mgr->getSegmentStatus(vec_index_name);
+            if (vi_status > VectorIndex::SegmentStatus::BUILT)
             {
                 LOG_DEBUG(log, "The vector index {} build in part {} was cancelled or failed with error, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "fail"});
             }
-            else if (column_index->getVectorIndexState() <= VIState::BUILDING)
+            else if (vi_status <= VectorIndex::SegmentStatus::BUILDING)
             {
                 LOG_WARNING(log, "The vector index {} in part {} was not ready, cannot send it", vec_index_name, part_name);
                 response.addCookie({"vector_index_build_status", "not_ready"});
@@ -217,24 +213,20 @@ void Service::processQuery(const HTMLForm & params, ReadBuffer & /*body*/, Write
             {
                 /// Handle cases when sending vector index and merge has conflicts.
                 /// When merge on VParts, vector index files will be moved from old parts to new decouple part.
+                if (!data.vi_manager->addPartToSendIndex(part->name))
                 {
-                    std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
-                    if (!data.currently_sending_vector_index_parts.insert(part->name).second)
-                    {
-                        response.addCookie({"vector_index_build_status", "retry"});
-                        LOG_DEBUG(log, "Part {} is already sending vector index right now", part->name);
-                        return;
-                    }
+                    response.addCookie({"vector_index_build_status", "retry"});
+                    LOG_DEBUG(log, "Part {} is already sending vector index right now", part->name);
+                    return;
                 }
 
                 SCOPE_EXIT_MEMORY
                 ({
-                    std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
-                    data.currently_sending_vector_index_parts.erase(part->name);
+                    data.vi_manager->removePartFromSendIndex(part->name);
                 });
 
                 /// Check if this part is currently being merged
-                if (!data.canSendVectorIndexForPart(part->name))
+                if (!data.vi_manager->canSendVectorIndexForPart(part->name))
                 {
                     response.addCookie({"vector_index_build_status", "retry"});
                     LOG_DEBUG(log, "Part {} is currently being merged, hence unable to send vector index", part->name);
@@ -382,27 +374,13 @@ MergeTreeData::DataPart::Checksums Service::sendPartFromDisk(
 {
     bool include_vector_indices = true;
 
-    /// Add the part name to currently_sending_vector_index_parts
-    if (part->vector_index.containAnyVIInReady())
-    {
-        std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
-        if (!data.currently_sending_vector_index_parts.insert(part->name).second)
-        {
-            LOG_DEBUG(log, "Part {} with vector index is already sending right now", part->name);
-        }
-    }
-
-    SCOPE_EXIT_MEMORY
-    ({
-        if (part->vector_index.containAnyVIInReady())
-        {
-            std::lock_guard lock(data.currently_sending_vector_index_parts_mutex);
-            data.currently_sending_vector_index_parts.erase(part->name);
-        }
-    });
+    /// Add the part name to send vector index parts set.
+    scope_guard send_vi_holder;
+    if (part->segments_mgr->hasSegmentInReady())
+        send_vi_holder = data.vi_manager->getSendIndexHolder(part->name);
 
     /// Background build vector index will remove merged old parts' vector index files after finished.
-    auto vector_index_read_lock = part->vector_index.tryLockTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
+    auto vector_index_read_lock = part->segments_mgr->tryLockSegmentsTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
 
     NameSet files_to_replicate;
     auto file_names_without_checksums = part->getFileNamesWithoutChecksums(include_vector_indices);
@@ -976,7 +954,7 @@ String Fetcher::fetchVectorIndex(
     {
         {"endpoint",                getEndpointId(replica_path)},
         {"part",                    source_part_name},  /// Use source part's name in log entry to avoid no active part in replica.
-        {"vector_index",            vec_index_name},
+        {"vector_index_name",       vec_index_name},
         {"client_protocol_version", toString(REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)},
         {"compress",                "false"}
     });
@@ -1043,7 +1021,7 @@ String Fetcher::fetchVectorIndex(
     if (build_status == "fail")
     {
         LOG_DEBUG(log, "Unable to fetch vector index {} in part {} due to build status is fail", vec_index_name, future_part_name);
-        future_part->vector_index.onVIBuildError(vec_index_name, "Another replica failed to build the vector index.");
+        future_part->segments_mgr->setSegmentStatus(vec_index_name, VectorIndex::SegmentStatus::ERROR, "Another replica failed to build the vector index.");
         return {};
     }
     else if (build_status == "no_need")
@@ -1051,7 +1029,7 @@ String Fetcher::fetchVectorIndex(
         /// The merged part covering this part doesn't exist in this replica.
         LOG_DEBUG(log, "No need to fetch vector index {} in part {} due to it is covered by merged part in replica",
                   vec_index_name, future_part_name);
-        future_part->vector_index.cancelIndexBuild(vec_index_name);
+        future_part->segments_mgr->setSegmentStatus(vec_index_name, VectorIndex::SegmentStatus::CANCELLED, "No need to fetch vector index.");
         return {};
     }
     else if (build_status == "not_ready")
