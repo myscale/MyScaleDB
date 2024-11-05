@@ -1292,7 +1292,9 @@ void DatabaseCatalog::dropTablesParallel(std::vector<DatabaseCatalog::TablesMark
         {
             try
             {
+                LOG_INFO(log, "Dropping table {}", table_iterator->table_id.getNameForLogs());
                 dropTableFinally(*table_iterator);
+                LOG_INFO(log, "Table {} was successfully dropped", table_iterator->table_id.getNameForLogs());
 
                 TableMarkedAsDropped table_to_delete_without_lock;
                 {

@@ -20,7 +20,7 @@ INSERT INTO t_vector_invert_subquery VALUES (0, [0,0,0], 'Ancient empires rise a
 
 ALTER TABLE t_vector_invert_subquery ADD VECTOR INDEX vec_ind vector TYPE FLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES t_vector_invert_subquery;
 
 SELECT 'Scalar Subquery in text search function';
 select id FROM (

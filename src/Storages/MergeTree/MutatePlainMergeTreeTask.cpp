@@ -111,8 +111,7 @@ bool MutatePlainMergeTreeTask::executeStep()
                 /// resulting in insufficient topk returned during subsequent searches.
                 if (new_part->isDeletedMaskUpdated())
                 {
-                    if (new_part->vector_index.containAnyVIInReady())
-                        new_part->onLightweightDelete();
+                    new_part->onLightweightDelete();
 
                     /// Clear deleted row ids
                     new_part->deleted_row_ids.clear();

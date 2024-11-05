@@ -122,6 +122,7 @@
 
 #include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Storages/ReplicatedVITask.h>
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
 
 namespace fs = std::filesystem;
 
@@ -335,7 +336,7 @@ StorageReplicatedMergeTree::StorageReplicatedMergeTree(
     , writer(*this)
     , merger_mutator(*this)
     , merge_strategy_picker(*this)
-    , vec_index_builder_updater(*this)
+    , vi_manager(std::make_unique<StorageReplicatedVectorIndicesMgr>(*this))
     , build_vindex_strategy_picker(*this)
     , queue(*this, merge_strategy_picker, build_vindex_strategy_picker)
     , fetcher(*this)
@@ -380,7 +381,10 @@ StorageReplicatedMergeTree::StorageReplicatedMergeTree(
 
     vidx_info_updating_task = getContext()->getSchedulePool().createTask(
         getStorageID().getFullTableName() + " (StorageReplicatedMergeTree::vidxInfoUpdatingTask)",
-        [this] { updateVectorIndexInfoZookeeper(); });
+        [this] {
+            vi_manager->scheduleUpdateVectorIndexInfoZookeeperJob();
+        });
+    vidx_info_updating_task->deactivate();
 
     bool has_zookeeper = getContext()->hasZooKeeper() || getContext()->hasAuxiliaryZooKeeper(zookeeper_name);
     if (has_zookeeper)
@@ -949,9 +953,9 @@ bool StorageReplicatedMergeTree::createTableIfNotExists(const StorageMetadataPtr
         ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/creator_info", toString(getStorageID().uuid) + "|" + toString(ServerUUID::get()),
             zkutil::CreateMode::Persistent));
 
-        /// Vector index build status
-        if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
-            ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
+        // /// Vector index build status
+        // if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
+        //     ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
 
         Coordination::Responses responses;
         auto code = zookeeper->tryMulti(ops, responses);
@@ -1104,8 +1108,9 @@ void StorageReplicatedMergeTree::createReplica(const StorageMetadataPtr & metada
             zkutil::CreateMode::Persistent));
 
         /// Vector index build status
-        if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
-            ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
+        // if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
+        //     ops.emplace_back(zkutil::makeCreateRequest(replica_path + "/vidx_build_parts", "", zkutil::CreateMode::Persistent));
+        vi_manager->createZKNodeIfNotExists(ops);
 
         /// Check version of /replicas to see if there are any replicas created at the same moment of time.
         ops.emplace_back(zkutil::makeSetRequest(zookeeper_path + "/replicas", "last added replica: " + replica_name, replicas_stat.version));
@@ -3653,7 +3658,7 @@ ReplicatedMergeTreeQueue::SelectedEntryPtr StorageReplicatedMergeTree::selectQue
 
     try
     {
-        selected = queue.selectEntryToProcess(merger_mutator, vec_index_builder_updater.builds_blocker, *this);
+        selected = queue.selectEntryToProcess(merger_mutator, vi_manager->builds_blocker, *this);
     }
     catch (...)
     {
@@ -3724,7 +3729,7 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
         auto metadata_snapshot = getInMemoryMetadataPtr();
 
         /// remove dropped vector indices
-        vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+        vi_manager->scheduleRemoveVectorIndexCacheJob(metadata_snapshot);
 
         return false;
     }
@@ -3757,7 +3762,7 @@ bool StorageReplicatedMergeTree::scheduleDataProcessingJob(BackgroundJobsAssigne
     else if (job_type == LogEntry::BUILD_VECTOR_INDEX)
     {
         auto task = std::make_shared<ReplicatedVITask>(
-            *this, selected_entry, vec_index_builder_updater, common_assignee_trigger);
+            *this, selected_entry, *vi_manager, common_assignee_trigger);
 
         /// slow mode uses a different background pool.
         if (selected_entry->log_entry->slow_mode)
@@ -3964,7 +3969,7 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
             /// Avoid to select part to build vector index when build is stopped.
             /// TODO: control index building by memory limit ...
             if ((create_result == CreateMergeEntryResult::Other) && getInMemoryMetadataPtr()->hasVectorIndices()
-                 && !vec_index_builder_updater.builds_blocker.isCancelled())
+                 && !vi_manager->builds_blocker.isCancelled())
             {
                 /// Limit the number of build vector index entries in queue.
                 auto settings = getContext()->getSettingsRef();
@@ -3974,15 +3979,15 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                 bool slow_mode = false;
 
                 /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
-                if (vec_index_builder_updater.allowToBuildVI(false, merges_and_mutations_queued.vector_index_builds))
+                if (vi_manager->allowToBuildVI(false, merges_and_mutations_queued.vector_index_builds))
                 {
-                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, false);
+                    vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, false);
                 }
 
-                if (!vector_index_entry && vec_index_builder_updater.allowToBuildVI(true, merges_and_mutations_queued.slow_vector_index_builds))
+                if (!vector_index_entry && vi_manager->allowToBuildVI(true, merges_and_mutations_queued.slow_vector_index_builds))
                 {
                     /// No fast build index selected, try to select slow build index.
-                    vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, true);
+                    vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, true);
                     slow_mode = true;
                 }
 
@@ -3993,11 +3998,7 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
 
                     /// Only add when create log entry successfully.
                     if(create_result == CreateMergeEntryResult::Ok)
-                    {
-                        std::lock_guard lock(currently_vector_indexing_parts_mutex);
-                        currently_vector_indexing_parts.insert(vector_index_entry->part_name);
-                        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", vector_index_entry->part_name);
-                    }
+                        vi_manager->addPartToIndexing(vector_index_entry->part_name);
                 }
             }
         }
@@ -4274,399 +4275,6 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
     }
 
     return CreateMergeEntryResult::Ok;
-}
-
-bool StorageReplicatedMergeTree::checkReplicaHaveVIndexInPart(const String & replica, const String & part_name, const String & vec_index_name)
-{
-    auto zookeeper = getZooKeeper();
-    return zookeeper->exists(fs::path(zookeeper_path) / "replicas" / replica / "vidx_build_parts" / vec_index_name / part_name);
-}
-
-void StorageReplicatedMergeTree::createVectorIndexBuildStatusForPart(const String & part_name, const String & vec_index_name, const String & status)
-{
-    auto zookeeper = getZooKeeper();
-
-    /// vidx_build_parts/vec_index_name/part_name, content is status
-    auto vector_index_zk_path = fs::path(replica_path) / "vidx_build_parts" / vec_index_name;
-
-    /// In cases when path is not created.
-    if (!zookeeper->exists(vector_index_zk_path))
-    {
-        zookeeper->createAncestors(vector_index_zk_path);
-        zookeeper->createIfNotExists(vector_index_zk_path, "");
-
-        LOG_DEBUG(log, "Created zookeeper path {} for vector index {}", vector_index_zk_path, vec_index_name);
-    }
-
-    zookeeper->createOrUpdate(fs::path(replica_path) / "vidx_build_parts" / vec_index_name / part_name, status, zkutil::CreateMode::Persistent);
-
-}
-
-void StorageReplicatedMergeTree::removeVecIndexBuildStatusForPartsFromZK(zkutil::ZooKeeperPtr & zookeeper, const DataPartsVector & parts_to_delete)
-{
-    for (const auto & part : parts_to_delete)
-    {
-        String part_name = part->name;
-
-        /// Support multiple vector indices
-        for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
-        {
-            String vec_index_name = vec_index_desc.name;
-
-            /// No need to check zookeeper when part doesn't have vector index and no build error
-            auto column_index_opt = part->vector_index.getColumnIndex(vec_index_desc.name);
-            if (!column_index_opt.has_value())
-                continue;
-            
-            auto column_index = column_index_opt.value();
-            if (!(column_index->getVectorIndexState() == VIState::BUILT) && !(column_index->getVectorIndexState() == VIState::ERROR))
-                continue;
-
-            String part_status_path = fs::path(replica_path) / "vidx_build_parts" / vec_index_name / part_name;
-
-            try
-            {
-                if (!zookeeper->exists(part_status_path))
-                    continue;
-
-                auto rm_res = zookeeper->tryRemove(part_status_path);
-                if (rm_res != Coordination::Error::ZOK && rm_res != Coordination::Error::ZNONODE)
-                {
-                    LOG_WARNING(log, "Unexpected status code {} on attempt to remove vidx_build_parts/{}/{}", rm_res, vec_index_name, part_name);
-                    continue;
-                }
-
-                LOG_DEBUG(log, "Deleted vector index {} build status for part {}", vec_index_name, part_name);
-            }
-            catch(...)
-            {
-                LOG_INFO(log, "An error occurred while checking and cleaning vector index {} build status for part {}: {}", vec_index_name, part_name, getCurrentExceptionMessage(false));
-            }
-        }
-    }
-}
-
-void StorageReplicatedMergeTree::cleanupVectorIndexBuildStatusFromZK(const String & index_name)
-{
-    auto zookeeper = getZooKeeper();
-
-    auto index_build_status_path = fs::path(replica_path) / "vidx_build_parts" / index_name;
-
-    /// Clean up vidx_build_parts/<index_name>/<part_name> nodes
-    bool removed_quickly = zookeeper->tryRemoveChildrenRecursive(index_build_status_path, /* probably flat */ true);
-    if (!removed_quickly)
-    {
-        LOG_WARNING(log, "Failed to quickly remove node 'vidx_build_parts/{}' and its children, fell back to recursive removal", index_name);
-        zookeeper->tryRemoveChildrenRecursive(index_build_status_path);
-    }
-
-    /// Remove vidx_build_parts/<index_name>
-    zookeeper->tryRemove(index_build_status_path);
-
-    LOG_DEBUG(log, "Cleaned up vector index `{}` build status from zookeeper", index_name);
-}
-
-void StorageReplicatedMergeTree::startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices)
-{
-    /// Compare old and new vector_indices to determine add or drop vector index
-    /// Support multiple vector indices
-    /// Check drop vector index
-    for (const auto & old_vec_index : old_vec_indices)
-    {
-        if (new_vec_indices.has(old_vec_index))
-            continue;
-
-        /// Drop vector index case.
-        String vec_index_name = old_vec_index.name;
-        LOG_INFO(log, "Get drop vector index {}, clear index cache and stop building vector index immediately", vec_index_name);
-
-        /// Delete vector index files.
-        for (const auto & part : getDataPartsForInternalUsage())
-        {
-            // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
-            part->vector_index.removeVectorIndex(vec_index_name);
-        }
-
-        /// update vector index info on zookeeper
-        writeVectorIndexInfoToZookeeper(true);
-
-        if (getSettings()->build_vector_index_on_random_single_replica)
-        {
-            /// Remove vector index build status for parts from zookeeper
-            cleanupVectorIndexBuildStatusFromZK(vec_index_name);
-        }
-
-        /// Remove build status for this dropped index
-        removeVectorIndexBuildStatus(vec_index_name);
-    }
-
-    /// Check create vector index
-    for (const auto & new_vec_index : new_vec_indices)
-    {
-        if (old_vec_indices.has(new_vec_index))
-            continue;
-
-        /// Add vector index case.
-        /// Clear vector index build status
-        addVectorIndexBuildStatus(new_vec_index.name);
-
-        /// Create vector index info
-        for (const auto & part : getDataPartsForInternalUsage())
-            part->vector_index.addVectorIndex(new_vec_index);
-
-        if (getSettings()->build_vector_index_on_random_single_replica)
-        {
-            /// Check if vidx_build_parts exists in zookeer.
-            auto zookeeper = getZooKeeper();
-
-            String zookeeper_build_status_path = fs::path(replica_path) / "vidx_build_parts" / new_vec_index.name;
-            zookeeper->createAncestors(zookeeper_build_status_path);
-            auto code = zookeeper->tryCreate(zookeeper_build_status_path, "", zkutil::CreateMode::Persistent);
-
-            if (code == Coordination::Error::ZNODEEXISTS)
-            { /// The table has been dropped vector index early.
-                LOG_DEBUG(log, "Build vector index status for index {} on path {} has already been created", new_vec_index.name, zookeeper_build_status_path);
-            }
-            else if (code != Coordination::Error::ZOK)
-            {
-                throw zkutil::KeeperException(code, zookeeper_build_status_path);
-            }
-        }
-
-        LOG_INFO(log, "Get add vector index {}, start background job immediately", new_vec_index.name);
-        background_operations_assignee.trigger();
-    }
-}
-
-/// Referenced from executeFetch(), no need to find replica.
-bool StorageReplicatedMergeTree::executeFetchVectorIndex(LogEntry & entry, String & replica, String & fetch_vector_index_path)
-{
-    String part_name = entry.source_parts.at(0);
-    String vec_index_name = entry.index_name;
-
-    auto metadata_snapshot = getInMemoryMetadataPtr();
-
-    /// If mutilple vector indices are supported, we need to check the index name and column in entry.
-    if (!metadata_snapshot->hasVectorIndices() || !metadata_snapshot->getVectorIndices().has(vec_index_name))
-    {
-        LOG_INFO(log, "No vector index {} in table {}, hence no need to fetch it for part {}", vec_index_name, zookeeper_path, part_name);
-        return false;
-    }
-
-    /// Get active part containg current part to build vector index
-    DataPartPtr future_part = getActiveContainingPart(part_name);
-    if (!future_part)
-    {
-        LOG_DEBUG(log, "Source part {} is not active, cannot fetch vector index {} for it", part_name, vec_index_name);
-        return false;
-    }
-
-    if (future_part->name != part_name)
-    {
-        const auto part_info = MergeTreePartInfo::fromPartName(part_name, format_version);
-
-        /// Check part name without mutation version is same.
-        if (future_part->info.isFromSamePart(part_info))
-        {
-            LOG_DEBUG(log, "Will put fetched vector index {} in future part {} instead of part {}", vec_index_name, future_part->name, part_name);
-        }
-        else
-        {
-            LOG_WARNING(log,
-                "Part {} is covered by {} but should fetch vector index {}. "
-                "Possibly the vector index fetching of this part is not needed and will be skipped. "
-                "This shouldn't happen often.",
-                part_name, future_part->name, vec_index_name);
-            return false;
-        }
-    }
-
-    /// We can't fetch vector index when none replicas have the built vector index in the part
-    if (replica.empty())
-    {
-        LOG_INFO(log, "No active replica has vector index {} in part {} (cannot execute {}: {})",
-                 vec_index_name, part_name, entry.znode_name, entry.getDescriptionForLogs(format_version));
-        return false;
-    }
-
-    /// Fetch vector index in part from replica
-    try
-    {
-        try
-        {
-            /// Temp fetch vector index acording Fetcher::fetchVectorIndex()
-            static const String TMP_PREFIX = "tmp-fetch_vector_index_" + vec_index_name + "_";
-            fetch_vector_index_path = TMP_PREFIX + future_part->name;
-
-            String source_replica_path = fs::path(zookeeper_path) / "replicas" / replica;
-            if (!fetchVectorIndex(future_part,
-                part_name,
-                vec_index_name,
-                metadata_snapshot,
-                source_replica_path,
-                /* zookeeper_ */ nullptr,
-                /* try_fetch_shared= */ true))
-            {
-                return false;
-            }
-        }
-        catch(Exception & e)
-        {
-            if (e.code() == ErrorCodes::DEADLOCK_AVOIDED)
-            {
-                LOG_WARNING(log, "Failed to lock future part {} for fetching vector index {} in part {}, will try again later", vec_index_name, future_part->name, part_name);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                return false;
-            }
-
-            /// No stacktrace, just log message
-            if (e.code() == ErrorCodes::RECEIVED_ERROR_TOO_MANY_REQUESTS)
-                e.addMessage("Too busy replica. Will try later.");
-            throw;
-        }
-    }
-    catch(...)
-    {
-       tryLogCurrentException(log, __PRETTY_FUNCTION__);
-       throw;
-    }
-
-    return true;
-}
-
-/// Referenced from fetchPart() with to_detached = false
-bool StorageReplicatedMergeTree::fetchVectorIndex(
-    DataPartPtr future_part,
-    const String & part_name,
-    const String & vec_index_name,
-    const StorageMetadataPtr & /*metadata_snapshot*/,
-    const String & source_replica_path,
-    zkutil::ZooKeeper::Ptr zookeeper_,
-    bool try_fetch_shared)
-{
-    auto zookeeper = zookeeper_ ? zookeeper_ : getZooKeeper();
-
-    /// Check if the replica is active or not
-    if(!zookeeper->exists(fs::path(source_replica_path) / "is_active"))
-    {
-        LOG_DEBUG(log, "The replica {} with vector index {} for part {} is not active", source_replica_path, vec_index_name, part_name);
-        return false;
-    }
-
-    /// Use future part name in log
-    String future_part_name = future_part->name;
-
-    /// Use currently_fetching_vector_index_parts for vector index fetch.
-    {
-        std::lock_guard lock(currently_fetching_vector_index_parts_mutex);
-        if (!currently_fetching_vector_index_parts.insert(future_part_name).second)
-        {
-            LOG_DEBUG(log, "Part {} is already fetching vector index {} right now", future_part_name, vec_index_name);
-            return false;
-        }
-    }
-
-    SCOPE_EXIT_MEMORY
-    ({
-        std::lock_guard lock(currently_fetching_vector_index_parts_mutex);
-        currently_fetching_vector_index_parts.erase(future_part_name);
-    });
-
-    if (future_part_name != part_name)
-        LOG_DEBUG(log, "Fetching vector index {} in part {} from {} and put in future part {}", vec_index_name, part_name, source_replica_path, future_part_name);
-    else
-        LOG_DEBUG(log, "Fetching vector index {} in part {} from {}", vec_index_name, part_name, source_replica_path);
-
-    TableLockHolder table_lock_holder;
-    table_lock_holder = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
-
-    /// Logging
-    Stopwatch stopwatch;
-    String tmp_fetch_vector_index_path; /// temp directory for fetched vector index files
-    ProfileEventsScope profile_events_scope;
-
-    auto write_part_log = [&] (const ExecutionStatus & execution_status)
-    {
-        writePartLog(
-            PartLogElement::DOWNLOAD_VECTOR_INDEX, execution_status, stopwatch.elapsed(),
-            part_name, future_part, {}, nullptr,
-            profile_events_scope.getSnapshot());
-    };
-
-    /// Not consider part_to_clone cases.
-
-    ReplicatedMergeTreeAddress address;
-    ConnectionTimeouts timeouts;
-    String interserver_scheme;
-    InterserverCredentialsPtr credentials;
-    std::optional<CurrentlySubmergingEmergingTagger> tagger_ptr;
-    std::function<String()> get_vector_index;
-
-    /// Get part's disk
-    auto disk_name = future_part->getDataPartStorage().getDiskName();
-    auto future_part_disk = future_part->storage.getStoragePolicy()->getDiskByName(disk_name);
-
-    {
-        address.fromString(zookeeper->get(fs::path(source_replica_path) / "host"));
-        timeouts = ConnectionTimeouts::getFetchPartHTTPTimeouts(getContext()->getServerSettings(), getContext()->getSettingsRef());
-
-        credentials = getContext()->getInterserverCredentials();
-        interserver_scheme = getContext()->getInterserverScheme();
-
-        get_vector_index = [&, address, timeouts, credentials, interserver_scheme]()
-        {
-            if (interserver_scheme != address.scheme)
-                throw Exception(ErrorCodes::INTERSERVER_SCHEME_DOESNT_MATCH, "Interserver schemes are different: "
-                    "'{}' != '{}', can't fetch vector index {} from {}", interserver_scheme, address.scheme, vec_index_name, address.host);
-
-            return fetcher.fetchVectorIndex(
-                future_part,
-                getContext(),
-                part_name,
-                vec_index_name,
-                source_replica_path,
-                address.host,
-                address.replication_port,
-                timeouts,
-                credentials->getUser(),
-                credentials->getPassword(),
-                interserver_scheme,
-                replicated_fetches_throttler,
-                "",
-                try_fetch_shared,
-                future_part_disk);
-        };
-    }
-
-    try
-    {
-        /// Download vector index files and store them to the temporary directory with name tmp_fetch_vector_index_<part_name> under table data's path
-        tmp_fetch_vector_index_path = get_vector_index();
-
-        if (tmp_fetch_vector_index_path.empty())
-        {
-            /// Will try again if fetch failed
-            LOG_DEBUG(log, "Fail to fetch vector index {} in part {} from {}, will try again later", vec_index_name, future_part_name, source_replica_path);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            return false;
-        }
-    }
-    catch (...)
-    {
-        write_part_log(ExecutionStatus::fromCurrentException("", true));
-        throw;
-    }
-
-    ProfileEvents::increment(ProfileEvents::ReplicatedPartVectorIndexFetches);
-
-    LOG_DEBUG(log, "Fetched vector index {} in part {} from {} into {}.", vec_index_name, future_part_name, source_replica_path, tmp_fetch_vector_index_path);
-
-    return true;
-}
-
-bool StorageReplicatedMergeTree::canSendVectorIndexForPart(const String & part_name) const
-{
-    return queue.canSendVectorIndexForPart(part_name);
 }
 
 void StorageReplicatedMergeTree::getRemovePartFromZooKeeperOps(const String & part_name, Coordination::Requests & ops, bool has_children)
@@ -5734,24 +5342,11 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         startBeingLeader();
 
-        /// MYSCALE_INTERNAL_CODE_BEGIN
-        /// clear nvme cache
-        /// no need clear nvme cache in this field, reload vector index will reuse this cache.
-        auto preload_indices = getPreloadVectorIndicesFromZK();
-        clearVectorNvmeCache(preload_indices);
-        /// MYSCALE_INTERNAL_CODE_END
+        vi_manager->startup();
 
 #if USE_TANTIVY_SEARCH
         updateTantivyIndexCache();
 #endif
-        /// Initilize vector index build status for each index
-        for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
-            addVectorIndexBuildStatus(vec_index_desc.name);
-
-        /// Initilize vector index build status for each index
-        for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
-            addVectorIndexBuildStatus(vec_index_desc.name);
-
         /// Activate replica in a separate thread if we are not calling from attach thread
         restarting_thread.start(/*schedule=*/!from_attach_thread);
 
@@ -5893,7 +5488,7 @@ void StorageReplicatedMergeTree::partialShutdown()
         auto fetch_lock = fetcher.blocker.cancel();
         auto merge_lock = merger_mutator.merges_blocker.cancel();
         auto move_lock = parts_mover.moves_blocker.cancel();
-        auto build_block = vec_index_builder_updater.builds_blocker.cancel();
+        auto build_block = vi_manager->builds_blocker.cancel();
         background_operations_assignee.finish();
     }
 
@@ -5904,10 +5499,6 @@ void StorageReplicatedMergeTree::shutdown(bool)
 {
     if (shutdown_called.exchange(true))
         return;
-
-    /// Save cached vector index info before shutdown
-    if (vidx_init_loaded.load())
-        writeVectorIndexInfoToZookeeper();
 
     LOG_TRACE(log, "Shutdown started");
 
@@ -5933,6 +5524,8 @@ void StorageReplicatedMergeTree::shutdown(bool)
 
     partialShutdown();
 
+    vi_manager->shutdown();
+
     part_moves_between_shards_orchestrator.shutdown();
 
     {
@@ -5953,9 +5546,6 @@ void StorageReplicatedMergeTree::shutdown(bool)
         /// Wait for all of them
         std::lock_guard lock(data_parts_exchange_ptr->rwlock);
     }
-
-    /// Clear cached vector index
-    clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
 
     /// Clear primary key cache if exists.
     clearPKCache(getDataPartsVectorForInternalUsage());
@@ -6029,6 +5619,10 @@ ReplicatedMergeTreeQuorumAddedParts::PartitionIdToMaxBlock StorageReplicatedMerg
     return max_added_blocks;
 }
 
+VectorIndicesMgr * StorageReplicatedMergeTree::getVectorIndexManager() const
+{
+    return vi_manager.get();
+}
 
 void StorageReplicatedMergeTree::read(
     QueryPlan & query_plan,
@@ -6602,7 +6196,7 @@ bool StorageReplicatedMergeTree::executeMetadataAlter(const StorageReplicatedMer
         if (metadata_diff.vector_indices_changed)
         {
             /// Support multiple vector indices
-            startVectorIndexJob(old_vec_indices, getInMemoryMetadataPtr()->getVectorIndices());
+            vi_manager->startVectorIndexJob(old_vec_indices, getInMemoryMetadataPtr()->getVectorIndices());
         }
     }
 
@@ -7615,7 +7209,7 @@ void StorageReplicatedMergeTree::getStatus(ReplicatedTableStatus & res, bool wit
     res.can_become_leader = storage_settings_ptr->replicated_can_become_leader;
     res.is_readonly = is_readonly;
     res.is_session_expired = !zookeeper || zookeeper->expired();
-    res.is_data_synced = vidx_init_loaded.load();
+    res.is_data_synced = vi_manager->isVectorIndexInfoLoaded();
 
     res.queue = queue.getStatus();
     res.absolute_delay = getAbsoluteDelay(); /// NOTE: may be slightly inconsistent with queue status.
@@ -8323,7 +7917,7 @@ void StorageReplicatedMergeTree::clearOldPartsAndRemoveFromZKImpl(zkutil::ZooKee
         if (getInMemoryMetadataPtr()->hasVectorIndices() && getSettings()->build_vector_index_on_random_single_replica)
         {
             LOG_DEBUG(log, "Removing {} vector index build status for old parts from ZooKeeper", parts_to_delete_completely.size());
-            removeVecIndexBuildStatusForPartsFromZK(zookeeper, parts_to_delete_completely);
+            vi_manager->removeVecIndexBuildStatusForPartsFromZK(zookeeper, parts_to_delete_completely);
         }
     }
     catch (...)
@@ -9374,7 +8968,7 @@ ActionLock StorageReplicatedMergeTree::getActionLock(StorageActionBlockType acti
         return cleanup_thread.getCleanupLock();
 
     if (action_type == ActionLocks::PartsBuildIndex)
-        return vec_index_builder_updater.builds_blocker.cancel();
+        return vi_manager->builds_blocker.cancel();
 
     return {};
 }
@@ -11229,203 +10823,6 @@ void StorageReplicatedMergeTree::attachRestoredParts(MutableDataPartsVector && p
 
     for (auto part : parts)
         sink->writeExistingPart(part);
-}
-
-std::unordered_map<String, std::unordered_set<String>> StorageReplicatedMergeTree::getPreloadVectorIndicesFromZK()
-{
-    auto zookeeper = getZooKeeper();
-
-    String vector_index_info;
-    bool success = zookeeper->tryGet(fs::path(replica_path) / "vidx_info", vector_index_info);
-
-    if (!success || vector_index_info.empty())
-    {
-        /// try other replicas
-        Strings replicas = zookeeper->getChildren(fs::path(zookeeper_path) / "replicas");
-
-        /// Select replicas in uniformly random order.
-        std::shuffle(replicas.begin(), replicas.end(), thread_local_rng);
-
-        for (const String & replica : replicas)
-        {
-            if (replica == replica_name)
-                continue;
-
-            if (!zookeeper->exists(fs::path(zookeeper_path) / "replicas" / replica / "is_active"))
-                continue;
-
-            String replica_vidx_info;
-            success = zookeeper->tryGet(fs::path(zookeeper_path) / "replicas" / replica / "vidx_info", replica_vidx_info);
-
-            if (success && !replica_vidx_info.empty())
-                vector_index_info += replica_vidx_info;
-        }
-    }
-
-    if (vector_index_info.empty())
-    {
-        LOG_INFO(log, "No vector index info found on zookeeper for table {}", getStorageID().getFullTableName());
-        return {};
-    }
-
-    ReadBufferFromString in(vector_index_info);
-    std::unordered_map<String, std::unordered_set<String>> vector_indices;
-
-    while (!in.eof())
-    {
-        String part_name, vector_index_name;
-        in >> part_name >> "\t" >> vector_index_name >> "\n";
-
-        if (vector_indices.contains(part_name))
-        {
-            vector_indices.at(part_name).emplace(vector_index_name);
-        }
-        else
-        {
-            std::unordered_set<String> set{vector_index_name};
-            vector_indices.try_emplace(part_name, set);
-        }
-    }
-
-    return vector_indices;
-}
-
-void StorageReplicatedMergeTree::loadVectorIndexFromZookeeper()
-{
-    
-    std::unordered_map<String, std::unordered_set<String>> vector_indices = getPreloadVectorIndicesFromZK();
-
-    LOG_INFO(log, "Load {} vector indices from keeper", vector_indices.size());
-
-    Stopwatch watch;
-    loadVectorIndices(vector_indices);
-
-    LOG_INFO(log, "Loaded vector indices from keeper in {} seconds", watch.elapsedSeconds());
-}
-
-void StorageReplicatedMergeTree::updateVectorIndexInfoZookeeper()
-{
-    if (!vidx_init_loaded.load())
-    {
-        bool synced = false;
-        Stopwatch watch;
-
-        try
-        {
-            watch.start();
-            synced = waitForProcessingQueue(getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), SyncReplicaMode::DEFAULT, {});
-            watch.stop();
-        }
-        catch (Exception & e)
-        {
-            LOG_WARNING(log, "Failed to wait for replica syncing: {}", e.displayText());
-            return;
-        }
-
-        if (synced)
-            LOG_INFO(log, "Replica synced in {} seconds", watch.elapsedSeconds());
-        else
-            LOG_WARNING(log, "Failed to shrink queue size in {} seconds", watch.elapsedSeconds());
-
-        LOG_INFO(log, "Start loading vector indices from zookeeper");
-
-        watch.restart();
-        loadVectorIndexFromZookeeper();
-        watch.stop();
-
-        LOG_INFO(log, "Loading vector indices from zookeeper done in {} seconds", watch.elapsedSeconds());
-
-        vidx_init_loaded.store(true);
-    }
-
-    writeVectorIndexInfoToZookeeper();
-
-    vidx_info_updating_task->scheduleAfter(getSettings()->vidx_zk_update_period.totalMilliseconds());
-}
-
-void StorageReplicatedMergeTree::writeVectorIndexInfoToZookeeper(bool force)
-{
-    std::lock_guard lock{vidx_info_mutex};
-
-    if (force || getInMemoryMetadata().hasVectorIndices())
-    {
-        /// get cached vector index info
-        auto cache_list = VectorIndex::VICacheManager::getAllCacheNames();
-        auto table_id = toString(getStorageID().uuid);
-
-        std::unordered_map<String, std::unordered_set<String>> cached_index_parts;
-        std::unordered_map<String, String> index_column_map;
-
-        /// get cached vector index & parts for current table
-        for (const auto & cache_item : cache_list)
-        {
-            auto cache_key = cache_item.first;
-            if (cache_key.getTableUUID() == table_id)
-            {
-                if (cached_index_parts.contains(cache_key.vector_index_name))
-                {
-                    cached_index_parts.at(cache_key.vector_index_name).emplace(cache_key.getPartName());
-                }
-                else
-                {
-                    std::unordered_set<String> part_set{cache_key.getPartName()};
-                    cached_index_parts.try_emplace(cache_key.vector_index_name, part_set);
-                }
-
-                index_column_map.try_emplace(cache_key.vector_index_name, cache_key.column_name);
-            }
-        }
-
-        WriteBufferFromOwnString out;
-        int count = 0;
-
-        /// get active part name (without mutation) for cached vector index
-        for (const auto & index_parts : cached_index_parts)
-        {
-            auto index_name = index_parts.first;
-            auto cached_parts = index_parts.second;
-            auto column_name = index_column_map.at(index_name);
-
-            for (const auto & part : getDataPartsVectorForInternalUsage())
-            {
-                auto part_name = part->info.getPartNameWithoutMutation();
-
-                if (cached_parts.contains(part_name))
-                {
-                    out << part_name << "\t" << index_name << "\n";
-                    count++;
-                    continue;
-                }
-                
-                auto column_index_opt = part->vector_index.getColumnIndex(index_name);
-                if (!column_index_opt.has_value())
-                    continue;
-                auto column_index = column_index_opt.value();
-                if (column_index->isShutdown())
-                    continue;
-                for (const auto & segment_id : VectorIndex::getAllSegmentIds(part, index_name))
-                {
-                    if (cached_parts.contains(segment_id.getCacheKey().getPartName()))
-                    {
-                        out << part_name << "\t" << index_name << "\n";
-                        count++;
-                        break;
-                    }
-                }
-            }
-        }
-
-        try
-        {
-            LOG_DEBUG(log, "Writing {} vector index info to zookeeper", count);
-            getZooKeeper()->createOrUpdate(fs::path(replica_path) / "vidx_info", out.str(), zkutil::CreateMode::Persistent);
-            LOG_DEBUG(log, "Wrote {} vector index info to zookeeper", count);
-        }
-        catch (zkutil::KeeperException & e)
-        {
-            LOG_ERROR(log, "Failed to write vector index info to zookeeper: {}", e.what());
-        }
-    }
 }
 
 template std::optional<EphemeralLockInZooKeeper> StorageReplicatedMergeTree::allocateBlockNumber<String>(

@@ -21,20 +21,17 @@ namespace VectorIndex
 
 std::unique_ptr<VectorIndexCache> VICacheManager::cache;
 
-size_t IndexWithMetaWeightFunc::operator()(const VIWithMeta & index_meta) const
+size_t CachedSegmentWeightFunc::operator()(const CachedSegment & cached_segment) const
 {
-    size_t res;
-    std::visit([&res](auto &&index_ptr)
-               {
-                   res = index_ptr->getResourceUsage().memory_usage_bytes;
-               }, index_meta.index);
-    return res;
+    return calculateInnerSegmentMemoryUsage(cached_segment.index, cached_segment.getDeleteBitmap());
 }
 
-void IndexWithMetaReleaseFunction::operator()(std::shared_ptr<VIWithMeta> index_meta_ptr)
+void CachedSegmentReleaseFunction::operator()(std::shared_ptr<CachedSegment> cached_segment_ptr)
 {
-    if (index_meta_ptr)
-        index_meta_ptr.reset();
+    if (cached_segment_ptr)
+    {
+        cached_segment_ptr->index_load_memory_size_metric.changeTo(0);
+    }
 }
 
 VICacheManager::VICacheManager(int) : log(&Poco::Logger::get("VICacheManager"))
@@ -54,7 +51,7 @@ VICacheManager * VICacheManager::getInstance()
     return &cache_mgr;
 }
 
-IndexWithMetaHolderPtr VICacheManager::get(const CacheKey & cache_key)
+CachedSegmentHolderPtr VICacheManager::get(const CachedSegmentKey & cache_key)
 {
     if (!cache)
     {
@@ -66,7 +63,7 @@ IndexWithMetaHolderPtr VICacheManager::get(const CacheKey & cache_key)
     return value;
 }
 
-void VICacheManager::put(const CacheKey & cache_key, VectorIndexWithMetaPtr index)
+void VICacheManager::put(const CachedSegmentKey & cache_key, CachedSegmentPtr index)
 {
     if (!cache)
     {
@@ -111,7 +108,7 @@ size_t VICacheManager::countItem() const
     return cache->size();
 }
 
-void VICacheManager::forceExpire(const CacheKey & cache_key)
+void VICacheManager::forceExpire(const CachedSegmentKey & cache_key)
 {
     LOG_INFO(log, "Force expire cache: cache_key = {}", cache_key.toString());
     auto global_context = DB::Context::getGlobalContextInstance();
@@ -127,8 +124,8 @@ void VICacheManager::forceExpire(const CacheKey & cache_key)
     cache->tryRemove(cache_key);
 }
 
-IndexWithMetaHolderPtr VICacheManager::load(const CacheKey & cache_key,
-                                          std::function<VectorIndexWithMetaPtr()> load_func)
+CachedSegmentHolderPtr VICacheManager::load(const CachedSegmentKey & cache_key,
+                                          std::function<CachedSegmentPtr()> load_func)
 {
     if (!cache)
     {
@@ -153,39 +150,30 @@ void VICacheManager::setCacheSize(size_t size_in_bytes)
     CurrentMetrics::set(CurrentMetrics::VectorIndexCacheManagerSize, size_in_bytes);
 }
 
-std::list<std::pair<CacheKey, VIParameter>> VICacheManager::getAllItems()
+std::list<std::pair<CachedSegmentKey, std::shared_ptr<DB::VIDescription>>> VICacheManager::getAllItems(bool exclude_expired)
 {
-    std::list<std::pair<CacheKey, VIParameter>> result;
+    std::list<std::pair<CachedSegmentKey, std::shared_ptr<DB::VIDescription>>> result;
 
-    std::list<std::pair<CacheKey, std::shared_ptr<VIWithMeta>>> cache_list = cache->getCacheList();
+    std::list<std::pair<CachedSegmentKey, std::shared_ptr<CachedSegment>>> cache_list = getInstance()->cache->getCachedList(exclude_expired);
 
     for (auto cache_item : cache_list)
     {
         // key   --- string
-        // value --- std::shared_ptr<VIWithMeta>
-        result.emplace_back(std::make_pair(cache_item.first, cache_item.second->des));
+        // value --- std::shared_ptr<CachedSegment>
+        result.emplace_back(std::make_pair(cache_item.first, cache_item.second->vec_desc));
     }
     return result;
 }
 
-std::list<std::pair<CacheKey, VIParameter>> VICacheManager::getAllCacheNames()
-{
-    return getInstance()->getAllItems();
-}
-
-bool VICacheManager::storedInCache(const CacheKey & cache_key)
+bool VICacheManager::storedInCache(const CachedSegmentKey & cache_key)
 {
     VICacheManager * mgr = getInstance();
 
-    IndexWithMetaHolderPtr column_index = mgr->get(cache_key);
-
-    if (column_index)
-        return true;
-    else
-        return false;
+    CachedSegmentHolderPtr cached_segment = mgr->get(cache_key);
+    return cached_segment != nullptr;
 }
 
-void VICacheManager::removeFromCache(const CacheKey & cache_key)
+void VICacheManager::removeFromCache(const CachedSegmentKey & cache_key)
 {
     Poco::Logger * log = &Poco::Logger::get("VICacheManager");
     VICacheManager * mgr = getInstance();

@@ -32,7 +32,7 @@ SELECT 'hybrid search rsf with WHERE clause';
 SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, [1.0,1,1], 'Ancient') as score FROM t_vector_invert WHERE id < 10 ORDER BY score DESC, id LIMIT 5;
 
 CREATE VECTOR INDEX i_vec ON t_vector_invert vector TYPE IVFFLAT;
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES t_vector_invert;
 SELECT 'hybrid search with vector index';
 SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, [1.0,1,1], 'Ancient') as score FROM t_vector_invert ORDER BY score DESC, id LIMIT 5;
 

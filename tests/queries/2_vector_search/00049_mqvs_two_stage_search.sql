@@ -28,12 +28,7 @@ select 'IP Distances';
 ALTER TABLE test_vector_two_stage modify setting float_vector_search_metric_type = 'IP';
 ALTER TABLE test_vector_two_stage ADD VECTOR INDEX ip_vidx vec TYPE MSTG;
 
-SELECT if(status='Built', sleep(0), sleep(2) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage;
 
 SELECT 'Vector index build status';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector_two_stage';
@@ -90,12 +85,7 @@ select 'L2 Distances';
 ALTER TABLE test_vector_two_stage modify setting float_vector_search_metric_type = 'L2';
 ALTER TABLE test_vector_two_stage ADD VECTOR INDEX l2_vidx vec TYPE MSTG;
 
-SELECT if(status='Built', sleep(0), sleep(2) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage;
 
 SELECT 'Vector index build status';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector_two_stage';
@@ -151,12 +141,7 @@ select 'Cosine Distances';
 ALTER TABLE test_vector_two_stage modify setting float_vector_search_metric_type = 'cosine';
 ALTER TABLE test_vector_two_stage ADD VECTOR INDEX cosine_vidx vec TYPE MSTG;
 
-SELECT if(status='Built', sleep(0), sleep(2) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_vector_two_stage' and database = currentDatabase());
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage;
 
 SELECT 'Vector index build status';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector_two_stage';

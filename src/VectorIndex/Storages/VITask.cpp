@@ -13,14 +13,14 @@ namespace ErrorCodes
     extern const int VECTOR_INDEX_ALREADY_EXISTS;
 }
 
-VIBuiltStatus VITask::prepare()
+VectorIndex::SegmentBuiltStatus VITask::prepare()
 {
     try
     {
         ctx = builder.prepareBuildVIContext(
             metadata_snapshot, vector_index_entry->part_name, vector_index_entry->vector_index_name, slow_mode);
 
-        return VIBuiltStatus{VIBuiltStatus::SUCCESS};
+        return VectorIndex::SegmentBuiltStatus{VectorIndex::SegmentBuiltStatus::SUCCESS};
     }
     catch (Exception & e)
     {
@@ -31,11 +31,11 @@ VIBuiltStatus VITask::prepare()
             e.code(),
             e.message());
         if (e.code() == ErrorCodes::NOT_FOUND_EXPECTED_DATA_PART)
-            return VIBuiltStatus{VIBuiltStatus::NO_DATA_PART, e.code(), e.message()};
+            return VectorIndex::SegmentBuiltStatus{VectorIndex::SegmentBuiltStatus::NO_DATA_PART, e.code(), e.message()};
         else if (e.code() == ErrorCodes::VECTOR_INDEX_ALREADY_EXISTS)
-            return VIBuiltStatus{VIBuiltStatus::BUILD_SKIPPED};
+            return VectorIndex::SegmentBuiltStatus{VectorIndex::SegmentBuiltStatus::BUILD_SKIPPED};
         else
-            return VIBuiltStatus{VIBuiltStatus::BUILD_FAIL, e.code(), e.message()};
+            return VectorIndex::SegmentBuiltStatus{VectorIndex::SegmentBuiltStatus::BUILD_FAIL, e.code(), e.message()};
     }
 }
 

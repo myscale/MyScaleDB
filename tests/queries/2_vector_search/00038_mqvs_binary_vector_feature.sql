@@ -27,28 +27,28 @@ SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary W
 
 SELECT '-- BinaryFLAT (Hamming)';
 ALTER TABLE test_binary ADD VECTOR INDEX vec_ind vector TYPE BinaryFLAT('metric_type=Hamming');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_binary;
 SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_binary';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 10;
 ALTER TABLE test_binary DROP VECTOR INDEX vec_ind;
 
 SELECT '-- BinaryFLAT (Jaccard)';
 ALTER TABLE test_binary ADD VECTOR INDEX vec_ind vector TYPE BinaryFLAT('metric_type=Jaccard');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_binary;
 SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_binary';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 10;
 ALTER TABLE test_binary DROP VECTOR INDEX vec_ind;
 
 SELECT '-- BINARYMSTG (Hamming)';
 ALTER TABLE test_binary ADD VECTOR INDEX vec_ind vector TYPE BINARYMSTG('metric_type=Hamming');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_binary;
 SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_binary';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 4;
 ALTER TABLE test_binary DROP VECTOR INDEX vec_ind;
 
 SELECT '-- BINARYMSTG (Jaccard)';
 ALTER TABLE test_binary ADD VECTOR INDEX vec_ind vector TYPE BINARYMSTG('metric_type=Jaccard');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_binary;
 SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_binary';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 4;
 ALTER TABLE test_binary DROP VECTOR INDEX vec_ind;
@@ -58,7 +58,7 @@ DELETE FROM test_binary WHERE id < 200;
 ALTER TABLE test_binary MODIFY SETTING binary_vector_search_metric_type = 'Hamming';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 10;
 ALTER TABLE test_binary ADD VECTOR INDEX vec_ind vector TYPE BINARYMSTG('metric_type=Jaccard');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_binary;
 SELECT table, name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_binary';
 SELECT id, distance(vector, char(100, 101, 102, 103)) AS dist FROM test_binary ORDER BY dist,id LIMIT 4;
 

@@ -10,7 +10,7 @@ namespace DB
 
 class IVolume;
 using VolumePtr = std::shared_ptr<IVolume>;
-class VIBuilderUpdater;
+class VectorIndicesMgr;
 class VIWithDataPart;
 class IMergeTreeDataPart;
 using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
@@ -120,7 +120,7 @@ public:
     bool hasActiveTransaction() const override;
 
 protected:
-    friend class VIBuilderUpdater;
+    friend class VectorIndicesMgr;
     friend class MergeTreeVSManager;
     friend class IMergeTreeDataPart;
     friend class VIWithDataPart;

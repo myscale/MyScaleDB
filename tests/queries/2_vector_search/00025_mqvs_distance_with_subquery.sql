@@ -14,7 +14,7 @@ INSERT INTO test_vector_subquery SELECT number, [number,number,number] FROM numb
 
 ALTER TABLE test_vector_subquery ADD VECTOR INDEX vec_ind vector TYPE HNSWFLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_subquery;
 
 SELECT 'Scalar Subquery in distance function';
 select id FROM (

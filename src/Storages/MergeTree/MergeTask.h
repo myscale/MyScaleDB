@@ -26,7 +26,6 @@
 #include <Storages/MergeTree/MergeProgress.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeIndices.h>
-#include <VectorIndex/Common/SegmentId.h>
 
 namespace ProfileEvents
 {

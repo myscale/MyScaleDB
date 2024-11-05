@@ -40,6 +40,7 @@
 #    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #endif
 #include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
 
 
 namespace ProfileEvents
@@ -949,7 +950,7 @@ void finalizeMutatedPart(
     ContextPtr context,
     StorageMetadataPtr metadata_snapshot,
     bool sync,
-    const NameSet & rebuild_index_column = {})
+    const NameSet & rebuild_index_column)
 {
     std::vector<std::unique_ptr<WriteBufferFromFileBase>> written_files;
 
@@ -1028,6 +1029,8 @@ void finalizeMutatedPart(
     new_data_part->minmax_idx = source_part->minmax_idx;
     new_data_part->modification_time = time(nullptr);
 
+    new_data_part->segments_mgr = source_part->segments_mgr->mutation(new_data_part, rebuild_index_column);
+
     /// Load rest projections which are hardlinked
     bool noop;
     new_data_part->loadProjections(false, false, noop, true /* if_not_loaded */);
@@ -1040,11 +1043,6 @@ void finalizeMutatedPart(
     new_data_part->calculateColumnsAndSecondaryIndicesSizesOnDisk();
 
     new_data_part->default_codec = codec;
-
-    /// Origin part is decoupled with merged vector indices or has simple built vector index
-    new_data_part->vector_index.loadVectorIndexFromLocalFile();
-    /// Inherit index status
-    new_data_part->vector_index.inheritVectorIndexStatus(source_part->vector_index, new_data_part->storage.getInMemoryMetadataPtr(), rebuild_index_column);
 
     /// TODO: Should new part inherit build error from old part?
     /// Retry build vector index for new parts.
@@ -1829,28 +1827,17 @@ private:
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
         /// Reuse vector index when no rows are deleted
-        if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVIInReady())
+        for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
         {
-            /// get current decouple index set
-            [[maybe_unused]] bool vector_files_found = false;
-            for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
-            {
-                String file_name = it->name();
-                if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
-                    continue;
+            String file_name = it->name();
+            if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                continue;
 
-                ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
-                vector_files_found = true;
-            }
-
-            /// get current decouple index set, Compute difference set, For the index whose attributes have changed, re-hard link
+            ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
         }
 
+        ctx->new_data_part->segments_mgr = ctx->source_part->segments_mgr->mutation(ctx->new_data_part, ctx->rebuild_vector_index_column);
         /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
-        ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
-        /// Inherit index status
-        ctx->new_data_part->vector_index.inheritVectorIndexStatus(ctx->source_part->vector_index, ctx->metadata_snapshot, ctx->rebuild_vector_index_column);
-
         /// TODO: Should new part inherit build error from old part?
         /// Retry build vector index for new parts.
     }
@@ -2298,7 +2285,7 @@ bool MutateTask::prepare()
                 ctx->need_delete_rows = true;
         }
     }
-    ctx->move_index_read_lock = ctx->source_part->vector_index.tryLockTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
+    ctx->move_index_read_lock = ctx->source_part->segments_mgr->tryLockSegmentsTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
     ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands);
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
@@ -2338,8 +2325,8 @@ bool MutateTask::prepare()
             std::tie(part, lock) = ctx->data->cloneAndLoadDataPart(
                 ctx->source_part, prefix, ctx->future_part->part_info, ctx->metadata_snapshot, clone_params, ctx->context->getReadSettings(), ctx->context->getWriteSettings(), true/*must_on_same_disk*/);
 
-            /// Inherit index status
-            part->vector_index.inheritVectorIndexStatus(ctx->source_part->vector_index, ctx->metadata_snapshot);
+            /// Inherit index status from source part
+            part->segments_mgr->mutateFrom(*ctx->source_part->segments_mgr, ctx->rebuild_vector_index_column);
 
             part->getDataPartStorage().beginTransaction();
 #if USE_TANTIVY_SEARCH

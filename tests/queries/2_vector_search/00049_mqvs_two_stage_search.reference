@@ -1,10 +1,4 @@
 IP Distances
-0
-0
-0
-0
-0
-0
 Vector index build status
 ip_vidx	MSTG	ip_vidx vec TYPE MSTG	Built
 Without Two Stage Search
@@ -41,12 +35,6 @@ Brute Force Search
 71	29571.5
 70	29155
 L2 Distances
-0
-0
-0
-0
-0
-0
 Vector index build status
 l2_vidx	MSTG	l2_vidx vec TYPE MSTG	Built
 Without Two Stage Search
@@ -83,12 +71,6 @@ Brute Force Search
 59	31028.09
 60	32099.09
 Cosine Distances
-0
-0
-0
-0
-0
-0
 Vector index build status
 cosine_vidx	MSTG	cosine_vidx vec TYPE MSTG	Built
 Without Two Stage Search

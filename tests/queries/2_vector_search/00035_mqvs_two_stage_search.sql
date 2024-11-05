@@ -16,7 +16,7 @@ ALTER TABLE test_vector_two_stage ADD VECTOR INDEX vec_ind vector TYPE MSTG;
 INSERT INTO test_vector_two_stage SELECT number, [number,number,number,number,number,number,number,number,number,number,number,number,number,number,number,number] FROM numbers(1001) where number != 1;
 
 SELECT 'two stage search with MSTG type and min_bytes_to_build_vector_index=0';
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage;
 
 SELECT id, distance(vector,[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]) AS dist FROM test_vector_two_stage WHERE id < 11 ORDER BY dist, id LIMIT 10;
 
@@ -40,7 +40,7 @@ INSERT INTO test_vector_two_stage_mix SELECT number, [number,number,number,numbe
 INSERT INTO test_vector_two_stage_mix SELECT number, [number,number,number,number,number,number,number,number,number,number,number,number,number,number,number,number] FROM numbers(1001, 2000);
 
 SELECT 'two stage search with MSTG type and min_bytes_to_build_vector_index=1024';
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage_mix;
 
 SELECT id, distance(vector,[1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0]) AS dist FROM test_vector_two_stage_mix WHERE id between 990 and 1010 ORDER BY dist, id LIMIT 10;
 
@@ -61,7 +61,7 @@ INSERT INTO test_vector_two_stage_decouple SELECT number, [number,number,number,
 INSERT INTO test_vector_two_stage_decouple SELECT number, [number,number,number,number,number,number,number,number,number,number,number,number,number,number,number,number] FROM numbers(1001, 2000);
 
 SELECT 'two stage search with MSTG type and decouple part';
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage_decouple;
 
 optimize table test_vector_two_stage_decouple final;
 
@@ -81,12 +81,12 @@ SETTINGS min_bytes_to_build_vector_index=0;
 
 ALTER TABLE test_vector_two_stage_ip ADD VECTOR INDEX vec_ind vector TYPE MSTG('metric_type=IP');
 
-INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(200) where number %4=0;
-INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(200) where number %4=1;
-INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(200) where number %4=2;
-INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(200) where number %4=3;
+INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(40000) where number %4=0;
+INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(40000) where number %4=1;
+INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(40000) where number %4=2;
+INSERT INTO test_vector_two_stage_ip SELECT number, [number,number,number] FROM numbers(40000) where number %4=3;
 
-SELECT sleep(1);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage_ip;
 
 SELECT id, distance(vector,[1.0,1.0,1.0]) AS dist FROM test_vector_two_stage_ip ORDER BY dist DESC LIMIT 10;
 

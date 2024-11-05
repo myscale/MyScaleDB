@@ -40,7 +40,6 @@
 #include <Storages/MergeTree/BackgroundJobsAssignee.h>
 #include <Parsers/SyncReplicaMode.h>
 #include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIStrategyPicker.h>
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
 
 
 namespace DB
@@ -92,6 +91,10 @@ namespace DB
 
 class ZooKeeperWithFaultInjection;
 using ZooKeeperWithFaultInjectionPtr = std::shared_ptr<ZooKeeperWithFaultInjection>;
+
+class VectorIndicesMgr;
+class StorageReplicatedVectorIndicesMgr;
+using StorageReplicatedVectorIndicesMgrPtr = std::unique_ptr<StorageReplicatedVectorIndicesMgr>;
 
 class StorageReplicatedMergeTree final : public MergeTreeData
 {
@@ -366,12 +369,7 @@ public:
     using ShutdownDeadline = std::chrono::time_point<std::chrono::system_clock>;
     void waitForUniquePartsToBeFetchedByOtherReplicas(ShutdownDeadline shutdown_deadline);
 
-    /// Check if part is being merged right now via future_parts in queue.
-    bool canSendVectorIndexForPart(const String & part_name) const;
-
-    /// Required only to avoid races between merge and sendVectorIndex
-    std::unordered_set<String> currently_sending_vector_index_parts;
-    std::mutex currently_sending_vector_index_parts_mutex;
+    VectorIndicesMgr * getVectorIndexManager() const override;
 
 private:
     std::atomic_bool are_restoring_replica {false};
@@ -397,8 +395,10 @@ private:
     friend class MergeFromLogEntryTask;
     friend class MutateFromLogEntryTask;
     friend class ReplicatedMergeMutateTaskBase;
-    friend class VIBuilderUpdater;
+    friend class StorageReplicatedVectorIndicesMgr;
+    friend class VectorIndexObject;
     friend class ReplicatedVITask;
+    friend class DataPartsExchange::Service;
     friend class ReplicatedMergeTreeBuildVIStrategyPicker;
 
     using MergeStrategyPicker = ReplicatedMergeTreeMergeStrategyPicker;
@@ -458,7 +458,7 @@ private:
 
     MergeStrategyPicker merge_strategy_picker;
 
-    VIBuilderUpdater vec_index_builder_updater;
+    StorageReplicatedVectorIndicesMgrPtr vi_manager;
     ReplicatedMergeTreeBuildVIStrategyPicker build_vindex_strategy_picker;
 
     /** The queue of what needs to be done on this replica to catch up with everyone. It is taken from ZooKeeper (/replicas/me/queue/).
@@ -536,12 +536,6 @@ private:
 
     /// A task that update cached vector index info to zookeeper.
     BackgroundSchedulePool::TaskHolder vidx_info_updating_task;
-
-    /// Whether vector indices were initially loaded on table start-up
-    std::atomic<bool> vidx_init_loaded{false};
-
-    /// It is acquired when writing vector index info to zookeeper
-    std::mutex vidx_info_mutex;
 
     /// True if replica was created for existing table with fixed granularity
     bool other_replicas_fixed_granularity = false;
@@ -1012,52 +1006,6 @@ private:
         const String & vector_index_name,
         int32_t log_version,
         bool slow_mode = false);
-
-    /// Required only to avoid races between mutate and fetchVectorIndex
-    std::unordered_set<String> currently_fetching_vector_index_parts;
-    std::mutex currently_fetching_vector_index_parts_mutex;
-
-    /// Fetch built vector index in part from other replica.
-    /// NOTE: First of all tries to find the part on other replica.
-    /// After that tries to fetch the vector index.
-    bool executeFetchVectorIndex(LogEntry & entry, String & replica, String & fetch_vector_index_path);
-
-    /// Download the vector index files of the specified part from the specified replica.
-    /// Returns false if vector index files are aready fetching right now.
-    bool fetchVectorIndex(
-        DataPartPtr future_part,
-        const String & part_name,
-        const String & vec_index_name,
-        const StorageMetadataPtr & metadata_snapshot,
-        const String & replica_path,
-        zkutil::ZooKeeper::Ptr zookeeper_ = nullptr,
-        bool try_fetch_shared = true);
-
-    /// Create a finished flag node 'vidx_build_parts/part_name_in_log_entry' on zookeeper for a part
-    /// when vector index build has done, no matter success or not.
-    void createVectorIndexBuildStatusForPart(const String & part_name, const String & vec_index_name, const String & status);
-
-    /// Check if the part in replica has finished vector index building job.
-    bool checkReplicaHaveVIndexInPart(const String & replica, const String & part_name, const String & vec_index_name);
-
-    /// Remove parts with vector index build status from ZooKeeper
-    void removeVecIndexBuildStatusForPartsFromZK(zkutil::ZooKeeperPtr & zookeeper, const DataPartsVector & parts_to_delete);
-
-    /// Cleanups vidx_build_parts/part_names for vector index build status
-    void cleanupVectorIndexBuildStatusFromZK(const String & index_name);
-
-    /// In create and drop vector index cases, do some operations.
-    void startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices);
-
-    std::unordered_map<String, std::unordered_set<String>> getPreloadVectorIndicesFromZK();
-    /// Get cached vector index info from zookeeper and load into cache.
-    void loadVectorIndexFromZookeeper();
-
-    /// Update cached vector index info to zookeeper periodically.
-    void updateVectorIndexInfoZookeeper();
-
-    /// Write vector index info to zookeeper.
-    void writeVectorIndexInfoToZookeeper(bool force = false);
 
     /// Wait for ephemral lock to disappear. Return true if table shutdown/readonly/timeout exceeded, etc.
     /// Or if node actually disappeared.

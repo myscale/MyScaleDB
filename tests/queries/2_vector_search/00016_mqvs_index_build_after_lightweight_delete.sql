@@ -11,7 +11,7 @@ delete from test_vector where id = 3;
 
 ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 

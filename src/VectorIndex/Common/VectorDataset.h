@@ -13,6 +13,12 @@ enum class DataType;
 
 namespace VectorIndex
 {
+enum class VectorSearchMethod
+{
+    IndexSearch = 1,
+    BruteForce = 2,
+};
+
 template<Search::DataType T>
 struct VectorDataset
 {
@@ -53,8 +59,23 @@ public:
     int64_t getDimension()
     { return dimension; }
 
-    typename SearchIndexDataTypeMap<T>::VectorDatasetType *getData()
-    { return vec_data.data(); }
+    template <VectorSearchMethod U = VectorSearchMethod::IndexSearch>
+    typename std::enable_if<
+        U != VectorSearchMethod::IndexSearch || T != Search::DataType::BinaryVector,
+        typename SearchIndexDataTypeMap<T>::VectorDatasetType *>::type
+    getData()
+    {
+        return vec_data.data();
+    }
+
+    template <VectorSearchMethod U>
+    typename std::enable_if<
+        U == VectorSearchMethod::IndexSearch && T == Search::DataType::BinaryVector,
+        bool *>::type
+    getData()
+    {
+        return reinterpret_cast<bool *>(&vec_data[0]);
+    }
 
     std::vector<typename SearchIndexDataTypeMap<T>::VectorDatasetType> &getRawVector()
     { return vec_data; }

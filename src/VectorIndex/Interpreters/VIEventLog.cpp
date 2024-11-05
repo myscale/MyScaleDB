@@ -161,6 +161,7 @@ void VIEventLog::addEventLog(
     const MergeTreeDataPartPtr & data_part,
     const String & index_name,
     VIEventLogElement::Type event_type,
+    const String & current_part_name,
     const ExecutionStatus & execution_status)
 {
     VIEventLogPtr log_entry = current_context->getVectorIndexEventLog();
@@ -175,7 +176,7 @@ void VIEventLog::addEventLog(
                         data_part->name,
                         data_part->info.partition_id,
                         event_type,
-                        data_part->name,
+                        current_part_name.empty() ? data_part->name : current_part_name,
                         execution_status);
     }
     catch (...)

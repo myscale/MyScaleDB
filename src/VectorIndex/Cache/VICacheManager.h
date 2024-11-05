@@ -6,63 +6,40 @@
 #include <string>
 
 #include <Common/LRUResourceCache.h>
-#include <VectorIndex/Cache/VICacheObject.h>
+#include <VectorIndex/Cache/CachedSegmentKey.h>
+#include <VectorIndex/Cache/CachedSegment.h>
+#include <VectorIndex/Storages/VIDescriptions.h>
 
 namespace std
 {
 template <>
-struct hash<VectorIndex::CacheKey>
+struct hash<VectorIndex::CachedSegmentKey>
 {
-    std::size_t operator()(VectorIndex::CacheKey const & key) const noexcept { return std::hash<std::string>{}(key.toString()); }
+    std::size_t operator()(VectorIndex::CachedSegmentKey const & key) const noexcept { return std::hash<std::string>{}(key.toString()); }
 };
 }
 
 namespace VectorIndex
 {
 
-struct VIWithMeta;
-using VectorIndexWithMetaPtr = std::shared_ptr<VIWithMeta>;
-
 static bool m = false;
 static size_t cache_size_in_bytes = 0;
 
-class IndexWithMetaWeightFunc
+class CachedSegmentWeightFunc
 {
 public:
-    size_t operator()(const VIWithMeta & index_meta) const;
+    size_t operator()(const CachedSegment & cached_segment) const;
 };
 
-class IndexWithMetaReleaseFunction
+class CachedSegmentReleaseFunction
 {
 public:
-    void operator()(std::shared_ptr<VIWithMeta> index_meta_ptr);
+    void operator()(std::shared_ptr<CachedSegment> cached_segment_ptr);
 };
 
-using VectorIndexCacheType
-    = DB::LRUResourceCache<CacheKey, VIWithMeta, IndexWithMetaWeightFunc, IndexWithMetaReleaseFunction, std::hash<CacheKey>>;
-using IndexWithMetaHolderPtr = VectorIndexCacheType::MappedHolderPtr;
-
-class VectorIndexCache
-    : public DB::LRUResourceCache<CacheKey, VIWithMeta, IndexWithMetaWeightFunc, IndexWithMetaReleaseFunction, std::hash<CacheKey>>
-{
-public:
-    explicit VectorIndexCache(size_t max_size) : VectorIndexCacheType(max_size) { }
-
-    std::list<std::pair<CacheKey, VectorIndexWithMetaPtr>> getCacheList()
-    {
-        std::list<std::pair<CacheKey, VectorIndexWithMetaPtr>> res;
-        {
-            std::lock_guard lock(mutex);
-
-            for (auto it = cells.begin(); it != cells.cend(); ++it)
-            {
-                res.push_back(std::make_pair(it->first, it->second.value));
-            }
-        }
-
-        return res;
-    }
-};
+using VectorIndexCache
+    = DB::LRUResourceCache<CachedSegmentKey, CachedSegment, CachedSegmentWeightFunc, CachedSegmentReleaseFunction, std::hash<CachedSegmentKey>>;
+using CachedSegmentHolderPtr = VectorIndexCache::MappedHolderPtr;
 
 class VICacheManager
 {
@@ -74,26 +51,30 @@ class VICacheManager
 private:
     explicit VICacheManager(int);
 
-public:
-    void put(const CacheKey & cache_key, VectorIndexWithMetaPtr index);
-    IndexWithMetaHolderPtr get(const CacheKey & cache_key);
+    void forceExpire(const CachedSegmentKey & cache_key);
+
     size_t countItem() const;
-    void forceExpire(const CacheKey & cache_key);
-    IndexWithMetaHolderPtr load(const CacheKey & cache_key,
-                                std::function<VectorIndexWithMetaPtr()> load_func);
-    std::list<std::pair<CacheKey, VIParameter>> getAllItems();
 
-    static VICacheManager * getInstance();
-    static void setCacheSize(size_t size_in_bytes);
-
-    static std::list<std::pair<CacheKey, VIParameter>> getAllCacheNames();
-    static bool storedInCache(const CacheKey & cache_key);
-
-    static void removeFromCache(const CacheKey & cache_key);
-
-protected:
+    /// don't allow direct access to cache
     static std::unique_ptr<VectorIndexCache> cache;
     Poco::Logger * log;
+
+public:
+    /// put a new item into cache
+    void put(const CachedSegmentKey & cache_key, CachedSegmentPtr index);
+    /// get an item from cache
+    CachedSegmentHolderPtr get(const CachedSegmentKey & cache_key);
+    /// load an item from cache
+    CachedSegmentHolderPtr load(const CachedSegmentKey & cache_key,
+                                std::function<CachedSegmentPtr()> load_func);
+
+    static VICacheManager * getInstance();
+    static std::list<std::pair<CachedSegmentKey, std::shared_ptr<DB::VIDescription>>> getAllItems(bool exclude_expired = false);
+    static void setCacheSize(size_t size_in_bytes);
+
+    static bool storedInCache(const CachedSegmentKey & cache_key);
+
+    static void removeFromCache(const CachedSegmentKey & cache_key);
 };
 
 }

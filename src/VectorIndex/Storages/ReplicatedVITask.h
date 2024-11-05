@@ -8,7 +8,7 @@
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Common/logger_useful.h>
 
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
+#include <VectorIndex/Common/VectorIndicesMgr.h>
 #include <VectorIndex/Storages/VITaskBase.h>
 
 namespace DB
@@ -26,7 +26,7 @@ public:
     ReplicatedVITask(
         StorageReplicatedMergeTree & storage_,
         ReplicatedMergeTreeQueue::SelectedEntryPtr & selected_entry_,
-        VIBuilderUpdater & builder_,
+        VectorIndicesMgr & builder_,
         Callback && task_result_callback_)
         : VITaskBase(
             storage_,
@@ -45,7 +45,7 @@ public:
 
 private:
     /// result, need_to_fetch
-    VIBuiltStatus prepare() override;
+    VectorIndex::SegmentBuiltStatus prepare() override;
 
     void remove_processed_entry() override;
 
