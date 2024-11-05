@@ -4,7 +4,7 @@
 
 #include <Core/Names.h>
 
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
+#include <VectorIndex/Common/VectorIndicesMgr.h>
 #include <VectorIndex/Storages/VITaskBase.h>
 
 #include <Common/logger_useful.h>
@@ -25,7 +25,7 @@ public:
         MergeTreeData & storage_,
         StorageMetadataPtr /*metadata_snapshot_*/,
         VIEntryPtr vector_index_entry_,
-        VIBuilderUpdater & builder_,
+        VectorIndicesMgr & builder_,
         Callback && task_result_callback_,
         bool slow_mode_)
         : VITaskBase(
@@ -43,6 +43,6 @@ private:
 
     void recordBuildStatus();
 
-    VIBuiltStatus prepare() override;
+    VectorIndex::SegmentBuiltStatus prepare() override;
 };
 }

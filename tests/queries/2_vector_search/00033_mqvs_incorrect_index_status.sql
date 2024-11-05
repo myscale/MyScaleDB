@@ -6,7 +6,7 @@ INSERT INTO test_172_status SELECT number as id, arrayMap(x -> (rand() % 1000000
 
 ALTER TABLE test_172_status ADD VECTOR INDEX idx data TYPE MSTG('unknown=1');
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_172_status; -- { serverError INVALID_VECTOR_INDEX }
 
 select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() order by table;
 
@@ -26,7 +26,7 @@ INSERT INTO test_172_replicated_status SELECT number as id, arrayMap(x -> (rand(
 
 ALTER TABLE test_172_replicated_status ADD VECTOR INDEX idx data TYPE MSTG('unknown=1');
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_172_replicated_status; -- { serverError INVALID_VECTOR_INDEX }
 
 select table, name, expr, status, latest_failed_part, substr(latest_fail_reason, position(latest_fail_reason,'ception') + 8) from system.vector_indices where database = currentDatabase() order by table;
 

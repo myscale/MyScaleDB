@@ -143,7 +143,6 @@
 104	0.6
 112	0.6
 -- BinaryFLAT (Hamming)
-0
 test_binary	vec_ind	BinaryFLAT	vec_ind vector TYPE BinaryFLAT(\'metric_type=Hamming\')	Built
 100	4
 101	4
@@ -156,7 +155,6 @@ test_binary	vec_ind	BinaryFLAT	vec_ind vector TYPE BinaryFLAT(\'metric_type=Hamm
 612	4
 613	4
 -- BinaryFLAT (Jaccard)
-0
 test_binary	vec_ind	BinaryFLAT	vec_ind vector TYPE BinaryFLAT(\'metric_type=Jaccard\')	Built
 103	0.2
 359	0.2
@@ -169,14 +167,12 @@ test_binary	vec_ind	BinaryFLAT	vec_ind vector TYPE BinaryFLAT(\'metric_type=Jacc
 613	0.22222222
 614	0.22222222
 -- BINARYMSTG (Hamming)
-0
 test_binary	vec_ind	BINARYMSTG	vec_ind vector TYPE BINARYMSTG(\'metric_type=Hamming\')	Built
 102	4
 358	4
 614	4
 870	4
 -- BINARYMSTG (Jaccard)
-0
 test_binary	vec_ind	BINARYMSTG	vec_ind vector TYPE BINARYMSTG(\'metric_type=Jaccard\')	Built
 102	0.22222222
 358	0.22222222
@@ -193,7 +189,6 @@ test_binary	vec_ind	BINARYMSTG	vec_ind vector TYPE BINARYMSTG(\'metric_type=Jacc
 615	4
 868	4
 869	4
-0
 test_binary	vec_ind	BINARYMSTG	vec_ind vector TYPE BINARYMSTG(\'metric_type=Jaccard\')	Built
 358	0.22222222
 614	0.22222222

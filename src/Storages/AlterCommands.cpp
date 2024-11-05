@@ -40,6 +40,7 @@
 #include <Common/typeid_cast.h>
 
 #include <VectorIndex/Parsers/ASTVIDeclaration.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace DB
 {

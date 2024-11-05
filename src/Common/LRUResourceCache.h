@@ -9,10 +9,6 @@
 #include <unordered_set>
 #include <Common/logger_useful.h>
 
-namespace VectorIndex
-{
-class VectorIndexCache;
-}
 namespace DB
 {
 template <typename T>
@@ -131,6 +127,21 @@ public:
         out_evict_count = evict_count;
     }
 
+    /// Returns a list of all cached items. If exclude_expired is true, expired items are not included.
+    /// This method might be broken lru cache instance, so use it with caution.
+    std::list<std::pair<Key, MappedPtr>> getCachedList(bool exclude_expired = false)
+    {
+        std::lock_guard lock(mutex);
+        std::list<std::pair<Key, MappedPtr>> res;
+        for (const auto & [key, cell] : cells)
+        {
+            if (exclude_expired && cell.expired)
+                continue;
+            res.emplace_back(key, cell.value);
+        }
+        return res;
+    }
+
 private:
     mutable std::mutex mutex;
 
@@ -216,7 +227,6 @@ private:
     };
 
     friend struct InsertTokenHolder;
-    friend class VectorIndex::VectorIndexCache;
     InsertTokenById insert_tokens;
     WeightFunction weight_function;
     ReleaseFunction release_function;

@@ -26,7 +26,7 @@ public:
         const ExpressionActionsSettings & actions_settings_,
         const MergeTreeReaderSettings & reader_settings_,
         const Names & virt_column_names_,
-        VIBitmapPtr filter_)
+        VectorIndex::VIBitmapPtr filter_)
         : MergeTreeThreadSelectAlgorithm(thread_, pool_, min_marks_to_read_, max_block_size_,
             preferred_block_size_bytes_, preferred_max_column_in_block_size_bytes_,
             storage_, storage_snapshot_, use_uncompressed_cache_,
@@ -61,7 +61,7 @@ protected:
     }
 
 private:
-    VIBitmapPtr filter;
+    VectorIndex::VIBitmapPtr filter;
 };
 
 }

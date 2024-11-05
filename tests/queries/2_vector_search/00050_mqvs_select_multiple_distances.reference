@@ -1,4 +1,3 @@
-0
 mutiple distances order by dist1 + dist2
 1	3	3
 0	0	12
@@ -67,7 +66,6 @@ brute force on multiple distances on two parts and where condition filter out th
 5	75	27
 7	147	75
 9	243	147
-0
 mutiple distances order by dist1 + dist2 on two parts
 1	3	3
 0	0	12
@@ -92,7 +90,6 @@ mutiple distances on two parts after LWD
 2	12	0
 3	27	3
 5	75	27
-0
 mutiple distances with primary key cache
 1	3	3
 0	0	12
@@ -111,16 +108,12 @@ mutiple distances with primary key cache after LWD
 3	27	3
 4	48	12
 5	75	27
-0
 multiple distances with binary vectors
 2	4	0	0
 3	8	0.5	3
 4	4	0.5	12
 5	8	0.6666667	27
 10	8	0.5	192
-0
-0
-0
 multiple distances with two stage search enabled on MSTG type
 1	16	16
 0	0	64

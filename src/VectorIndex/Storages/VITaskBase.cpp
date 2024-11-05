@@ -2,11 +2,12 @@
 
 namespace DB
 {
+using namespace VectorIndex;
 VITaskBase::State VITaskBase::getNextState()
 {
-    if (build_status.getStatus() == VIBuiltStatus::SUCCESS && state != VITaskBase::State::NEED_FINALIZE)
+    if (build_status.getStatus() == VectorIndex::SegmentBuiltStatus::SUCCESS && state != VITaskBase::State::NEED_FINALIZE)
         return static_cast<VITaskBase::State>(static_cast<int>(state) + 1);
-    else if (build_status.getStatus() == VIBuiltStatus::BUILD_RETRY)
+    else if (build_status.getStatus() == VectorIndex::SegmentBuiltStatus::BUILD_RETRY)
         return state;
     else
         /// build error
@@ -27,15 +28,10 @@ void VITaskBase::recordBuildStatus()
         return;
 
     bool is_success
-        = build_status.getStatus() == VIBuiltStatus::SUCCESS || build_status.getStatus() == VIBuiltStatus::BUILD_SKIPPED;
-
-    // storage.updateVectorIndexBuildStatus(part_name, vector_index_name, is_success, build_status.err_msg);
-    bool record_build_status = true;
+        = build_status.getStatus() == VectorIndex::SegmentBuiltStatus::SUCCESS || build_status.getStatus() == VectorIndex::SegmentBuiltStatus::BUILD_SKIPPED;
     if (ctx)
     {
-        if (ctx->source_column_index->isShutdown() && build_status.getStatus() != VIBuiltStatus::BUILD_CANCEL)
-            record_build_status = false;
-        ctx->source_column_index->onBuildFinish(is_success, build_status.err_msg);
+        ctx->vi_status->setStatus(is_success ? SegmentStatus::BUILT : SegmentStatus::ERROR, build_status.err_msg);
         if (is_success)
         {
             LOG_INFO(
@@ -58,7 +54,7 @@ void VITaskBase::recordBuildStatus()
                 ctx->vector_index_name,
                 build_status.statusToString(),
                 build_status.err_msg);
-            VIEventLogElement::Type event_type = build_status.getStatus() == VIBuiltStatus::BUILD_CANCEL
+            VIEventLogElement::Type event_type = build_status.getStatus() == SegmentBuiltStatus::BUILD_CANCEL
                 ? VIEventLogElement::BUILD_CANCELD
                 : VIEventLogElement::BUILD_ERROR;
             ctx->write_event_log(event_type, build_status.err_code, build_status.err_msg);
@@ -67,19 +63,15 @@ void VITaskBase::recordBuildStatus()
     else
     {
         MergeTreeDataPartPtr part = storage.getActiveContainingPart(part_name);
-        if (!part || !part->vector_index.getColumnIndex(vector_index_name).has_value())
+        auto vi_seg = part->segments_mgr->getSegment(vector_index_name);
+        if (!part || !vi_seg)
             return;
 
         bool is_same = part->info.getPartNameWithoutMutation() == VectorIndex::cutMutVer(part_name);
         if (!is_same)
             return;
-
-        auto source_column_index = part->vector_index.getColumnIndex(vector_index_name).value();
-        source_column_index->onBuildFinish(is_success, build_status.err_msg);
+        vi_seg->getSegmentStatus()->setStatus(is_success ? VectorIndex::SegmentStatus::BUILT : VectorIndex::SegmentStatus::ERROR, build_status.err_msg);
     }
-
-    if (record_build_status)
-        storage.updateVectorIndexBuildStatus(part_name, vector_index_name, is_success, build_status.err_msg);
 }
 
 bool VITaskBase::executeStep()
@@ -112,7 +104,7 @@ bool VITaskBase::executeStep()
                     ctx->source_part->name,
                     e.code(),
                     e.message());
-                build_status = VIBuiltStatus{VIBuiltStatus::BUILD_FAIL, e.code(), e.message()};
+                build_status = SegmentBuiltStatus{SegmentBuiltStatus::BUILD_FAIL, e.code(), e.message()};
             }
 
             state = getNextState();
@@ -123,7 +115,7 @@ bool VITaskBase::executeStep()
             remove_processed_entry();
             /// clean build temp folder
             if (ctx)
-                ctx->clean_tmp_folder_callback(ctx->vector_tmp_relative_path);
+                ctx->clean_tmp_folder(ctx->vector_tmp_relative_path);
 
             return false;
         }

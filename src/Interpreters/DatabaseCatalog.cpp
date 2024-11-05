@@ -1073,7 +1073,9 @@ void DatabaseCatalog::dropTableDataTask()
     {
         try
         {
+            LOG_INFO(log, "Dropping table {}", table.table_id.getNameForLogs());
             dropTableFinally(table);
+            LOG_INFO(log, "Table {} was successfully dropped", table.table_id.getNameForLogs());
             std::lock_guard lock(tables_marked_dropped_mutex);
             [[maybe_unused]] auto removed = tables_marked_dropped_ids.erase(table.table_id.uuid);
             assert(removed);

@@ -5,21 +5,19 @@ CREATE TABLE test_replicated_vector(id Float32, vector Array(Float32), CONSTRAIN
 ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(2100);
 
-SELECT sleep(2);
-
 set allow_experimental_lightweight_delete=1;
 set mutations_sync=1;
 
 delete from test_replicated_vector where id = 2;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_replicated_vector order by d limit 10;
 
 SELECT 'Test build vector index for new inserted part after lightweight delete';
 INSERT INTO test_replicated_vector SELECT number, [number, number, number] FROM numbers(2100,1001);
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 SELECT status FROM system.vector_indices where database=currentDatabase() and table='test_replicated_vector';
 
 DROP TABLE test_replicated_vector SYNC;

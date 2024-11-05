@@ -1,15 +1,9 @@
-0
-0
-0
 test_mstg	v1	v1 vector TYPE MSTG(\'disk_mode=1\')	Built		
 0	15128.954
 1	15128.986
 2	15129.109
 3	15129.32
 4	15129.625
-0
-0
-0
 test_mstg	v1	v1 vector TYPE MSTG(\'metric_type=Cosine\')	Built		
 0	0.9980481
 1	0.99852467

@@ -52,7 +52,7 @@ SETTINGS min_bytes_to_build_vector_index=0;
 ALTER TABLE test_vector_inverted_two_stage ADD VECTOR INDEX vec_ind vector TYPE MSTG;
 
 INSERT INTO test_vector_inverted_two_stage SELECT number, arrayWithConstant(16, number), number FROM numbers(1001);
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_inverted_two_stage;
 
 SELECT 'hybrid search with two stage enabled';
 SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, arrayWithConstant(16, 1.0), '3') as score
@@ -75,7 +75,7 @@ ALTER TABLE test_vector_inverted_two_stage_multi_parts ADD VECTOR INDEX vec_ind 
 
 INSERT INTO test_vector_inverted_two_stage_multi_parts SELECT number, arrayWithConstant(16, number), number FROM numbers(1001);
 INSERT INTO test_vector_inverted_two_stage_multi_parts SELECT number, arrayWithConstant(16, number), number-1001 FROM numbers(1001,1001);
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_inverted_two_stage_multi_parts;
 
 SELECT 'hybrid search multi parts with two stage enabled';
 SELECT id, hybridsearch('fusion_type=rsf')(vector, doc, arrayWithConstant(16, 1.0), '3') as score

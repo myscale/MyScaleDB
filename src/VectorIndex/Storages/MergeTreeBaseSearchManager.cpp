@@ -1,5 +1,6 @@
 #include <queue>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace DB
 {

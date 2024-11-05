@@ -5,6 +5,8 @@
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <VectorIndex/Utils/VSUtils.h>
 
+#include <VectorIndex/Common/VICommon.h>
+
 namespace DB
 {
 
@@ -243,6 +245,33 @@ UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context,
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Sum of m and n in limit ({}) should not exceed `max_search_result_window`({})", topk, context->getSettingsRef().max_search_result_window);
 
     return topk;
+}
+
+VectorIndex::VIMetric getVSMetric(MergeTreeData::DataPartPtr part, const VSDescription & desc)
+{
+    String metric_name = "L2";
+    bool found = false;
+    auto metadata_snapshot = part->storage.getInMemoryMetadataPtr();
+    for (const auto & vi_desc : metadata_snapshot->getVectorIndices())
+    {
+        if (vi_desc.column == desc.search_column_name)
+        {
+            if (vi_desc.parameters && vi_desc.parameters->has("metric_type"))
+            {
+                found = true;
+                metric_name = vi_desc.parameters->getValue<String>("metric_type");
+            }
+            break;
+        }
+    }
+    if (!found)
+    {
+        if (desc.vector_search_type == Search::DataType::FloatVector)
+            metric_name = part->storage.getSettings()->float_vector_search_metric_type;
+        else
+            metric_name = part->storage.getSettings()->binary_vector_search_metric_type;
+    }
+    return Search::getMetricType(metric_name, desc.vector_search_type);
 }
 
 }

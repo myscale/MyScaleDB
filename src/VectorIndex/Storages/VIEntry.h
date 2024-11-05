@@ -7,21 +7,24 @@
 
 #include <VectorIndex/Interpreters/VIEventLog.h>
 
+namespace VectorIndex
+{
+class BaseSegment;
+using SegmentPtr = std::shared_ptr<BaseSegment>;
+}
+
 namespace DB
 {
 
 struct VIDescription;
-class VIWithColumnInPart;
-using VIWithColumnInPartPtr = std::shared_ptr<VIWithColumnInPart>;
-
 
 struct VIContext
 {
     StorageMetadataPtr metadata_snapshot;
     VIDescription vec_index_desc{VIDescription()};
     MergeTreeData::DataPartPtr source_part;
-    VIWithColumnInPartPtr source_column_index;
-    VIVariantPtr build_index;
+    VectorIndex::SegmentStatusPtr vi_status;
+    VectorIndex::CachedSegmentPtr build_index;
     ActionBlocker * builds_blocker;
     String part_name;
     String vector_index_name;
@@ -35,9 +38,9 @@ struct VIContext
 
     scope_guard temporary_directory_lock;
 
-    IndexBuildMemoryUsageHelperPtr index_build_memory_lock;
+    VectorIndex::IndexBuildMemoryUsageHelperPtr index_build_memory_lock;
 
-    std::function<void(const String &)> clean_tmp_folder_callback = {};
+    std::function<void(const String &)> clean_tmp_folder = {};
 
     std::function<bool()> build_cancel_callback = {};
 
@@ -55,34 +58,21 @@ struct VIEntry
     String part_name;
     String vector_index_name;
     MergeTreeData & data;
-    bool is_replicated;
+    scope_guard temporary_vi_part_holder;
+    bool is_replicated; /// no use now
     Poco::Logger * log = &Poco::Logger::get("VectorIndexEntry");
 
-    VIEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, const bool is_replicated_)
+    VIEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, scope_guard && temporary_vi_part_holder_ = {}, const bool is_replicated_ = false)
      : part_name(std::move(part_name_))
      , vector_index_name(index_name_)
      , data(data_)
+     , temporary_vi_part_holder(std::move(temporary_vi_part_holder_))
      , is_replicated(is_replicated_)
     {
-        /// Replicated merge tree cases will do the add when create log entry is sucessfull or pull log entry.
-        if (!is_replicated)
-        {
-            LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", part_name);
-            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
-            data.currently_vector_indexing_parts.insert(part_name);
-        }
     }
 
     ~VIEntry()
     {
-        /// VIEntry will be distroyed for replicated merge tree after create log entry.
-        if (!is_replicated)
-        {
-            LOG_DEBUG(log, "currently_vector_indexing_parts remove: {}", part_name);
-
-            std::lock_guard lock(data.currently_vector_indexing_parts_mutex);
-            data.currently_vector_indexing_parts.erase(part_name);
-        }
     }
 };
 

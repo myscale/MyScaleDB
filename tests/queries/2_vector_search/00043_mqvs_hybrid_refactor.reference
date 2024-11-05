@@ -16,14 +16,12 @@ hybrid search on two parts rsf with WHERE clause (0 is top 1 in text)
 2	0.4921875
 3	0.46875
 4	0.4296875
-0
 hybrid search with two stage enabled
 3	0.9881657
 1	0.5
 0	0.49704143
 2	0.49704143
 4	0.4733728
-0
 hybrid search multi parts with two stage enabled
 3	0.9881657
 1	0.5

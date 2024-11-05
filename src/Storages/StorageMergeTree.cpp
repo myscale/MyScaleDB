@@ -39,6 +39,7 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Storages/VITask.h>
 #include <VectorIndex/Utils/VIUtils.h>
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
 #include <base/sort.h>
 #include <Common/ProfileEventsScope.h>
 #include <Common/ThreadPool.h>
@@ -110,7 +111,7 @@ StorageMergeTree::StorageMergeTree(
     , reader(*this)
     , writer(*this)
     , merger_mutator(*this)
-    , vec_index_builder_updater(*this)
+    , vi_manager(std::make_unique<StorageVectorIndicesMgr>(*this))
 {
     initializeDirectoriesAndFormatVersion(relative_data_path_, attach, date_column_name);
 
@@ -140,7 +141,7 @@ void StorageMergeTree::startup()
     /// expand cleanup folder vector_tmp
     clearOldTemporaryDirectories(0, {"tmp_", "delete_tmp_", "tmp-fetch_", "vector_tmp_"});
 
-    clearVectorNvmeCache(); /// clear nvme cache. MYSCALE_OSS_DELETE_LINE
+    vi_manager->startup();
 
 #if USE_TANTIVY_SEARCH
     updateTantivyIndexCache();
@@ -153,11 +154,6 @@ void StorageMergeTree::startup()
     /// Do not schedule any background jobs if current storage has static data files.
     if (isStaticStorage())
         return;
-
-    /// Initilize vector index build status for each index
-    for (const auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
-        addVectorIndexBuildStatus(vec_index_desc.name);
-
     try
     {
         background_operations_assignee.start();
@@ -204,9 +200,10 @@ void StorageMergeTree::shutdown()
         mutation_wait_event.notify_all();
     }
 
+    vi_manager->shutdown();
+
     merger_mutator.merges_blocker.cancelForever();
     parts_mover.moves_blocker.cancelForever();
-    vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancle background vector index build tasks
 
     background_operations_assignee.finish();
     background_moves_assignee.finish();
@@ -216,9 +213,6 @@ void StorageMergeTree::shutdown()
 
     try
     {
-        /// Clear cached vector index
-        clearCachedVectorIndex(getDataPartsVectorForInternalUsage());
-
         /// Clear primary key cache if exists.
         clearPKCache(getDataPartsVectorForInternalUsage());
     }
@@ -370,7 +364,7 @@ void StorageMergeTree::alter(
             DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
 
             if (!maybe_vec_index_commands.empty())
-                startVectorIndexJob(maybe_vec_index_commands);
+                vi_manager->startVectorIndexJob(old_metadata.getVectorIndices(), new_metadata.getVectorIndices());
 
             if (!maybe_mutation_commands.empty())
                 mutation_version = startMutation(maybe_mutation_commands, local_context);
@@ -514,49 +508,6 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, Context
     background_operations_assignee.trigger();
     return version;
 }
-
-void StorageMergeTree::startVectorIndexJob(const VICommands & vector_index_commands)
-{
-    /// Handle multiple index commands case
-    for (auto & vec_index_command : vector_index_commands)
-    {
-        /// Handle drop vector index command
-        if (vec_index_command.drop_command)
-        {
-            String vec_index_name = vec_index_command.index_name;
-
-            /// Delete vector index files.
-            for (const auto & part : getDataPartsForInternalUsage())
-            {
-                // if (part.unique()) /// Remove only parts that are not used by anyone (SELECTs for example).
-                part->vector_index.removeVectorIndex(vec_index_name);
-            }
-
-            /// Remove build status for this dropped index
-            removeVectorIndexBuildStatus(vec_index_name);
-        }
-        else
-        {
-            /// handle add vector index command
-            /// Add build status for new vector index
-            addVectorIndexBuildStatus(vec_index_command.index_name);
-
-            /// Create vector index info
-            /// Get vector index desc for the newly added index
-            for (auto & vec_index_desc : getInMemoryMetadataPtr()->getVectorIndices())
-            {
-                if (vec_index_desc.name != vec_index_command.index_name)
-                    continue;
-
-                for (const auto & part : getDataPartsForInternalUsage())
-                    part->vector_index.addVectorIndex(vec_index_desc);
-            }
-        }
-    }
-
-    background_operations_assignee.trigger();
-}
-
 
 void StorageMergeTree::updateMutationEntriesErrors(FutureMergedMutatedPartPtr result_part, bool is_successful, const String & exception_message)
 {
@@ -885,34 +836,6 @@ void StorageMergeTree::loadMutations()
         increment.value = std::max(increment.value.load(), current_mutations_by_version.rbegin()->first);
 }
 
-bool StorageMergeTree::canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right)
-{
-    /// No need to check if there is no vector index on the table.
-    if (!metadata_snapshot->hasVectorIndices())
-        return true;
-
-    /// Check if part is building vector index
-    {
-        std::lock_guard lock(currently_vector_indexing_parts_mutex);
-        for (const auto & part_name : currently_vector_indexing_parts)
-        {
-            if (part_name == left->name || part_name == right->name)
-                return false;
-
-            auto info = MergeTreePartInfo::fromPartName(part_name, format_version);
-            if (left->info.contains(info) || right->info.contains(info))
-                return false;
-        }
-    }
-
-    /// Check if part contains merged vector index
-    for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
-            return false;
-
-    return true;
-}
-
 MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
     const StorageMetadataPtr & metadata_snapshot,
     bool aggressive,
@@ -1003,7 +926,7 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
             return false;
         }
 
-        return canMergeForVectorIndex(metadata_snapshot, left, right);
+        return vi_manager->canMergeForVectorIndex(metadata_snapshot, left, right);
     };
 
     SelectPartsDecision select_decision = SelectPartsDecision::CANNOT_SELECT;
@@ -1345,21 +1268,21 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
                 mutate_entry = selectPartsToMutate(metadata_snapshot, nullptr, shared_lock, lock);
 
             has_mutations = !current_mutations_by_version.empty();
-            vec_index_builder_updater.removeDroppedVectorIndices(metadata_snapshot);
+            vi_manager->scheduleRemoveVectorIndexCacheJob(metadata_snapshot);
         }
 
         /// Consider vector index building when no merge or mutate.
         /// TODO: Add selectPartToBuildVI to do some checks, including memory limit/pool size.
         if (!merge_entry && !mutate_entry)
         {
-            if (vec_index_builder_updater.builds_blocker.isCancelled())
+            if (vi_manager->builds_blocker.isCancelled())
                 return false;
 
             /// first for new data parts, then for merged data parts   
             /// only select one part for each build
-            vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, false);
+            vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, false);
             if (!vector_index_entry)
-                slow_mode_vector_index_entry = vec_index_builder_updater.selectPartToBuildVI(metadata_snapshot, true);
+                slow_mode_vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, true);
         }
     }
 
@@ -1383,14 +1306,14 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
     if (vector_index_entry)
     {
         std::shared_ptr<VITask> task = std::make_shared<VITask>(
-            *this, metadata_snapshot, vector_index_entry, vec_index_builder_updater, common_assignee_trigger, false);
+            *this, metadata_snapshot, vector_index_entry, *vi_manager, common_assignee_trigger, false);
         assignee.scheduleVectorIndexTask(task);
         return true;
     }
     if (slow_mode_vector_index_entry)
     {
         std::shared_ptr<VITask> task = std::make_shared<VITask>(
-            *this, metadata_snapshot, slow_mode_vector_index_entry, vec_index_builder_updater, common_assignee_trigger, true);
+            *this, metadata_snapshot, slow_mode_vector_index_entry, *vi_manager, common_assignee_trigger, true);
         assignee.scheduleSlowModeVectorIndexTask(task);
         return true;
     }
@@ -1437,6 +1360,11 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
 
 
     return scheduled;
+}
+
+VectorIndicesMgr * StorageMergeTree::getVectorIndexManager() const
+{
+    return vi_manager.get();
 }
 
 UInt64 StorageMergeTree::getCurrentMutationVersion(
@@ -1624,9 +1552,7 @@ ActionLock StorageMergeTree::stopMergesAndWait()
 
 ActionLock StorageMergeTree::stopBuildIndexAndWait()
 {
-    std::unique_lock lock(currently_vector_indexing_parts_mutex);
-
-    auto build_index_blocker = vec_index_builder_updater.builds_blocker.cancel();
+    auto build_index_blocker = vi_manager->builds_blocker.cancel();
 
     /// [TODO] Need wait build task complate?
 
@@ -2170,7 +2096,7 @@ ActionLock StorageMergeTree::getActionLock(StorageActionBlockType action_type)
     else if (action_type == ActionLocks::PartsMove)
         return parts_mover.moves_blocker.cancel();
     else if (action_type == ActionLocks::PartsBuildIndex)
-        return vec_index_builder_updater.builds_blocker.cancel();
+        return vi_manager->builds_blocker.cancel();
 
     return {};
 }
