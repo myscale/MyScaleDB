@@ -103,7 +103,7 @@ rust::Vec<SPARSE::TupleElement> mapToVector(const std::unordered_map<uint32_t, f
 }
 
 rust::Vec<SPARSE::ScoredPointOffset> SparseIndexStore::sparseSearch(
-    const std::unordered_map<uint32_t, float> & sparse_vector, uint32_t topk, const rust::Vec<uint8_t> & u8_alived_bitmap)
+    const std::unordered_map<uint32_t, float> & sparse_vector, uint32_t topk, const std::vector<uint8_t> & u8_alived_bitmap)
 {
     DB::OpenTelemetry::SpanHolder span("sparse_index_store::sparse_search");
     if (!this->index_reader_status)

@@ -261,8 +261,8 @@ void invertedIndexValidator(const IndexDescription& index, bool attach);
 #if USE_CUSTOM_SKIP_INDEX
 MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index);
 void ftsIndexValidator(const IndexDescription & index, bool attach);
-#endif
 
 MergeTreeIndexPtr sparseIndexCreator(const IndexDescription & index);
 void sparseIndexValidator(const IndexDescription & index, bool attach);
+#endif
 }

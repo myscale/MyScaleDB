@@ -5,6 +5,7 @@
 #include <Core/Field.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeLowCardinality.h>
+#include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -131,22 +132,24 @@ void MergeTreeIndexAggregatorSparse::update(const Block & block, size_t * pos, s
             // Get current column with type.
             const auto & col_with_type = block.getByName(sample_col.name);
 
-            if (isArray(col_with_type.type))
+            if (isMap(col_with_type.type))
             {
                 // Cut a single row data, with setting start postion (row_idx).
                 const auto & column = col_with_type.column->cut(*pos + row_idx, 1);
-                const auto & column_array = assert_cast<const ColumnArray &>(*column);
-                const auto & column_tuple = assert_cast<const ColumnTuple &>(column_array.getData());
 
-                if (column_tuple.tupleSize() != 2)
-                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Each tuple in the array must contain exactly 2 elements.");
+                const auto & map_column = assert_cast<const ColumnMap &>(*column);
+                const auto * column_array = typeid_cast<const ColumnArray *>(map_column.getNestedColumnPtr().get());
+                const auto * column_tuple = typeid_cast<const ColumnTuple *>(column_array->getDataPtr().get());
 
-                const auto * dim_ids_ptr = typeid_cast<const ColumnVector<UInt32> *>(&column_tuple.getColumn(0));
+                const auto * dim_ids_ptr = typeid_cast<const ColumnVector<UInt32> *>(&column_tuple->getColumn(0));
                 if (!dim_ids_ptr)
                     throw Exception(ErrorCodes::LOGICAL_ERROR, "Only u32 types are allowed for the first element of the tuple.");
 
-                const auto * f32_value_ptr = typeid_cast<const ColumnVector<Float32> *>(&column_tuple.getColumn(1));
-                const auto * u8_value_ptr = typeid_cast<const ColumnVector<UInt8> *>(&column_tuple.getColumn(1));
+                if (column_tuple->tupleSize() != 2)
+                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Each tuple in the array must contain exactly 2 elements.");
+
+                const auto * f32_value_ptr = typeid_cast<const ColumnVector<Float32> *>(&column_tuple->getColumn(1));
+                const auto * u8_value_ptr = typeid_cast<const ColumnVector<UInt8> *>(&column_tuple->getColumn(1));
 
                 std::uint8_t value_type = 0; // default 0 means f32.
                 if (!f32_value_ptr && !u8_value_ptr)
@@ -183,12 +186,11 @@ void MergeTreeIndexAggregatorSparse::update(const Block & block, size_t * pos, s
 
                     cur_sparse_vector.emplace_back(element);
                 }
-
                 sparse_vectors.emplace_back(std::move(cur_sparse_vector));
             }
             else
             {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Only support array(tuple) type");
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Only support Map type");
             }
         }
         granule->addRowIdRange(start_row_id + row_idx, static_cast<UInt64>(start_row_id + row_idx));
@@ -251,48 +253,37 @@ MergeTreeIndexPtr sparseIndexCreator(const IndexDescription & index)
 
 void sparseIndexValidator(const IndexDescription & index, bool /* attach */)
 {
+    // TODO test for multi columns.
+    if (index.data_types.size() != 1)
+    {
+        throw Exception(ErrorCodes::INCORRECT_QUERY, "SparseIndex only support single column.");
+    }
+
     for (const auto & index_data_type : index.data_types)
     {
         WhichDataType data_type(index_data_type);
 
-        if (data_type.isArray())
+        if (data_type.isMap())
         {
-            const auto & array_type = assert_cast<const DataTypeArray &>(*index_data_type);
-            const auto & nested_type = array_type.getNestedType();
-            data_type = WhichDataType(nested_type);
+            const auto & map_data_type = assert_cast<const DataTypeMap &>(*index_data_type);
 
-            if (!data_type.isTuple())
+            const auto & key_type = WhichDataType(map_data_type.getKeyType());
+            const auto & val_type = WhichDataType(map_data_type.getValueType());
+
+            if (!key_type.isUInt32())
             {
-                throw Exception(ErrorCodes::INCORRECT_QUERY, "Sparse index can only be used with `Array(Tuple(...))`.");
+                throw Exception(ErrorCodes::INCORRECT_QUERY, "The first element of Sparse index Map must be UInt32.");
             }
-            else
+
+            if (!val_type.isFloat32() && !val_type.isUInt8())
             {
-                const auto & tuple_type = assert_cast<const DataTypeTuple &>(*nested_type);
-                const auto & tuple_elements = tuple_type.getElements();
-
-                if (tuple_elements.size() != 2)
-                {
-                    throw Exception(ErrorCodes::INCORRECT_QUERY, "Sparse index Tuple must contain exactly 2 elements");
-                }
-
-                WhichDataType first_type(tuple_elements[0]);
-                WhichDataType second_type(tuple_elements[1]);
-
-                if (!first_type.isUInt32())
-                {
-                    throw Exception(ErrorCodes::INCORRECT_QUERY, "The first element of Sparse index Tuple must be UInt32.");
-                }
-
-                if (!second_type.isFloat32() && !second_type.isUInt8())
-                {
-                    throw Exception(
-                        ErrorCodes::INCORRECT_QUERY, "The second element of Sparse index Tuple must be either Float32 or UInt8.");
-                }
+                throw Exception(ErrorCodes::INCORRECT_QUERY, "The second element of Sparse index Map must be either Float32 or UInt8.");
             }
         }
         else
         {
-            throw Exception(ErrorCodes::INCORRECT_QUERY, "Sparse index can only be used with `Array(Tuple(...))`.");
+            throw Exception(
+                ErrorCodes::INCORRECT_QUERY, "Sparse index can only be used with `Map(UInt32, Float32)` or `Map(UInt32, UInt8)`.");
         }
     }
 }

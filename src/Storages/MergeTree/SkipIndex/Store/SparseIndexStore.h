@@ -27,7 +27,7 @@ public:
         uint64_t row_id, const std::vector<String> & column_names, const std::vector<rust::Vec<SPARSE::TupleElement>> & sparse_vectors);
 
     rust::Vec<SPARSE::ScoredPointOffset> sparseSearch(
-        const std::unordered_map<uint32_t, float> & sparse_vector, uint32_t topk, const rust::Vec<uint8_t> & u8_alived_bitmap = {});
+        const std::unordered_map<uint32_t, float> & sparse_vector, uint32_t topk, const std::vector<uint8_t> & u8_alived_bitmap = {});
 };
 
 
