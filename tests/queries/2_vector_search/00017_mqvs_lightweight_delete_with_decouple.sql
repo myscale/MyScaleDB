@@ -5,12 +5,12 @@ CREATE TABLE test_vector(id Float32, vector Array(Float32), CONSTRAINT vector_le
 INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
 ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 
 INSERT INTO test_vector SELECT number + 100, [number + 100, number + 100, number + 100] FROM numbers(100);
 INSERT INTO test_vector SELECT number + 200, [number + 200, number + 200, number + 200] FROM numbers(100);
 
-SELECT sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 SELECT '--- Original topK result';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 
@@ -19,7 +19,7 @@ set mutations_sync=1;
 SELECT '--- Lightweight delete on parts with vector index';
 delete from test_vector where id = 2;
 delete from test_vector where id = 10;
-SELECT sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 SELECT '--- After lightweight, select from test_vector limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 SELECT '--- After lightweight, select from test_vector id>5 limit 10';
@@ -27,7 +27,7 @@ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector prewh
 
 SELECT '--- Decoupled part when source parts contain lightweight delete';
 optimize table test_vector final;
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 SELECT '--- After optimize, select from test_vector limit 10';
 SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector order by d limit 10;
 SELECT '--- After optimize, select from test_vector id>5 limit 10';
@@ -36,7 +36,7 @@ SELECT id, vector, distance(vector, [0.1, 0.1, 0.1]) as d FROM test_vector prewh
 SELECT '--- lightweight delete on decoupled part';
 delete from test_vector where id = 3;
 delete from test_vector where id = 15;
-SELECT sleep(1.99)+sleep(1.98);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and table = 'test_vector';
 SELECT '--- After lightweight, select from test_vector limit 10';

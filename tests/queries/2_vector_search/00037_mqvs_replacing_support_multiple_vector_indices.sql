@@ -28,8 +28,7 @@ INSERT INTO replacing_test_multi SELECT
     toDate('2023-03-01', 'UTC')
 FROM numbers(6000);
 
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES replacing_test_multi;
 
 SELECT 'Vector index build status';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'replacing_test_multi';

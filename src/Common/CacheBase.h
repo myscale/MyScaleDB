@@ -15,11 +15,6 @@
 #include <Common/logger_useful.h>
 #include <base/defines.h>
 
-namespace VectorIndex
-{
-class VectorIndexCache;
-}
-
 namespace DB
 {
 namespace ErrorCodes
@@ -304,7 +299,6 @@ private:
     };
 
     friend struct InsertTokenHolder;
-    friend class VectorIndex::VectorIndexCache;
 
     InsertTokenById insert_tokens TSA_GUARDED_BY(mutex);
 

@@ -2,6 +2,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/RangesInDataPart.h>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace DB
 {
@@ -17,5 +18,7 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
 
 /// get topk from limit clause
 UInt64 getTopKFromLimit(const ASTSelectQuery * select_query, ContextPtr context, bool is_batch = false);
+
+VectorIndex::VIMetric getVSMetric(MergeTreeData::DataPartPtr part, const VSDescription & desc);
 
 }

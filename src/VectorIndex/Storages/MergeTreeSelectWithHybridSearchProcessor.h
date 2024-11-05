@@ -99,7 +99,7 @@ private:
         size_t max_streams);
 
     /// Peform prefilter on provided data part and mark ranges
-    static VIBitmapPtr performPrefilter(
+    static VectorIndex::VIBitmapPtr performPrefilter(
         MarkRanges mark_ranges,
         const PrewhereInfoPtr & prewhere_info_copy,
         const MergeTreeData & storage_,

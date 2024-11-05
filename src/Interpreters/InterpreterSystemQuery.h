@@ -58,6 +58,7 @@ private:
     void restartReplicas(ContextMutablePtr system_context);
     void syncReplica(ASTSystemQuery & query);
     void waitLoadingParts();
+    void waitBuildingVectorIndices();
 
     void syncReplicatedDatabase(ASTSystemQuery & query);
 

@@ -11,6 +11,9 @@
 #include <Parsers/formatAST.h>
 #include <base/sort.h>
 
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
+
 
 namespace DB
 {
@@ -289,11 +292,7 @@ void ReplicatedMergeTreeQueue::insertUnlocked(
 
     /// Update currently scheduled build index part, avoid to create duplicate build index entry in case of restart.
     if (entry->type == LogEntry::BUILD_VECTOR_INDEX)
-    {
-        std::lock_guard lock(storage.currently_vector_indexing_parts_mutex);
-        storage.currently_vector_indexing_parts.insert(entry->source_parts.at(0));
-        LOG_DEBUG(log, "currently_vector_indexing_parts add: {}", entry->source_parts.at(0));
-    }
+        storage.vi_manager->addPartToIndexing(entry->source_parts.at(0));
 }
 
 
@@ -1455,18 +1454,15 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
         /// Check if source part for mutate and merge is currently fetching vector index.
         if (data.getInMemoryMetadataPtr()->hasVectorIndices())
         {
+            for (const auto & name : entry.source_parts)
             {
-                std::lock_guard lock(storage.currently_fetching_vector_index_parts_mutex);
-                for (const auto & name : entry.source_parts)
+                if (storage.vi_manager->containsPartInFetchIndex(name))
                 {
-                    if (storage.currently_fetching_vector_index_parts.count(name))
-                    {
-                        constexpr auto fmt_string = "Not executing log entry {} of type {} for part {}"
-                                                    " because source part {} is currently fetching vector index.";
-                        LOG_DEBUG(LogToStr(out_postpone_reason, LogFrequencyLimiter(log, 5)), fmt_string, entry.znode_name, entry.typeToString(), entry.new_part_name, name);
+                    constexpr auto fmt_string = "Not executing log entry {} of type {} for part {}"
+                                                " because source part {} is currently fetching vector index.";
+                    LOG_DEBUG(LogToStr(out_postpone_reason, LogFrequencyLimiter(log, 5)), fmt_string, entry.znode_name, entry.typeToString(), entry.new_part_name, name);
 
-                        return false;
-                    }
+                    return false;
                 }
             }
 
@@ -1474,10 +1470,9 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
             /// When parts with vector index are merged, index files will be moved to merged new part.
             if (entry.type == LogEntry::MERGE_PARTS)
             {
-                std::lock_guard lock(storage.currently_sending_vector_index_parts_mutex);
                 for (const auto & name : entry.source_parts)
                 {
-                    if (storage.currently_sending_vector_index_parts.count(name))
+                    if (storage.vi_manager->containsPartInSendIndex(name))
                     {
                         constexpr auto fmt_string = "Not executing log entry {} of type {} for part {}"
                                                     " because source part {} is currently sending vector index.";
@@ -1604,7 +1599,7 @@ bool ReplicatedMergeTreeQueue::shouldExecuteLogEntry(
         }
 
         /// If part already have this vector index, let it execute and record status in zookeeper.
-        if (source_part->vector_index.alreadyWithVIndexSegment(entry.index_name))
+        if (source_part->segments_mgr->getSegmentStatus(entry.index_name) == VectorIndex::SegmentStatus::BUILT)
         {
             LOG_DEBUG(log, "Part {}'s active covered part {} already has vector index {}, will execute to remove the log entry",
                         part_name, source_part->name, entry.index_name);
@@ -2486,8 +2481,11 @@ bool ReplicatedMergeTreeMergePredicate::canMergeTwoParts(
     }
 
     /// Checks related to vector index
-    if (!canMergeWithVectorIndex(left, right, out_reason))
-        return false;
+    if (auto * vi_manager = left->storage.getVectorIndexManager())
+    {
+        if (!vi_manager->canMergeForVectorIndex(left->storage.getInMemoryMetadataPtr(), left, right, out_reason))
+            return false;
+    }
 
     return MergeTreeData::partsContainSameProjections(left, right);
 }
@@ -2554,45 +2552,6 @@ bool ReplicatedMergeTreeMergePredicate::partParticipatesInReplaceRange(const Mer
     }
     return false;
 }
-
-bool ReplicatedMergeTreeMergePredicate::canMergeWithVectorIndex(
-    const MergeTreeData::DataPartPtr & left,
-    const MergeTreeData::DataPartPtr & right,
-    String * out_reason)
-{
-    /// No need to check if there is no vector index on the table.
-    auto metadata_snapshot = left->storage.getInMemoryMetadataPtr();
-    if (!metadata_snapshot->hasVectorIndices())
-        return true;
-
-    /// Check if part is building vector index
-    {
-        std::lock_guard lock(left->storage.currently_vector_indexing_parts_mutex);
-        for (const auto & part_name : left->storage.currently_vector_indexing_parts)
-        {
-            auto info = MergeTreePartInfo::fromPartName(part_name, left->storage.format_version);
-            if (left->info.isFromSamePart(info) || right->info.isFromSamePart(info))
-            {
-                if (out_reason)
-                    *out_reason = "source part " + left->name + " or " + right->name + " is currently building vector index";
-                return false;
-            }
-        }
-    }
-
-    /// Check if two parts contain vector index files.
-    /// Two parts can be merged when both have built vector index or both not.
-    for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
-        if (!VIWithColumnInPart::canMergeForColumnIndex(left, right, vec_desc.name))
-        {
-            if (out_reason)
-                *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
-            return false;
-        }
-
-    return true;
-}
-
 
 std::optional<std::pair<Int64, int>> ReplicatedMergeTreeMergePredicate::getDesiredMutationVersion(const MergeTreeData::DataPartPtr & part) const
 {

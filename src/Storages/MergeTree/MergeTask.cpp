@@ -33,8 +33,9 @@
 #include <Storages/MergeTree/MergeTreeSequentialSource.h>
 #include <Storages/MergeTree/MergeTreeSource.h>
 #include <VectorIndex/Cache/VICacheManager.h>
-#include <VectorIndex/Common/VIWithDataPart.h>
 #include <VectorIndex/Utils/VIUtils.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Common/Segment.h>
 #include <Common/ActionBlocker.h>
 #include <Common/logger_useful.h>
 
@@ -334,11 +335,8 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
             for (size_t i = 0; i <  global_ctx->future_part->parts.size(); ++i)
             {
                 auto & part = global_ctx->future_part->parts[i];
-                auto column_index_opt = part->vector_index.getColumnIndex(vec_index);
-                if (!column_index_opt.has_value())
-                    continue;
-                auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VIState::BUILT)
+                auto vi_status = part->segments_mgr->getSegmentStatus(vec_index.name);
+                if (vi_status == VectorIndex::SegmentStatus::BUILT)
                     num_parts_with_vector_index++;
                 
                 if (part->rows_count == 0)
@@ -371,13 +369,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
             global_ctx->can_be_decouple = false;  /// No need to create row ids map
         }
     }
-    std::vector<MergedPartNameAndId> merge_source_parts;
-    for (size_t i = 0; i < global_ctx->future_part->parts.size(); ++i)
-    {
-        const auto & old_part = global_ctx->future_part->parts[i];
-        merge_source_parts.emplace_back(MergedPartNameAndId(old_part->name, int(i), old_part->rows_count != 0));
-    }
-    global_ctx->new_data_part->vector_index.setMergedSourceParts(merge_source_parts);
 
     if (global_ctx->can_be_decouple)
     {
@@ -724,20 +715,17 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
                 if (i > 0)
                 {
                     /// Support multiple vector indices
+                    VectorIndex::VIBitmapPtr delete_bit_map = std::make_shared<VectorIndex::VIBitmap>(partRowNum, true);
+                    for (size_t row_id : deleteRowIds)
+                    {
+                        if (row_id)
+                            delete_bit_map->unset(row_id);
+                    }
                     for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
                     {
-                        const DataPartStorageOnDiskBase * part_storage
-                            = dynamic_cast<const DataPartStorageOnDiskBase *>(global_ctx->future_part->parts[source_num]->getDataPartStoragePtr().get());
-                        if (part_storage == nullptr)
-                            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unsupported part storage.");
-
-                        VectorIndex::SegmentId segment_id(
-                            global_ctx->future_part->parts[source_num]->getDataPartStoragePtr(),
-                            global_ctx->future_part->parts[source_num]->name,
-                            vec_index_desc.name,
-                            vec_index_desc.column);
-
-                        updateBitMap(segment_id, deleteRowIds);
+                        auto vi_segment = global_ctx->future_part->parts[source_num]->segments_mgr->getSegment(vec_index_desc.name);
+                        if (vi_segment)
+                            vi_segment->updateCachedBitMap(delete_bit_map);
                     }
                 }
             }
@@ -1217,23 +1205,6 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
             /// write new part decoupled vector index checksums file
             VectorIndex::dumpCheckSums(global_ctx->new_data_part->getDataPartStoragePtr(), vector_index_name, vector_index_checksums);
         }
-
-        /// Initialize the vector index metadata for the new part
-        global_ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
-
-        // For the decouple part, the row ids map in the cache needs to be updated in advance, 
-        // otherwise, the thread that searches for the decouple part for the first time will 
-        // perform an io operation of read row ids map
-        for (auto & index_name : decouple_index_name)
-        {
-            auto column_index_opt = global_ctx->new_data_part->vector_index.getColumnIndex(index_name);
-            if (!column_index_opt.has_value())
-                continue;
-            auto column_index = column_index_opt.value();
-            for (auto & segment_id : VectorIndex::getAllSegmentIds(global_ctx->new_data_part, *column_index->getIndexSegmentMetadata()))
-                column_index->loadDecoupleCache(segment_id);
-        }
-
     }
     else if (global_ctx->only_one_vpart_merged)
     {
@@ -1258,22 +1229,9 @@ bool MergeTask::MergeProjectionsStage::finalizeProjectionsAndWholeMerge() const
                 VectorIndex::dumpCheckSums(global_ctx->new_data_part->getDataPartStoragePtr(), vec_index.name, index_checksums);
             }
         }
-
-        /// Initialize the vector index metadata for the new part
-        global_ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
-
-        /// Will load vector index to cache when selected.
     }
-    else
-        /// has no vector index, but should init index from local metadata.
-        global_ctx->new_data_part->vector_index.loadVectorIndexFromLocalFile();
 
-    /// Cancel source part build vector index
-    for (auto & old_part : global_ctx->future_part->parts)
-    {
-        old_part->vector_index.cancelAllIndexBuild();
-        old_part->vector_index.waitAllIndexFinish();
-    }
+    global_ctx->new_data_part->segments_mgr->initSegment();
 
     global_ctx->new_data_part->getDataPartStorage().precommitTransaction();
     global_ctx->promise.set_value(global_ctx->new_data_part);

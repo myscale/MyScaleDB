@@ -92,6 +92,7 @@ public:
         const MergeTreeDataPartPtr & data_part,
         const String & index_name,
         VIEventLogElement::Type event_type,
+        const String & current_part_name = "",
         const ExecutionStatus & execution_status = {});
 
     static void addEventLog(

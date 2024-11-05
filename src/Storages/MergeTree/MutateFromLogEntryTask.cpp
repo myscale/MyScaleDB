@@ -250,9 +250,7 @@ bool MutateFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrit
     /// Update vector index bitmap after mutations with lightweight delete.
     if (new_part->isDeletedMaskUpdated())
     {
-        if (new_part->vector_index.containAnyVIInReady())
-            new_part->onLightweightDelete();
-
+        new_part->onLightweightDelete();
         /// Clear deleted row ids
         new_part->deleted_row_ids.clear();
     }

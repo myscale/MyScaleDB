@@ -20,8 +20,7 @@ ALTER TABLE test_vector_two_stage_multi ADD VECTOR INDEX vec_ind_v2 v2 TYPE IVFF
 
 INSERT INTO test_vector_two_stage_multi SELECT number, [number,number,number,number,number,number,number,number,number,number,number,number,number,number,number,number], range(1,17) FROM numbers(1001) where number != 1;
 
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_two_stage_multi;
 
 SELECT 'Vector index build status';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_vector_two_stage_multi';

@@ -14,7 +14,7 @@ DELETE FROM test_multi_lwd WHERE id = 3;
 ALTER TABLE test_multi_lwd ADD VECTOR INDEX v1 v1 TYPE MSTG;
 ALTER TABLE test_multi_lwd ADD VECTOR INDEX v2 v2 TYPE MSTG;
 
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_lwd;
 
 SELECT '-- Original VPart, Select on v1';
 SELECT id, v1, distance(v1, [0.1, 0.1, 0.1]) as d FROM test_multi_lwd order by d limit 10;
@@ -37,7 +37,7 @@ SELECT id, v2, distance(v2, [100.1, 100.1, 100.1]) as d FROM test_multi_lwd orde
 SELECT '-- Decouple part on Vpart with multiple vector indices';
 INSERT INTO test_multi_lwd SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500,5500);
 
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_lwd;
 
 SELECT '-- Before decouple part, select on v1';
 SELECT id, v1, distance(v1, [0.1, 0.1, 0.1]) as d FROM test_multi_lwd order by d limit 10;

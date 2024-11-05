@@ -1,5 +1,4 @@
 two stage search with MSTG type and min_bytes_to_build_vector_index=0
-0
 0	16
 2	16
 3	64
@@ -22,7 +21,6 @@ disable two stage search
 9	1024
 10	1296
 two stage search with MSTG type and min_bytes_to_build_vector_index=1024
-0
 999	16
 1001	16
 998	64
@@ -34,7 +32,6 @@ two stage search with MSTG type and min_bytes_to_build_vector_index=1024
 995	400
 1005	400
 two stage search with MSTG type and decouple part
-0
 999	16
 1001	16
 998	64
@@ -46,14 +43,13 @@ two stage search with MSTG type and decouple part
 995	400
 1005	400
 two stage search with MSTG type and metric_type=IP
-0
-199	597
-198	594
-197	591
-196	588
-195	585
-194	582
-193	579
-192	576
-191	573
-190	570
+39999	119997
+39998	119994
+39997	119991
+39996	119988
+39995	119985
+39994	119982
+39993	119979
+39992	119976
+39991	119973
+39990	119970

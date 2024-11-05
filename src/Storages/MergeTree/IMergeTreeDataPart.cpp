@@ -36,9 +36,10 @@
 #include <Common/escapeForFileName.h>
 
 #include <VectorIndex/Cache/PKCacheManager.h>
-#include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Common/VIMetadata.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
+#include <VectorIndex/Common/Segment.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 
 namespace CurrentMetrics
@@ -317,7 +318,7 @@ IMergeTreeDataPart::IMergeTreeDataPart(
     , name(name_)
     , info(info_)
     , index_granularity_info(storage_, part_type_)
-    , vector_index(*this)
+    , segments_mgr(std::make_unique<VectorIndex::SegmentsMgr>(*this))
     , part_type(part_type_)
     , parent_part(parent_part_)
     , use_metadata_cache(storage.use_metadata_cache)
@@ -366,16 +367,15 @@ std::optional<size_t> IMergeTreeDataPart::getColumnPosition(const String & colum
     return it->second;
 }
 
-
 void IMergeTreeDataPart::setState(MergeTreeDataPartState new_state) const
 {
     decrementStateMetric(state);
     state = new_state;
     incrementStateMetric(state);
-
     /// Remove vector_memory_size_metric in vector index info
     if (state != MergeTreeDataPartState::PreActive && state != MergeTreeDataPartState::Active)
-        vector_index.removeAllVectorIndexInfo();
+        segments_mgr->removeSegMemoryResource();
+
 }
 
 MergeTreeDataPartState IMergeTreeDataPart::getState() const
@@ -647,6 +647,7 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
         loadRowsCount(); /// Must be called after loadIndexGranularity() as it uses the value of `index_granularity`.
         loadExistingRowsCount(); /// Must be called after loadRowsCount() as it uses the value of `rows_count`.
         loadPartitionAndMinMaxIndex();
+        segments_mgr->initSegment();
         if (!parent_part)
         {
             loadTTLInfos();
@@ -657,9 +658,6 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             checkConsistency(require_columns_checksums);
 
         loadDefaultCompressionCodec();
-
-        if (state != MergeTreeDataPartState::Outdated)
-            loadVectorIndexFromLocalFile();
     }
     catch (...)
     {
@@ -878,20 +876,6 @@ void IMergeTreeDataPart::loadDefaultCompressionCodec()
             LOG_WARNING(storage.log, "Cannot parse default codec for part {} from file {}, content '{}', error '{}'. Default compression codec will be deduced automatically, from data on disk.", name, path, codec_line, ex.what());
             default_codec = detectDefaultCompressionCodec();
         }
-    }
-}
-
-void IMergeTreeDataPart::loadVectorIndexFromLocalFile()
-{
-    if (!isStoredOnDisk() || !storage.getInMemoryMetadataPtr()->hasVectorIndices())
-        return;
-    try
-    {
-        vector_index.loadVectorIndexFromLocalFile(true);
-    }
-    catch (...)
-    {
-        LOG_ERROR(storage.log, "Load vector index metadata from local index file failed for part {}. {}", name, getCurrentExceptionMessage(false));
     }
 }
 
@@ -1618,8 +1602,9 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
 
     /// Support multiple vector indices. We may need to update specified vector index after build finished.
     bool update_all_indices = index_name.empty() ? true : false;
-    if ((update_all_indices && !vector_index.containAnyVIInReady()) || (!update_all_indices && !vector_index.containDecoupleOrVPartIndexInReady(index_name)))
-        return;
+
+    /// Store deleted row ids
+    VectorIndex::VIBitmapPtr del_bitmap = nullptr;
 
     /// Store deleted row ids
     std::vector<UInt64> del_row_ids;
@@ -1635,36 +1620,27 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
         if (!update_all_indices && vec_index_desc.name != index_name)
             continue;
 
-        auto column_index_opt = vector_index.getColumnIndex(vec_index_desc.name);
-        if (!column_index_opt.has_value())
+        auto vi_segment = segments_mgr->getSegment(vec_index_desc.name);
+        if (!vi_segment || !vi_segment->inCache())
             continue;
 
-        auto column_index = column_index_opt.value();
-        auto segmentIds = VectorIndex::getAllSegmentIds(*this, *column_index->getIndexSegmentMetadata());
-        for (auto & segment_id : segmentIds)
+        if (del_bitmap == nullptr)
         {
-            /// Update vector index deleted bitmap in cache if exists.
-            VICacheManager * mgr = VICacheManager::getInstance();
-            IndexWithMetaHolderPtr index_holder = mgr->get(segment_id.getCacheKey());
-
-            if (index_holder)
+            del_bitmap = std::make_shared<VectorIndex::VIBitmap>(rows_count, true);
+            if (del_row_ids.empty())
             {
-                /// Only read row_exists when vector index is cached.
+                del_row_ids = getDeleteBitmapFromRowExists();
                 if (del_row_ids.empty())
                 {
-                    del_row_ids = getDeleteBitmapFromRowExists();
-                    if (del_row_ids.empty())
-                    {
-                        LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
-                        return;
-                    }
+                    LOG_DEBUG(storage.log, "The value of row exists column is all 1, nothing to do in part {}", name);
+                    return;
                 }
-                if (!segment_id.fromMergedParts())
-                    updateSingleBitMap(index_holder->value(), del_row_ids);
-                else
-                    updateMergedBitMap(index_holder->value(), del_row_ids);
             }
+            for (auto & del_row_id : del_row_ids)
+                del_bitmap->unset(del_row_id);
         }
+
+        vi_segment->updateCachedBitMap(del_bitmap);
     }
 }
 

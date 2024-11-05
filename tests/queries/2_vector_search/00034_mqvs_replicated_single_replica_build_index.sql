@@ -9,8 +9,7 @@ CREATE TABLE t_rep_vector_2(id Float32, vector Array(Float32), CONSTRAINT check_
 CREATE VECTOR INDEX v1 ON t_rep_vector vector TYPE FLAT;
 
 INSERT INTO t_rep_vector SELECT number, [number, number, number] FROM numbers(10000);
-SELECT sleep(3);
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES t_rep_vector;
 
 SELECT table, name, status FROM system.vector_indices WHERE table like 't_rep_vector%' AND database=currentDatabase();
 
@@ -18,7 +17,7 @@ SELECT 'Test drop one of two replicas, vector index should build sucessfully';
 DROP TABLE t_rep_vector_2 sync;
 
 INSERT INTO t_rep_vector SELECT number, [number, number, number] FROM numbers(10000,5000);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES t_rep_vector;
 
 SELECT table, name, status FROM system.vector_indices WHERE table='t_rep_vector' AND database=currentDatabase();
 

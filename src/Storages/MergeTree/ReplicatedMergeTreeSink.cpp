@@ -12,6 +12,8 @@
 #include <IO/Operators.h>
 #include <fmt/core.h>
 
+#include <VectorIndex/Common/SegmentsMgr.h>
+
 namespace ProfileEvents
 {
     extern const Event DuplicatedInsertedBlocks;
@@ -530,7 +532,7 @@ void ReplicatedMergeTreeSinkImpl<false>::finishDelayedChunk(const ZooKeeperWithF
 
             /// init vector index
             for (auto & vec_desc : metadata_snapshot->getVectorIndices())
-                part->vector_index.addVectorIndex(vec_desc);
+                part->segments_mgr->addSegment(vec_desc);
 
             last_block_is_duplicate = last_block_is_duplicate || part->is_duplicate;
 

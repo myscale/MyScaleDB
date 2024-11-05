@@ -7,14 +7,12 @@ engine MergeTree primary key id SETTINGS index_granularity=3, min_rows_to_build_
 INSERT INTO test_vector SELECT number, [number, number, number] FROM numbers(100);
 ALTER TABLE test_vector ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 
 set allow_experimental_lightweight_delete=1;
 set mutations_sync=1;
 
 delete from test_vector where id = 2 or id = 3 or id = 8;
-
-SELECT sleep(2);
 
 SELECT id, vector, distance(vector, [1.0, 1.0, 1.0]) as d FROM test_vector order by d limit 10;
 
