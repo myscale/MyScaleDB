@@ -32,7 +32,7 @@ namespace ErrorCodes
 
 MergeTreeIndexGranuleSparse::MergeTreeIndexGranuleSparse(
     const String & index_name_, const Block & index_sample_block_, const String & json_parameter_)
-    : index_name(index_name_), index_sample_block(index_sample_block_), json_parameter(json_parameter_)
+    : index_name(index_name_), index_sample_block(index_sample_block_), json_parameter(json_parameter_), has_elems(false)
 {
 }
 
@@ -64,10 +64,10 @@ void MergeTreeIndexGranuleSparse::deserializeBinary(ReadBuffer & istr, MergeTree
 
     istr.readStrict(reinterpret_cast<char *>(this->ranges.data()), range_size * sizeof(RowIdRanges::value_type));
 
-    if (range_size != 0)
-    {
-        has_elems = true;
-    }
+    // if (range_size != 0)
+    // {
+    has_elems = true;
+    // }
 }
 
 MergeTreeIndexAggregatorSparse::MergeTreeIndexAggregatorSparse(
@@ -86,7 +86,11 @@ MergeTreeIndexAggregatorSparse::MergeTreeIndexAggregatorSparse(
 
 MergeTreeIndexGranulePtr MergeTreeIndexAggregatorSparse::getGranuleAndReset()
 {
-    return std::make_shared<MergeTreeIndexGranuleSparse>(index_name, index_sample_block, json_parameter);
+    auto new_granule = std::make_shared<MergeTreeIndexGranuleSparse>(index_name, index_sample_block, json_parameter);
+    new_granule.swap(granule);
+    return new_granule;
+
+    // return std::make_shared<MergeTreeIndexGranuleSparse>(index_name, index_sample_block, json_parameter);
 }
 
 void MergeTreeIndexAggregatorSparse::update(const Block & block, size_t * pos, size_t limit)
@@ -201,7 +205,7 @@ void MergeTreeIndexAggregatorSparse::update(const Block & block, size_t * pos, s
         }
 
         bool status = this->store->indexSparseVector(start_row_id + row_idx, this->index_sample_block.getNames(), sparse_vectors);
-        LOG_INFO(
+        LOG_TRACE(
             &Poco::Logger::get("MergeTreeIndexAggregatorSparse"),
             "[update] indexed one row for sparse_index, row_id: {}, sparse_vectors size: {}, insert status: {}",
             start_row_id + row_idx,
