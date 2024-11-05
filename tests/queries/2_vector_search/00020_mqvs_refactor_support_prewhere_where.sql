@@ -18,7 +18,7 @@ INSERT INTO test_vector SELECT number+2000, range(3), '2018-12-28', 'building' F
 optimize table test_vector final;
 
 alter table test_vector add vector index vector_idx data type IVFFLAT;
-select sleep(1);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 select table, name, type, status from system.vector_indices where database = currentDatabase() and table = 'test_vector';
 
 select id, date, label, distance(data, [0,1.0,2.0]) as dist from test_vector where toYear(date) >= 2020 and label = 'animal' order by dist limit 10;

@@ -5,6 +5,8 @@
 #include <DataTypes/ObjectUtils.h>
 #include <Common/ProfileEventsScope.h>
 
+#include <VectorIndex/Common/SegmentsMgr.h>
+
 namespace ProfileEvents
 {
     extern const Event DuplicatedInsertedBlocks;
@@ -151,6 +153,10 @@ void MergeTreeSink::finishDelayedChunk()
 
         auto & part = partition.temp_part.part;
 
+        /// init vector index
+        for (auto & vec_desc : metadata_snapshot->getVectorIndices())
+            part->segments_mgr->addSegment(vec_desc);
+
         bool added = false;
 
         /// It's important to create it outside of lock scope because
@@ -176,10 +182,6 @@ void MergeTreeSink::finishDelayedChunk()
             added = storage.renameTempPartAndAdd(part, transaction, lock);
             transaction.commit(&lock);
         }
-
-        /// init vector index
-        for (auto & vec_desc : metadata_snapshot->getVectorIndices())
-            part->vector_index.addVectorIndex(vec_desc);
 
         /// Part can be deduplicated, so increment counters and add to part log only if it's really added
         if (added)

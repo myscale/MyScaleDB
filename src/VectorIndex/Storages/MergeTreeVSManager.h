@@ -158,7 +158,7 @@ private:
         int dim,
         int k,
         bool is_batch,
-        const VIMetric & metric);
+        const VectorIndex::VIMetric & metric);
 
     void mergeBatchVectorScanResult(
         Columns & pre_result,
@@ -197,7 +197,7 @@ private:
         std::vector<int64_t> & final_id,
         std::vector<float> & final_distance,
         std::vector<size_t> & actual_id_in_range,
-        const VIMetric & metric,
+        const VectorIndex::VIMetric & metric,
         Search::DenseBitmapPtr & row_exists,
         int delete_id_nums);
 

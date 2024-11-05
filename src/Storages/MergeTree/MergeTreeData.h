@@ -32,14 +32,12 @@
 #include <Storages/extractKeyExpressionList.h>
 #include <Storages/PartitionCommands.h>
 #include <Interpreters/PartLog.h>
-#include <VectorIndex/Common/SegmentId.h>
 
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index/global_fun.hpp>
 #include <boost/range/iterator_range_core.hpp>
-
 
 namespace DB
 {
@@ -78,6 +76,9 @@ class ExpressionActions;
 using ExpressionActionsPtr = std::shared_ptr<ExpressionActions>;
 using ManyExpressionActions = std::vector<ExpressionActionsPtr>;
 class MergeTreeDeduplicationLog;
+class VectorIndicesMgr;
+using VectorIndicesMgrUniquePtr = std::unique_ptr<VectorIndicesMgr>;
+class VectorIndexObject;
 
 namespace ErrorCodes
 {
@@ -662,15 +663,7 @@ public:
     size_t clearOldPartsFromFilesystem(bool force = false);
     /// Try to clear parts from filesystem. Throw exception in case of errors.
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
-    void clearCachedVectorIndex(const DataPartsVector & parts, bool force = true);
     void clearPKCache(const DataPartsVector & parts);
-    /// Check whether the cache and vector index file need to be deleted according to the part to which the cache belongs.
-    std::pair<bool, bool> needClearVectorIndexCacheAndFile(
-        const DataPartPtr & part, const StorageMetadataPtr & metadata_snapshot, const VectorIndex::CacheKey & cache_key) const;
-
-    /// MYSCALE_INTERNAL_CODE_BEGIN
-    void clearVectorNvmeCache(std::unordered_map<String, std::unordered_set<String>> preload_indices = {}) const;
-    /// MYSCALE_INTERNAL_CODE_END
 
 #if USE_TANTIVY_SEARCH
     void updateTantivyIndexCache();
@@ -1064,35 +1057,6 @@ public:
     /// Do nothing for non-replicated tables
     virtual void createAndStoreFreezeMetadata(DiskPtr disk, DataPartPtr part, String backup_part_path) const;
 
-    /// Similar as MergeTreeMutationStatus. For the system table vector_indices.
-    struct MergeTreeVectorIndexStatus
-    {
-        String latest_failed_part;
-        MergeTreePartInfo latest_failed_part_info;
-        String latest_fail_reason;
-
-        void clear()
-        {
-            latest_failed_part.clear();
-            latest_failed_part_info = MergeTreePartInfo();
-            latest_fail_reason.clear();
-        }
-    };
-
-    /// Return introspection information about currently processing or recently processed vector index build jobs.
-    MergeTreeVectorIndexStatus getVectorIndexBuildStatus(const String & index_name) const;
-
-    /// Update vector index status after buildVIForOnePart() is called for this part. May reset old
-    /// error if built was successful. Otherwise update latested failed status.
-    void updateVectorIndexBuildStatus(const String & part_name, const String & index_name, bool is_successful, const String & exception_message);
-
-    /// Reset vector index status when a vector index is dropped
-    /// Also reset vector index build error flag in parts
-    void removeVectorIndexBuildStatus(const String & index_name);
-
-    /// Support multiple vector indices. Add status for each vector index that exists.
-    void addVectorIndexBuildStatus(const String & index_name);
-
     /// Parts that currently submerging (merging to bigger parts) or emerging
     /// (to be appeared after merging finished). These two variables have to be used
     /// with `currently_submerging_emerging_mutex`.
@@ -1100,10 +1064,6 @@ public:
     std::map<String, EmergingPartInfo> currently_emerging_big_parts;
     /// Mutex for currently_submerging_parts and currently_emerging_parts
     mutable std::mutex currently_submerging_emerging_mutex;
-
-    /// Mutex for currently_vector_indexing_parts
-    mutable std::mutex currently_vector_indexing_parts_mutex;
-    std::set<String> currently_vector_indexing_parts;
 
     /// Mutex for parts currently processing in background
     /// merging (also with TTL), mutating or moving.
@@ -1118,13 +1078,9 @@ public:
     void waitForOutdatedPartsToBeLoaded() const;
     bool canUsePolymorphicParts() const;
 
+    virtual VectorIndicesMgr * getVectorIndexManager() const { return nullptr; }
+
     virtual bool isShutdown() const { return false; }
-
-    /// Load vector indices to memory, map key is part_name, value are vector indices in this part to load
-    void loadVectorIndices(std::unordered_map<String, std::unordered_set<String>> & vector_indices);
-
-    /// Remove loaded vector indices from memory
-    static void abortLoadVectorIndex(std::vector<VectorIndex::CacheKey> & loaded_keys);
 
 protected:
     friend class IMergeTreeDataPart;
@@ -1135,7 +1091,9 @@ protected:
     friend class MergeTask;
     friend class IPartMetadataManager;
     friend class IMergedBlockOutputStream; // for access to log
-    friend class VIBuilderUpdater;
+    friend class VectorIndicesMgr;
+    friend class VectorIndexObject;
+    friend class DataVectorIndicesSource;
 
     bool require_part_metadata;
 
@@ -1594,10 +1552,6 @@ private:
     static MutableDataPartPtr asMutableDeletingPart(const DataPartPtr & part);
 
     mutable TemporaryParts temporary_parts;
-
-    mutable std::mutex currently_vector_index_status_mutex;
-    /// Support multiple vector indices
-    mutable std::unordered_map<String, MergeTreeVectorIndexStatus> vector_indices_status;
 };
 
 /// RAII struct to record big parts that are submerging or emerging.

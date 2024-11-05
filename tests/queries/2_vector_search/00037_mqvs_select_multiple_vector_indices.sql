@@ -18,8 +18,7 @@ SELECT id, distance(v2, [111.0,111.0,111.0]) AS dist FROM test_select_multi ORDE
 ALTER TABLE test_select_multi ADD VECTOR INDEX v1 v1 TYPE MSTG;
 ALTER TABLE test_select_multi ADD VECTOR INDEX v2 v2 TYPE FLAT;
 
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_select_multi;
 
 SELECT 'Vector Index Status';
 SELECT name, type, status FROM system.vector_indices WHERE database=currentDatabase() AND table='test_select_multi' order by name;

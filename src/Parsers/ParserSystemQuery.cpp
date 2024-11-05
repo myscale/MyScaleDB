@@ -254,6 +254,7 @@ bool ParserSystemQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected & 
         case Type::RESTART_REPLICA:
         case Type::SYNC_REPLICA:
         case Type::WAIT_LOADING_PARTS:
+        case Type::WAIT_BUILDING_VECTOR_INDICES:
         {
             if (!parseQueryWithOnCluster(res, pos, expected))
                 return false;

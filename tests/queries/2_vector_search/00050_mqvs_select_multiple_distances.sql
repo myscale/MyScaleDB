@@ -11,7 +11,7 @@ INSERT INTO test_multi_distances SELECT number, [number, number, number], [numbe
 
 ALTER TABLE test_multi_distances ADD vector index v1_idx v1 TYPE IVFFLAT;
 ALTER TABLE test_multi_distances ADD vector index v2_idx v2 TYPE IVFFLAT;
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_distances;
 
 -- Not support multiple distances mixed with text or hybrid search
 SELECT id, distance(v1,[0.0,0,0]) as dist, textsearch(text,'keyword') as bm25 FROM test_multi_distances ORDER BY dist LIMIT 1; -- { serverError NOT_IMPLEMENTED }
@@ -120,7 +120,7 @@ LIMIT 5 SETTINGS enable_brute_force_vector_search=1;
 
 ALTER TABLE test_multi_distances_parts ADD vector index v1_idx v1 TYPE IVFFLAT;
 ALTER TABLE test_multi_distances_parts ADD vector index v2_idx v2 TYPE IVFFLAT;
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_distances_parts;
 
 SELECT 'mutiple distances order by dist1 + dist2 on two parts';
 SELECT id, distance(v1,[0.,0,0]) as dist1, distance(v2,[3.,3,3]) as dist2
@@ -162,7 +162,7 @@ INSERT INTO test_multi_distances_pkcache SELECT number, [number, number, number]
 
 ALTER TABLE test_multi_distances_pkcache ADD vector index v1_idx v1 TYPE IVFFLAT;
 ALTER TABLE test_multi_distances_pkcache ADD vector index v2_idx v2 TYPE IVFFLAT;
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_distances_pkcache;
 
 SELECT 'mutiple distances with primary key cache';
 SELECT id, distance(v1,[0.,0,0]) as dist1, distance(v2,[3.,3,3]) as dist2
@@ -198,7 +198,7 @@ INSERT INTO test_multi_distances_binary SELECT number, char(number, number, numb
 ALTER TABLE test_multi_distances_binary ADD VECTOR INDEX vec_ind1 v1 TYPE BinaryFLAT('metric_type=Hamming');
 ALTER TABLE test_multi_distances_binary ADD VECTOR INDEX vec_ind2 v2 TYPE IVFFLAT;
 ALTER TABLE test_multi_distances_binary ADD VECTOR INDEX vec_ind3 v3 TYPE BinaryFLAT('metric_type=Jaccard');
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_distances_binary;
 
 SELECT 'multiple distances with binary vectors';
 SELECT id, distance(v1,char(0.,0,0,0)) as dist1, distance(v3,char(4.,4,4)) as dist2, distance(v2, [3.0,3,3]) as dist3
@@ -223,9 +223,7 @@ ALTER TABLE test_multi_distances_two_stage ADD VECTOR INDEX vec_ind3 v3 TYPE IVF
 
 INSERT INTO test_multi_distances_two_stage SELECT number, arrayWithConstant(16, number), arrayWithConstant(16, number+1), arrayWithConstant(8, number+2) FROM numbers(1001);
 
-SELECT sleep(2);
-SELECT sleep(2);
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_distances_two_stage;
 
 SELECT 'multiple distances with two stage search enabled on MSTG type';
 SELECT id, distance(v1, arrayWithConstant(16, 0.0)) as dist1, distance(v2, arrayWithConstant(16, 3.0)) as dist2

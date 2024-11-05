@@ -12,6 +12,8 @@
 #include <IO/HashingReadBuffer.h>
 #include <Common/CurrentMetrics.h>
 
+#include <VectorIndex/Common/VICommon.h>
+
 
 namespace CurrentMetrics
 {
