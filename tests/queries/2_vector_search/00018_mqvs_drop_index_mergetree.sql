@@ -5,7 +5,7 @@ CREATE TABLE test_drop_index(id Float32, vector Array(Float32), CONSTRAINT vecto
 INSERT INTO test_drop_index SELECT number, [number, number, number] FROM numbers(2100);
 ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 
-select sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_drop_index;
 
 select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_index';
 
@@ -17,7 +17,8 @@ select table, name, type, expr, status from system.vector_indices where database
 select '-- Create a new vector index with same name but different type';
 ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE IVFFlat;
 
-select sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_drop_index;
+
 select table, name, type, expr, status from system.vector_indices where database = currentDatabase() and table = 'test_drop_index';
 
 drop table test_drop_index;

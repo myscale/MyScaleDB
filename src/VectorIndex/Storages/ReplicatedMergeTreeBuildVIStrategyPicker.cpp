@@ -1,6 +1,7 @@
 #include <Storages/MergeTree/ReplicatedMergeTreeLogEntry.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <VectorIndex/Storages/ReplicatedMergeTreeBuildVIStrategyPicker.h>
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
 
 #include <base/types.h>
 #include <base/sort.h>
@@ -39,7 +40,7 @@ bool ReplicatedMergeTreeBuildVIStrategyPicker::isBuildVectorIndexFinishedByRepli
     /// we don't want to check zookeeper too frequent
     if (time(nullptr) - reference_timestamp >= RECHECK_BUILD_READYNESS_INTERVAL_SECONDS)
     {
-        return storage.checkReplicaHaveVIndexInPart(replica, entry.source_parts.at(0), entry.index_name);
+        return storage.vi_manager->checkReplicaHaveVIndexInPart(replica, entry.source_parts.at(0), entry.index_name);
     }
 
     return false;

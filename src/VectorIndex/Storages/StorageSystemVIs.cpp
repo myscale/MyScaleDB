@@ -14,6 +14,9 @@
 #include <base/getFQDNOrHostName.h>
 #include <Common/escapeForFileName.h>
 #include <Common/logger_useful.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Common/StorageVectorIndicesMgr.h>
+#include <VectorIndex/Common/SegmentStatus.h>
 
 namespace DB
 {
@@ -63,13 +66,8 @@ protected:
         size_t built_parts = 0;
         for (auto & data_part : data_parts)
         {
-            auto column_index_opt = data_part->vector_index.getColumnIndex(index);
-            if (column_index_opt.has_value())
-            {
-                auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VIState::BUILT)
-                    ++built_parts;
-            }
+            if (data_part->segments_mgr->getSegmentStatus(index.name) == VectorIndex::SegmentStatus::BUILT)
+                ++built_parts;
         }
         return built_parts;
     }
@@ -80,13 +78,8 @@ protected:
         for (auto & data_part : data_parts)
         {
             /// if we enlarge small part size, there may exists some parts with indices built earlier.
-            auto column_index_opt = data_part->vector_index.getColumnIndex(index);
-            if (column_index_opt.has_value())
-            {
-                auto column_index = column_index_opt.value();
-                if (column_index->getVectorIndexState() == VIState::SMALL_PART)
-                    ++small_parts;
-            }
+            if (data_part->segments_mgr->getSegmentStatus(index.name) == VectorIndex::SegmentStatus::SMALL_PART)
+                ++small_parts;
         }
         return small_parts;
     }
@@ -151,7 +144,7 @@ protected:
                 {
                     ++rows_count;
 
-                    const auto fail_status = data->getVectorIndexBuildStatus(index.name);
+                    const auto fail_status = data->getVectorIndexManager()->getVectorIndexObject(index.name)->getVectorIndexBuildStatus();
                     size_t src_index = 0;
                     size_t res_index = 0;
 

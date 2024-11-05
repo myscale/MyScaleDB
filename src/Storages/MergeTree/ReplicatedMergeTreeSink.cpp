@@ -20,6 +20,7 @@
 #include <IO/Operators.h>
 #include <fmt/core.h>
 
+#include <VectorIndex/Common/SegmentsMgr.h>
 
 namespace ProfileEvents
 {
@@ -464,7 +465,7 @@ void ReplicatedMergeTreeSinkImpl<false>::finishDelayedChunk(const ZooKeeperWithF
 
             /// init vector index
             for (auto & vec_desc : metadata_snapshot->getVectorIndices())
-                part->vector_index.addVectorIndex(vec_desc);
+                part->segments_mgr->addSegment(vec_desc);
 
             /// Set a special error code if the block is duplicate
             int error = (deduplicate && deduplicated) ? ErrorCodes::INSERT_WAS_DEDUPLICATED : 0;

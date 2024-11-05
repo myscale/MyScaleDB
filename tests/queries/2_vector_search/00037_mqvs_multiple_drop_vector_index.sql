@@ -9,7 +9,7 @@ INSERT INTO test_multi_drop_index SELECT number, range(768), range(768) FROM num
 
 ALTER TABLE test_multi_drop_index ADD VECTOR INDEX v1 v1 TYPE MSTG;
 -- wait build vector index to start
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi_drop_index;
 
 SYSTEM STOP MERGES test_multi_drop_index;
 ALTER TABLE test_multi_drop_index DROP VECTOR INDEX v1, ADD VECTOR INDEX v1 v1 TYPE FLAT;

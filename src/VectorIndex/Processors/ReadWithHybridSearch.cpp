@@ -55,7 +55,7 @@ namespace ErrorCodes
     extern const int QUERY_WAS_CANCELLED;
 }
 
-static MergeTreeReaderSettings getMergeTreeReaderSettings(
+[[maybe_unused]] static MergeTreeReaderSettings getMergeTreeReaderSettings(
     const ContextPtr & context, const SelectQueryInfo & query_info)
 {
     const auto & settings = context->getSettingsRef();
@@ -72,7 +72,7 @@ static MergeTreeReaderSettings getMergeTreeReaderSettings(
     };
 }
 
-static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_info)
+[[maybe_unused]] static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_info)
 {
     return query_info.projection ? query_info.projection->prewhere_info
                                  : query_info.prewhere_info;
@@ -288,7 +288,7 @@ void ReadWithHybridSearch::supportTwoStageSearch(
             continue;
 
         /// Get index type and disk_mode from vector index defined on the search column
-        VIType type = VIType::IVFFLAT;
+        VectorIndex::VIType type = VectorIndex::VIType::IVFFLAT;
         int disk_mode = default_mstg_disk_mode;
 
         for (auto & vec_index_desc : metadata_for_reading->getVectorIndices())
@@ -308,17 +308,17 @@ void ReadWithHybridSearch::supportTwoStageSearch(
         bool support_two_stage = false;
         UInt64 num_reorder = 0;
 
-        if (disk_mode && (type == VIType::MSTG))
+        if (disk_mode && (type == VectorIndex::VIType::MSTG))
         {
             /// Prepare for number of cadidates (num_reorder) for first stage search
-            VIParameter search_params = VectorIndex::convertPocoJsonToMap(vec_scan_desc.vector_parameters);
+            VectorIndex::VIParameter search_params = VectorIndex::convertPocoJsonToMap(vec_scan_desc.vector_parameters);
 
             UInt64 total_rows = 0;
             for (auto part : prepared_parts_)
                 total_rows += part->rows_count;
 
             /// Use total rows of all parts to get num_reorder for first search stage
-            num_reorder = VectorIndex::FloatVI::computeFirstStageNumCandidates(type, disk_mode, total_rows, vec_scan_desc.search_column_dim, vec_scan_desc.topk, search_params);
+            num_reorder = VectorIndex::FloatInnerSegment::computeFirstStageNumCandidates(type, disk_mode, total_rows, vec_scan_desc.search_column_dim, vec_scan_desc.topk, search_params);
 
             LOG_DEBUG(log, "search column {}'s num_reorder for first stage = {}", vec_scan_desc.search_column_name, num_reorder);
 
@@ -331,7 +331,7 @@ void ReadWithHybridSearch::supportTwoStageSearch(
                 for (auto part : prepared_parts_)
                 {
                     /// get num_reorder for every part
-                    total_num_reorder += VectorIndex::FloatVI::computeFirstStageNumCandidates(
+                    total_num_reorder += VectorIndex::FloatInnerSegment::computeFirstStageNumCandidates(
                                             type, disk_mode, part->rows_count, vec_scan_desc.search_column_dim, vec_scan_desc.topk, search_params);
                 }
 

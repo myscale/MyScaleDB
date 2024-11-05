@@ -18,8 +18,7 @@ SETTINGS min_bytes_to_build_vector_index=10000;
 
 INSERT INTO test_multi SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500);
 
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi;
 
 SELECT '-- Check build status for multiple vector indices';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi';
@@ -32,15 +31,14 @@ SELECT '-- Check system table vector_index_segments';
 SELECT part, name, status FROM system.vector_index_segments WHERE database = currentDatabase() and table = 'test_multi' order by name;
 
 ALTER TABLE test_multi ADD VECTOR INDEX v1 v1 TYPE MSTG;
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi;
 
 SELECT '-- After add a second index on VPart, check build status for multiple vector indices';
 SELECT name, type, expr, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi';
 
 SELECT '-- Insert a new part for the test of VParts -> DPart';
 INSERT INTO test_multi SELECT number, [number, number, number], [number+100, number+100, number+100] FROM numbers(5500,5500);
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi;
 
 SELECT 'Before decouple, two VParts with multiple vector indices';
 SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi';
@@ -55,8 +53,7 @@ SELECT '-- After decouple, check system table vector_indices';
 SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi';
 
 SYSTEM START BUILD VECTOR INDICES test_multi;
-SELECT sleep(3);
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_multi;
 
 SELECT '-- DPart->VPart, check system table vector_indices';
 SELECT name, type, expr, total_parts, parts_with_vector_index, status FROM system.vector_indices WHERE database = currentDatabase() and table = 'test_multi';

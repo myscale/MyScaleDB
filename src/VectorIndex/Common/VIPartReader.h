@@ -35,7 +35,7 @@ public:
         size_t dimension_,
         bool enforce_fixed_array_)
         : part(part_)
-        , cols(cols_)
+        , cols(std::move(cols_))
         , index_granularity(part->index_granularity)
         , check_build_canceled_callback(check_build_canceled_callback_)
         , dimension(dimension_)
@@ -164,9 +164,9 @@ protected:
 
         size_t remaining_size = part->rows_count - num_rows_read;
         size_t max_read_row = std::min(remaining_size, n);
+        LOG_DEBUG(logger, "Column size is {}", cols.size());
         DB::Columns result(cols.size());
         LOG_DEBUG(logger, "Reading {} rows from part {} from row {}", max_read_row, part->name, num_rows_read);
-        LOG_DEBUG(logger, "Column size is {}", cols.size());
         size_t num_rows = reader->readRows(current_mask, 0, continue_read, max_read_row, result);
         LOG_DEBUG(logger, "Read {} rows from part {}", num_rows, part->name);
         if (num_rows == 0)
@@ -302,8 +302,8 @@ private:
     using MergeTreeReaderPtr = std::unique_ptr<DB::IMergeTreeReader>;
 
     const Poco::Logger *logger = &Poco::Logger::get("VIPartReader");
-    const DB::MergeTreeDataPartPtr &part;
-    const DB::NamesAndTypesList &cols;
+    const DB::MergeTreeDataPartPtr part;
+    const DB::NamesAndTypesList cols;
     const DB::MergeTreeIndexGranularity &index_granularity;
     CheckBuildCanceledFunction check_build_canceled_callback;
     const size_t dimension = 0;

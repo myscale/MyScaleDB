@@ -23,7 +23,8 @@ ALTER TABLE test_vector_sql_improvment ADD VECTOR INDEX v2 vector TYPE HNSWFLAT;
 INSERT INTO test_vector_sql_improvment SELECT number, [number, number, number] from numbers(1, 100);
 INSERT INTO test_vector_bak SELECT number, [number, number, number] from numbers(1, 100);
 
-SELECT sleep(1);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_sql_improvment;
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_bak;
 
 SELECT 'vector column name exists in both two joined tables';
 SELECT t1.id, distance(t2.vector, [1.0,1.0,1.0]) as dist

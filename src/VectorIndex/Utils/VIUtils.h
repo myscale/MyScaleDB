@@ -8,6 +8,8 @@
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Storages/VIDescriptions.h>
 
+#include <boost/algorithm/string.hpp>
+
 #pragma GCC diagnostic ignored "-Wunused-function"
 
 namespace Search
@@ -18,7 +20,7 @@ enum class DataType;
 namespace DB
 {
 struct MergedPartNameAndId;
-struct VISegmentMetadata;
+struct SegmentMetadata;
 class IMergeTreeDataPart;
 using MergeTreeDataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
 using MergeTreeMutableDataPartPtr = std::shared_ptr<IMergeTreeDataPart>;
@@ -45,28 +47,44 @@ MergeTreeDataPartChecksums calculateVectorIndexChecksums(
 
 namespace VectorIndex
 {
+struct CachedSegment;
 
-struct SegmentId;
-struct VIWithMeta;
+inline String cutMutVer(const String & part_name)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, part_name, boost::is_any_of("_"));
+    if (tokens.size() <= 4) /// without mutation version
+    {
+        return part_name;
+    }
+    else
+        return tokens[0] + "_" + tokens[1] + "_" + tokens[2] + "_" + tokens[3];
+}
 
-std::vector<SegmentId> getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const String & index_name);
+inline String cutPartitionID(const String & part_name)
+{
+    std::vector<String> tokens;
+    boost::split(tokens, part_name, boost::is_any_of("_"));
+    return tokens[0];
+}
 
-std::vector<SegmentId>
-getAllSegmentIds(const DB::MergeTreeDataPartPtr & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata);
-
-std::vector<SegmentId>
-getAllSegmentIds(const DB::IMergeTreeDataPart & data_part, const DB::VISegmentMetadata & vector_index_segment_metadata);
-
-std::vector<SegmentId> getAllSegmentIds(
-    const DB::DataPartStoragePtr part_storage,
-    const String & current_part_name,
-    const DB::VISegmentMetadata & vector_index_segment_metadata);
+inline String getPartRelativePath(const String & table_path)
+{
+    /// get table relative path from data_part_path,
+    /// for example: table_path: /var/lib/clickhouse/store/0e3/0e3..../all_1_1_0 or store/0e3/0e3..../,
+    /// return path: store/0e3/0e3....
+    auto path = fs::path(table_path).parent_path();
+    return fs::path(path.parent_path().parent_path().filename()) / path.parent_path().filename() / path.filename();
+}
 
 DB::NameSet
 getVectorIndexFileNamesInChecksums(const DB::DataPartStoragePtr & part_storage, const String & index_name, bool need_checksums_file = false);
 
 DB::MergeTreeDataPartChecksums
 getVectorIndexChecksums(const DB::DataPartStoragePtr & part_storage, const String & index_name);
+
+DB::MergeTreeDataPartChecksums
+getVectorIndexChecksums(const DB::DiskPtr disk, const String & index_name, const String & vi_file_path_prefix);
 
 void removeVectorIndexFilesFromFileLists(const DB::DataPartStoragePtr & part_storage, const DB::Names & index_files_list);
 
@@ -79,20 +97,6 @@ void removeIncompleteMovedVectorIndexFiles(const DB::IMergeTreeDataPart & data_p
 void dumpCheckSums(const DB::DataPartStoragePtr & part_storage, const String & index_name, const DB::MergeTreeDataPartChecksums & index_checksum);
 
 bool checkConsistencyForVectorIndex(const DB::DataPartStoragePtr & part_storage, const DB::MergeTreeDataPartChecksums & index_checksums);
-
-const std::vector<UInt64> readDeleteBitmapAccordingSegmentId(const SegmentId segment_id);
-
-void convertBitmap(
-    const SegmentId & segment_id,
-    const std::vector<UInt64> & part_deleted_row_ids,
-    VIBitmapPtr index_deleted_row_ids,
-    const std::shared_ptr<RowIds> & row_ids_map,
-    const std::shared_ptr<RowIds> & inverted_row_ids_map,
-    const std::shared_ptr<RowSource> & inverted_row_sources_map);
-
-VIBitmapPtr getRealBitmap(
-    const VIBitmapPtr filter,
-    const VIWithMeta & index_with_meta);
 
 std::vector<DB::MergedPartNameAndId>
 getMergedSourcePartsFromFileName(const String & index_name, const DB::MergeTreeDataPartChecksums vector_index_checksums);
@@ -108,17 +112,12 @@ String generateUUIDv4();
 
 void printMemoryInfo(const Poco::Logger * log, std::string msg);
 
-/// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
-void updateBitMap(SegmentId & segment_id, const std::vector<UInt64> & deleted_row_ids);
-
-/// Update part's single delete bitmap after lightweight delete on disk and cache if exists.
-void updateSingleBitMap(VIWithMeta & index_with_meta, const std::vector<UInt64> & deleted_row_ids);
-
-/// Update merged old part's delete bitmap after lightweight delete on disk and cache if exists.
-void updateMergedBitMap(VIWithMeta & index_with_meta, const std::vector<UInt64> & deleted_row_ids);
-
 uint64_t getVectorDimension(const Search::DataType &search_type, const DB::StorageInMemoryMetadata &metadata, const String &column_name);
 
 size_t getEachVectorBytes(const Search::DataType &search_type, const size_t dimension);
+
+std::vector<String> splitString(const String &str, const char &delim);
+
+void convertIndexFileForUpgrade(const DB::IMergeTreeDataPart & part);
 
 }

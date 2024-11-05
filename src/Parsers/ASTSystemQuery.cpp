@@ -192,6 +192,7 @@ void ASTSystemQuery::formatImpl(const FormatSettings & settings, FormatState & s
         case Type::RESTORE_REPLICA:
         case Type::SYNC_REPLICA:
         case Type::WAIT_LOADING_PARTS:
+        case Type::WAIT_BUILDING_VECTOR_INDICES:
         case Type::FLUSH_DISTRIBUTED:
         {
             if (table)

@@ -18,7 +18,7 @@ INSERT INTO test_vector SELECT number+2000, [number,number,number], '2022-12-28'
 
 ALTER TABLE test_vector ADD VECTOR INDEX vector_idx data TYPE IVFFLAT;
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector;
 
 SELECT 'explain syntax for sql w/o vector search';
 EXPLAIN SYNTAX SELECT id FROM test_vector WHERE toYear(date) >= 2000 AND label = 'animal';

@@ -41,7 +41,7 @@
 #include <ctime>
 #include <numeric>
 
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
+#include <VectorIndex/Common/VectorIndicesMgr.h>
 #include <boost/algorithm/string/replace.hpp>
 
 
@@ -817,25 +817,21 @@ void MergeTreeDataMergerMutator::handleVectorIndicesForMergedPart(
         /// This old vector index has been dropped during merge. Check decouple part or vpart cases.
         String vec_index_name = old_vec_index.name;
         LOG_DEBUG(log, "Try to remove vector index {} from new part {} due to dropped in metadata", vec_index_name, new_part->name);
-        new_part->vector_index.removeVectorIndex(vec_index_name);
+        new_part->segments_mgr->removeSegment(vec_index_name);
     }
 
     /// Special handling for merge one single VPart. If new part has vector index, expire the index cache for old part.
     /// TODO: Can use old part's index cache, just update cache key to avoid load it for new part?
-    if (new_part->vector_index.containAnyVIInReady() && old_parts.size() == 1)
+    if (old_parts.size() == 1)
     {
         auto old_part = old_parts[0];
         for (const auto & vec_index : new_vector_indices)
         {
-            if (new_part->vector_index.alreadyWithVIndexSegment(vec_index.name))
+            auto vi_seg = old_part->segments_mgr->getSegment(vec_index.name);
+            if (!vi_seg->isDecoupled())
             {
-                /// Expire cache for old part
-                auto segment_ids = VectorIndex::getAllSegmentIds(old_part, vec_index.name);
-                for (auto & segment_id : segment_ids)
-                {
-                    LOG_DEBUG(log, "Remove vector index {} for old part {} from cache", vec_index.name, old_part->name);
-                    VectorIndex::VICacheManager::removeFromCache(segment_id.getCacheKey());
-                }
+                LOG_DEBUG(log, "Expire vector index cache for old part {} due to merge new single part {}", old_part->name, new_part->name);
+                vi_seg->removeCache();
             }
         }
     }

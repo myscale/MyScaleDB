@@ -5,7 +5,7 @@ CREATE TABLE test_replicated_vector_merge(id Float32, vector Array(Float32), CON
 ALTER TABLE test_replicated_vector_merge ADD VECTOR INDEX v1 vector TYPE HNSWFLAT;
 INSERT INTO test_replicated_vector_merge SELECT number, [number, number, number] FROM numbers(100);
 
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector_merge;
 INSERT INTO test_replicated_vector_merge SELECT number, [number, number, number] FROM numbers(200,1000);
 
 OPTIMIZE TABLE test_replicated_vector_merge FINAL;
@@ -13,7 +13,7 @@ OPTIMIZE TABLE test_replicated_vector_merge FINAL;
 SELECT 'Test merge on part with vector index and part w/o index built';
 SELECT table, name from system.parts where database=currentDatabase() and table='test_replicated_vector_merge' and active;
 
-SELECT sleep(3);
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector_merge;
 SELECT 'Test merge on all parts with vector index built';
 SELECT status from system.vector_indices where table='test_replicated_vector_merge';
 

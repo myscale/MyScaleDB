@@ -14,7 +14,6 @@
 #include <Storages/MergeTree/MergeTreeMutationStatus.h>
 #include <Storages/MergeTree/MergeTreePartsMover.h>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
-#include <VectorIndex/Storages/VIBuilderUpdater.h>
 
 #include <Disks/StoragePolicy.h>
 #include <Common/SimpleIncrement.h>
@@ -22,6 +21,10 @@
 
 namespace DB
 {
+
+class VectorIndicesMgr;
+class StorageVectorIndicesMgr;
+using StorageVectorIndicesMgrPtr = std::unique_ptr<StorageVectorIndicesMgr>;
 
 /** See the description of the data structure in MergeTreeData.
   */
@@ -118,6 +121,8 @@ public:
 
     MergeTreeDeduplicationLog * getDeduplicationLog() { return deduplication_log.get(); }
 
+    VectorIndicesMgr * getVectorIndexManager() const override;
+
 private:
 
     /// Mutex and condvar for synchronous mutations wait
@@ -127,7 +132,7 @@ private:
     MergeTreeDataSelectExecutor reader;
     MergeTreeDataWriter writer;
     MergeTreeDataMergerMutator merger_mutator;
-    VIBuilderUpdater vec_index_builder_updater;
+    StorageVectorIndicesMgrPtr vi_manager;
 
     std::unique_ptr<MergeTreeDeduplicationLog> deduplication_log;
 
@@ -238,7 +243,6 @@ private:
     UInt32 getMaxLevelInBetween(
         const DataPartPtr & left,
         const DataPartPtr & right) const;
-    void startVectorIndexJob(const VICommands & vector_index_commands);
 
     /// Returns maximum version of a part, with respect of mutations which would not change it.
     Int64 getUpdatedDataVersion(
@@ -290,13 +294,11 @@ private:
 
     void assertNotReadonly() const;
 
-    bool canMergeForVectorIndex(const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right);
-
     friend class MergeTreeSink;
     friend class MergeTreeData;
     friend class MergePlainMergeTreeTask;
     friend class MutatePlainMergeTreeTask;
-    friend class VIBuilderUpdater;
+    friend class StorageVectorIndicesMgr;
 
     struct DataValidationTasks : public IStorage::DataValidationTasksBase
     {

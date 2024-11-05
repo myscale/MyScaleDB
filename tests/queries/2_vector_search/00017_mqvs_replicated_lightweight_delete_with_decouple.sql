@@ -7,15 +7,12 @@ CREATE TABLE test_replicated_vector2(id Float32, vector Array(Float32), CONSTRAI
 INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0008 * (number * 32 + x + 1) * (if(x % 2 = 0, -1, 1)), range(32)) as vector FROM numbers(1000);
 ALTER TABLE test_replicated_vector ADD VECTOR INDEX v1 vector TYPE MSTG;
 
-SELECT sleep(1);
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 
 INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0005 * (number * 32 + x + 1) * (if(x % 2 = 0, -1, 1)), range(32)) as vector FROM numbers(1000, 1000);
 INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0001 * (number * 32 + x + 1) * (if(x % 2 = 0, -1, 1)), range(32)) as vector FROM numbers(2000, 1000);
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT '--- Original topK result';
@@ -28,10 +25,7 @@ set mutations_sync=2;
 delete from test_replicated_vector where id = 2;
 delete from test_replicated_vector where id = 8;
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95)+sleep(1.94)+sleep(1.93)+sleep(1.92)+sleep(1.91)+sleep(1.90) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 SELECT '--- After lightweight, select from test_replicated_vector2 limit 10';
 SELECT id, distance(vector, [0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1,0.11,0.12,0.13,0.14,0.15,0.16,0.17,0.18,0.19,0.2,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.3,0.31,0.32 ]) AS d FROM test_replicated_vector2 ORDER BY d LIMIT 10;
@@ -42,7 +36,7 @@ SELECT id, distance(vector, [0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1,0.
 
 SELECT '--- Decoupled part when source parts contain lightweight delete';
 optimize table test_replicated_vector final;
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 SELECT '--- After optimize, select from test_replicated_vector limit 10';
 SELECT id, distance(vector, [0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1,0.11,0.12,0.13,0.14,0.15,0.16,0.17,0.18,0.19,0.2,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.3,0.31,0.32 ]) AS d FROM test_replicated_vector ORDER BY d LIMIT 10;
@@ -53,8 +47,8 @@ SELECT '--- Lightweight delete on decoupled part';
 delete from test_replicated_vector where id = 3;
 delete from test_replicated_vector where id = 7;
 
-SELECT if(status='Built', sleep(0), sleep(1.99)+sleep(1.98)+sleep(1.97)+sleep(1.96)+sleep(1.95) ) FROM (select status from system.vector_indices where table = 'test_replicated_vector' and database = currentDatabase());
-
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector2;
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 SELECT '--- After lightweight, select from test_replicated_vector2 limit 10';
 SELECT id, distance(vector, [0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1,0.11,0.12,0.13,0.14,0.15,0.16,0.17,0.18,0.19,0.2,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.3,0.31,0.32 ]) AS d FROM test_replicated_vector2 ORDER BY d LIMIT 10;

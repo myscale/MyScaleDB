@@ -58,7 +58,7 @@ INSERT INTO test_vector_inverted_two_stage_final SELECT number, arrayWithConstan
 
 --upsert data
 INSERT INTO test_vector_inverted_two_stage_final SELECT number, arrayWithConstant(16, number), number FROM numbers(1001);
-SELECT sleep(2);
+SYSTEM WAIT BUILDING VECTOR INDICES test_vector_inverted_two_stage_final;
 
 SELECT 'Two-stage vector scan + final';
 SELECT id, distance(vector, arrayWithConstant(16, 1.0)) AS dist FROM test_vector_inverted_two_stage_final FINAL WHERE id < 11 ORDER BY dist, id LIMIT 5 SETTINGS two_stage_search_option=2;

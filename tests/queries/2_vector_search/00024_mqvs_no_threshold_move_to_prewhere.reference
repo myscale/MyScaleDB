@@ -1,4 +1,3 @@
-0
 explain syntax for sql w/o vector search
 SELECT id
 FROM test_vector

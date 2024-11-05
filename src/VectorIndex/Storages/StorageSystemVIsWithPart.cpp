@@ -14,9 +14,10 @@
 #include <Storages/VirtualColumnUtils.h>
 
 #include <SearchIndex/Common/Utils.h>
-#include <VectorIndex/Common/SegmentId.h>
-#include <VectorIndex/Common/VIMetadata.h>
-#include <VectorIndex/Storages/VIInfo.h>
+#include <VectorIndex/Common/SegmentInfo.h>
+#include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Common/Segment.h>
+#include <VectorIndex/Cache/VICacheManager.h>
 
 namespace DB
 {
@@ -63,7 +64,7 @@ public:
 protected:
     void getVectorIndexInfo(
         const VIDescription & index,
-        const VIInfoPtr & vec_info,
+        const SegmentInfoPtr & vec_info,
         const std::string & table_name,
         const MergeTreeData::DataPartPtr & part,
         const std::set<std::string> & cached_indices,
@@ -82,13 +83,8 @@ protected:
             owner_part_id = vec_info->owner_part_id;
         }
 
-        VectorIndex::SegmentId segment_id(
-            part->getDataPartStoragePtr(),
-            part->name,
-            owner_part,
-            index.name,
-            index.column,
-            owner_part_id);
+        String part_relative_path = VectorIndex::getPartRelativePath(fs::path(part->getDataPartStorage().getFullPath()).parent_path());
+        VectorIndex::CachedSegmentKey cache_key{part_relative_path, VectorIndex::cutMutVer(part->name), VectorIndex::cutMutVer(owner_part), index.name, index.column};
 
         size_t src_index = 0;
         size_t res_index = 0;
@@ -132,12 +128,12 @@ protected:
         /// 'status' column
         if (column_mask[src_index++])
         {
-            if (cached_indices.contains(segment_id.getCacheKey().toString()))
-                res_columns[res_index++]->insert(Search::enumToString(VIState::LOADED));
+            if (cached_indices.contains(cache_key.toString()))
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndex::SegmentStatus::LOADED));
             else if (vec_info)
                 res_columns[res_index++]->insert(vec_info->statusString());
             else
-                res_columns[res_index++]->insert(Search::enumToString(VIState::PENDING));
+                res_columns[res_index++]->insert(Search::enumToString(VectorIndex::SegmentStatus::PENDING));
         }
         /// 'total_vectors' column
         if (column_mask[src_index++])
@@ -175,7 +171,7 @@ protected:
         if (column_mask[src_index++])
         {
             if (vec_info)
-                res_columns[res_index++]->insert(static_cast<UInt64>(vec_info->elapsed));
+                res_columns[res_index++]->insert(static_cast<UInt64>(vec_info->elapsed_time));
             else
                 res_columns[res_index++]->insertDefault();
         }
@@ -183,7 +179,7 @@ protected:
         if (column_mask[src_index++])
         {
             if (vec_info)
-                res_columns[res_index++]->insert(vec_info->err_msg);
+                res_columns[res_index++]->insert(vec_info->status.getErrMsg());
             else
                 res_columns[res_index++]->insertDefault();
         }
@@ -224,7 +220,7 @@ protected:
             const bool check_access_for_tables = check_access_for_databases && !access->isGranted(AccessType::SHOW_TABLES, database_name);
 
             std::set<std::string> cached_indices;
-            for (const auto & it : VectorIndex::VICacheManager::getAllCacheNames())
+            for (const auto & it : VectorIndex::VICacheManager::getAllItems())
                 cached_indices.emplace(it.first.toString());
 
             for (; rows_count < max_block_size && tables_it->isValid(); tables_it->next())
@@ -252,17 +248,13 @@ protected:
                 {
                     for (auto & index : indices)
                     {
-                        auto column_index_opt = part->vector_index.getColumnIndex(index.name);
-                        if (!column_index_opt.has_value())
-                            continue;
-                        auto column_index = column_index_opt.value();
-                        if (!index.dim)
-                            index.dim = static_cast<int>(getVectorDimension(index.vector_search_type, *metadata_snapshot, index.column));
-
-                        for (const auto & info : column_index->getVectorIndexInfos())
+                        if (auto vi_seg = part->segments_mgr->getSegment(index.name))
                         {
-                            ++rows_count;
-                            getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
+                            for (const auto & info : vi_seg->getSegmentInfoList())
+                            {
+                                ++rows_count;
+                                getVectorIndexInfo(index, info, table_name, part, cached_indices, res_columns);
+                            }
                         }
                     }
                 }

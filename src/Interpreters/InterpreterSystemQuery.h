@@ -61,6 +61,7 @@ private:
     void setReplicaReadiness(bool ready);
     void waitLoadingParts();
     void unloadPrimaryKeys();
+    void waitBuildingVectorIndices();
 
     void syncReplicatedDatabase(ASTSystemQuery & query);
 

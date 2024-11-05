@@ -1,0 +1,14 @@
+-- Test single vector index
+test_single_vindex	v1	LOADED	11000	all_1_2_1	all_1_2_1
+test_single_vindex	v1	LOADED	11000	all_1_2_1	all_1_2_1
+2	2.69
+3	3.8899999
+1	7.49
+4	11.09
+0	18.29
+5	24.29
+6	43.489998
+7	68.69
+8	99.89
+9	137.09
+test_single_vindex	v1	LOADED	11000	all_3_3_1	all_3_3_1

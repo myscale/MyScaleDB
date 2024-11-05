@@ -69,6 +69,8 @@
 #include <algorithm>
 #include <unistd.h>
 
+#include <VectorIndex/Common/VectorIndicesMgr.h>
+
 #if USE_PROTOBUF
 #include <Formats/ProtobufSchemas.h>
 #endif
@@ -716,6 +718,9 @@ BlockIO InterpreterSystemQuery::execute()
         case Type::WAIT_LOADING_PARTS:
             waitLoadingParts();
             break;
+        case Type::WAIT_BUILDING_VECTOR_INDICES:
+            waitBuildingVectorIndices();
+            break;
         case Type::RESTART_DISK:
             restartDisk(query.disk);
         case Type::FLUSH_LOGS:
@@ -1205,6 +1210,24 @@ void InterpreterSystemQuery::unloadPrimaryKeys()
     }
 }
 
+void InterpreterSystemQuery::waitBuildingVectorIndices()
+{
+    getContext()->checkAccess(AccessType::SYSTEM_WAIT_BUILDING_VECTOR_INDICES, table_id);
+    StoragePtr table = DatabaseCatalog::instance().getTable(table_id, getContext());
+
+    if (auto * merge_tree = dynamic_cast<MergeTreeData *>(table.get()))
+    {
+        LOG_TRACE(log, "Waiting for building of vector indices of table {}", table_id.getFullTableName());
+        merge_tree->getVectorIndexManager()->waitForBuildingVectorIndices();
+        LOG_TRACE(log, "Finished waiting for building of vector indices of table {}", table_id.getFullTableName());
+    }
+    else
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS,
+            "Command WAIT BUILDING VECTOR INDICES is supported only for MergeTree table, but got: {}", table->getName());
+    }
+}
+
 void InterpreterSystemQuery::syncReplicatedDatabase(ASTSystemQuery & query)
 {
     const auto database_name = query.getDatabase();
@@ -1471,6 +1494,11 @@ AccessRightsElements InterpreterSystemQuery::getRequiredAccessForDDLOnCluster() 
         case Type::WAIT_LOADING_PARTS:
         {
             required_access.emplace_back(AccessType::SYSTEM_WAIT_LOADING_PARTS, query.getDatabase(), query.getTable());
+            break;
+        }
+        case Type::WAIT_BUILDING_VECTOR_INDICES:
+        {
+            required_access.emplace_back(AccessType::SYSTEM_WAIT_BUILDING_VECTOR_INDICES, query.getDatabase(), query.getTable());
             break;
         }
         case Type::SYNC_DATABASE_REPLICA:

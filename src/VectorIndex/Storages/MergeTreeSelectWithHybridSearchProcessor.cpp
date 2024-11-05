@@ -1095,7 +1095,7 @@ struct PartRangesReadInfo
 };
 
 template<typename PullingExecutor>
-void getFilterFromPipeline(Pipe & pipe, VIBitmapPtr & filter)
+void getFilterFromPipeline(Pipe & pipe, VectorIndex::VIBitmapPtr & filter)
 {
     QueryPipelineBuilder builder;
     builder.init(std::move(pipe));
@@ -1138,7 +1138,7 @@ void parallelGetFilterFromPipeline(Pipe & pipe)
 
 }
 
-VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
+VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
     MarkRanges mark_ranges,
     const PrewhereInfoPtr & prewhere_info_copy,
     const MergeTreeData & storage_,
@@ -1235,7 +1235,7 @@ VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(
     LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", max_streams, info.min_marks_for_concurrent_read);
 
     size_t num_rows = data_part_->rows_count;
-    VIBitmapPtr filter = std::make_shared<VIBitmap>(num_rows);
+    VectorIndex::VIBitmapPtr filter = std::make_shared<VectorIndex::VIBitmap>(num_rows);
 
     /// Read in multiple threads will use Async pulling executor
     if (enable_parallel_reading)

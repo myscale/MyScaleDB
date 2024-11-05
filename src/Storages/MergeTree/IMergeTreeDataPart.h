@@ -25,14 +25,18 @@
 #include <Interpreters/TransactionVersionMetadata.h>
 #include <DataTypes/Serializations/SerializationInfo.h>
 #include <Storages/MergeTree/IPartMetadataManager.h>
-#include <VectorIndex/Common/VIWithDataPart.h>
-#include <VectorIndex/Storages/VIInfo.h>
 
 
 namespace zkutil
 {
     class ZooKeeper;
     using ZooKeeperPtr = std::shared_ptr<ZooKeeper>;
+}
+
+namespace VectorIndex
+{
+class SegmentsMgr;
+using SegmentsMgrPtr = std::unique_ptr<SegmentsMgr>;
 }
 
 namespace DB
@@ -399,7 +403,7 @@ public:
     void unloadIndex();
     bool isIndexLoaded() const;
 
-    mutable VIWithDataPart vector_index;
+    mutable VectorIndex::SegmentsMgrPtr segments_mgr;
 
     /// For data in RAM ('index')
     UInt64 getIndexSizeInBytes() const;
@@ -757,8 +761,6 @@ private:
     /// if it not exists tries to deduce codec from compressed column without
     /// any specifial compression.
     void loadDefaultCompressionCodec();
-
-    void loadVectorIndexFromLocalFile();
 
     void writeColumns(const NamesAndTypesList & columns_, const WriteSettings & settings);
     void writeVersionMetadata(const VersionMetadata & version_, bool fsync_part_dir) const;
