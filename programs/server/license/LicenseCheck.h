@@ -158,7 +158,7 @@ protected:
     void checkMachineResource(const LicenseCheckCtx & check_ctx);
     void checkExpiration(const LicenseCheckCtx & check_ctx);
     void checkMachineInfo(const LicenseCheckCtx & check_ctx);
-    virtual void checkZKLicenseInfo() { LOG_WARNING(log, "Zookeeper license check is not supported."); }
+    virtual void checkZKLicenseInfo() { LOG_DEBUG(log, "No need to check zk license info."); }
     virtual void checkInstanceCount(const LicenseCheckCtx & check_ctx) = 0;
     virtual void checkLicenseFinal() { LOG_DEBUG(log, "License check is passed."); }
     virtual void stopLicenseCheckImpl() { /*nothing to do*/ }
