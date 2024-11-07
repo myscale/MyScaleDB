@@ -218,12 +218,21 @@ void AMILicenseChecker::checkInstanceID(const AmazonInstanceMetadata & metadata)
 void AMILicenseChecker::checkMarketplaceProductCode(const AmazonInstanceMetadata & metadata)
 {
     auto amazon_dynamic_json_data = convertStringToJson(metadata.dynamic_document);
-    String marketplace_product_code = amazon_dynamic_json_data->optValue("marketplaceProductCode", String(""));
-    trim(marketplace_product_code);
-    std::transform(marketplace_product_code.begin(), marketplace_product_code.end(), marketplace_product_code.begin(),
-        [](unsigned char c) { return std::tolower(c); });
-    if (marketplace_product_code != AMAZON_MYSCALE_MARKETPLACE_PRODUCT_CODE)
-        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, marketplace product code is not matched.");
+    Poco::JSON::Array::Ptr marketplace_product_code_list = amazon_dynamic_json_data->getArray("marketplaceProductCodes");
+    if (!marketplace_product_code_list || marketplace_product_code_list->size() == 0)
+        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, marketplace product code is empty.");
+    for (UInt32 i = 0; i < marketplace_product_code_list->size(); ++i) {
+        LOG_INFO(log, "Marketplace product code: {}", marketplace_product_code_list->get(i).convert<String>());
+        String marketplace_product_code = marketplace_product_code_list->get(i).convert<String>();
+        trim(marketplace_product_code);
+        std::transform(marketplace_product_code.begin(), marketplace_product_code.end(), marketplace_product_code.begin(),
+            [](unsigned char c) { return std::tolower(c); });
+        if (marketplace_product_code == AMAZON_MYSCALE_MARKETPLACE_PRODUCT_CODE)
+            return;
+        else
+            LOG_ERROR(log, "Check license failed, marketplace product code: {} is not matched {}.", marketplace_product_code, AMAZON_MYSCALE_MARKETPLACE_PRODUCT_CODE);
+    }
+    throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, marketplace product code is not found.");
 }
 
 
