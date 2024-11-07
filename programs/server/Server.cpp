@@ -139,7 +139,7 @@
 #endif
 
 #if defined(ENABLE_LICENSE_CHECK) || defined(ENABLE_MYSCALE_COMMUNITY_EDITION) || defined(ENABLE_AMAZON_AMI_LICENSE_CHECK)    /// MYSCALE_INTERNAL_CODE_BEGIN
-#   include "License/LicenseHeaders.h"
+#   include "license/LicenseHeaders.h"
 #endif      /// MYSCALE_INTERNAL_CODE_END
 
 namespace CurrentMetrics
