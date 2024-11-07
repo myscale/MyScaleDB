@@ -274,27 +274,26 @@ void ILicenseChecker::checkMachineInfo(const LicenseCheckCtx & check_ctx)
         return;
     }
 
-    Poco::XML::Element * node_info_elem = check_ctx.license_doc->getElementById(machine_id_digest, MACHINE_ID_TAG);
-    if (node_info_elem)
+    Poco::XML::NodeList* nodes = check_ctx.license_doc->getElementsByTagName(NODE_INFO_TAG);
+    for (unsigned long i = 0; i < nodes->length(); ++i)
     {
-        LOG_DEBUG(log, "Given id is checked, given id: {}.", machine_id_digest);
+        Poco::XML::Element* node_info_elem = dynamic_cast<Poco::XML::Element*>(nodes->item(i));
+        if (node_info_elem && node_info_elem->getAttribute(MACHINE_ID_TAG) == machine_id_digest)
+        {
+            LOG_DEBUG(log, "Given id is checked, given id: {}.", machine_id_digest);
 
-        String system_uuid_xml = node_info_elem->getChildElement(SYSTEM_UUID_TAG)->innerText();
-        if (system_uuid_digest == system_uuid_xml)
-        {
-            LOG_DEBUG(log, "Machine info is matched, machine info: {}.", system_uuid_digest);
+            String system_uuid_xml = node_info_elem->getChildElement(SYSTEM_UUID_TAG)->innerText();
+            if (system_uuid_digest == system_uuid_xml)
+            {
+                LOG_DEBUG(log, "Machine info is matched, machine info: {}.", system_uuid_digest);
+                return;
+            }
         }
-        else
-        {
-            LOG_ERROR(log, "Machine info is not matched, current machine info: {}.", system_uuid_digest);
-            throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, machine info is not matched.");
-        }
+        continue;
     }
-    else
-    {
-        LOG_ERROR(log, "There is no such machine in license, some info may be modified, current given id: {}.", machine_id_digest);
-        throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, there is no such machine.");
-    }
+    /// no registered machine, throw exception, licensecheck failed
+    LOG_ERROR(log, "There is no such machine in license, some info may be modified, current given id: {}.", machine_id_digest);
+    throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, there is no such machine.");
 }
 
 XMLDocumentPtr ILicenseChecker::getFormatLicenseInfoDoc(XMLDocumentPtr license_doc_, bool new_format_license) const
