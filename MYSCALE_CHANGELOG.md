@@ -2,6 +2,33 @@
 
 ## 2024
 
+### [v1.9.0](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.9.0) - 2024-11-07
+
+Features & Improvements
+
+- Refactor the code for performance improvements and further optimizations.
+ [!489](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/489) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Remove the dependency on the Intel MKL library
+ [!495](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/495) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Improve performance for lightweight delete and merge
+ [!498](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/498) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- Optimize concurrent bitmap filter set
+ [!499](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/499) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- Optimize slow lightweight delete
+ [!502](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/502) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+- Add other registry source to Cargo
+ [!503](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/503) ([Shanfeng Pang](https://git.moqi.ai/shanfengp)).
+- Properly initialize two stage variables added for multiple distances
+ [!504](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/504) ([Jianmei Zhang](https://git.moqi.ai/jianmeiz)).
+
+Fixs
+
+- Fix fatal when prewhere and where coexist
+ [!500](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/500) ([Libao Yang](https://git.moqi.ai/libaoy)).
+- Fix typo in FTS acceleration setting
+ [!506](https://git.moqi.ai/mqdb/ClickHouse/-/merge_requests/506) ([Libao Yang](https://git.moqi.ai/libaoy)).
+
+
 ### [v1.8.0](https://git.moqi.ai/mqdb/ClickHouse/-/tags/myscale-v1.8.0) - 2024-09-24
 
 Features & Improvements
