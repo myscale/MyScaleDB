@@ -178,7 +178,8 @@ String parse_arg(String & input, const String index_type, bool check_parameter)
                         candidates.push_back(_it->convert<String>());
                     }
                 }
-                if (std::find(candidates.begin(), candidates.end(), case_sensitive ? value : Poco::toUpper(value)) == candidates.end())
+                if (!candidates.empty()
+                    && std::find(candidates.begin(), candidates.end(), case_sensitive ? value : Poco::toUpper(value)) == candidates.end())
                 {
                     throw Exception(
                         ErrorCodes::BAD_ARGUMENTS,
@@ -193,7 +194,8 @@ String parse_arg(String & input, const String index_type, bool check_parameter)
             }
             else
             {
-                if (std::find(candidates_obj->begin(), candidates_obj->end(), std::stof(value)) == candidates_obj->end())
+                if (candidates_obj->size() > 0
+                    && std::find(candidates_obj->begin(), candidates_obj->end(), std::stof(value)) == candidates_obj->end())
                 {
                     std::vector<String> candidates;
                     for (Poco::JSON::Array::ConstIterator _it = candidates_obj->begin(); _it != candidates_obj->end(); ++_it)
