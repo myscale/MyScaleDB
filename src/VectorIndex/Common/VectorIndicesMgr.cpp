@@ -559,6 +559,12 @@ VIEntryPtr VectorIndicesMgr::selectPartToBuildVI(
 
             if (!vi_seg || !vi_seg->canBuildIndex())
                 continue;
+            else if (vi_seg->inCache(true))
+            {
+                /// When mutation rebuilds the vector index, the old part cache_key exists and will be removed
+                vi_seg->removeCache(true);
+                continue;
+            }
 
             /// Part doesn't contain this vector index, need to build.
             if (select_slow_mode_part)

@@ -360,9 +360,14 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare()
             }
         }
 
-        /// When only one part is merged, the merged part can be decouple only when LWD exists.
-        /// If no LWD, still a VPart after merge.
-        if (global_ctx->can_be_decouple && max_part_with_index == 1 && !global_ctx->future_part->parts[first_part_with_data]->hasLightweightDelete())
+        /// When only one VPart is merged, the vector index will be reused and still a VPart after merge
+        /// To reuse the vector index, need to satisfy no LWD and:
+        /// 1. The Merge Type is Regular or TTLRecompress.
+        /// 2. The Merge Type is TTLDelete, but merges with TTL are cancelled, TTLTransform will not be executed.
+        /// Otherwise, the merged one VPart will be decoupled
+        if (global_ctx->can_be_decouple && max_part_with_index == 1
+            && !global_ctx->future_part->parts[first_part_with_data]->hasLightweightDelete()
+            && !ctx->need_remove_expired_values)
         {
             LOG_DEBUG(ctx->log, "Merge single VPart without LWD to VPart. With vector index in part_id {}", global_ctx->first_part_with_data);
             global_ctx->only_one_vpart_merged = true;
@@ -643,139 +648,97 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         }
 
         /// read data into buffer
-        uint64_t new_part_row_id = 0;
+        uint64_t row_source_offset = 0;
+        uint64_t final_part_offset = 0;
+
+        /// source_row_ids stores the row offset of the corresponding part
         std::vector<uint64_t> source_row_ids(global_ctx->future_part->parts.size(), 0);
         /// used to store new row ids for each old part
         std::vector<std::unordered_map<UInt64, UInt64>> parts_new_row_ids(global_ctx->future_part->parts.size());
         /// TODO: confirm read all in one round?
 
-        /// Replacing Merge Tree
-        if (ctx->merging_params.mode == MergeTreeData::MergingParams::Collapsing
-            || ctx->merging_params.mode == MergeTreeData::MergingParams::Replacing
-            || ctx->merging_params.mode == MergeTreeData::MergingParams::VersionedCollapsing)
+        /// Write one file(inverted row ids map), new part -> pos in old part
+        /// If row of row_source is not in final merged part, skip writing
+        while (!rows_sources_read_buf->eof())
         {
-            /// write one file(inverted row ids map), new part -> pos in old part, if not in, skip writing
-            while (!rows_sources_read_buf->eof())
+            RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
+            RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
+            while (row_source_pos < row_sources_end)
             {
-                RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
-                RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
-                while (row_source_pos < row_sources_end)
-                {
-                    /// row_source is the part from which row comes
-                    RowSourcePart row_source = *row_source_pos;
-                    /// part pos number in part_offsets
-                    size_t source_num = row_source.getSourceNum() ;
+                /// row_source is the part from which row comes
+                RowSourcePart row_source = *row_source_pos;
+                /// part pos number in part_offsets
+                size_t source_num = row_source.getSourceNum();
 
-                    if (!row_source_pos->getSkipFlag())
+                /// Replacing merging mode(Collapsing, Replacing, VersionedCollapsing), only write non-skipped rows in row_source
+                if (!row_source_pos->getSkipFlag())
+                {
+                    bool is_deleted_by_ttl = ctx->need_remove_expired_values && ctx->ttl_delete_row_ids->count(row_source_offset) > 0;
+
+                    /// if No TTLDelete or TTLDelete not delete this new_part_row_id row
+                    /// will write old_part_offset to inverted_row_ids_map
+                    if (!is_deleted_by_ttl)
                     {
                         /// source_row_ids stores the row offset of the corresponding part
                         auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
 
                         /// parts_new_row_ids stores mapping from a formal row in old part to its current pos in new merged part
-                        parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
+                        parts_new_row_ids[source_num][old_part_offset] = final_part_offset;
+
                         writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
-                        /// need to add this, or we cannot correctly read uint64 value
                         writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
-                        ++new_part_row_id;
-                    }
-                    ++source_row_ids[source_num];
 
-                    ++row_source_pos;
+                        ++final_part_offset;
+                    }
                 }
-                rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+
+                ++source_row_ids[source_num];
+                ++row_source_pos;
+                ++row_source_offset;
             }
-
-            /// write row_ids_map_bufs,
-            for (size_t source_num = 0; source_num < old_parts_num; source_num++)
-            /// write multiple files(row id map buf), old part -> pos in new part,if not in skip writing
-            {
-                auto metadata_snapshot = global_ctx->data->getInMemoryMetadataPtr();
-                UInt64 old_row_id = 0;
-                auto partRowNum = global_ctx->future_part->parts[source_num]->rows_count;
-                std::vector<uint64_t> deleteRowIds(partRowNum, 0);
-                int i = 0;
-                while (old_row_id < partRowNum)
-                {
-                    UInt64 new_row_id = -1;
-                    if (parts_new_row_ids[source_num].count(old_row_id) > 0)
-                    {
-                        new_row_id = parts_new_row_ids[source_num][old_row_id];
-                    }
-                    else
-                    {
-                        //generate delete row id for using in vector index
-                        deleteRowIds[i] = static_cast<UInt64>(old_row_id);
-                        i++;
-                    }
-                    writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                    writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                    ++old_row_id;
-                }
-
-                if (i > 0)
-                {
-                    /// Support multiple vector indices
-                    VectorIndex::VIBitmapPtr delete_bit_map = std::make_shared<VectorIndex::VIBitmap>(partRowNum, true);
-                    for (size_t row_id : deleteRowIds)
-                    {
-                        if (row_id)
-                            delete_bit_map->unset(row_id);
-                    }
-                    for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
-                    {
-                        auto vi_segment = global_ctx->future_part->parts[source_num]->segments_mgr->getSegment(vec_index_desc.name);
-                        if (vi_segment)
-                            vi_segment->updateCachedBitMap(delete_bit_map);
-                    }
-                }
-            }
+            rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
         }
-        else
+
+        /// Write multiple files(row id map buf), old part -> pos in new part
+        /// If old part row is not in final merged part, write UINT64_MAX
+        for (size_t source_num = 0; source_num < old_parts_num; source_num++)
         {
-            while (!rows_sources_read_buf->eof())
+            auto metadata_snapshot = global_ctx->data->getInMemoryMetadataPtr();
+            UInt64 old_row_id = 0;
+            auto partRowNum = global_ctx->future_part->parts[source_num]->rows_count;
+            std::vector<uint64_t> deleteRowIds;
+
+            while (old_row_id < partRowNum)
             {
-                RowSourcePart * row_source_pos = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->position());
-                RowSourcePart * row_sources_end = reinterpret_cast<RowSourcePart *>(rows_sources_read_buf->buffer().end());
-                while (row_source_pos < row_sources_end)
+                UInt64 new_row_id = UINT64_MAX;
+                if (parts_new_row_ids[source_num].count(old_row_id) > 0)
                 {
-                    /// row_source is the part from which row comes
-                    RowSourcePart row_source = *row_source_pos;
-                    /// part pos number in part_offsets
-                    size_t source_num = row_source.getSourceNum();
-                    /// source_row_ids stores the row offset of the corresponding part
-                    auto old_part_offset = part_offsets[source_num][source_row_ids[source_num]];
-                    /// stores mapping from a formal row in old part to its current pos in new merged part
-                    parts_new_row_ids[source_num][old_part_offset] = new_part_row_id;
-
-                    /// writeIntText(new_part_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                    writeIntText(old_part_offset, *global_ctx->inverted_row_ids_map_buf);
-                    /// need to add this, or we cannot correctly read uint64 value
-                    /// writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                    writeChar('\t', *global_ctx->inverted_row_ids_map_buf);
-
-                    ++new_part_row_id;
-                    ++source_row_ids[source_num];
-
-                    ++row_source_pos;
+                    new_row_id = parts_new_row_ids[source_num][old_row_id];
                 }
-
-                rows_sources_read_buf->position() = reinterpret_cast<char *>(row_source_pos);
+                else
+                {
+                    // generate delete row id for using in vector index
+                    deleteRowIds.push_back(old_row_id);
+                }
+                writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
+                writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
+                ++old_row_id;
             }
 
-            /// write row_ids_map_bufs
-            for (size_t source_num = 0; source_num < old_parts_num; source_num++)
+            if (deleteRowIds.size() > 0)
             {
-                UInt64 old_row_id = 0;
-                while (old_row_id < global_ctx->future_part->parts[source_num]->rows_count)
+                /// Support multiple vector indices
+                VectorIndex::VIBitmapPtr delete_bit_map = std::make_shared<VectorIndex::VIBitmap>(partRowNum, true);
+                for (size_t row_id : deleteRowIds)
                 {
-                    UInt64 new_row_id = -1;
-                    if (parts_new_row_ids[source_num].count(old_row_id) > 0)
-                    {
-                        new_row_id = parts_new_row_ids[source_num][old_row_id];
-                    }
-                    writeIntText(new_row_id, *global_ctx->row_ids_map_bufs[source_num]);
-                    writeChar('\t', *global_ctx->row_ids_map_bufs[source_num]);
-                    ++old_row_id;
+                    if (row_id)
+                        delete_bit_map->unset(row_id);
+                }
+                for (const auto & vec_index_desc : metadata_snapshot->getVectorIndices())
+                {
+                    auto vi_segment = global_ctx->future_part->parts[source_num]->segments_mgr->getSegment(vec_index_desc.name);
+                    if (vi_segment)
+                        vi_segment->updateCachedBitMap(delete_bit_map);
                 }
             }
         }
@@ -1465,8 +1428,22 @@ void MergeTask::ExecuteAndFinalizeHorizontalPart::createMergedStream()
     }
 
     if (ctx->need_remove_expired_values)
+    {
+        if (!ctx->ttl_delete_row_ids)
+        {
+            /// Create a set to store the row ids that need to be deleted during TTLTransform
+            ctx->ttl_delete_row_ids = std::make_shared<std::unordered_set<UInt64>>();
+        }
+
         res_pipe.addTransform(std::make_shared<TTLTransform>(
-            res_pipe.getHeader(), *global_ctx->data, global_ctx->metadata_snapshot, global_ctx->new_data_part, global_ctx->time_of_merge, ctx->force_ttl));
+            res_pipe.getHeader(),
+            *global_ctx->data,
+            global_ctx->metadata_snapshot,
+            global_ctx->new_data_part,
+            global_ctx->time_of_merge,
+            ctx->force_ttl,
+            ctx->ttl_delete_row_ids));
+    }
 
     if (global_ctx->metadata_snapshot->hasSecondaryIndices())
     {

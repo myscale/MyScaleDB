@@ -343,9 +343,9 @@ bool BaseSegment::validateSegments() const
     return true;
 }
 
-const CachedSegmentKeyList BaseSegment::getCachedSegmentKeys() const
+const CachedSegmentKeyList BaseSegment::getCachedSegmentKeys(bool is_mutation_rebuild) const
 {
-    if (this->vi_status->getStatus() != SegmentStatus::BUILT)
+    if (!is_mutation_rebuild && this->vi_status->getStatus() != SegmentStatus::BUILT)
         return {};
     auto lock_part = getDataPart();
     String part_relative_path = getPartRelativePath(fs::path(lock_part->getDataPartStorage().getFullPath()).parent_path());
@@ -1061,12 +1061,12 @@ void DecoupleSegment<data_type>::updateCachedBitMap(const VIBitmapPtr & bitmap)
 }
 
 template <Search::DataType data_type>
-const CachedSegmentKeyList DecoupleSegment<data_type>::getCachedSegmentKeys() const
+const CachedSegmentKeyList DecoupleSegment<data_type>::getCachedSegmentKeys(bool is_mutation_rebuild) const
 {
     CachedSegmentKeyList res;
     for (const auto & segment : segments)
     {
-        auto cache_keys = segment->getCachedSegmentKeys();
+        auto cache_keys = segment->getCachedSegmentKeys(is_mutation_rebuild);
         res.insert(res.end(), cache_keys.begin(), cache_keys.end());
     }
     return res;

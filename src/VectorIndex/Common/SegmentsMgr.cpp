@@ -114,13 +114,13 @@ void SegmentsMgr::setSegmentStatus(const String & vi_name, SegmentStatus::Status
         vi_seg->vi_status->setStatus(status, message);
 }
 
-VISegWithPartUniquePtr SegmentsMgr::mutation(const MergeTreeDataPartPtr & new_data_part, const NameSet & rebuild_index_column)
+VISegWithPartUniquePtr SegmentsMgr::mutation(const MergeTreeDataPartPtr & new_data_part, const NameSet & rebuild_index_column, const bool & need_delete_rows)
 {
     VISegWithPartUniquePtr new_vi_segments = std::make_unique<SegmentsMgr>(*new_data_part);
     std::unique_lock lock(segments_mutex);
     for (const auto & [vi_name, segment] : segments)
     {
-        if (rebuild_index_column.contains(segment->getVIColumnName()))
+        if (rebuild_index_column.contains(segment->getVIColumnName()) || need_delete_rows)
         {
             /// [TODO] need remove old segmnets files?
             SegmentPtr new_seg = createSegment(segment->getVIDescription(), new_data_part);

@@ -41,7 +41,7 @@ public:
     SegmentStatus::Status getSegmentStatus(const String & vi_name) const;
     void setSegmentStatus(const String & vi_name, SegmentStatus::Status status, const String & message = "");
     void initSegment();
-    VISegWithPartUniquePtr mutation(const MergeTreeDataPartPtr & new_data_part, const NameSet & rebuild_index_column = {});
+    VISegWithPartUniquePtr mutation(const MergeTreeDataPartPtr & new_data_part, const NameSet & rebuild_index_column = {}, const bool & need_delete_rows = false);
     void mutateFrom(const SegmentsMgr & from, const NameSet & rebuild_index_column = {});
     void cancelAllSegmentsActions();
     void removeSegMemoryResource();

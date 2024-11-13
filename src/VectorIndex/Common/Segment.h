@@ -165,7 +165,7 @@ public:
         const MergeIdMapsPtr & vi_merged_maps_ = nullptr)
         = 0;
 
-    virtual const CachedSegmentKeyList getCachedSegmentKeys() const;
+    virtual const CachedSegmentKeyList getCachedSegmentKeys(bool is_mutation_rebuild = false) const;
 
     const CachedSegmentholderList getCachedSegmentHolders() const;
 
@@ -228,9 +228,9 @@ public:
         return success;
     }
 
-    bool inCache() const
+    bool inCache(bool is_mutation_rebuild = false) const
     {
-        for (const auto & cache_key : getCachedSegmentKeys())
+        for (const auto & cache_key : getCachedSegmentKeys(is_mutation_rebuild))
         {
             if (VICacheManager::getInstance()->get(cache_key) != nullptr)
                 return true;
@@ -238,9 +238,9 @@ public:
         return false;
     }
 
-    void removeCache()
+    void removeCache(bool is_mutation_rebuild = false)
     {
-        for (const auto & cache_key : getCachedSegmentKeys())
+        for (const auto & cache_key : getCachedSegmentKeys(is_mutation_rebuild))
             VICacheManager::removeFromCache(cache_key);
     }
 
@@ -394,7 +394,7 @@ public:
 
     bool supportTwoStageSearch() const override { return segments.front()->supportTwoStageSearch(); }
 
-    const CachedSegmentKeyList getCachedSegmentKeys() const override;
+    const CachedSegmentKeyList getCachedSegmentKeys(bool is_mutation_rebuild = false) const override;
 
     bool isDecoupled() const override { return true; }
 

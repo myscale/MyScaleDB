@@ -1403,17 +1403,18 @@ private:
         ctx->out.reset();
 
         /// Create hardlinks for vector index files in simple built part or decoupled part when MutateAllPartColumns
+        /// Currently DELETE and MATERIALIZE_TTL will delete rows, but ALTER DELETE is disabled in vector index.
         /// Reuse vector index when no rows are deleted
         for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
         {
             String file_name = it->name();
-            if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+            if (ctx->need_delete_rows || !endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
                 continue;
 
             ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
         }
 
-        ctx->new_data_part->segments_mgr = ctx->source_part->segments_mgr->mutation(ctx->new_data_part, ctx->rebuild_vector_index_column);
+        ctx->new_data_part->segments_mgr = ctx->source_part->segments_mgr->mutation(ctx->new_data_part, ctx->rebuild_vector_index_column, ctx->need_delete_rows);
         /// TODO: build index marks the ector_indexed in some unsuccessful cases. If fixed, vector_files_found can be removed.
         /// TODO: Should new part inherit build error from old part?
         /// Retry build vector index for new parts.
