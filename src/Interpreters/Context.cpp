@@ -225,6 +225,7 @@ struct ContextSharedPart : boost::noncopyable
     String user_scripts_path;                               /// Path to the directory with user provided scripts.
     String vector_index_cache_path;                         /// Path to the directory of vector index cache for MyScale vector index disk mode.
     String tantivy_index_cache_path;                        /// Path to the directory of tantivy index cache.
+    String sparse_index_cache_path; /// Path to the directory of sparse index cache.
     ConfigurationPtr config;                                /// Global configuration settings.
 
     String tmp_path;                                        /// Path to the temporary files that occur when processing the request.
@@ -750,6 +751,12 @@ String Context::getTantivyIndexCachePath() const
     return shared->tantivy_index_cache_path;
 }
 
+String Context::getSparseIndexCachePath() const
+{
+    auto lock = getLock();
+    return shared->sparse_index_cache_path;
+}
+
 Strings Context::getWarnings() const
 {
     Strings common_warnings;
@@ -818,6 +825,9 @@ void Context::setPath(const String & path)
 
     if (shared->tantivy_index_cache_path.empty())
         shared->tantivy_index_cache_path = shared->path + "tantivy_index_cache/";
+
+    if (shared->sparse_index_cache_path.empty())
+        shared->sparse_index_cache_path = shared->path + "sparse_index_cache/";
 }
 
 static void setupTmpPath(Poco::Logger * log, const std::string & path)
@@ -965,6 +975,12 @@ void Context::setTantivyIndexCachePath(const String & path)
 {
     auto lock = getLock();
     shared->tantivy_index_cache_path = path;
+}
+
+void Context::setSparseIndexCachePath(const String & path)
+{
+    auto lock = getLock();
+    shared->sparse_index_cache_path = path;
 }
 
 void Context::addWarningMessage(const String & msg) const

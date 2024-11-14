@@ -104,7 +104,7 @@
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Processors/FusionSortingStep.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <VectorIndex/Utils/CommonUtils.h>
 #    include <VectorIndex/Utils/HybridSearchUtils.h>
 #endif
@@ -820,7 +820,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 
     analyze(shouldMoveToPrewhere());
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     if (!options.only_analyze && storage && context->getSettingsRef().dfs_query_then_fetch)
     {
         /// Collect global statistics information of all shards used in BM25 calculation when text/hybrid search is distributed

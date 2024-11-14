@@ -2,7 +2,7 @@
 
 #include <memory>
 #include <vector>
-#include <Storages/MergeTree/TantivyIndexStore.h>
+#include <Storages/MergeTree/SkipIndex/Store/TantivyIndexStore.h>
 #include <roaring.hh>
 #include <roaring64map.hh>
 namespace DB

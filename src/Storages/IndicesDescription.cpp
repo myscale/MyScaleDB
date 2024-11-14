@@ -12,8 +12,9 @@
 
 #include <Core/Defines.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/MergeTreeIndexSparse.h>
 #endif
 
 namespace DB
@@ -186,12 +187,24 @@ Names IndicesDescription::getAllRegisteredNames() const
     return result;
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 bool IndicesDescription::hasFTS() const
 {
     for (const auto & index : *this)
     {
         if (index.type == TANTIVY_INDEX_NAME)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IndicesDescription::hasSparse() const
+{
+    for (const auto & index : *this)
+    {
+        if (index.type == SPARSE_INDEX_NAME)
         {
             return true;
         }

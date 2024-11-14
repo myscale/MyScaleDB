@@ -665,8 +665,8 @@ public:
     void clearPartsFromFilesystem(const DataPartsVector & parts, bool throw_on_error = true, NameSet * parts_failed_to_delete = nullptr);
     void clearPKCache(const DataPartsVector & parts);
 
-#if USE_TANTIVY_SEARCH
-    void updateTantivyIndexCache();
+#if USE_CUSTOM_SKIP_INDEX
+    void updateCustomSkipIndexCache(SkipIndexType skip_index_type);
 #endif
 
     /// Delete WAL files containing parts, that all already stored on disk.

@@ -143,8 +143,9 @@ void StorageMergeTree::startup()
 
     vi_manager->startup();
 
-#if USE_TANTIVY_SEARCH
-    updateTantivyIndexCache();
+#if USE_CUSTOM_SKIP_INDEX
+    updateCustomSkipIndexCache(SkipIndexType::TantivyIndex);
+    updateCustomSkipIndexCache(SkipIndexType::SparseIndex);
 #endif
 
     /// NOTE background task will also do the above cleanups periodically.
@@ -1803,12 +1804,21 @@ void StorageMergeTree::dropPart(const String & part_name, bool detach, ContextPt
                 LOG_INFO(log, "{} {} part by replacing it with new empty {} part. With txn {}",
                          op, part->name, future_parts[0].part_name,
                          transaction.getTID());
-#if USE_TANTIVY_SEARCH
-                auto metadata = part->storage.getInMemoryMetadataPtr();
-                if (metadata->hasSecondaryIndices() && metadata->getSecondaryIndices().hasFTS())
+#if USE_CUSTOM_SKIP_INDEX
                 {
-                    auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
-                    TantivyIndexStoreFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath(), index_names);
+                    auto metadata = part->storage.getInMemoryMetadataPtr();
+                    if (metadata->hasSecondaryIndices())
+                    {
+                        auto index_names = metadata->getSecondaryIndices().getAllRegisteredNames();
+                        if (metadata->getSecondaryIndices().hasFTS())
+                        {
+                            TantivyIndexFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath(), index_names);
+                        }
+                        if (metadata->getSecondaryIndices().hasSparse())
+                        {
+                            SparseIndexFactory::instance().remove(part->getDataPartStoragePtr()->getRelativePath(), index_names);
+                        }
+                    }
                 }
 #endif
             }

@@ -54,8 +54,10 @@ function(clickhouse_import_crate)
         set(CMAKE_CONFIGURATION_TYPES "${CMAKE_BUILD_TYPE};debug")
     endif()
 
-    if (CMAKE_BUILD_TYPE_UC STREQUAL "DEBUG")
-        set(profile "")
+    if(CMAKE_BUILD_TYPE_UC STREQUAL "RELWITHDEBINFO")
+        set(profile "relwithdebinfo")
+    elseif (CMAKE_BUILD_TYPE_UC STREQUAL "DEBUG")
+        set(profile "release")
     else()
         if (ENABLE_THINLTO)
             set(profile "release-thinlto")
@@ -66,6 +68,7 @@ function(clickhouse_import_crate)
 
     # Note, here --offline is not used, since on CI vendor archive is used, and
     # passing --offline here will be inconvenient for local development.
+    message(STATUS "ck corrosion import profile: ${profile}, ARGN is ${ARGN} --- ${CMAKE_BUILD_TYPE_UC}")
     corrosion_import_crate(NO_STD ${ARGN} PROFILE ${profile})
 endfunction()
 
@@ -98,4 +101,5 @@ endfunction()
 
 # supercrate combines all the Rust libraries into one static library, 
 # which can avoid symbol conflicts that occur when ClickHouse links multiple Rust static libraries.
+set(BUILD_RUST_FOR_CK TRUE)
 add_rust_subdirectory (supercrate)

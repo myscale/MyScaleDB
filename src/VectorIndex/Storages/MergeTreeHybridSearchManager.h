@@ -15,8 +15,8 @@
 
 #include <Common/logger_useful.h>
 
-#if USE_TANTIVY_SEARCH
-#include <tantivy_search.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <tantivy_search.h>
 #endif
 
 namespace DB
@@ -98,7 +98,7 @@ public:
         return result;
     }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     void setBM25Stats(const TANTIVY::Statistics & bm25_stats_in_table_)
     {
         if (text_search_manager)

@@ -11,10 +11,14 @@ cxx = "1.0.83"
 term = "0.7.0"
 
 [build-dependencies]
-cxx-build = "1.0.83"
+cxx-build = "1.0.119"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
 
 [profile.release]
+debug = true
+
+[profile.relwithdebinfo]
+inherits = "release"
 debug = true

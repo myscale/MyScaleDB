@@ -34,9 +34,10 @@
 #include <Storages/ReadInOrderOptimizer.h>
 #include <Storages/VirtualColumnUtils.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
 #endif
+#include <Storages/MergeTree/MergeTreeIndexSparse.h>
 
 #include <Core/UUID.h>
 #include <Common/CurrentMetrics.h>
@@ -957,6 +958,10 @@ RangesInDataParts MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipInd
     {
         for (const auto & index : metadata_snapshot->getSecondaryIndices())
         {
+            if (index.type == SPARSE_INDEX_NAME)
+            {
+                continue;
+            }
             auto index_helper = MergeTreeIndexFactory::instance().get(index);
             if (index_helper->isMergeable())
             {
@@ -1645,7 +1650,7 @@ MarkRanges MergeTreeDataSelectExecutor::markRangesFromPKRange(
     return res;
 }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     MergeTreeIndexPtr index_helper,
     MergeTreeIndexConditionPtr condition,
@@ -1687,7 +1692,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     TantivyIndexStorePtr tantivy_store = nullptr;
     if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
     {
-        tantivy_store = TantivyIndexStoreFactory::instance().getOrLoadForSearch(index_helper->getFileName(), part->getDataPartStoragePtr());
+        tantivy_store = TantivyIndexFactory::instance().getOrLoadForSearch(index_helper->getFileName(), part->getDataPartStoragePtr());
         indexed_doc_nums = tantivy_store->getIndexedDocsNum();
         if (indexed_doc_nums > std::numeric_limits<uint32_t>::max())
         {
@@ -1869,7 +1874,7 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
 
     DB::OpenTelemetry::SpanHolder span("MergeTreeDataSelectExecutor::skip_granule");
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
     {
         return generateMarkRangesFromTantivy(

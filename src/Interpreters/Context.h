@@ -487,6 +487,7 @@ public:
     String getUserScriptsPath() const;
     String getVectorIndexCachePath() const;
     String getTantivyIndexCachePath() const;
+    String getSparseIndexCachePath() const;
 
     /// A list of warnings about server configuration to place in `system.warnings` table.
     Strings getWarnings() const;
@@ -503,6 +504,7 @@ public:
     void setUserScriptsPath(const String & path);
     void setVectorIndexCachePath(const String & path);
     void setTantivyIndexCachePath(const String & path);
+    void setSparseIndexCachePath(const String & path);
 
     void addWarningMessage(const String & msg) const;
 

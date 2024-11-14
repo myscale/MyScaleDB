@@ -45,8 +45,9 @@
 #include <Interpreters/executeDDLQueryOnCluster.h>
 #include <Interpreters/executeQuery.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
+#    include <Storages/MergeTree/MergeTreeIndexSparse.h>
 #endif
 
 #include <Access/Common/AccessRightsElement.h>
@@ -755,12 +756,18 @@ InterpreterCreateQuery::TableProperties InterpreterCreateQuery::getTableProperti
                     throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                             "Experimental Inverted Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
                 }
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
                 if (index_desc.type == TANTIVY_INDEX_NAME && !settings.allow_experimental_inverted_index)
                 {
                     throw Exception(
                         ErrorCodes::SUPPORT_IS_DISABLED,
-                        "Experimental fts Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                        "Experimental FTS Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
+                }
+                if (index_desc.type == SPARSE_INDEX_NAME && !settings.allow_experimental_inverted_index)
+                {
+                    throw Exception(
+                        ErrorCodes::SUPPORT_IS_DISABLED,
+                        "Experimental Sparse Index feature is not enabled (the setting 'allow_experimental_inverted_index')");
                 }
 #endif
                 if (index_desc.type == "annoy" && !settings.allow_experimental_annoy_index)

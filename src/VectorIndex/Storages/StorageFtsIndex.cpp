@@ -5,9 +5,9 @@
 #include <Processors/Sources/SourceFromSingleChunk.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 
-#if USE_TANTIVY_SEARCH
-#include <Interpreters/TantivyFilter.h>
-#include <VectorIndex/Storages/StorageFtsIndex.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <Interpreters/TantivyFilter.h>
+#    include <VectorIndex/Storages/StorageFtsIndex.h>
 #endif
 
 namespace DB
@@ -147,7 +147,7 @@ void ReadFromFtsIndex::initializePipeline(QueryPipelineBuilder & pipeline, const
         if (!part->getDataPartStorage().exists(tantivy_index_file_name + ".idx"))
             throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Fts index file {} does not exist", tantivy_index_file_name);
 
-        auto tantivy_store = TantivyIndexStoreFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
+        auto tantivy_store = TantivyIndexFactory::instance().getOrLoadForSearch(tantivy_index_file_name, part->getDataPartStoragePtr());
 
         final_total_docs += tantivy_store->getTotalNumDocs();
 

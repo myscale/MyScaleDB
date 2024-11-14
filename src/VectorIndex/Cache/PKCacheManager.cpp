@@ -17,7 +17,7 @@ PKCacheManager::PKCacheManager(size_t max_size)
 
 void PKCacheManager::setPartPkCache(String cache_key, Columns columns)
 {
-    LOG_INFO(log, "PrimaryKeyCache put cache_key={}", cache_key);
+    LOG_DEBUG(log, "PrimaryKeyCache put cache_key={}", cache_key);
 
     /// type of clickhouse LRUCache's value must be std::shard_ptr
     std::shared_ptr<Columns> cols_ptr = std::make_shared<Columns>(columns);

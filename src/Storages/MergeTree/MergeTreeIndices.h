@@ -17,9 +17,9 @@
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageInMemoryMetadata.h>
 
-#if USE_TANTIVY_SEARCH
-#    include <Storages/MergeTree/TantivyIndexStore.h>
-#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#if USE_CUSTOM_SKIP_INDEX
+#    include <Storages/MergeTree/SkipIndex/Factory/SparseIndexFactory.h>
+#    include <Storages/MergeTree/SkipIndex/Factory/TantivyIndexFactory.h>
 #endif
 
 
@@ -176,8 +176,13 @@ struct IMergeTreeIndex
         return createIndexAggregator();
     }
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] TantivyIndexStorePtr & store) const
+    {
+        return createIndexAggregator();
+    }
+
+    virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] SparseIndexStorePtr & store) const
     {
         return createIndexAggregator();
     }
@@ -253,8 +258,11 @@ void annoyIndexValidator(const IndexDescription & index, bool attach);
 MergeTreeIndexPtr invertedIndexCreator(const IndexDescription& index);
 void invertedIndexValidator(const IndexDescription& index, bool attach);
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index);
 void ftsIndexValidator(const IndexDescription & index, bool attach);
+
+MergeTreeIndexPtr sparseIndexCreator(const IndexDescription & index);
+void sparseIndexValidator(const IndexDescription & index, bool attach);
 #endif
 }

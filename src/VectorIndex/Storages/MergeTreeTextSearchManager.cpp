@@ -17,11 +17,11 @@
 #include <Storages/MergeTree/IMergeTreeReader.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
 #    include <Storages/MergeTree/MergeTreeIndexTantivy.h>
-#    include <Storages/MergeTree/TantivyIndexStore.h>
-#    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
+#    include <Storages/MergeTree/SkipIndex/Factory/SparseIndexFactory.h>
+#    include <Storages/MergeTree/SkipIndex/Factory/TantivyIndexFactory.h>
 #endif
 
 #include <memory>
@@ -68,7 +68,7 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
     auto score_column = DataTypeFloat32().createColumn();
     auto label_column = DataTypeUInt32().createColumn();
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     const String search_column_name = text_search_info->text_column_name;
     size_t k = static_cast<UInt32>(text_search_info->topk);
 
@@ -128,8 +128,8 @@ TextSearchResultPtr MergeTreeTextSearchManager::textSearch(
             }
 
             if (dynamic_cast<const MergeTreeIndexTantivy *>(&*index_helper) != nullptr)
-                tantivy_store = TantivyIndexStoreFactory::instance().getOrLoadForSearch(
-                    index_helper->getFileName(), data_part->getDataPartStoragePtr());
+                tantivy_store
+                    = TantivyIndexFactory::instance().getOrLoadForSearch(index_helper->getFileName(), data_part->getDataPartStoragePtr());
 
             if (tantivy_store)
             {

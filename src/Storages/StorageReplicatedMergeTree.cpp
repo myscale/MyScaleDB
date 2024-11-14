@@ -4506,8 +4506,9 @@ void StorageReplicatedMergeTree::startupImpl(bool from_attach_thread)
 
         vi_manager->startup();
 
-#if USE_TANTIVY_SEARCH
-        updateTantivyIndexCache();
+#if USE_CUSTOM_SKIP_INDEX
+        updateCustomSkipIndexCache(SkipIndexType::TantivyIndex);
+        updateCustomSkipIndexCache(SkipIndexType::SparseIndex);
 #endif
         /// In this thread replica will be activated.
         restarting_thread.start();

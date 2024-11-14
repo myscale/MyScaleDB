@@ -1,15 +1,34 @@
 [package]
 name = "supercrate"
-version = "0.1.0"
-authors = ["MochiXu <mochix@myscale.com>"]
+version = "0.2.0"
+authors = ["MochiXu <mochi_xu@icloud.com>"]
 edition = "2021"
 
 [dependencies]
-blake3 ={ path = "libs/blake3"}
-skim ={ path = "libs/skim"}
-tantivy_search ={ path = "libs/tantivy_search"}
+libc = "0.2.82"
+cxx = "1.0.119"
+blake3 = { path = "libs/blake3" }
+skim = { path = "libs/skim" }
+sparse_index = { path = "libs/sparse_index" }
+tantivy_search = { path = "libs/tantivy_search" }
+tantivy = { path = "libs/tantivy_search/contrib/tantivy"}
+walkdir = "2.3.2"
 
+[features]
+use-flurry-cache = []
+use-shared-search-pool = []
+default = ["use-shared-search-pool"]
 
 [lib]
 crate-type = ["staticlib"]
 
+
+[build-dependencies]
+cxx-build = "1.0.119"
+
+[profile.relwithdebinfo]
+inherits = "release"
+debug = true
+
+[profile.release]
+debug = true

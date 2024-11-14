@@ -4,14 +4,14 @@
 #include <vector>
 #include "config.h"
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <tantivy_search.h>
 #endif
 
 namespace DB
 {
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 
 using RustVecDocWithFreq = rust::cxxbridge1::Vec<TANTIVY::DocWithFreq>;
 

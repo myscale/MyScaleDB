@@ -71,7 +71,7 @@
 #include <Interpreters/JoinUtils.h>
 #include <Interpreters/misc.h>
 
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
 #    include <Interpreters/TantivyFilter.h>
 #endif
 
@@ -136,7 +136,7 @@ Poco::Logger * getLogger() { return &Poco::Logger::get("ExpressionAnalyzer"); }
 inline void checkTantivyIndex([[maybe_unused]]const StorageSnapshotPtr & storage_snapshot, [[maybe_unused]]const String & text_column_name)
 {
     bool find_tantivy_index = false;
-#if USE_TANTIVY_SEARCH
+#if USE_CUSTOM_SKIP_INDEX
     if (storage_snapshot && storage_snapshot->metadata)
     {
         auto metadata_snapshot = storage_snapshot->metadata;

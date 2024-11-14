@@ -11,7 +11,7 @@
 #include <Interpreters/TantivyFilter.h>
 #include <Storages/MergeTree/MergeTreeIndexFullText.h>
 #include <Storages/MergeTree/MergeTreeIndexInverted.h>
-#include <Storages/MergeTree/TantivyIndexStore.h>
+#include <Storages/MergeTree/SkipIndex/Store/TantivyIndexStore.h>
 
 namespace DB
 {
