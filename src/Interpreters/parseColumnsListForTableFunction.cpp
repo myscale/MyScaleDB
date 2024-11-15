@@ -28,6 +28,7 @@ DataTypeValidationSettings::DataTypeValidationSettings(const DB::Settings& setti
         , allow_experimental_object_type(settings.allow_experimental_object_type)
         , allow_suspicious_fixed_string_types(settings.allow_suspicious_fixed_string_types)
         , allow_experimental_variant_type(settings.allow_experimental_variant_type)
+        , allow_experimental_bfloat16_type(settings.allow_experimental_bfloat16_type)
         , allow_suspicious_variant_types(settings.allow_suspicious_variant_types)
         , validate_nested_types(settings.validate_experimental_and_suspicious_types_inside_nested_types)
         , allow_experimental_dynamic_type(settings.allow_experimental_dynamic_type)
@@ -87,6 +88,18 @@ void validateDataType(const DataTypePtr & type_to_check, const DataTypeValidatio
                     ErrorCodes::ILLEGAL_COLUMN,
                     "Cannot create column with type '{}' because experimental Variant type is not allowed. "
                     "Set setting allow_experimental_variant_type = 1 in order to allow it",
+                    data_type.getName());
+            }
+        }
+
+        if (!settings.allow_experimental_bfloat16_type)
+        {
+            if (WhichDataType(data_type).isBFloat16())
+            {
+                throw Exception(
+                    ErrorCodes::ILLEGAL_COLUMN,
+                    "Cannot create column with type '{}' because experimental BFloat16 type is not allowed. "
+                    "Set setting allow_experimental_bfloat16_type = 1 in order to allow it",
                     data_type.getName());
             }
         }
