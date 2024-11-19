@@ -771,7 +771,7 @@ SearchResultPtr SimpleSegment<data_type>::searchVI(
     VIBitmapPtr delete_bitmap = vi_entry->value().getDeleteBitmap();
     VIBitmapPtr merged_filter = filter;
     if (!delete_bitmap->all())
-        merged_filter = Search::intersectDenseBitmaps(merged_filter, delete_bitmap);
+        merged_filter = Search::DenseBitmap::intersectDenseBitmaps(merged_filter, delete_bitmap);
     VIParameter index_parameters = parameters;
     if (vi_entry->value().fallback_to_flat)
         index_parameters.clear();
@@ -837,7 +837,7 @@ void SimpleSegment<data_type>::updateCachedBitMap(const VIBitmapPtr & bitmap)
     if (!vi_entry)
         return;
     auto delete_bitmap = vi_entry->value().getDeleteBitmap();
-    auto real_filter = Search::intersectDenseBitmaps(bitmap, delete_bitmap);
+    auto real_filter = Search::DenseBitmap::intersectDenseBitmaps(bitmap, delete_bitmap);
     vi_entry->value().setDeleteBitmap(real_filter);
 }
 
@@ -1020,7 +1020,7 @@ SearchResultPtr DecoupleSegment<data_type>::searchVI(
     }
     /// decoupel seg search result has first stage result, we don't need to sort and trim
     if (has_first_stage_result)
-        return SearchResult::mergeNoSort(res);
+        return SearchResult::merge(res, this->vi_metadata.index_metric, 0, false);
     else
         return SearchResult::merge(res, this->vi_metadata.index_metric, k);
 }
