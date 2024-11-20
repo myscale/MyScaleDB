@@ -961,7 +961,7 @@ String Fetcher::fetchVectorIndex(
 
     if (disk)
     {
-        LOG_TRACE(log, "Will fetch to disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
+        LOG_TRACE(log, "Will fetch to disk {} with type {}", disk->getName(), disk->getDataSourceDescription().toString());
         UInt64 revision = disk->getRevision();
         if (revision)
             uri.addQueryParameter("disk_revision", toString(revision));
@@ -973,8 +973,8 @@ String Fetcher::fetchVectorIndex(
         /// disk should always be valid because here use target part's disk
         if (disk && disk->supportZeroCopyReplication())
         {
-            LOG_TRACE(log, "Trying to fetch with zero copy replication, provided disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
-            capability.push_back(toString(disk->getDataSourceDescription().type));
+            LOG_TRACE(log, "Trying to fetch with zero copy replication, provided disk {} with type {}", disk->getName(), disk->getDataSourceDescription().toString());
+            capability.push_back(disk->getDataSourceDescription().toString());
         }
     }
 
@@ -1056,7 +1056,7 @@ String Fetcher::fetchVectorIndex(
     }
 
     /// No sum_files_size in fetchVectorIndex, sync = false.
-    LOG_TEST(log, "Disk for fetch is disk {} with type {}", disk->getName(), toString(disk->getDataSourceDescription().type));
+    LOG_TEST(log, "Disk for fetch is disk {} with type {}", disk->getName(), disk->getDataSourceDescription().toString());
 
     UInt64 revision = parse<UInt64>(in->getResponseCookie("disk_revision", "0"));
     if (revision)
@@ -1399,7 +1399,7 @@ String Fetcher::downloadVectorIndexInPartToDisk(
         readStringBinary(part_id, in);
 
         if (!disk->supportZeroCopyReplication() || !disk->checkUniqueId(part_id))
-            throw Exception(ErrorCodes::ZERO_COPY_REPLICATION_ERROR, "Part {} unique id {} doesn't exist on {} (with type {}).", part_name, part_id, disk->getName(), toString(disk->getDataSourceDescription().type));
+            throw Exception(ErrorCodes::ZERO_COPY_REPLICATION_ERROR, "Part {} unique id {} doesn't exist on {} (with type {}).", part_name, part_id, disk->getName(), disk->getDataSourceDescription().toString());
 
         LOG_DEBUG(log, "Downloading vector index {} in part {} unique id {} metadata onto disk {}.", vec_index_name, part_name, part_id, disk->getName());
     }

@@ -119,7 +119,7 @@
 #endif
 
 #include "config.h"
-#include "config_version.h"
+#include <Common/config_version.h>
 
 
 #if defined(OS_LINUX)
@@ -995,6 +995,8 @@ try
         }
     );
 
+    std::function<void()> release_license_check = [] {}; // MYSCALE_OSS_DELETE_LINE
+
     /// NOTE: global context should be destroyed *before* GlobalThreadPool::shutdown()
     /// Otherwise GlobalThreadPool::shutdown() will hang, since Context holds some threads.
     SCOPE_EXIT({
@@ -1600,7 +1602,6 @@ try
     }
 
 // MYSCALE_INTERNAL_CODE_BEGIN
-    std::function<void()> release_license_check = [] {};
 #if defined(ENABLE_MYSCALE_COMMUNITY_EDITION)
     /// Check hardware resource
     MyscaleLicense::checkHardwareResourceLimitsForCommunityEdition();
