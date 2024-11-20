@@ -1,4 +1,4 @@
-image: harbor.internal.moqi.ai/mqdb/builder:3.1.2
+image: harbor.internal.moqi.ai/mqdb/builder:4.0.0
 
 workflow:
   rules:

@@ -1,19 +1,19 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/builder:3.1.2 .
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:3.1.2 . --push
-# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:3.1.2 bash
+# docker build -t harbor.internal.moqi.ai/mqdb/builder:4.0.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/builder:4.0.0 . --push
+# docker run --rm -it --name builder --hostname builder --workdir /builder -v $HOME/.ccache:/builder/.ccache -v $(realpath .):/builder/ClickHouse harbor.internal.moqi.ai/mqdb/builder:4.0.0 bash
 
 FROM ubuntu:22.04
 
 ARG TARGETARCH
 ARG WORK_DIRECTORY=/builder
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=15
+ENV LLVM_VERSION=18
 ENV CC=clang-${LLVM_VERSION}
 ENV CXX=clang++-${LLVM_VERSION}
-ENV INTEL_ONEAPI_VERSION=2021.4.0
 ENV CCACHE_VERSION=4.7.4
 ENV NFPM_VERSION=2.16.0
 ENV GO_VERSION=1.18.3
+ENV DEFAULT_RUST_TOOLCHAIN_VERSION=1.79.0
 
 RUN apt update && apt install ca-certificates --yes --verbose-versions \
     && sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list \
@@ -24,15 +24,17 @@ RUN apt update && apt install ca-certificates --yes --verbose-versions \
 
 RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && apt install ca-certificates lsb-release wget gnupg apt-transport-https software-properties-common --yes --verbose-versions \
-    && wget -q -O - https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
     && echo "deb [trusted=yes] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker-ce.list \
+    && export LLVM_PUBKEY_HASH="bda960a8da687a275a2078d43c111d66b1c6a893a3275271beedf266c1ff4a0cdecb429c7a5cccf9f486ea7aa43fd27f" \
+    && wget -nv -O /tmp/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && echo "${LLVM_PUBKEY_HASH} /tmp/llvm-snapshot.gpg.key" | sha384sum -c \
+    && apt-key add /tmp/llvm-snapshot.gpg.key \
     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
     && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
-    && wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
     && apt update \
     && apt install bash vim curl apt-utils expect perl pkg-config python3 python3-lxml python3-requests python3-termcolor tzdata pip docker-ce-cli dnsutils iputils-ping rsync --yes --verbose-versions \
-    && apt install git git-lfs build-essential libssl-dev cmake g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
-    && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu libblas-dev liblapack-dev --yes --verbose-versions \
+    && apt install git git-lfs build-essential libssl-dev g++ gcc yasm ninja-build debhelper pbuilder fakeroot alien devscripts gperf moreutils pigz pixz debian-archive-keyring debian-keyring --yes --verbose-versions \
+    && apt install gnutls-bin bsdmainutils gdb nasm rename binutils-riscv64-linux-gnu brotli file lsof odbcinst psmisc unixodbc pv jq zstd libhdf5-dev --yes --verbose-versions \
     && apt install \
     llvm-${LLVM_VERSION} \
     llvm-${LLVM_VERSION}-dev \
@@ -59,6 +61,21 @@ RUN apt update && apt upgrade --yes --verbose-versions --fix-missing \
     && apt clean \
     && rm -rfv /var/lib/apt/lists/*
 
+# Install cmake 3.20+ for Rust support
+# Used https://askubuntu.com/a/1157132 as reference
+RUN curl -s https://apt.kitware.com/keys/kitware-archive-latest.asc | \
+        gpg --dearmor - > /etc/apt/trusted.gpg.d/kitware.gpg && \
+    echo "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" >> /etc/apt/sources.list.d/kitware.list \
+    && apt update && apt install cmake --yes --verbose-versions
+
+# FIXME: workaround for "The imported target "merge-fdata" references the file" error
+# https://salsa.debian.org/pkg-llvm-team/llvm-toolchain/-/commit/992e52c0b156a5ba9c6a8a54f8c4857ddd3d371d
+RUN sed -i '/_IMPORT_CHECK_FILES_FOR_\(mlir-\|llvm-bolt\|merge-fdata\|MLIR\)/ {s|^|#|}' /usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm/LLVMExports-*.cmake
+
+# LLVM changes paths for compiler-rt libraries. For some reason clang-18.1.8 cannot catch up libraries from default install path.
+# It's very dirty workaround, better to build compiler and LLVM ourself and use it. Details: https://github.com/llvm/llvm-project/issues/95792
+RUN test ! -d /usr/lib/llvm-18/lib/clang/18/lib/x86_64-pc-linux-gnu || ln -s /usr/lib/llvm-18/lib/clang/18/lib/x86_64-pc-linux-gnu /usr/lib/llvm-18/lib/clang/18/lib/x86_64-unknown-linux-gnu
+
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     && pip install --upgrade cmake numpy clickhouse_driver
 
@@ -81,25 +98,41 @@ RUN curl -Lo /tmp/ccache.tar.gz https://github.com/ccache/ccache/releases/downlo
 
 ADD update-ccache-symlinks /usr/sbin/update-ccache-symlinks
 
+ARG TARGETARCH
+ARG SCCACHE_VERSION=v0.7.7
+ENV SCCACHE_IGNORE_SERVER_IO_ERROR=1
+# sccache requires a value for the region. So by default we use The Default Region
+ENV SCCACHE_REGION=us-east-1
+RUN arch=${TARGETARCH:-amd64} \
+  && case $arch in \
+    amd64) rarch=x86_64 ;; \
+    arm64) rarch=aarch64 ;; \
+  esac \
+  && curl -Ls "https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl.tar.gz" | \
+    tar xz -C /tmp \
+  && mv "/tmp/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl/sccache" /usr/bin \
+  && rm "/tmp/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl" -r
+
 # Rust toolchain and libraries
-ENV RUSTUP_HOME=${WORK_DIRECTORY}/rustup
-ENV CARGO_HOME=${WORK_DIRECTORY}/cargo
-ENV PATH="${WORK_DIRECTORY}/cargo/env:${PATH}"
-ENV PATH="${WORK_DIRECTORY}/cargo/bin:${PATH}"
-ENV SCCACHE_DIR="${WORK_DIRECTORY}/.sccache"
-ENV DEFAULT_RUST_TOOLCHAIN_VERSION=1.79.0
-# ENV SCCACHE_CONF="${WORK_DIRECTORY}/.sccache/sccache.conf"
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain=${DEFAULT_RUST_TOOLCHAIN_VERSION} \
-    && chmod 777 -R ${WORK_DIRECTORY}/rustup  \
-    && chmod 777 -R ${WORK_DIRECTORY}/cargo  \
-    && rustup target add aarch64-unknown-linux-gnu \
-    && rustup target add x86_64-apple-darwin \
-    && rustup target add x86_64-unknown-freebsd \
-    && rustup target add aarch64-apple-darwin \
-    && rustup target add powerpc64le-unknown-linux-gnu \
-    && cargo install sccache \
-    && mkdir -p ${SCCACHE_DIR} \
-    && rm -fr ${CARGO_HOME}/registry
+RUN mkdir -p /rust
+ENV RUSTUP_HOME=/rust/rustup
+ENV CARGO_HOME=/rust/cargo
+ENV PATH="/rust/cargo/bin:${PATH}"
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y && \
+    chmod 777 -R /rust && \
+    rustup toolchain install nightly-2024-04-01 && \
+    rustup default nightly-2024-04-01 && \
+    rustup toolchain remove stable && \
+    rustup component add rust-src && \
+    rustup target add x86_64-unknown-linux-gnu && \
+    rustup target add aarch64-unknown-linux-gnu && \
+    rustup target add x86_64-apple-darwin && \
+    rustup target add x86_64-unknown-freebsd && \
+    rustup target add aarch64-apple-darwin && \
+    rustup target add powerpc64le-unknown-linux-gnu && \
+    rustup target add x86_64-unknown-linux-musl && \
+    rustup target add aarch64-unknown-linux-musl && \
+    rustup target add riscv64gc-unknown-linux-gnu
 
 ADD cargo.config.toml ${CARGO_HOME}/config.toml
 
@@ -157,9 +190,10 @@ ENV PATH="$PATH:/usr/local/go/bin"
 ENV GOPATH=${WORK_DIRECTORY}/go
 ENV GOCACHE=${WORK_DIRECTORY}/go/.cache
 
-RUN mkdir -pv ${WORK_DIRECTORY}/go/{src,bin,.cache} && chmod 777 ${WORK_DIRECTORY}
-
-RUN pip install --upgrade clickhouse_driver
+ARG CLANG_TIDY_SHA1=c191254ea00d47ade11d7170ef82fe038c213774
+RUN curl -Lo /usr/bin/clang-tidy-cache \
+        "https://raw.githubusercontent.com/matus-chochlik/ctcache/$CLANG_TIDY_SHA1/clang-tidy-cache" \
+    && chmod +x /usr/bin/clang-tidy-cache
 
 RUN mkdir -p /root/.ssh
 RUN chmod -R 600 /root/.ssh

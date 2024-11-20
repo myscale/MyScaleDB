@@ -627,6 +627,8 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
 {
     OpenTelemetry::SpanHolder span("ReadWithHybridSearch::selectTotalHybridResult()");
     HybridAnalysisResult hybrid_result;
+    MergeTreeReadTask::BlockSizeParams block_size_params;
+    block_size_params.max_block_size_rows = getMaxBlockSize();
 
     /// Get vector scan and full-text search result for all selected parts
     auto parts_with_vector_text_result = MergeTreeSelectWithHybridSearchProcessor::selectPartsByVectorAndTextIndexes(
@@ -640,7 +642,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         prewhere_info,
         storage_snapshot,
         context,
-        getMaxBlockSize(),
+        block_size_params,
         num_streams,
         data,
         reader_settings);
