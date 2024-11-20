@@ -65,12 +65,12 @@ public:
         const VectorAndTextResultInDataParts & vector_results,
         const size_t vec_res_index,
         const VSDescription & vector_scan_desc,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     static ScoreWithPartIndexAndLabels getTotalTopKTextResult(
         const VectorAndTextResultInDataParts & text_results,
         const TextSearchInfoPtr & text_info,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     /// Get num_reorder candidate vector result among all selected parts for two stage search
     static ScoreWithPartIndexAndLabels getTotalCandidateVSResult(
@@ -78,16 +78,16 @@ public:
         const size_t vec_res_index,
         const VSDescription & vector_scan_desc,
         const UInt64 & num_reorder,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     static std::set<UInt64> getLabelsInSearchResults(
         const VectorAndTextResultInDataPart & mix_results,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     static void filterSearchResultsByFinalLabels(
         VectorAndTextResultInDataPart & mix_results,
         std::set<UInt64> & label_ids,
-        Poco::Logger * log);
+        LoggerPtr log);
 
 protected:
 
@@ -113,7 +113,7 @@ protected:
         const VectorAndTextResultInDataParts & vector_text_results,
         const UInt64 & top_k,
         const bool & desc_direction,
-        Poco::Logger * log,
+        LoggerPtr log,
         const bool need_vector,
         const size_t vec_res_index = 0);
 
@@ -121,13 +121,13 @@ protected:
     static void getLabelsInSearchResult(
         std::set<UInt64> & label_ids,
         const CommonSearchResultPtr & search_result,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     /// Construct a new search result based on original search result and final label ids.
     static CommonSearchResultPtr filterSearchResultByFinalLabels(
         const CommonSearchResultPtr & pre_search_result,
         std::set<UInt64> & label_ids,
-        Poco::Logger * log);
+        LoggerPtr log);
 };
 
 using MergeTreeBaseSearchManagerPtr = std::shared_ptr<MergeTreeBaseSearchManager>;

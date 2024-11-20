@@ -958,7 +958,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
 
         if (!typeid_cast<const ColumnString *>(column_nested.get()))
         {
-            const ColumnNullable * column_nested_nullable = checkAndGetColumn<ColumnNullable>(*column_nested);
+            const ColumnNullable * column_nested_nullable = checkAndGetColumn<ColumnNullable>(&*column_nested);
             if (!column_nested_nullable || !typeid_cast<const ColumnString *>(&column_nested_nullable->getNestedColumn()))
             {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS,
@@ -997,7 +997,7 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
         if (arg.getType() != Field::Types::String)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "All parameters inside {} function must be key-value format string, separated by `=`.", search_name);
 
-        String param_str = arg.get<String>();
+        String param_str = arg.safeGet<String>();
         auto pos = param_str.find('=');
         if (pos == std::string::npos || pos == 0 || pos == param_str.length())
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "The parameter {} inside {} function should be key-value format string, separated by `=`.", param_str, search_name);
@@ -1124,7 +1124,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
         }
 
         /// Use num_candidates for vector scan's top-k to get more candidates results for hybrid search
-        const auto & settings = getContext()->getSettingsRef();
+        const auto & settings_ref = getContext()->getSettingsRef();
         int num_candidates = 0;
         if (hybrid_parameters_map.contains("num_candidates"))
         {
@@ -1136,7 +1136,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
 
         /// Use default value (3 * topk) if specified num_candidates <= 0
         if (num_candidates <= 0)
-            num_candidates = static_cast<int>(settings.hybrid_search_top_k_multiple_base * syntax->limit_length);
+            num_candidates = static_cast<int>(settings_ref.hybrid_search_top_k_multiple_base * syntax->limit_length);
         else if (static_cast<UInt64>(num_candidates) < syntax->limit_length)
         {
             /// num_candidates should be no less than limit N (top k)
@@ -1177,7 +1177,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
 
         if (isRelativeScoreFusion(hybrid_fusion_type))
         {
-            float hybrid_fusion_weight = static_cast<float>(settings.hybrid_search_fusion_weight);
+            float hybrid_fusion_weight = static_cast<float>(settings_ref.hybrid_search_fusion_weight);
             if (hybrid_parameters_map.count("fusion_weight") > 0)
             {
                 std::stringstream fusion_weight_ss(hybrid_parameters_map["fusion_weight"]);
@@ -1200,7 +1200,7 @@ bool ExpressionAnalyzer::makeHybridSearchInfo(ActionsDAG & actions)
         }
         else if (isRankFusion(hybrid_fusion_type))
         {
-            int hybrid_fusion_k = static_cast<int>(settings.hybrid_search_fusion_k);
+            int hybrid_fusion_k = static_cast<int>(settings_ref.hybrid_search_fusion_k);
             if (hybrid_parameters_map.count("fusion_k") > 0)
             {
                 std::stringstream fusion_k_ss(hybrid_parameters_map["fusion_k"]);

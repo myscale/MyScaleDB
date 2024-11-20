@@ -1,5 +1,5 @@
-#include <Storages/MergeTree/MergeTreeWithVectorScanSource.h>
-#include <Storages/MergeTree/MergeTreeSelectWithHybridSearchProcessor.h>
+#include <VectorIndex/Storages/MergeTreeWithVectorScanSource.h>
+#include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <Common/threadPoolCallbackRunner.h>
 #include <IO/SharedThreadPools.h>
 #include <Common/EventFD.h>

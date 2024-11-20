@@ -101,10 +101,10 @@
 
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Processors/FusionSortingStep.h>
+#include <VectorIndex/Utils/HybridSearchUtils.h>
 
 #if USE_TANTIVY_SEARCH
 #    include <VectorIndex/Utils/CommonUtils.h>
-#    include <VectorIndex/Utils/HybridSearchUtils.h>
 #endif
 
 namespace ProfileEvents

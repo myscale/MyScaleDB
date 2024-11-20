@@ -32,6 +32,7 @@ namespace CurrentMetrics
 {
     extern const Metric MergeTreeDataSelectHybridSearchThreads;
     extern const Metric MergeTreeDataSelectHybridSearchThreadsActive;
+    extern const Metric MergeTreeDataSelectExecutorThreadsScheduled;
 }
 
 namespace DB
@@ -187,7 +188,7 @@ VectorIndex::BinaryVectorDatasetPtr MergeTreeVSManager::generateVectorDataset(bo
         if (!query_col)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong query column type, expect Array in batch distance function");
 
-        const ColumnString *src_data_concrete = checkAndGetColumn<ColumnString>(query_col->getData());
+        const ColumnString * src_data_concrete = checkAndGetColumn<ColumnString>(&(query_col->getData()));
         if (!src_data_concrete)
             throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Wrong query column type, expect fixed String inside Array() in batch distance function");
 
@@ -306,7 +307,11 @@ ManyVectorScanResults MergeTreeVSManager::vectorScan(
     else
     {
         /// Parallel executing vector scan
-        ThreadPool pool(CurrentMetrics::MergeTreeDataSelectHybridSearchThreads, CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive, num_threads);
+        ThreadPool pool(
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
+            num_threads);
 
         for (size_t desc_index = 0; desc_index < descs_size; ++desc_index)
             pool.scheduleOrThrowOnError([&, desc_index]()
@@ -449,7 +454,7 @@ VectorScanResultPtr MergeTreeVSManager::executeSecondStageVectorScan(
     const VectorScanResultPtr & first_stage_vec_result)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVSManager::executeSecondStageVectorScan()");
-    Poco::Logger * log_ = &Poco::Logger::get("executeSecondStageVectorScan");
+    LoggerPtr log_ = getLogger("executeSecondStageVectorScan");
 
     /// Currently, only FloatVector can create MSTG index, and use two stage search(MYSCALE_OSS_DELETE_LINE)
     if (vector_scan_desc.vector_search_type != Search::DataType::FloatVector)
@@ -534,7 +539,7 @@ VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
     const VectorAndTextResultInDataParts & parts_with_mix_results,
     const ScoreWithPartIndexAndLabels & first_stage_top_results,
     const VSDescription & vector_scan_desc,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     /// Merge candidate vector results from the same part index into a vector
     std::map<size_t, std::vector<ScoreWithPartIndexAndLabel>> part_index_merged_map;
@@ -599,7 +604,7 @@ SearchResultAndRangesInDataParts MergeTreeVSManager::FilterPartsWithManyVSResult
     const RangesInDataParts & parts_with_ranges,
     const std::unordered_map<String, ScoreWithPartIndexAndLabels> & vector_scan_results_with_part_index,
     const Settings & settings,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     OpenTelemetry::SpanHolder span("MergeTreeVSManager::FilterPartsWithManyVSResults()");
 
@@ -690,7 +695,11 @@ SearchResultAndRangesInDataParts MergeTreeVSManager::FilterPartsWithManyVSResult
     else
     {
         /// Parallel executing filter parts_in_ranges with total top-k results
-        ThreadPool pool(CurrentMetrics::MergeTreeDataSelectHybridSearchThreads, CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive, num_threads);
+        ThreadPool pool(
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
+            num_threads);
 
         for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
             pool.scheduleOrThrowOnError([&, part_index]()
@@ -902,12 +911,9 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
     auto label_column = DataTypeUInt32().createColumn();
     auto vector_id_column = DataTypeUInt32().createColumn();
 
-    tmp_vector_scan_result->is_batch = is_batch;
-    tmp_vector_scan_result->top_k = k;
-    tmp_vector_scan_result->query_vector_num = static_cast<int>(nq);
-
     auto alter_conversions = part->storage.getAlterConversionsForPart(part);
-    MergeTreeReaderSettings reader_settings = {.save_marks_in_cache = true};
+    MergeTreeReaderSettings reader_settings;
+    reader_settings.save_marks_in_cache = true;
 
     StorageSnapshotPtr storage_snapshot_ptr = std::make_shared<StorageSnapshot>(part->storage, metadata);
 
@@ -1081,7 +1087,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
 
                     if (vector_raw_data.empty())
                     {
-                        ASSERT(mark_left_rows == 0)
+                        assert(mark_left_rows == 0);
                         continue;
                     }
 
@@ -1090,7 +1096,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                             static_cast<int32_t>(dim),
                             const_cast<float *>(vector_raw_data.data()));
 
-                    assert(vector_raw_data.size() == mark_left_rows * dim)
+                    assert(vector_raw_data.size() == mark_left_rows * dim);
                 }
                 else if constexpr (T == Search::DataType::BinaryVector)
                 {
@@ -1133,7 +1139,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     else if (const ColumnSparse *sparse_column = checkAndGetColumn<ColumnSparse>(one_column.get()))
                     {
                         LOG_INFO(get_logger(), "test DB::VectorSearchType::BinaryVector: Sparse(FixedString(N))");  /// MYSCALE_OSS_DELETE_LINE
-                        const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
+                        const ColumnFixedString * sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(&(sparse_column->getValuesColumn()));
                         if (!sparse_fixed_string)
                             throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
 
@@ -1168,7 +1174,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
 
                     if (vector_raw_data.empty())
                     {
-                        ASSERT(mark_left_rows == 0)
+                        assert(mark_left_rows == 0);
                         continue;
                     }
 
@@ -1177,7 +1183,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                             static_cast<int32_t>(dim),
                             const_cast<uint8_t *>(vector_raw_data.data()));
 
-                    assert(vector_raw_data.size() == mark_left_rows * dim / 8)
+                    assert(vector_raw_data.size() == mark_left_rows * dim / 8);
                 }
 
                 VectorIndex::VIBitmapPtr row_exists = std::make_shared<VectorIndex::VIBitmap>(mark_left_rows, true);
@@ -1314,7 +1320,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                 /// BinaryVector is represented as FixedString(N), sometimes it maybe Sparse(FixedString(N))
                 else if (const ColumnSparse *sparse_column = checkAndGetColumn<ColumnSparse>(one_column.get()))
                 {
-                    const ColumnFixedString *sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(sparse_column->getValuesColumn());
+                    const ColumnFixedString * sparse_fixed_string = checkAndGetColumn<ColumnFixedString>(&(sparse_column->getValuesColumn()));
                     if (!sparse_fixed_string)
                         throw DB::Exception(DB::ErrorCodes::ILLEGAL_COLUMN, "Vector column type for BinaryVector is not FixString(N) in column {}", search_column);
 

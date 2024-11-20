@@ -36,7 +36,6 @@ MergeFromLogEntryTask::MergeFromLogEntryTask(
         task_result_callback_)
     , rng(randomSeed())
 {
-    metadata_snapshot = storage.getInMemoryMetadataPtr();
 }
 
 
@@ -423,6 +422,7 @@ bool MergeFromLogEntryTask::finalize(ReplicatedMergeMutateTaskBase::PartLogWrite
      */
 
     /// Support multiple vector indices
+    StorageMetadataPtr metadata_snapshot = storage.getInMemoryMetadataPtr();
     if (metadata_snapshot->hasVectorIndices())
         storage.merger_mutator.handleVectorIndicesForMergedPart(part, parts, metadata_snapshot);
 

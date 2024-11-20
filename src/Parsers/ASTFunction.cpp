@@ -64,10 +64,8 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
                 writeString(alias, ostr);
             else
             {
-                Hash hash = getTreeHash();
-                writeText(hash.first, ostr);
-                ostr.write('_');
-                writeText(hash.second, ostr);
+                Hash hash = getTreeHash(/*ignore_aliases=*/ false);
+                writeText(toString(hash), ostr);
             }
         }
 

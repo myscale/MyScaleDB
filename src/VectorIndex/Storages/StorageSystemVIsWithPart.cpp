@@ -7,6 +7,7 @@
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Processors/ISource.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
@@ -317,7 +318,23 @@ Pipe StorageSystemVIsWithPart::read(
 
     /// Condition on "database" in a query acts like an index.
     Block block{ColumnWithTypeAndName(std::move(column), std::make_shared<DataTypeString>(), "database")};
-    VirtualColumnUtils::filterBlockWithQuery(query_info.query, block, context);
+
+
+    ActionDAGNodes added_filter_nodes;
+    if (query_info.prewhere_info)
+    {
+        const auto & node = query_info.prewhere_info->prewhere_actions.findInOutputs(query_info.prewhere_info->prewhere_column_name);
+        added_filter_nodes.nodes.push_back(&node);
+    }
+
+    std::optional<ActionsDAG> filter;
+    if (auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(added_filter_nodes.nodes))
+        filter = VirtualColumnUtils::splitFilterDagForAllowedInputs(filter_actions_dag->getOutputs().at(0), &block);
+
+    const ActionsDAG::Node * predicate = filter ? filter->getOutputs().at(0) : nullptr;
+
+    /// Filter block with `database` column.
+    VirtualColumnUtils::filterBlockWithPredicate(predicate, block, context);
 
     ColumnPtr & filtered_databases = block.getByPosition(0).column;
     return Pipe(std::make_shared<DataVectorIndexSegmentsSource>(

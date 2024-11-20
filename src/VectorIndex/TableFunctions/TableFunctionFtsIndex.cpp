@@ -1,5 +1,6 @@
 #include <VectorIndex/Storages/StorageFtsIndex.h>
 #include <Interpreters/evaluateConstantExpression.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Storages/checkAndGetLiteralArgument.h>
 #include <TableFunctions/TableFunctionFactory.h>
 #include <VectorIndex/TableFunctions/TableFunctionFtsIndex.h>
@@ -52,9 +53,9 @@ void TableFunctionFtsIndex::parseArguments(const ASTPtr & ast_function, ContextP
                 "Table function '{}' expected bool flag for 'search_with_index_name' argument", getName());
 
         if (value.getType() == Field::Types::Bool)
-            search_with_index_name = value.get<bool>();
+            search_with_index_name = value.safeGet<bool>();
         else
-            search_with_index_name = value.get<UInt64>();
+            search_with_index_name = value.safeGet<UInt64>();
     }
 
     auto database = checkAndGetLiteralArgument<String>(args[0], "database");
@@ -68,7 +69,7 @@ void TableFunctionFtsIndex::parseArguments(const ASTPtr & ast_function, ContextP
     query_text = checkAndGetLiteralArgument<String>(args[3], "query_text");
 }
 
-ColumnsDescription TableFunctionFtsIndex::getActualTableStructure(ContextPtr) const
+ColumnsDescription TableFunctionFtsIndex::getActualTableStructure(ContextPtr, bool /*is_insert_query*/) const
 {
     ColumnsDescription columns;
     for (const auto & column : StorageFtsIndex::virtuals_sample_block)
@@ -77,10 +78,10 @@ ColumnsDescription TableFunctionFtsIndex::getActualTableStructure(ContextPtr) co
     return columns;
 }
 
-StoragePtr TableFunctionFtsIndex::executeImpl(const ASTPtr & /*ast_function*/, ContextPtr context, const std::string & table_name, ColumnsDescription /*cached_columns*/) const
+StoragePtr TableFunctionFtsIndex::executeImpl(const ASTPtr & /*ast_function*/, ContextPtr context, const std::string & table_name, ColumnsDescription /*cached_columns*/, bool /*is_insert_query*/) const
 {
     auto source_table = DatabaseCatalog::instance().getTable(source_table_id, context);
-    auto columns = getActualTableStructure(context);
+    auto columns = getActualTableStructure(context, false);
 
     StorageID storage_id(getDatabaseName(), table_name);
     auto res = std::make_shared<StorageFtsIndex>(std::move(storage_id), std::move(source_table), std::move(columns), search_with_index_name, search_column_name, fts_index_name, query_text);
@@ -91,14 +92,15 @@ StoragePtr TableFunctionFtsIndex::executeImpl(const ASTPtr & /*ast_function*/, C
 
 void registerTableFunctionFtsIndex(TableFunctionFactory & factory)
 {
-    factory.registerFunction<TableFunctionFtsIndex>({.documentation = {R"(
+    factory.registerFunction<TableFunctionFtsIndex>({.documentation = {
+        .description=R"(
 The table function is used to gather global information about the FTS index on the table. The returned results can serve as essential parameters for the precise calculation of BM25 in distributed text search.
 
 The syntax is ftsIndex(db_name, table_name, search_column_name|fts_index_name, query_text [,search_with_index_name = false])
 
 The parameter search_with_index_name determines whether the third parameter should be search_column_name or fts_index_name. By default, it is set to false and can be omitted.
 )",
-    {{"ftsIndex", "SELECT * FROM ftsIndex(currentDatabase(), local_table, text_column, 'hello')"}}
+        .examples={{"ftsIndex", "SELECT * FROM ftsIndex(currentDatabase(), local_table, text_column, 'hello')", ""}}
     }});
 }
 

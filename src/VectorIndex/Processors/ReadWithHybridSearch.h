@@ -33,7 +33,7 @@ public:
         size_t num_streams_,
         std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
         LoggerPtr log_,
-        MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
+        AnalysisResultPtr analyzed_result_ptr_,
         bool enable_parallel_reading
     );
 
@@ -91,7 +91,7 @@ private:
         const StorageMetadataPtr & metadata_for_reading,
         const int default_mstg_disk_mode,
         const SelectQueryInfo & query_info_,
-        Poco::Logger * log);
+        LoggerPtr log);
     /// MYSCALE_INTERNAL_CODE_END
 
     void performFinal(

@@ -26,7 +26,7 @@ struct SegmentBuiltStatus
     };
     Status getStatus() { return status; }
 
-    DB::String statusToString()
+    String statusToString()
     {
         switch (status)
         {
@@ -63,20 +63,20 @@ struct SegmentStatus
 
     SegmentStatus(Status status_ = Status::PENDING, String err_msg_ = "") : status(status_), err_msg(err_msg_) {}
 
-    DB::String statusToString() const
+    String statusToString() const
     {
         return std::string(magic_enum::enum_name(status));
     }
     Status getStatus() const { std::lock_guard lock(mutex); return status; }
-    DB::String getErrMsg() const { std::lock_guard lock(mutex); return err_msg; }
-    void setErrMsg(const DB::String & msg) { std::lock_guard lock(mutex); err_msg = msg; }
+    String getErrMsg() const { std::lock_guard lock(mutex); return err_msg; }
+    void setErrMsg(const String & msg) { std::lock_guard lock(mutex); err_msg = msg; }
     UInt64 getElapsedTime() const
     {
         std::lock_guard lock(mutex);
         return static_cast<UInt64>(watch ? watch->elapsedSeconds() : elapsed_time);
     }
     void setElapsedTime(double time) { std::lock_guard lock(mutex); elapsed_time = time; }
-    void setStatus(Status status_, DB::String err_msg_ = "") 
+    void setStatus(Status status_, String err_msg_ = "") 
     {
         std::lock_guard lock(mutex);
         status = status_;
@@ -95,7 +95,7 @@ struct SegmentStatus
 private:
     mutable std::mutex mutex;
     Status status{Status::PENDING};
-    DB::String err_msg{""};
+    String err_msg{""};
     StopwatchUniquePtr watch{nullptr};
     double elapsed_time{0};
 };

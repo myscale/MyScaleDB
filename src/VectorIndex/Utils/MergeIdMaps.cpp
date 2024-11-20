@@ -60,8 +60,8 @@ void MergeIdMaps::transferToOldRowIds(const UInt8 own_id, SearchResultPtr & resu
     auto new_distances = result->getResultDistances();
     auto new_ids = result->getResultIndices();
 
-    std::vector<DB::UInt64> real_row_ids;
-    std::vector<DB::Float32> distances;
+    std::vector<UInt64> real_row_ids;
+    std::vector<Float32> distances;
     for (int i = 0; i < result->getNumCandidates(); i++)
     {
         auto new_row_id = new_ids[i];

@@ -80,8 +80,8 @@ bool VIDescription::operator==(const VIDescription & other) const
     /// Compare the definition_ast string. In replicated cases, the new metadata is newly construted from log entry,
     /// hence the data_type, parameters, and definition_ast are different.
     /// TODO: May optimize when parameters can be compared.
-    String ast_string = serializeAST(*definition_ast, true);
-    String other_ast_string = serializeAST(*(other.definition_ast), true);
+    String ast_string = serializeAST(*definition_ast);
+    String other_ast_string = serializeAST(*(other.definition_ast));
     return ast_string == other_ast_string;
 }
 

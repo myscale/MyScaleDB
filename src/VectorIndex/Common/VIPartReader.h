@@ -43,7 +43,7 @@ public:
         , enforce_fixed_array(enforce_fixed_array_)
     {
         DB::MergeTreeReaderSettings reader_settings;
-        StorageSnapshotPtr storage_snapshot_ptr = std::make_shared<StorageSnapshot>(part->storage, metadata_snapshot_);
+        DB::StorageSnapshotPtr storage_snapshot_ptr = std::make_shared<DB::StorageSnapshot>(part->storage, metadata_snapshot_);
         reader = part->getReader(
             cols,
             storage_snapshot_ptr,
@@ -51,7 +51,7 @@ public:
             /*vitual_fields = */ {},
             /* uncompressed_cache = */ nullptr,
             mark_cache_,
-            std::make_shared<AlterConversions>(),
+            std::make_shared<DB::AlterConversions>(),
             reader_settings,
             {},
             {});
@@ -201,7 +201,7 @@ protected:
             {
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column inner type in Array is not Float32 in part {}", part->name);
             }
-            const DB::PaddedPODArray<DB::Float32> &src_vec = src_data_concrete->getData();
+            const DB::PaddedPODArray<Float32> &src_vec = src_data_concrete->getData();
 
             total_rows = offsets.size();
             if (total_rows == 0)
@@ -233,7 +233,7 @@ protected:
         }
         else if constexpr (T == Search::DataType::BinaryVector)
         {
-            if (const DB::ColumnFixedString *fixed_string = DB::checkAndGetColumn<DB::ColumnFixedString>(one_column.get()))
+            if (const DB::ColumnFixedString * fixed_string = DB::checkAndGetColumn<DB::ColumnFixedString>(&*one_column))
             {
                 auto fixed_N = fixed_string->getN();
                 if (fixed_N * 8 != dimension)
@@ -255,7 +255,7 @@ protected:
             /// BinaryVector is represented as FixedString(N), sometimes it maybe Sparse(FixedString(N))
             else if (const DB::ColumnSparse *sparse_column = checkAndGetColumn<DB::ColumnSparse>(one_column.get()))
             {
-                const DB::ColumnFixedString *sparse_fixed_string = checkAndGetColumn<DB::ColumnFixedString>(sparse_column->getValuesColumn());
+                const DB::ColumnFixedString * sparse_fixed_string = checkAndGetColumn<DB::ColumnFixedString>(&(sparse_column->getValuesColumn()));
                 if (!sparse_fixed_string)
                     throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column type for BinaryVector is not FixString(N) in part {}", part->name);
 

@@ -935,53 +935,36 @@ void StorageDistributed::readHybridSearch(
 
     const auto & snapshot_data = assert_cast<const SnapshotData &>(*storage_snapshot->data);
 
-    ClusterProxy::AdditionalShardFilterGenerator additional_shard_filter_generator;
-    if (query_info.use_custom_key)
-    {
-        if (auto custom_key_ast = parseCustomKeyForTable(settings.parallel_replicas_custom_key, *local_context))
-        {
-            if (query_info.getCluster()->getShardCount() == 1)
-            {
-                // we are reading from single shard with multiple replicas but didn't transform replicas
-                // into virtual shards with custom_key set
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Replicas weren't transformed into virtual shards");
-            }
-
-            additional_shard_filter_generator =
-                [&, custom_key_ast = std::move(custom_key_ast), shard_count = query_info.cluster->getShardCount()](uint64_t shard_num) -> ASTPtr
-            {
-                return getCustomKeyFilterForParallelReplica(
-                    shard_count, shard_num - 1, custom_key_ast, settings.parallel_replicas_custom_key_filter_type, *this, local_context);
-            };
-        }
-    }
-
     auto executeHybridSearch = [&](ASTPtr & query_ast, QueryPlan & query_plan_hybrid_search, UInt8 score_type)
     {
         Block header_query
             = InterpreterSelectQuery(query_ast, local_context, SelectQueryOptions(processed_stage).analyze()).getSampleBlock();
 
-        const auto & modified_query_ast
-            = ClusterProxy::rewriteSelectQuery(local_context, query_ast, remote_database, remote_table, remote_table_function_ptr);
+        SelectQueryInfo modified_query_info = query_info;
+        modified_query_info.query = ClusterProxy::rewriteSelectQuery(
+            local_context, query_ast, remote_database, remote_table, remote_table_function_ptr);
 
         ClusterProxy::SelectStreamFactory select_stream_factory
             = ClusterProxy::SelectStreamFactory(header_query, snapshot_data.objects_by_shard, storage_snapshot, processed_stage);
+
+        auto shard_filter_generator = ClusterProxy::getShardFilterGeneratorForCustomKey(
+            *query_info.getCluster(), local_context, getInMemoryMetadataPtr()->columns);
 
         ClusterProxy::executeQuery(
             query_plan_hybrid_search,
             header_query,
             processed_stage,
-            main_table,
+            remote_storage,
             remote_table_function_ptr,
             select_stream_factory,
             log,
-            modified_query_ast,
             local_context,
-            query_info,
+            modified_query_info,
             sharding_key_expr,
             sharding_key_column_name,
-            query_info.cluster,
-            additional_shard_filter_generator);
+            distributed_settings,
+            shard_filter_generator,
+            is_remote_function);
 
         if (!query_plan_hybrid_search.isInitialized())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Distributed HybridSearch Pipeline is not initialized");

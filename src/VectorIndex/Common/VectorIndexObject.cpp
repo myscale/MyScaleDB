@@ -1,4 +1,5 @@
 #include <Common/ErrorCodes.h>
+#include <Common/callOnce.h>
 
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <VectorIndex/Common/VectorIndexObject.h>
@@ -15,9 +16,9 @@ namespace ErrorCodes
 }
 
 const UInt64 WAIT_VECTOR_INDEX_BUILD_TIMEOUT_SEC = 300;
-void VectorIndexObject::init()
+void VectorIndexObject::init() const
 {
-    auto init_func = [this] {
+    auto init_func = [&] {
         for (const auto & part : storage.getDataPartsForInternalUsage())
             part->segments_mgr->addSegment(vec_desc);
         if (is_replica)
@@ -42,13 +43,13 @@ void VectorIndexObject::init()
                 }
                 else if (code != Coordination::Error::ZOK)
                 {
-                    throw zkutil::KeeperException(code, zookeeper_build_status_path);
+                    throw zkutil::KeeperException::fromPath(code, zookeeper_build_status_path);
                 }
             }
         }
     };
 
-    std::call_once(init_flag, init_func);
+    callOnce(init_flag, init_func);
 }
 
 void VectorIndexObject::drop()

@@ -13,7 +13,7 @@ void MergeTreeBaseSearchManager::mergeSearchResultImpl(
     CommonSearchResultPtr tmp_result,
     const ColumnUInt64 * part_offset)
 {
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeBaseSearchManager");
+    LoggerPtr log = getLogger("MergeTreeBaseSearchManager");
 
     OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::mergeSearchResultImpl()");
     const ColumnUInt32 * label_column = checkAndGetColumn<ColumnUInt32>(tmp_result->result_columns[0].get());
@@ -153,7 +153,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
     const VectorAndTextResultInDataParts & vector_results,
     const size_t vec_res_index,
     const VSDescription & vector_scan_desc,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     bool desc_direction = vector_scan_desc.direction == -1;
     int top_k = vector_scan_desc.topk > 0 ? vector_scan_desc.topk : VectorIndex::DEFAULT_TOPK;
@@ -166,7 +166,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKVSResult(
 ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopKTextResult(
     const VectorAndTextResultInDataParts & text_results,
     const TextSearchInfoPtr & text_info,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     int top_k = text_info->topk;
 
@@ -180,7 +180,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalCandidateVSResul
         const size_t vec_res_index,
         const VSDescription & vector_scan_desc,
         const UInt64 & num_reorder,
-        Poco::Logger * log)
+        LoggerPtr log)
 {
     bool desc_direction = vector_scan_desc.direction == -1;
 
@@ -194,7 +194,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
     const VectorAndTextResultInDataParts & vector_text_results,
     const UInt64 & top_k,
     const bool & desc_direction,
-    Poco::Logger * log,
+    LoggerPtr log,
     const bool need_vector,
     const size_t vec_res_index)
 {
@@ -286,7 +286,7 @@ ScoreWithPartIndexAndLabels MergeTreeBaseSearchManager::getTotalTopSearchResultI
 
 std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
     const VectorAndTextResultInDataPart & mix_results,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     OpenTelemetry::SpanHolder span("MergeTreeBaseSearchManager::getLabelsInSearchResults()");
     std::set<UInt64> label_ids;
@@ -309,7 +309,7 @@ std::set<UInt64> MergeTreeBaseSearchManager::getLabelsInSearchResults(
 void MergeTreeBaseSearchManager::getLabelsInSearchResult(
     std::set<UInt64> & label_ids,
     const CommonSearchResultPtr & search_result,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     if (!search_result || !search_result->computed)
         return;
@@ -334,7 +334,7 @@ void MergeTreeBaseSearchManager::getLabelsInSearchResult(
 void MergeTreeBaseSearchManager::filterSearchResultsByFinalLabels(
     VectorAndTextResultInDataPart & mix_results,
     std::set<UInt64> & label_ids,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     LOG_DEBUG(log, "filterSearchResultsByFinalLabels: part = {}", mix_results.data_part->name);
 
@@ -361,7 +361,7 @@ void MergeTreeBaseSearchManager::filterSearchResultsByFinalLabels(
 CommonSearchResultPtr MergeTreeBaseSearchManager::filterSearchResultByFinalLabels(
     const CommonSearchResultPtr & pre_search_result,
     std::set<UInt64> & label_ids,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     if (!pre_search_result || !pre_search_result->computed)
         return nullptr;
