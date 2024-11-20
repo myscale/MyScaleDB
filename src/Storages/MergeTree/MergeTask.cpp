@@ -886,7 +886,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         LOG_DEBUG(ctx->log, "After write row_source_pos: inverted_row_ids_map_buf size: {}", global_ctx->inverted_row_ids_map_buf->count());
         if (global_ctx->chosen_merge_algorithm == MergeAlgorithm::Horizontal)
         {
-            ctx->rows_sources_file.reset();
             ctx->rows_sources_write_buf.reset();
             ctx->rows_sources_uncompressed_write_buf.reset();
         }

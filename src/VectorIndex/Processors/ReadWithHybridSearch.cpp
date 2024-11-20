@@ -12,7 +12,10 @@
 #include <Processors/Transforms/PartialSortingTransform.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
-#include <Storages/MergeTree/MergeTreeWithVectorScanSource.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
+#include <Storages/MergeTree/MergeTreeReadPoolInOrder.h>
+#include <Storages/MergeTree/MergeTreeSource.h>
+#include <VectorIndex/Storages/MergeTreeWithVectorScanSource.h>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
@@ -41,6 +44,7 @@ namespace CurrentMetrics
 {
     extern const Metric MergeTreeDataSelectBM25CollectThreads;
     extern const Metric MergeTreeDataSelectBM25CollectThreadsActive;
+    extern const Metric MergeTreeDataSelectExecutorThreadsScheduled; /// TODO: use proper scheduled
     extern const Metric ReadWithHybridSearchSecondStageThreads;
     extern const Metric ReadWithHybridSearchSecondStageThreadsActive;
     extern const Metric MergeTreeDataSelectHybridSearchThreads;
@@ -70,12 +74,6 @@ namespace ErrorCodes
             && (settings.max_streams_to_max_threads_ratio > 1 || settings.max_streams_for_merge_tree_reading > 1),
         .enable_multiple_prewhere_read_steps = settings.enable_multiple_prewhere_read_steps,
     };
-}
-
-[[maybe_unused]] static const PrewhereInfoPtr & getPrewhereInfo(const SelectQueryInfo & query_info)
-{
-    return query_info.projection ? query_info.projection->prewhere_info
-                                 : query_info.prewhere_info;
 }
 
 #if USE_TANTIVY_SEARCH
@@ -109,7 +107,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
         db_table_name = data.getStorageID().database_name + ".";
     db_table_name += data.getStorageID().table_name;
 
-    for (const auto & index_desc : metadata_for_reading->getSecondaryIndices())
+    for (const auto & index_desc : getStorageMetadata()->getSecondaryIndices())
     {
         if (index_desc.type == TANTIVY_INDEX_NAME && ((from_table_function && index_desc.name == text_search_info->index_name)
             || (!from_table_function && index_desc.column_names.size() == 1 && index_desc.column_names[0] == search_column_name)))
@@ -175,6 +173,7 @@ void ReadWithHybridSearch::getStatisticForTextSearch()
         ThreadPool pool(
             CurrentMetrics::MergeTreeDataSelectBM25CollectThreads,
             CurrentMetrics::MergeTreeDataSelectBM25CollectThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
             num_threads);
 
         for (size_t part_index = 0; part_index < prepared_parts.size(); ++part_index)
@@ -214,7 +213,7 @@ ReadWithHybridSearch::ReadWithHybridSearch(
     size_t num_streams_,
     std::shared_ptr<PartitionIdToMaxBlock> max_block_numbers_to_read_,
     LoggerPtr log_,
-    MergeTreeDataSelectAnalysisResultPtr analyzed_result_ptr_,
+    AnalysisResultPtr analyzed_result_ptr_,
     bool enable_parallel_reading)
     : ReadFromMergeTree(
         parts_,
@@ -245,7 +244,7 @@ ReadWithHybridSearch::ReadWithHybridSearch(
         vec_num_reorders.resize(vector_scan_descs_size, 0);
         /// MYSCALE_INTERNAL_CODE_BEGIN
         supportTwoStageSearch(prepared_parts, vector_scan_info, context->getSettingsRef(),
-                            metadata_for_reading, data.getSettings()->default_mstg_disk_mode, query_info, log);
+                            getStorageMetadata(), data.getSettings()->default_mstg_disk_mode, query_info, log);
         /// MYSCALE_INTERNAL_CODE_END
     }
 }
@@ -258,7 +257,7 @@ void ReadWithHybridSearch::supportTwoStageSearch(
     const StorageMetadataPtr & metadata_for_reading,
     const int default_mstg_disk_mode,
     const SelectQueryInfo & query_info_,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     if (!vector_scan_info_ptr)
         return;
@@ -275,7 +274,7 @@ void ReadWithHybridSearch::supportTwoStageSearch(
         return;
 
     /// TODO: In adaptive two stage search option, disable two stage search for FINAL
-    if (isFinal(query_info_) && settings.two_stage_search_option == 1)
+    if (query_info_.isFinal() && settings.two_stage_search_option == 1)
         return;
 
     /// It is allowed that some vector scans with two-stage, but others not
@@ -432,15 +431,17 @@ void ReadWithHybridSearch::initializePipeline(QueryPipelineBuilder & pipeline, c
         pipeline.init(Pipe(std::make_shared<NullSource>(getOutputStream().header)));
         return;
     }
+
+    Pipe pipe;
     /// TODO: batch_distance refactor
     if (query_info.vector_scan_info && query_info.vector_scan_info->is_batch)
     {
-        if (isFinal(query_info))
+        if (query_info.isFinal())
         {
             std::set<String> add_columns;
             add_columns.insert(column_names_to_read.begin(),column_names_to_read.end());
 
-            for(auto temp_name : metadata_for_reading->getColumnsRequiredForSortingKey())
+            for(auto temp_name : getStorageMetadata()->getColumnsRequiredForSortingKey())
             {
                 if(!add_columns.contains(temp_name))
                 {
@@ -535,16 +536,16 @@ Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
 
     auto pipe = readFromParts(std::move(parts_with_ranges), column_names, settings.use_uncompressed_cache);
 
-    if(isFinal(query_info))
+    if(query_info.isFinal())
     {
         /// Add generating sorting key processor
         auto sorting_expr = std::make_shared<ExpressionActions>(
-            metadata_for_reading->getSortingKey().expression->getActionsDAG().clone());
+            getStorageMetadata()->getSortingKey().expression->getActionsDAG().clone());
         pipe.addSimpleTransform([sorting_expr](const Block & header)
                                 { return std::make_shared<ExpressionTransform>(header, sorting_expr); });
 
         /// Add partial sort processor
-        Names sort_columns = metadata_for_reading->getSortingKeyColumns();
+        Names sort_columns = getStorageMetadata()->getSortingKeyColumns();
         SortDescription sort_description;
         sort_description.compile_sort_description = settings.compile_sort_description;
         sort_description.min_count_to_compile_sort_description = settings.min_count_to_compile_sort_description;
@@ -558,7 +559,7 @@ Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
                                     return std::make_shared<PartialSortingTransform>(header, sort_description);
                                 });
 
-        Names partition_key_columns = metadata_for_reading->getPartitionKey().column_names;
+        Names partition_key_columns = getStorageMetadata()->getPartitionKey().column_names;
 
         /// Add merging final processor
         ReadFromMergeTree::addMergingFinal(
@@ -566,7 +567,8 @@ Pipe ReadWithHybridSearch::createReadProcessorsAmongParts(
             sort_description,
             data.merging_params,
             partition_key_columns,
-            max_block_size);
+            getMaxBlockSize(),
+            enable_vertical_final);
 
     }
 
@@ -587,29 +589,24 @@ Pipe ReadWithHybridSearch::readFromParts(
     for (const auto & part_with_ranges : parts_with_ranges)
     {
         MergeTreeBaseSearchManagerPtr search_manager = nullptr;
-        search_manager = std::make_shared<MergeTreeVSManager>(metadata_for_reading, query_info.vector_scan_info, context, false);
+        search_manager = std::make_shared<MergeTreeVSManager>(getStorageMetadata(), query_info.vector_scan_info, context, false);
 
         auto algorithm = std::make_unique<MergeTreeSelectWithHybridSearchProcessor>(
-            search_manager,
-            context,
-            requested_num_streams,
             data,
             storage_snapshot,
-            part.data_part,
-            part.alter_conversions,
-            max_block_size,
-            preferred_block_size_bytes,
-            preferred_max_column_in_block_size_bytes,
+            part_with_ranges,
+            shared_virtual_fields,
             required_columns,
-            part.ranges,
             use_uncompressed_cache,
             prewhere_info,
             actions_settings,
+            block_size,
             reader_settings,
-            nullptr,
-            virt_column_names);
+            search_manager,
+            context,
+            requested_num_streams);
 
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+        auto source = std::make_shared<MergeTreeWithVectorScanSource>(std::move(algorithm), data.getLogName());
 
         pipes.emplace_back(Pipe(std::move(source)));
     }
@@ -620,7 +617,7 @@ Pipe ReadWithHybridSearch::readFromParts(
 
 ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::getHybridSearchResult(const RangesInDataParts & parts_with_ranges) const
 {
-    return selectTotalHybridResult(parts_with_ranges, metadata_for_reading, requested_num_streams);
+    return selectTotalHybridResult(parts_with_ranges, getStorageMetadata(), requested_num_streams);
 }
 
 ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybridResult(
@@ -643,7 +640,7 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         prewhere_info,
         storage_snapshot,
         context,
-        max_block_size,
+        getMaxBlockSize(),
         num_streams,
         data,
         reader_settings);
@@ -665,13 +662,13 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         log_name = vector_scan_info ? "selectTotalVectorScanResult" : "selectTotalTextResult";
 
     /// If final is used, remove duplicate results from vector scan and/or full-text search results of all selected parts
-    if(isFinal(query_info) && parts_with_vector_text_result.size() > 1)
+    if(query_info.isFinal() && parts_with_vector_text_result.size() > 1)
     {
         LOG_DEBUG(log, "Perform final on search results from parts");
         performFinal(parts_with_ranges, parts_with_vector_text_result, num_streams);
     }
 
-    Poco::Logger * hybrid_log = &Poco::Logger::get(log_name);
+    LoggerPtr hybrid_log = getLogger(log_name);
 
     std::unordered_map<String, ScoreWithPartIndexAndLabels> multiple_distances_topk_results_map;
     if (vector_scan_info)
@@ -732,7 +729,11 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
         else
         {
             /// Parallel executing get total topk and possible two search stage
-            ThreadPool pool(CurrentMetrics::MergeTreeDataSelectHybridSearchThreads, CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive, num_threads);
+            ThreadPool pool(
+                CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
+                CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+                CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
+                num_threads);
 
             for (size_t desc_index = 0; desc_index < descs_size; ++desc_index)
                 pool.scheduleOrThrowOnError([&, desc_index]()
@@ -844,6 +845,7 @@ void ReadWithHybridSearch::performFinal(
         ThreadPool pool(
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
             num_threads);
 
         for (size_t part_index = 0; part_index < parts_with_vector_text_result.size(); ++part_index)
@@ -887,7 +889,7 @@ void ReadWithHybridSearch::performFinal(
     Names column_names_to_read;
 
     /// Add columns needed to calculate the sorting expression and the sign.
-    std::vector<String> add_columns = metadata_for_reading->getColumnsRequiredForSortingKey();
+    std::vector<String> add_columns = getStorageMetadata()->getColumnsRequiredForSortingKey();
     column_names_to_read.insert(column_names_to_read.end(), add_columns.begin(), add_columns.end());
 
     if (!data.merging_params.is_deleted_column.empty())
@@ -901,33 +903,59 @@ void ReadWithHybridSearch::performFinal(
     column_names_to_read.erase(std::unique(column_names_to_read.begin(), column_names_to_read.end()), column_names_to_read.end());
 
     /// Add virtual columns
-    Names local_virt_column_names = {"_part",  "_part_offset"};
+    column_names_to_read.push_back("_part");
+    column_names_to_read.push_back("_part_offset");
 
-    /// ReadType = InOrder
-    Pipes pipes;
-    for (const auto & part : parts_for_final_ranges)
+    /// Refactor to use pool, reference from readInOrder()
+    MergeTreeReadPoolPtr pool;
+
+    MergeTreeReadPoolBase::PoolSettings pool_settings
     {
-        ExpressionActionsSettings local_actions_settings;
+        .threads = /*max_streams*/ 1,
+        .sum_marks = parts_for_final_ranges.getMarksCountAllParts(),
+        //.min_marks_for_concurrent_read = min_marks_for_concurrent_read,
+        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
+        .use_uncompressed_cache = settings.use_uncompressed_cache,
+        .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
+    };
 
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
-                data, storage_snapshot, part.data_part, part.alter_conversions, max_block_size, preferred_block_size_bytes,
-                preferred_max_column_in_block_size_bytes, column_names_to_read, part.ranges, settings.use_uncompressed_cache, nullptr,
-                local_actions_settings, reader_settings, nullptr, local_virt_column_names, part.part_index_in_query, false);
+    ExpressionActionsSettings local_actions_settings;
 
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+    pool = std::make_shared<MergeTreeReadPoolInOrder>(
+            /*has_limit_below_one_block*/ false,
+            MergeTreeReadType::Default,
+            parts_for_final_ranges,
+            shared_virtual_fields,
+            storage_snapshot,
+            /*prewhere_info*/ nullptr,
+            local_actions_settings,
+            reader_settings,
+            column_names_to_read,
+            pool_settings,
+            context);
 
+    Pipes pipes;
+    for (size_t i = 0; i < parts_for_final_ranges.size(); ++i)
+    {
+        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(i);
+
+        auto processor = std::make_unique<MergeTreeSelectProcessor>(
+            pool, std::move(algorithm), nullptr,
+            local_actions_settings, block_size, reader_settings);
+
+        auto source = std::make_shared<MergeTreeSource>(std::move(processor), data.getLogName());
         pipes.emplace_back(std::move(source));
     }
 
     auto pipe = Pipe::unitePipes(std::move(pipes));
 
     auto sorting_expr = std::make_shared<ExpressionActions>(
-        metadata_for_reading->getSortingKey().expression->getActionsDAG().clone());
+        getStorageMetadata()->getSortingKey().expression->getActionsDAG().clone());
 
     pipe.addSimpleTransform([sorting_expr](const Block & header)
                             { return std::make_shared<ExpressionTransform>(header, sorting_expr); });
 
-    Names sort_columns = metadata_for_reading->getSortingKeyColumns();
+    Names sort_columns = getStorageMetadata()->getSortingKeyColumns();
     SortDescription sort_description;
     sort_description.compile_sort_description = settings.compile_sort_description;
     sort_description.min_count_to_compile_sort_description = settings.min_count_to_compile_sort_description;
@@ -935,7 +963,7 @@ void ReadWithHybridSearch::performFinal(
     size_t sort_columns_size = sort_columns.size();
     sort_description.reserve(sort_columns_size);
 
-    Names partition_key_columns = metadata_for_reading->getPartitionKey().column_names;
+    Names partition_key_columns = getStorageMetadata()->getPartitionKey().column_names;
 
     for (size_t i = 0; i < sort_columns_size; ++i)
         sort_description.emplace_back(sort_columns[i], 1, 1);
@@ -945,7 +973,8 @@ void ReadWithHybridSearch::performFinal(
         sort_description,
         data.merging_params,
         partition_key_columns,
-        max_block_size);
+        getMaxBlockSize(),
+        enable_vertical_final);
 
     QueryPipeline final_pipeline(std::move(pipe));
     PullingPipelineExecutor final_executor(final_pipeline);
@@ -957,7 +986,7 @@ void ReadWithHybridSearch::performFinal(
     Block block;
     while (final_executor.pull(block))
     {
-        const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+        const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column).getData();
 
         /// Handle LowCardinality cases
         auto part_column = block.getByName("_part").column->convertToFullColumnIfLowCardinality();
@@ -966,7 +995,7 @@ void ReadWithHybridSearch::performFinal(
         size_t rows = block.rows();
         for (size_t i = 0; i < rows; ++i)
         {
-            String part_name = part_col[i].get<String>();
+            String part_name = part_col[i].safeGet<String>();
             UInt64 label = col_data[i];
 
             /// Check if the label is from original top-k results in this part
@@ -1038,6 +1067,7 @@ VectorAndTextResultInDataParts ReadWithHybridSearch::selectPartsBySecondStageVec
         ThreadPool pool(
             CurrentMetrics::ReadWithHybridSearchSecondStageThreads,
             CurrentMetrics::ReadWithHybridSearchSecondStageThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
             num_threads);
 
         for (size_t part_index = 0; part_index < parts_with_candidates.size(); ++part_index)

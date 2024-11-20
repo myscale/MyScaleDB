@@ -25,6 +25,7 @@ namespace CurrentMetrics
 {
     extern const Metric MergeTreeDataSelectHybridSearchThreads;
     extern const Metric MergeTreeDataSelectHybridSearchThreadsActive;
+    extern const Metric MergeTreeDataSelectExecutorThreadsScheduled;
 }
 
 namespace DB
@@ -39,7 +40,7 @@ namespace ErrorCodes
 HybridSearchResultPtr getHybridResultFromScoresWithPartIndex(
     const ScoreWithPartIndexAndLabels & score_with_part_index_labels,
     const String & part_name,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     HybridSearchResultPtr tmp_hybrid_search_result = std::make_shared<CommonSearchResult>();
 
@@ -94,7 +95,7 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
     const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
     const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
     const HybridSearchInfoPtr & hybrid_info,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     /// Get fusion type from hybrid_info
     String fusion_type = hybrid_info->fusion_type;
@@ -159,7 +160,7 @@ SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHy
     const RangesInDataParts & parts_with_ranges,
     const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
     const Settings & settings,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     /// Merge hybrid results from the same part index into a vector
     std::map<size_t, std::vector<ScoreWithPartIndexAndLabel>> part_index_merged_map;
@@ -213,7 +214,11 @@ SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHy
     else
     {
         /// Parallel executing filter parts_in_ranges with total top-k results
-        ThreadPool pool(CurrentMetrics::MergeTreeDataSelectHybridSearchThreads, CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive, num_threads);
+        ThreadPool pool(
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
+            CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
+            num_threads);
 
         for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)
             pool.scheduleOrThrowOnError([&, part_index]()

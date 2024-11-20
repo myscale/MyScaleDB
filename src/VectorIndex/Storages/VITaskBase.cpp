@@ -125,7 +125,7 @@ bool VITaskBase::executeStep()
     }
 }
 
-StorageID VITaskBase::getStorageID()
+StorageID VITaskBase::getStorageID() const
 {
     return storage.getStorageID();
 }

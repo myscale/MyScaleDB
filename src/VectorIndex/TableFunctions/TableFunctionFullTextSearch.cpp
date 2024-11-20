@@ -58,9 +58,9 @@ inline void checkTantivyIndex([[maybe_unused]]const StoragePtr & storage, [[mayb
 
 }
 
-StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_function */, ContextPtr context, const std::string & table_name_, ColumnsDescription /*cached_columns*/) const
+StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_function */, ContextPtr context, const std::string & table_name_, ColumnsDescription /*cached_columns*/, bool /*is_insert_query*/) const
 {
-    auto columns = getActualTableStructure(context);
+    auto columns = getActualTableStructure(context, false);
 
     /// Use real score column name no matter with_score is true or false
     String score_col_name = SCORE_COLUMN_NAME;
@@ -72,7 +72,7 @@ StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_functi
     return storage;
 }
 
-ColumnsDescription TableFunctionFullTextSearch::getActualTableStructure(ContextPtr /* context */) const
+ColumnsDescription TableFunctionFullTextSearch::getActualTableStructure(ContextPtr /* context */, bool /*is_insert_query*/) const
 {
     /// Get table structure of underlying table and full-text search related columns
     ColumnsDescription columns_description;

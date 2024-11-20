@@ -10,13 +10,13 @@ namespace VectorIndex
 {
 struct CachedSegmentKey
 {
-    DB::String table_path;                      /// current cached segment table relative path
-    DB::String cur_part_name;                   /// current cached segment part name
-    DB::String part_name_no_mutation;           /// cached segment belongs to part without mutation
-    DB::String vector_index_name;               /// cached segment vector index name
-    DB::String column_name;                     /// cached segment column name
+    String table_path;                      /// current cached segment table relative path
+    String cur_part_name;                   /// current cached segment part name
+    String part_name_no_mutation;           /// cached segment belongs to part without mutation
+    String vector_index_name;               /// cached segment vector index name
+    String column_name;                     /// cached segment column name
 
-    DB::String toString() const
+    String toString() const
     {
         return table_path + "/" + part_name_no_mutation + "/" + vector_index_name + "-" + column_name;
     }
@@ -28,18 +28,18 @@ struct CachedSegmentKey
             && (part_name_no_mutation == other.part_name_no_mutation) && (vector_index_name == other.vector_index_name)
             && (column_name == other.column_name);
     }
-    DB::String getTableUUID() const
+    String getTableUUID() const
     {
         fs::path full_path(table_path);
         return full_path.stem().string();
     }
 
-    DB::String getPartName() const { return part_name_no_mutation; }
+    String getPartName() const { return part_name_no_mutation; }
 
-    DB::String getCurPartName() const { return cur_part_name; }
+    String getCurPartName() const { return cur_part_name; }
 
-    DB::String getPartitionID() const { return cutPartitionID(part_name_no_mutation); }
+    String getPartitionID() const { return cutPartitionID(part_name_no_mutation); }
 
-    DB::String getIndexName() const { return vector_index_name; }
+    String getIndexName() const { return vector_index_name; }
 };
 } // namespace VectorIndex

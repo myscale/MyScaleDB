@@ -8,6 +8,7 @@
 #include <SearchIndex/Common/DenseBitmap.h>
 #include <VectorIndex/Cache/PKCacheManager.h>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
+#include <VectorIndex/Common/VICommon.h>
 
 namespace DB
 {
@@ -36,7 +37,7 @@ public:
         const MergeTreeReaderSettings & reader_settings_,
         MergeTreeBaseSearchManagerPtr base_search_manager_,
         ContextPtr context_,
-        size_t max_streamns);
+        size_t max_streams);
 
     static Block transformHeader(
         Block block, const PrewhereInfoPtr & prewhere_info, const DataTypePtr & partition_value_type, const Names & virtual_columns);
@@ -67,7 +68,7 @@ public:
         const PrewhereInfoPtr & prewhere_info,
         StorageSnapshotPtr storage_snapshot,
         ContextPtr context,
-        size_t max_block_size,
+        const MergeTreeReadTask::BlockSizeParams & block_size_params_,
         size_t num_streams,
         const MergeTreeData & data,
         const MergeTreeReaderSettings & reader_settings);
@@ -176,10 +177,7 @@ private:
         const MergeTreeData & storage_,
         const StorageSnapshotPtr & storage_snapshot_,
         const MergeTreeData::DataPartPtr & data_part_,
-        const AlterConversionsPtr & alter_conversions_,
-        size_t max_block_size,
-        UInt64 preferred_block_size_bytes_,
-        UInt64 preferred_max_column_in_block_size_bytes_,
+        const MergeTreeReadTask::BlockSizeParams & block_size_params_,
         MarkRanges mark_ranges,
         const PrewhereInfoPtr & prewhere_info_copy,
         const MergeTreeReaderSettings & reader_settings_,
@@ -193,10 +191,7 @@ private:
         const MergeTreeData & storage_,
         const StorageSnapshotPtr & storage_snapshot_,
         const MergeTreeData::DataPartPtr & data_part_,
-        const AlterConversionsPtr & alter_conversions_,
-        size_t max_block_size,
-        UInt64 preferred_block_size_bytes_,
-        UInt64 preferred_max_column_in_block_size_bytes_,
+        const MergeTreeReadTask::BlockSizeParams & block_size_params_,
         const MergeTreeReaderSettings & reader_settings_,
         ContextPtr context_,
         size_t max_streams);

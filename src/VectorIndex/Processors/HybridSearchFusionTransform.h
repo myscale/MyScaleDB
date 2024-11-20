@@ -75,7 +75,7 @@ private:
     size_t fusion_part_index_pos;
     size_t fusion_part_offset_pos;
 
-    Poco::Logger * log = &Poco::Logger::get("HybridSearchFusionTransform");
+    LoggerPtr log = getLogger("HybridSearchFusionTransform");
 };
 
 }

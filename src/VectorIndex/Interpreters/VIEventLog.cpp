@@ -48,7 +48,7 @@ ColumnsDescription VIEventLogElement::getColumnsDescription()
 
     result.add({"database", std::make_shared<DataTypeString>(), "Database name."});
     result.add({"table", std::make_shared<DataTypeString>(), "Table name."});
-    result.add({"index_name", std::make_shared<DataTypeString>(), "Index name."})
+    result.add({"index_name", std::make_shared<DataTypeString>(), "Index name."});
     result.add({"part_name", std::make_shared<DataTypeString>()}, "Part name.");
     result.add({"current_part_name", std::make_shared<DataTypeString>()}, "Current part name.");
     result.add({"partition_id", std::make_shared<DataTypeString>()}, "Partition id.");

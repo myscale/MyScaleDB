@@ -119,7 +119,6 @@
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <base/defines.h>
-#include <VectorIndex/CacheManager.h>
 #include <VectorIndex/Interpreters/VIEventLog.h>
 
 

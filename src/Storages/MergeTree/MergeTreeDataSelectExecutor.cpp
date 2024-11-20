@@ -1576,12 +1576,6 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
     PostingsCacheForStore cache_in_store;
     if (dynamic_cast<const MergeTreeIndexFullText *>(index_helper.get()))
         cache_in_store.store = GinIndexStoreFactory::instance().get(index_helper->getFileName(), part->getDataPartStoragePtr());
-        LOG_DEBUG(
-            log,
-            "[filterMarksUsingIndex] init (GinIndexStore) cache_in_store.store, file_name:{}, part:{}",
-            index_helper->getFileName(),
-            part->getNameWithState());
-    }
 
     DB::OpenTelemetry::SpanHolder span("MergeTreeDataSelectExecutor::skip_granule");
 
@@ -1603,6 +1597,7 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
             log);
     }
 #endif
+
     for (size_t i = 0; i < ranges.size(); ++i)
     {
         const MarkRange & index_range = index_ranges[i];

@@ -1057,7 +1057,7 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMerge(
             return false;
         }
 
-        return vi_manager->canMergeForVectorIndex(metadata_snapshot, left, right);
+        return vi_manager->canMergeForVectorIndex(metadata_snapshot, left, right, disable_reason);
     };
 
     SelectPartsDecision select_decision = SelectPartsDecision::CANNOT_SELECT;
@@ -1448,11 +1448,11 @@ bool StorageMergeTree::scheduleDataProcessingJob(BackgroundJobsAssignee & assign
             if (merger_mutator.merges_blocker.isCancelled())
                 return false;
 
-        PreformattedMessage out_reason;
-        merge_entry = selectPartsToMerge(metadata_snapshot, false, {}, false, out_reason, shared_lock, lock, txn);
+            PreformattedMessage out_reason;
+            merge_entry = selectPartsToMerge(metadata_snapshot, false, {}, false, out_reason, shared_lock, lock, txn);
 
-        if (!merge_entry && !current_mutations_by_version.empty())
-            mutate_entry = selectPartsToMutate(metadata_snapshot, out_reason, shared_lock, lock);
+            if (!merge_entry && !current_mutations_by_version.empty())
+                mutate_entry = selectPartsToMutate(metadata_snapshot, out_reason, shared_lock, lock);
 
             has_mutations = !current_mutations_by_version.empty();
             vi_manager->scheduleRemoveVectorIndexCacheJob(metadata_snapshot);

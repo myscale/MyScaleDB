@@ -151,7 +151,7 @@ void RankFusion(
     const ScoreWithPartIndexAndLabels & vec_scan_result_dataset,
     const ScoreWithPartIndexAndLabels & text_search_result_dataset,
     const UInt64 fusion_k,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     size_t idx = 0;
     for (const auto & vector_score_with_label : vec_scan_result_dataset)
@@ -200,7 +200,7 @@ void RelativeScoreFusion(
     const ScoreWithPartIndexAndLabels & text_search_result_dataset,
     const Float32 fusion_weight,
     const Int8 vector_scan_direction,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     /// Normalize text search score
     std::vector<Float32> norm_score;
@@ -259,7 +259,7 @@ void RelativeScoreFusion(
 }
 
 void computeNormalizedScore(
-    const ScoreWithPartIndexAndLabels & search_result_dataset, std::vector<Float32> & norm_score, Poco::Logger * log)
+    const ScoreWithPartIndexAndLabels & search_result_dataset, std::vector<Float32> & norm_score, LoggerPtr log)
 {
     const auto result_size = search_result_dataset.size();
     if (result_size == 0)

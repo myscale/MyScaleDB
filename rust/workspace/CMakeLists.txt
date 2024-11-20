@@ -21,7 +21,9 @@ function(clickhouse_import_crate)
         endif()
     endif()
 
-    corrosion_import_crate(${ARGN} NO_STD PROFILE ${profile} LOCKED FLAGS --offline)
+    # Note, here --offline is not used, since on CI vendor archive is used, and
+    # passing --offline here will be inconvenient for local development.
+    corrosion_import_crate(${ARGN} NO_STD PROFILE ${profile} LOCKED FLAGS)
 endfunction()
 
 # -Wno-dollar-in-identifier-extension: cxx bridge complies names with '$'
@@ -31,6 +33,8 @@ set(RUST_CXXFLAGS "${RUST_CXXFLAGS} ${CXXBRIDGE_CXXFLAGS}")
 message(STATUS "RUST_CXXFLAGS (for skim): ${RUST_CXXFLAGS}")
 
 configure_file(".cargo/config.toml.in" ".cargo/config.toml" @ONLY)
+configure_file("tantivy_search/.cargo/config.toml.in" "tantivy_search/.cargo/config.toml" @ONLY)
+configure_file("tantivy_search/build.rs.in" "tantivy_search/build.rs" @ONLY)
 
 clickhouse_import_crate(MANIFEST_PATH Cargo.toml)
 

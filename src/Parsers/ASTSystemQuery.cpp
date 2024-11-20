@@ -174,7 +174,7 @@ void ASTSystemQuery::formatImpl(const FormatSettings & settings, FormatState & s
         case Type::STOP_CLEANUP:
         case Type::START_CLEANUP:
         case Type::UNLOAD_PRIMARY_KEY:
-        case Type::START_BUILD_VECTOR_INDICES
+        case Type::START_BUILD_VECTOR_INDICES:
         case Type::STOP_BUILD_VECTOR_INDICES:
         {
             if (table)

@@ -328,7 +328,7 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
 #endif
         else
         {
-            skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(nullptr));
+            skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(nullptr, settings));
         }
 
         skip_index_accumulated_marks.push_back(0);
@@ -434,7 +434,7 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
 #endif
                 else
                 {
-                    skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(nullptr);
+                    skip_indices_aggregators[i] = index_helper->createIndexAggregatorForPart(nullptr, settings);
                 }
 
                 if (stream.compressed_hashing.offset() >= settings.min_compress_block_size)

@@ -678,6 +678,7 @@ BlockIO InterpreterSystemQuery::execute()
             break;
         case Type::TEST_VIEW:
             getRefreshTask()->setFakeTime(query.fake_time_for_view);
+            break;
         case Type::STOP_BUILD_VECTOR_INDICES:
             startStopAction(ActionLocks::PartsBuildIndex, false);
             break;
