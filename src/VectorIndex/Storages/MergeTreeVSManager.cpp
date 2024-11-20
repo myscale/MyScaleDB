@@ -371,7 +371,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanOnSingleColumn(
     {   
         auto vi_executor = data_part->segments_mgr->getSegmentByColumn(search_column_name);
         if (!vi_executor)
-            throw Exception(ErrorCodes::CANNOT_USE_CACHE, "Vector index not found in part {}", data_part->name);
+            throw Exception(ErrorCodes::VECTOR_INDEX_CACHE_LOAD_ERROR, "Vector index not found in part {}", data_part->name);
 
         int64_t query_vector_num = 0;
         std::visit([&query_vector_num](auto &&vec_data_ptr)
@@ -429,7 +429,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanOnSingleColumn(
     }
     catch (const Exception & e)
     {
-        if (e.code() != ErrorCodes::CANNOT_USE_CACHE)
+        if (e.code() != ErrorCodes::VECTOR_INDEX_CACHE_LOAD_ERROR)
             throw;
     }
 

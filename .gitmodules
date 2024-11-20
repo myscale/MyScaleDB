@@ -205,7 +205,7 @@
 	url = https://github.com/ClickHouse/sqlite-amalgamation
 [submodule "contrib/s2geometry"]
 	path = contrib/s2geometry
-	url = git@git.moqi.ai:mqdb/s2geometry.git
+	url = https://github.com/ClickHouse/s2geometry.git
 [submodule "contrib/bzip2"]
 	path = contrib/bzip2
 	url = https://github.com/ClickHouse/bzip2

@@ -293,7 +293,8 @@ bool checkConsistencyForVectorIndex(const DB::DataPartStoragePtr & part_storage,
     /// Base consistency check: existence of files recorded in checksums
     try
     {
-        index_checksums.checkSizes(*part_storage);
+        for (const auto & [filename, vector_index_checksum] : index_checksums.files)
+            vector_index_checksum.checkSize(*part_storage, filename);
     }
     catch (...)
     {
