@@ -79,7 +79,7 @@ public:
         const VectorAndTextResultInDataParts & parts_with_mix_results,
         const ScoreWithPartIndexAndLabels & first_stage_top_results,
         const VSDescription & vector_scan_desc,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     /// Filter parts using total top-k vector scan results from multiple distance functions
     /// For every part, select mark ranges to read, and save multiple vector scan results
@@ -87,7 +87,7 @@ public:
         const RangesInDataParts & parts_with_ranges,
         const std::unordered_map<String, ScoreWithPartIndexAndLabels> & vector_scan_results_with_part_index,
         const Settings & settings,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     void mergeResult(
         Columns & pre_result,

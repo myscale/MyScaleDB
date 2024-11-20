@@ -5,11 +5,10 @@
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeSource.h>
-#include <Storages/MergeTree/MergeTreeThreadSelectProcessor.h>
 #include <Storages/MergeTree/LoadedMergeTreeDataPartInfoForReader.h>
 #include <Storages/MergeTree/MergeTreeReadPoolInOrder.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/MergeTreeVirtualColumns.h>
-#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/QueryPlan/SourceStepWithFilter.h>
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
@@ -30,6 +29,7 @@ namespace CurrentMetrics
 {
     extern const Metric MergeTreeDataSelectHybridSearchThreads;
     extern const Metric MergeTreeDataSelectHybridSearchThreadsActive;
+    extern const Metric MergeTreeDataSelectExecutorThreadsScheduled;
 }
 
 namespace DB
@@ -82,7 +82,7 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
     const MergeTreeReaderSettings & reader_settings_,
     MergeTreeBaseSearchManagerPtr base_search_manager_,
     ContextPtr context_,
-    size_t max_streamns)
+    size_t max_streams)
     : storage(storage_)
     , storage_snapshot(storage_snapshot_)
     , prewhere_info(prewhere_info_)
@@ -102,7 +102,7 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
     , total_rows(data_part->index_granularity.getRowsCountInRanges(all_mark_ranges))
     , base_search_manager(base_search_manager_)
     , context(context_)
-    , max_streamns_for_prewhere(max_streams)
+    , max_streams_for_prewhere(max_streams)
 {
     auto header = storage_snapshot_->getSampleBlockForColumns(required_columns);
     result_header = SourceStepWithFilter::applyPrewhereActions(std::move(header), prewhere_info);
@@ -139,14 +139,10 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
         data_part->name,
         total_rows,
         data_part->index_granularity.getMarkStartingRow(all_mark_ranges.front().begin));
-
-    /// Save original remove_prewhere_column, which will be changed to true in performPrefilter()
-    if (prewhere_info)
-        original_remove_prewhere_column = prewhere_info->remove_prewhere_column;
 }
 
 
-bool MergeTreeSelectWithVSProcessor::getNewTask()
+bool MergeTreeSelectWithHybridSearchProcessor::getNewTask()
 {
     if (getNewTaskImpl())
         return true;
@@ -154,7 +150,7 @@ bool MergeTreeSelectWithVSProcessor::getNewTask()
     return false;
 }
 
-ChunkAndProgress MergeTreeSelectWithVSProcessor::read()
+ChunkAndProgress MergeTreeSelectWithHybridSearchProcessor::read()
 {
     while (!is_cancelled)
     {
@@ -199,133 +195,13 @@ ChunkAndProgress MergeTreeSelectWithVSProcessor::read()
     return {Chunk(), 0, 0, true};
 }
 
-void MergeTreeSelectWithVSProcessor::finish()
+void MergeTreeSelectWithHybridSearchProcessor::finish()
 {
     /** Close the files (before destroying the object).
     * When many sources are created, but simultaneously reading only a few of them,
     * buffers don't waste memory.
     */
     data_part.reset();
-}
-
-VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefilter(MarkRanges & mark_ranges)
-{
-    OpenTelemetry::SpanHolder span("MergeTreeSelectWithHybridSearchProcessor::performPrefilter()");
-    Names requried_columns;
-
-    /// TODO: confirm columns are valid?
-    NameSet pre_name_set;
-
-    /// Add column reading steps:
-    /// 1. Columns for row level filter
-    if (prewhere_info->row_level_filter)
-    {
-        Names row_filter_column_names =  prewhere_info->row_level_filter->getRequiredColumnsNames();
-
-        requried_columns.insert(requried_columns.end(), row_filter_column_names.begin(), row_filter_column_names.end());
-        pre_name_set.insert(row_filter_column_names.begin(), row_filter_column_names.end());
-    }
-
-    /// 2. Columns for prewhere
-    Names all_pre_column_names = prewhere_info->prewhere_actions.getRequiredColumnsNames();
-
-    for (const auto & name : all_pre_column_names)
-    {
-        if (pre_name_set.contains(name))
-            continue;
-        requried_columns.push_back(name);
-        pre_name_set.insert(name);
-    }
-
-
-    /// Add _part_offset column
-    required_columns.push_back("_part_offset");
-
-    /// Clone an prewhere_info for performPrefilter()
-    PrewhereInfoPtr prewhere_info_copy = prewhere_info->clone();
-    prewhere_info_copy->need_filter = true;
-    prewhere_info_copy->remove_prewhere_column = true;
-
-    /// Only one part
-    RangesInDataParts parts_with_ranges;
-    parts_with_ranges.emplace_back(data_part, std::make_shared<AlterConversions>(), 0, mark_ranges);
-
-    /// spreadMarkRangesAmongStreams()
-    const auto & settings = context->getSettingsRef();
-    const auto data_settings = storage.getSettings();
-
-    size_t sum_marks = data_part->getMarksCount();
-    size_t min_marks_for_concurrent_read = 0;
-    min_marks_for_concurrent_read = MergeTreeDataSelectExecutor::minMarksForConcurrentRead(
-            settings.merge_tree_min_rows_for_concurrent_read, settings.merge_tree_min_bytes_for_concurrent_read,
-            data_settings->index_granularity, data_settings->index_granularity_bytes, sum_marks);
-
-    size_t num_streams = max_streamns_for_prewhere;
-    if (num_streams > 1)
-    {
-        /// Reduce the number of num_streams if the data is small.
-        if (sum_marks < num_streams * min_marks_for_concurrent_read && parts_with_ranges.size() < num_streams)
-            num_streams = std::max((sum_marks + min_marks_for_concurrent_read - 1) / min_marks_for_concurrent_read, parts_with_ranges.size());
-    }
-
-    /// Refactor to use pool, reference from readInOrder()
-    MergeTreeReadPoolPtr pool;
-
-    MergeTreeReadPoolBase::PoolSettings pool_settings
-    {
-        .threads = /*max_streams*/ 1,
-        .sum_marks = part_with_ranges.getMarksCount(),
-        //.min_marks_for_concurrent_read = min_marks_for_concurrent_read,
-        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
-        .use_uncompressed_cache = use_uncompressed_cache,
-        .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
-    };
-
-    pool = std::make_shared<MergeTreeReadPoolInOrder>(
-            /*has_limit_below_one_block*/ false,
-            MergeTreeReadType::Default,
-            parts_with_ranges,
-            shared_virtual_fields,
-            storage_snapshot,
-            prewhere_info,
-            actions_settings,
-            reader_settings,
-            required_columns,
-            pool_settings,
-            context);
-
-    auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(0);
-
-    auto processor = std::make_unique<MergeTreeSelectProcessor>(
-            pool, std::move(algorithm), prewhere_info,
-            actions_settings, block_size_params, reader_settings);
-
-    auto source = std::make_shared<MergeTreeSource>(std::move(processor), storage.getLogName());
-
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
-
-        pipe = Pipe(std::move(source));
-
-    QueryPipeline filter_pipeline(std::move(pipe));
-    PullingPipelineExecutor filter_executor(filter_pipeline);
-
-    size_t num_rows = data_part->rows_count;
-
-    Block block;
-    VIBitmapPtr filter = std::make_shared<VIBitmap>(num_rows);
-    {
-        OpenTelemetry::SpanHolder span_pipe("MergeTreeSelectWithHybridSearchProcessor::performPrefilter()::StartPipe");
-        while (filter_executor.pull(block))
-        {
-            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column).getData();
-            for (size_t i = 0; i < block.rows(); ++i)
-            {
-                filter->set(col_data[i]);
-            }
-        }
-    }
-
-    return filter;
 }
 
 bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
@@ -335,7 +211,7 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
     const StorageMetadataPtr & metadata_snapshot,
     const ContextPtr context_)
 {
-    if (!prewhere_info_ || !metadata_snapshot->hasPartitionKey() || !prewhere_info_->prewhere_actions)
+    if (!prewhere_info_ || !metadata_snapshot->hasPartitionKey() || prewhere_info_->prewhere_actions.getNodes().empty())
         return false;
 
     if (!context_->getSettingsRef().optimize_prefilter_in_search)
@@ -349,7 +225,7 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
 
     /// Quick check if requried column names has any partition key column name
     /// Get column names in prewhere condition
-    auto required_columns = prewhere_actions->getRequiredColumnsNames();
+    auto required_columns = prewhere_actions.getRequiredColumnsNames();
     bool exists = false;
 
     for (const auto & required_column : required_columns)
@@ -366,10 +242,10 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
     if (!exists)
         return false;
 
-    /// Reference PartitionPrunner using KeyCondition, difference is that FUNCTION_UNKNOWN returns false.
-    KeyCondition partition_prunner_condition(
-        prewhere_actions, context_, partition_key.column_names,
-        partition_key.expression, {}, true /* single_point */, false, true /* known_false */);
+    /// Reference PartitionPruner using KeyCondition, difference is that FUNCTION_UNKNOWN returns false.
+    KeyCondition partition_pruner_condition(
+        &prewhere_actions, context_, partition_key.column_names,
+        partition_key.expression, true /* single_point */, true /* known_false */);
 
     const auto & partition_value = data_part_->partition.value;
     std::vector<FieldRef> index_value(partition_value.begin(), partition_value.end());
@@ -380,7 +256,7 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
             field = POSITIVE_INFINITY;
     }
 
-    if (partition_prunner_condition.mayBeTrueInRange(
+    if (partition_pruner_condition.mayBeTrueInRange(
         partition_value.size(), index_value.data(), index_value.data(), partition_key.data_types))
         return true;
 
@@ -389,8 +265,8 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
     DataTypes minmax_columns_types = storage_.getMinMaxColumnsTypes(partition_key);
 
     KeyCondition minmax_idx_condition(
-        prewhere_actions, context_, minmax_columns_names,
-        minmax_expression_actions, {}, false /* single_point */, false, true /* known_false */);
+        &prewhere_actions, context_, minmax_columns_names,
+        minmax_expression_actions, false /* single_point */, true /* known_false */);
 
     return minmax_idx_condition.checkInHyperrectangle(data_part_->minmax_idx->hyperrectangle, minmax_columns_types).can_be_true;
 }
@@ -930,7 +806,7 @@ catch (...)
     throw;
 }
 
-MergeTreeReadTaskPtr MergeTreeSelectWithVSProcessor::createTask(MarkRanges ranges) const
+MergeTreeReadTaskPtr MergeTreeSelectWithHybridSearchProcessor::createTask(MarkRanges ranges) const
 {
     /// reader and pre_reader_for_step are put inside MergeTreeReadTask
     auto read_task_info = initializeReadTaskInfo();
@@ -949,7 +825,7 @@ MergeTreeReadTaskPtr MergeTreeSelectWithVSProcessor::createTask(MarkRanges range
         std::move(task_size_predictor));
 }
 
-MergeTreeReadTask::Extras MergeTreeSelectWithVSProcessor::getExtras() const
+MergeTreeReadTask::Extras MergeTreeSelectWithHybridSearchProcessor::getExtras() const
 {
     return
     {
@@ -961,7 +837,7 @@ MergeTreeReadTask::Extras MergeTreeSelectWithVSProcessor::getExtras() const
     };
 }
 
-MergeTreeReadTaskInfoPtr MergeTreeSelectWithVSProcessor::initializeReadTaskInfo() const
+MergeTreeReadTaskInfoPtr MergeTreeSelectWithHybridSearchProcessor::initializeReadTaskInfo() const
 {
     MergeTreeReadTaskInfo read_task_info;
     
@@ -996,9 +872,8 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(MarkRanges mark_ran
         prewhere_info_copy->remove_prewhere_column = true;
     }
 
-    executeSearch(base_search_manager, storage, storage_snapshot, data_part, alter_conversions, max_block_size_rows,
-                preferred_block_size_bytes, preferred_max_column_in_block_size_bytes, mark_ranges,
-                prewhere_info_copy, reader_settings, context, max_streams_for_prewhere);
+    executeSearch(base_search_manager, storage, storage_snapshot, data_part, block_size_params,
+                mark_ranges, prewhere_info_copy, reader_settings, context, max_streams_for_prewhere);
 }
 
 void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
@@ -1006,10 +881,7 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     const MergeTreeData & storage_,
     const StorageSnapshotPtr & storage_snapshot_,
     const MergeTreeData::DataPartPtr & data_part_,
-    const AlterConversionsPtr & alter_conversions_,
-    size_t max_block_size,
-    UInt64 preferred_block_size_bytes_,
-    UInt64 preferred_max_column_in_block_size_bytes_,
+    const MergeTreeReadTask::BlockSizeParams & block_size_params_,
     MarkRanges mark_ranges,
     const PrewhereInfoPtr & prewhere_info_copy,
     const MergeTreeReaderSettings & reader_settings_,
@@ -1017,7 +889,7 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     size_t max_streams)
 {
     bool can_skip_peform_prefilter = canSkipPrewhereForPart(data_part_, prewhere_info_copy, storage_,
-                                        storage_snapshot_->getMetadataForQuery(), context_);
+                                        storage_snapshot_->metadata, context_);
 
     /// perform vector scan
     if (!prewhere_info_copy || can_skip_peform_prefilter)
@@ -1030,9 +902,7 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
         /// 1 read, then get the filtered part_offsets
         /// 2 perform vector scan based on part_offsets
         auto filter = performPrefilter(mark_ranges, prewhere_info_copy, storage_, storage_snapshot_, data_part_,
-                                alter_conversions_, max_block_size, preferred_block_size_bytes_,
-                                preferred_max_column_in_block_size_bytes_, reader_settings_,
-                                context_, max_streams);
+                                block_size_params_, reader_settings_, context_, max_streams);
 
         ReadRanges read_ranges;
         ReadRange read_range{0, data_part_->rows_count, 0, data_part_->index_granularity.getMarksCount()};
@@ -1111,7 +981,7 @@ void getFilterFromPipeline(Pipe & pipe, VectorIndex::VIBitmapPtr & filter)
     {
         if (block)
         {
-            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column)->getData();
+            const PaddedPODArray<UInt64> & col_data = checkAndGetColumn<ColumnUInt64>(*block.getByName("_part_offset").column).getData();
             for (size_t i = 0; i < block.rows(); ++i)
             {
                 filter->set(col_data[i]);
@@ -1144,10 +1014,7 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     const MergeTreeData & storage_,
     const StorageSnapshotPtr & storage_snapshot_,
     const MergeTreeData::DataPartPtr & data_part_,
-    const AlterConversionsPtr & alter_conversions_,
-    size_t max_block_size,
-    UInt64 preferred_block_size_bytes_,
-    UInt64 preferred_max_column_in_block_size_bytes_,
+    const MergeTreeReadTask::BlockSizeParams & block_size_params_,
     const MergeTreeReaderSettings & reader_settings_,
     ContextPtr context_,
     size_t max_streams)
@@ -1173,9 +1040,9 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     }
 
     /// 2. Columns for prewhere
-    if (prewhere_info_copy->prewhere_actions)
+    if (!prewhere_info_copy->prewhere_actions.getNodes().empty())
     {
-        Names all_pre_column_names = prewhere_info_copy->prewhere_actions->getRequiredColumnsNames();
+        Names all_pre_column_names = prewhere_info_copy->prewhere_actions.getRequiredColumnsNames();
 
         for (const auto & name : all_pre_column_names)
         {
@@ -1232,20 +1099,30 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
         }
     }
 
-    LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", max_streams, info.min_marks_for_concurrent_read);
+    LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", num_streams, info.min_marks_for_concurrent_read);
 
     size_t num_rows = data_part_->rows_count;
     VectorIndex::VIBitmapPtr filter = std::make_shared<VectorIndex::VIBitmap>(num_rows);
 
+    /// Only one part
+    RangesInDataParts parts_with_ranges;
+    parts_with_ranges.emplace_back(data_part_, std::make_shared<AlterConversions>(), 0, mark_ranges);
+
+    MergeTreeReadPool::PoolSettings pool_settings
+    {
+        .threads = num_streams,
+        .sum_marks = info.sum_marks,
+        .min_marks_for_concurrent_read = info.min_marks_for_concurrent_read,
+        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
+        .use_uncompressed_cache = settings.use_uncompressed_cache,
+        .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
+    };
+
+    size_t max_block_size = block_size_params_.max_block_size_rows;
     /// Read in multiple threads will use Async pulling executor
     if (enable_parallel_reading)
     {
-        /// spreadMarkRangesAmongStreams()
-        /// Only one part
-        RangesInDataParts parts_with_ranges;
-        parts_with_ranges.emplace_back(data_part_, std::make_shared<AlterConversions>(), 0, mark_ranges);
-        Pipes pipes;
-
+        /// ReadFromMergeTree::readFromPool()
         if (max_block_size && !info.is_adaptive)
         {
             size_t fixed_index_granularity = data_settings->index_granularity;
@@ -1255,28 +1132,32 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
 
         MergeTreeReadPoolPtr pool;
         pool = std::make_shared<MergeTreeReadPool>(
-            num_streams,
-            info.sum_marks,
-            info.min_marks_for_concurrent_read,
             std::move(parts_with_ranges),
+            VirtualFields{},
             storage_snapshot_,
             prewhere_info_copy,
             actions_settings,
             reader_settings_,
             required_columns_prewhere,
-            system_columns,
-            context_,
-            false);
+            pool_settings,
+            context_);
 
-        for (size_t i = 0; i < num_streams; ++i)
+        /// The reason why we change this setting is because MergeTreeReadPool takes the full task
+        /// ignoring min_marks_to_read setting in case of remote disk (see MergeTreeReadPool::getTask).
+        /// In this case, we won't limit the number of rows to read based on adaptive granularity settings.
+        auto block_size_copy = block_size_params_;
+        block_size_copy.min_marks_to_read = pool_settings.min_marks_for_concurrent_read;
+
+        Pipes pipes;
+        for (size_t i = 0; i < pool_settings.threads; ++i)
         {
-            auto algorithm = std::make_unique<MergeTreeThreadSelectWithFilterAlgorithm>(
-                i, pool, info.min_marks_for_concurrent_read, max_block_size,
-                settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
-                storage_, storage_snapshot_, info.use_uncompressed_cache,
-                prewhere_info_copy, actions_settings, reader_settings_, system_columns, filter);
+            auto algorithm = std::make_unique<MergeTreeThreadSelectWithFilterAlgorithm>(i, filter);
 
-            auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+            auto processor = std::make_unique<MergeTreeSelectProcessor>(
+                pool, std::move(algorithm), prewhere_info_copy,
+                actions_settings, block_size_copy, reader_settings_);
+
+            auto source = std::make_shared<MergeTreeSource>(std::move(processor), storage_.getLogName());
 
             if (i == 0)
                 source->addTotalRowsApprox(info.total_rows);
@@ -1292,24 +1173,27 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     else
     {
         /// Read in a single thread
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(
-            storage_,
+        MergeTreeReadPoolPtr pool;
+        pool = std::make_shared<MergeTreeReadPoolInOrder>(
+            /*has_limit_below_one_block*/ false,
+            ReadFromMergeTree::ReadType::Default,
+            parts_with_ranges,
+            VirtualFields{},
             storage_snapshot_,
-            data_part_,
-            alter_conversions_,
-            max_block_size,
-            preferred_block_size_bytes_,
-            preferred_max_column_in_block_size_bytes_,
-            required_columns_prewhere,
-            mark_ranges,
-            info.use_uncompressed_cache,
             prewhere_info_copy,
             actions_settings,
             reader_settings_,
-            nullptr,
-            system_columns);
+            required_columns_prewhere,
+            pool_settings,
+            context_);
 
-        auto source = std::make_shared<MergeTreeSource>(std::move(algorithm));
+        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(0);
+
+        auto processor = std::make_unique<MergeTreeSelectProcessor>(
+            pool, std::move(algorithm), prewhere_info_copy,
+            actions_settings, block_size_params_, reader_settings_);
+
+        auto source = std::make_shared<MergeTreeSource>(std::move(processor), storage_.getLogName());
 
         Pipe pipe = Pipe(std::move(source));
 
@@ -1330,7 +1214,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
     const PrewhereInfoPtr & prewhere_info_,
     StorageSnapshotPtr storage_snapshot_,
     ContextPtr context,
-    size_t max_block_size,
+    const MergeTreeReadTask::BlockSizeParams & block_size_params_,
     size_t num_streams,
     const MergeTreeData & data,
     const MergeTreeReaderSettings & reader_settings_)
@@ -1351,17 +1235,15 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         prewhere_info_copy->remove_prewhere_column = true;
     }
 
-    auto & settings = context->getSettingsRef();
-
     /// Execute vector scan and text search in this part.
     auto process_part = [&](size_t part_index)
     {
         auto & part_with_range = parts_with_ranges[part_index];
-        auto & data_part = part_with_range.data_part;
+        auto & data_part_ = part_with_range.data_part;
         auto & mark_ranges = part_with_range.ranges;
 
         /// Save part_index in parts_with_ranges
-        VectorAndTextResultInDataPart mix_results(part_index, data_part);
+        VectorAndTextResultInDataPart mix_results(part_index, data_part_);
 
         /// Handle three cases: vector scan, full-text seach and hybrid search
         if (query_info.hybrid_search_info)
@@ -1372,9 +1254,8 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
             hybrid_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan and text search
-            executeSearch(hybrid_search_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
-                        max_block_size, settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
-                        mark_ranges, prewhere_info_copy, reader_settings_,
+            executeSearch(hybrid_search_mgr, data, storage_snapshot_, data_part_,
+                        block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 
             if (hybrid_search_mgr)
@@ -1389,9 +1270,8 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
                                         context, vec_support_two_stage_searches);
 
             /// Get vector scan
-            executeSearch(vector_scan_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
-                        max_block_size, settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
-                        mark_ranges, prewhere_info_copy, reader_settings_,
+            executeSearch(vector_scan_mgr, data, storage_snapshot_, data_part_,
+                        block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 
             /// Support multiple distance functions
@@ -1405,9 +1285,8 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
             text_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan
-            executeSearch(text_search_mgr, data, storage_snapshot_, data_part, part_with_range.alter_conversions,
-                        max_block_size, settings.preferred_block_size_bytes, settings.preferred_max_column_in_block_size_bytes,
-                        mark_ranges, prewhere_info_copy, reader_settings_,
+            executeSearch(text_search_mgr, data, storage_snapshot_, data_part_,
+                        block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 
             if (text_search_mgr && text_search_mgr->preComputed())
@@ -1430,6 +1309,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
         ThreadPool pool(
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreads,
             CurrentMetrics::MergeTreeDataSelectHybridSearchThreadsActive,
+            CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
             num_threads);
 
         for (size_t part_index = 0; part_index < parts_with_ranges_size; ++part_index)

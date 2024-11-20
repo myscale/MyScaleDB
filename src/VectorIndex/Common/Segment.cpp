@@ -1,5 +1,6 @@
 #include <Core/ServerSettings.h>
 
+#include <SearchIndex/IndexDataFileIO.h>
 #include <VectorIndex/Common/BruteForceSearch.h>
 #include <VectorIndex/Common/SegmentsMgr.h>
 #include "Segment.h"
@@ -668,12 +669,12 @@ CachedSegmentHolderPtr SimpleSegment<data_type>::loadVI(const MergeIdMapsPtr & v
                     "Does not exists {}, Index is not in the ready state and cannot be loaded",
                     getVectorDescriptionFilePath());
 
-            auto check_index_expired = [this, disk = disk]() mutable -> bool { return !disk->exists(getVectorDescriptionFilePath()); };
+            auto check_index_expired = [this, disk]() mutable -> bool { return !disk->exists(getVectorDescriptionFilePath()); };
 
             CachedSegmentPtr vi_cache_entry = prepareVIEntry(vi_metadata);
             auto file_reader = Search::IndexDataFileReader<VectorIndexIStream>(
                 getSegmentFullPath(),
-                [disk = disk](const std::string & name, std::ios::openmode /*mode*/)
+                [disk](const std::string & name, std::ios::openmode /*mode*/)
                 { return std::make_shared<VectorIndexReader>(disk, name); });
 
             printMemoryInfo(log, "Before load");

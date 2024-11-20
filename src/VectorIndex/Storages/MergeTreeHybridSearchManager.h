@@ -111,7 +111,7 @@ public:
         const ScoreWithPartIndexAndLabels & vec_scan_result_with_part_index,
         const ScoreWithPartIndexAndLabels & text_search_result_with_part_index,
         const HybridSearchInfoPtr & hybrid_info,
-        Poco::Logger * log);
+        LoggerPtr log);
 
     /// Filter parts using total top-k hybrid search result
     /// For every part, select mark ranges to read, also save hybrid result
@@ -119,7 +119,7 @@ public:
         const RangesInDataParts & parts_with_ranges,
         const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
         const Settings & settings,
-        Poco::Logger * log);
+        LoggerPtr log);
 
 private:
 
@@ -130,7 +130,7 @@ private:
     MergeTreeVectorScanManagerPtr vector_scan_manager = nullptr;
     MergeTreeTextSearchManagerPtr text_search_manager = nullptr;
 
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeHybridSearchManager");
+    LoggerPtr log = getLogger("MergeTreeHybridSearchManager");
 };
 
 using MergeTreeHybridSearchManagerPtr = std::shared_ptr<MergeTreeHybridSearchManager>;

@@ -5,6 +5,7 @@
 #include <Daemon/BaseDaemon.h>
 
 #include <Storages/MergeTree/DataPartStorageOnDiskBase.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 
 #include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Utils/MergeIdMaps.h>

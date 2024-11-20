@@ -29,7 +29,6 @@
 #include <Storages/MergeTree/PartMetadataManagerOrdinary.h>
 #include <Storages/MergeTree/checkDataPart.h>
 #include <Storages/MergeTree/Backup.h>
-#include <Storages/MergeTree/PrimaryKeyCacheManager.h>
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <base/JSON.h>
 #include <boost/algorithm/string/join.hpp>
@@ -1776,7 +1775,7 @@ std::vector<UInt64> IMergeTreeDataPart::getDeleteBitmapFromRowExists() const
     }
 
     NamesAndTypesList cols;
-    cols.push_back(LightweightDeleteDescription::FILTER_COLUMN);
+    cols.push_back({RowExistsColumn::name, RowExistsColumn::type});
 
     StorageMetadataPtr metadata_ptr = storage.getInMemoryMetadataPtr();
     StorageSnapshotPtr storage_snapshot_ptr = storage.getStorageSnapshot(metadata_ptr, storage.getContext());

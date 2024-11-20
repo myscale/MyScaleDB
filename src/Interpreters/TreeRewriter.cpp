@@ -73,6 +73,7 @@
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <Interpreters/DatabaseCatalog.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Interpreters/GetHybridSearchVisitor.h>
 #include <VectorIndex/Interpreters/parseVSParameters.h>
@@ -1452,17 +1453,6 @@ bool TreeRewriterResult::collectUsedColumns(const ASTPtr & query, bool is_select
                 }
                 ++it;
             }
-        }
-    }
-
-    /// insert distance func columns into source columns here
-    if (!vector_scan_funcs.empty() && !vector_from_right_table)
-    {
-        for (auto node : vector_scan_funcs)
-        {
-            const String distance_col_name = node->getColumnName();
-            addDistanceFuncColName(distance_col_name, source_columns);
-            unknown_required_source_columns.erase(distance_col_name);
         }
     }
 

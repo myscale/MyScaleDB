@@ -25,7 +25,8 @@ using VIEntryPtr = std::shared_ptr<VIEntry>;
 struct VIContext;
 using VIContextPtr = std::shared_ptr<VIContext>;
 class IMergeTreeDataPart;
-using DataPartsVector = std::vector<std::shared_ptr<const IMergeTreeDataPart>>;
+using DataPartPtr = std::shared_ptr<const IMergeTreeDataPart>;
+using DataPartsVector = std::vector<DataPartPtr>;
 
 /// VectorIndicesMgr class is designed to manage vector index data and cache at the table level.
 /// This class provides functionalities for starting and shutting down vector indices, handling the loading and clearing of vector indices, 
@@ -43,7 +44,7 @@ public:
     void initVectorIndexObject();
 
     bool canMergeForVectorIndex(
-        const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right, String * out_reason = nullptr);
+        const StorageMetadataPtr & metadata_snapshot, const DataPartPtr & left, const DataPartPtr & right, PreformattedMessage & out_reason);
 
     /// record the part without mutation level is indexing vector index, part in this set will not be merged
     scope_guard getPartIndexLock(const String & part_name, const String & /*vec_index_name*/)

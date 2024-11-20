@@ -2,7 +2,9 @@
 #include <Interpreters/convertFieldToType.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <VectorIndex/Utils/VSUtils.h>
 
 #include <VectorIndex/Common/VICommon.h>

@@ -7,6 +7,7 @@
 #include <Interpreters/DatabaseCatalog.h>
 #include <Parsers/queryToString.h>
 #include <Processors/ISource.h>
+#include <Processors/Sources/NullSource.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/VirtualColumnUtils.h>
@@ -244,45 +245,66 @@ Pipe StorageSystemVIs::read(
     size_t max_block_size,
     size_t /* num_streams */)
 {
-    auto metadata_snapshot = storage_snapshot->metadata;
+    storage_snapshot->check(column_names);
+
+    /// Create a mask of what columns are needed in the result.
 
     NameSet names_set(column_names.begin(), column_names.end());
 
-    Block sample_block = metadata_snapshot->getSampleBlock();
+    Block sample_block = storage_snapshot->metadata->getSampleBlock();
     Block header;
 
     std::vector<UInt8> columns_mask(sample_block.columns());
     for (size_t i = 0, size = columns_mask.size(); i < size; ++i)
     {
-        if (names_set.count(sample_block.getByPosition(i).name))
+        if (names_set.contains(sample_block.getByPosition(i).name))
         {
             columns_mask[i] = 1;
             header.insert(sample_block.getByPosition(i));
         }
     }
 
-    MutableColumnPtr column = ColumnString::create();
+    /// Add `database` column.
+    MutableColumnPtr database_column_mut = ColumnString::create();
 
     const auto databases = DatabaseCatalog::instance().getDatabases();
     for (const auto & [database_name, database] : databases)
     {
         if (database_name == DatabaseCatalog::TEMPORARY_DATABASE)
-            continue;
+            continue; /// We don't want to show the internal database for temporary tables in system.columns
 
-        /// Lazy database can contain only very primitive tables,
-        /// it cannot contain tables with data skipping indices.
-        /// Skip it to avoid unnecessary tables loading in the Lazy database.
+        /// We are skipping "Lazy" database because we cannot afford initialization of all its tables.
+        /// This should be documented.
+
         if (database->getEngineName() != "Lazy")
-            column->insert(database_name);
+            database_column_mut->insert(database_name);
     }
 
     /// Condition on "database" in a query acts like an index.
-    Block block { ColumnWithTypeAndName(std::move(column), std::make_shared<DataTypeString>(), "database") };
-    VirtualColumnUtils::filterBlockWithQuery(query_info.query, block, context);
+    Block block_to_filter { ColumnWithTypeAndName(std::move(database_column_mut), std::make_shared<DataTypeString>(), "database") };
 
-    ColumnPtr & filtered_databases = block.getByPosition(0).column;
+    ActionDAGNodes added_filter_nodes;
+    if (query_info.prewhere_info)
+    {
+        const auto & node = query_info.prewhere_info->prewhere_actions.findInOutputs(query_info.prewhere_info->prewhere_column_name);
+        added_filter_nodes.nodes.push_back(&node);
+    }
+
+    std::optional<ActionsDAG> filter;
+    if (auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(added_filter_nodes.nodes))
+        filter = VirtualColumnUtils::splitFilterDagForAllowedInputs(filter_actions_dag->getOutputs().at(0), &block_to_filter);
+
+    const ActionsDAG::Node * predicate = filter ? filter->getOutputs().at(0) : nullptr;
+
+    /// Filter block with `database` column.
+    VirtualColumnUtils::filterBlockWithPredicate(predicate, block_to_filter, context);
+
+    if (!block_to_filter.rows())
+        return Pipe(std::make_shared<NullSource>(header));
+
+    ColumnPtr & database_column = block_to_filter.getByName("database").column;
     return Pipe(std::make_shared<DataVectorIndicesSource>(
-        std::move(columns_mask), std::move(header), max_block_size, std::move(filtered_databases), context));
+        std::move(columns_mask), std::move(header), max_block_size, std::move(database_column), context));
 }
 
 }

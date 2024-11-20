@@ -17,7 +17,7 @@
 #include <Common/ErrorCodes.h>
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 
 #include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Common/VICommon.h>
@@ -115,7 +115,7 @@ bool VectorIndicesMgr::canMergeForVectorIndex(
     const StorageMetadataPtr & metadata_snapshot,
     const DataPartPtr & left,
     const DataPartPtr & right,
-    String * out_reason)
+    PreformattedMessage & out_reason)
 {
     /// No need to check if there is no vector index on the table.
     if (!metadata_snapshot->hasVectorIndices())
@@ -124,8 +124,7 @@ bool VectorIndicesMgr::canMergeForVectorIndex(
     /// Check if part is building vector index
     if (containsPartInIndexing(left->name) || containsPartInIndexing(right->name))
     {
-        if (out_reason)
-            *out_reason = "source part " + left->name + " or " + right->name + " is currently building vector index";
+        out_reason = PreformattedMessage::create("source part {} or {} is currently building vector index", left->name, right->name);
         return false;
     }
 
@@ -136,8 +135,7 @@ bool VectorIndicesMgr::canMergeForVectorIndex(
         auto right_vi_seg = right->segments_mgr->getSegment(vec_desc.name);
         if (!BaseSegment::canMergeForSegs(left_vi_seg, right_vi_seg))
         {
-            if (out_reason)
-                *out_reason = "source part " + left->name + " or " + right->name + " doesn't contain the same built vector index";
+            out_reason = PreformattedMessage::create("source part {} or {} doesn't contain the same built vector index", left->name, right->name);
             return false;
         }
     }
@@ -710,10 +708,10 @@ VIContextPtr VectorIndicesMgr::prepareBuildVIContext(
 
     ctx->build_cancel_callback = [source_part = part,
                                   vi_status = ctx->vi_status,
-                                  builds_blocker = ctx->builds_blocker,
+                                  builds_blocker_ = ctx->builds_blocker,
                                   vec_index_desc = ctx->vec_index_desc]() -> bool
     {
-        if (source_part->storage.isShutdown() || builds_blocker->isCancelled())
+        if (source_part->storage.isShutdown() || builds_blocker_->isCancelled())
             return true;
 
         if (vi_status->getStatus() == VectorIndex::SegmentStatus::CANCELLED)
@@ -732,20 +730,20 @@ VIContextPtr VectorIndicesMgr::prepareBuildVIContext(
         return false;
     };
 
-    ctx->clean_tmp_folder = [log = ctx->log, disk](const String & vector_tmp_path) mutable
+    ctx->clean_tmp_folder = [log_ = ctx->log, disk](const String & vector_tmp_path) mutable
     {
         /// Remove temporay directory
         if (disk->exists(vector_tmp_path))
             disk->removeRecursive(vector_tmp_path);
         else
-            LOG_DEBUG(log, "Remove vector_tmp_relative_path doesn't exist {}", vector_tmp_path);
+            LOG_DEBUG(log_, "Remove vector_tmp_relative_path doesn't exist {}", vector_tmp_path);
     };
 
-    ctx->write_event_log = [part = ctx->source_part, vector_index_name = ctx->vector_index_name](
+    ctx->write_event_log = [part_ = ctx->source_part, vector_index_name_ = ctx->vector_index_name](
                                VIEventLogElement::Type event_type, int error_code, const String & error_message) mutable
     {
         VIEventLog::addEventLog(
-            Context::getGlobalContextInstance(), part, vector_index_name, event_type, "", ExecutionStatus(error_code, error_message));
+            Context::getGlobalContextInstance(), part_, vector_index_name_, event_type, "", ExecutionStatus(error_code, error_message));
     };
 
     return ctx;

@@ -22,7 +22,7 @@ public:
     
     /// only call in alter table add index, will add segment for all parts,
     /// if table is replicated, will create zookeeper node for vector index build status
-    void init();
+    void init() const;
     /// only call in alter table drop index, will remove segment for all parts,
     /// if table is replicated, will remove zookeeper node for vector index build status
     void drop();
@@ -44,7 +44,7 @@ protected:
     const VIDescription vec_desc;
     const bool is_replica;
     std::atomic<bool> is_dropped{false};
-    std::once_flag init_flag;
+    mutable std::once_flag init_flag;
 };
 
 using VectorIndexObjectPtr

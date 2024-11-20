@@ -42,8 +42,9 @@ public:
     }
 
     bool executeStep() override;
-    StorageID getStorageID() override;
-    UInt64 getPriority() override { return priority; }
+    StorageID getStorageID() const override;
+    Priority getPriority() const override { return priority; }
+    String getQueryId() const override { return getStorageID().getShortName() + "::" + part_name + "::" + vector_index_name; }
     void onCompleted() override;
 
     ~VITaskBase() override;
@@ -82,7 +83,7 @@ protected:
     bool slow_mode;
 
     State state{State::NEED_PREPARE};
-    UInt64 priority{0};
+    Priority priority{0};
 
     Poco::Logger * log;
 };

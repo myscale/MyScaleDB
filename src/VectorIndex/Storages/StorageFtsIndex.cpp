@@ -4,10 +4,10 @@
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/Sources/SourceFromSingleChunk.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
+#include <VectorIndex/Storages/StorageFtsIndex.h>
 
 #if USE_TANTIVY_SEARCH
 #include <Interpreters/TantivyFilter.h>
-#include <VectorIndex/Storages/StorageFtsIndex.h>
 #endif
 
 namespace DB
@@ -87,6 +87,7 @@ void StorageFtsIndex::read(
     const auto & table_metadata = source_table->getInMemoryMetadataPtr();
 
     String tantivy_index_file_name;
+#if USE_TANTIVY_SEARCH
     for (const auto & index_desc : table_metadata->getSecondaryIndices())
     {
         if ((search_with_index_name && index_desc.type == TANTIVY_INDEX_NAME && index_desc.name == fts_index_name) ||
@@ -96,6 +97,7 @@ void StorageFtsIndex::read(
             break;
         }
     }
+#endif
 
     if (tantivy_index_file_name.empty())
     {
@@ -142,6 +144,7 @@ void ReadFromFtsIndex::initializePipeline(QueryPipelineBuilder & pipeline, const
     std::map<UInt32, UInt64> total_tokens_map;
     std::map<std::pair<UInt32, String>, UInt64> terms_freq_map;
 
+#if USE_TANTIVY_SEARCH
     for (auto const & part : storage->getDataParts())
     {
         if (!part->getDataPartStorage().exists(tantivy_index_file_name + ".idx"))
@@ -163,6 +166,7 @@ void ReadFromFtsIndex::initializePipeline(QueryPipelineBuilder & pipeline, const
             terms_freq_map[std::make_pair(field_id, std::string(term_str))] += doc_freq;
         }
     }
+#endif
 
     total_docs_column->insert(final_total_docs);
 

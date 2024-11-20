@@ -184,6 +184,7 @@ bool StorageReplicatedVectorIndicesMgr::executeFetchVectorIndex(LogEntry & entry
     return true;
 }
 
+/// Reference from StorageReplicatedMergeTree::fetchPart()
 bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
     DataPartPtr future_part,
     const String & part_name,
@@ -262,7 +263,7 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
 
     {
         address.fromString(zookeeper->get(fs::path(source_replica_path) / "host"));
-        timeouts = storage.getFetchPartHTTPTimeouts(storage.getContext());
+        timeouts = ConnectionTimeouts::getFetchPartHTTPTimeouts(storage.getContext()->getServerSettings(), storage.getContext()->getSettingsRef());
 
         credentials = storage.getContext()->getInterserverCredentials();
         interserver_scheme = storage.getContext()->getInterserverScheme();
@@ -281,6 +282,7 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
 
             return storage.fetcher.fetchVectorIndex(
                 future_part,
+                storage.getContext(),
                 part_name,
                 vec_index_name,
                 source_replica_path,
@@ -415,7 +417,7 @@ void StorageReplicatedVectorIndicesMgr::scheduleUpdateVectorIndexInfoZookeeperJo
         try
         {
             watch.start();
-            synced = storage.waitForProcessingQueue(storage.getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), true);
+            synced = storage.waitForProcessingQueue(storage.getContext()->getSettingsRef().receive_timeout.totalMilliseconds(), SyncReplicaMode::DEFAULT, {});
             watch.stop();
         }
         catch (Exception & e)

@@ -7697,6 +7697,12 @@ bool MergeTreeData::canUseAdaptiveGranularity() const
         && (settings->enable_mixed_granularity_parts || !has_non_adaptive_index_granularity_parts);
 }
 
+bool MergeTreeData::canUsePrimaryKeyCache() const
+{
+    const auto settings = getSettings();
+    return settings->enable_primary_key_cache.value && getContext()->getPKCacheSize()>0;
+}
+
 String MergeTreeData::getFullPathOnDisk(const DiskPtr & disk) const
 {
     return disk->getPath() + relative_data_path;

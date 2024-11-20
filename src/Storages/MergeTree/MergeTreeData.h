@@ -875,11 +875,7 @@ public:
     virtual bool canUseAdaptiveGranularity() const;
 
     // Returns true if primary key cache is enabled when cache size > 0.
-    bool canUsePrimaryKeyCache() const
-    {
-        const auto settings = getSettings();
-        return settings->enable_primary_key_cache.value && getContext()->getPKCacheSize()>0;
-    }
+    bool canUsePrimaryKeyCache() const;
 
     /// Get constant pointer to storage settings.
     /// Copy this pointer into your scope and you will

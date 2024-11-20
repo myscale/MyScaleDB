@@ -5439,8 +5439,9 @@ void StorageReplicatedMergeTree::flushAndPrepareForShutdown()
         fetcher.blocker.cancelForever();
         merger_mutator.merges_blocker.cancelForever();
         parts_mover.moves_blocker.cancelForever();
-        vec_index_builder_updater.builds_blocker.cancelForever(); /// Cancel background vector index build tasks
         stopBeingLeader();
+
+        vi_manager->shutdown();
 
         if (attach_thread)
         {
@@ -5523,8 +5524,6 @@ void StorageReplicatedMergeTree::shutdown(bool)
     stopOutdatedAndUnexpectedDataPartsLoadingTask();
 
     partialShutdown();
-
-    vi_manager->shutdown();
 
     part_moves_between_shards_orchestrator.shutdown();
 

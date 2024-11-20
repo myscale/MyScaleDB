@@ -14,6 +14,7 @@ set (CLICKHOUSE_CLIENT_LINK
 
 if (TARGET ch_rust::skim)
     list(APPEND CLICKHOUSE_CLIENT_LINK PRIVATE ch_rust::skim)
+endif()
 
 # Always use internal readpassphrase
 list(APPEND CLICKHOUSE_CLIENT_LINK PRIVATE readpassphrase)
