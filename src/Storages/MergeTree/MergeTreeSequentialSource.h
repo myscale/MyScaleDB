@@ -29,6 +29,7 @@ void createMergeTreeSequentialSource(
     MergeTreeData::DataPartPtr data_part,
     Names columns_to_read,
     bool apply_deleted_mask,
+    bool from_lwd_mutation,
     ActionsDAGPtr filter,
     ContextPtr context,
     Poco::Logger * log);

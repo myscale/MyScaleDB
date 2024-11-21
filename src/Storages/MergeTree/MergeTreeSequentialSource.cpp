@@ -34,6 +34,7 @@ public:
         bool apply_deleted_mask,
         bool read_with_direct_io_,
         bool take_column_types_from_storage,
+        bool from_lwd_mutation_ = false,
         bool quiet = false);
 
     ~MergeTreeSequentialSource() override;
@@ -75,6 +76,9 @@ private:
     /// current row at which we stop reading
     size_t current_row = 0;
 
+    /// Use max_block_size in optimized lightweight delete
+    bool from_lwd_mutation = false;
+
     /// max rows to read at a time
     size_t max_rows_to_read = 0;
 
@@ -92,6 +96,7 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
     bool apply_deleted_mask,
     bool read_with_direct_io_,
     bool take_column_types_from_storage,
+    bool from_lwd_mutation_,
     bool quiet)
     : ISource(storage_snapshot_->getSampleBlockForColumns(columns_to_read_))
     , storage(storage_)
@@ -101,6 +106,7 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
     , read_with_direct_io(read_with_direct_io_)
     , mark_ranges(std::move(mark_ranges_))
     , mark_cache(storage.getContext()->getMarkCache())
+    , from_lwd_mutation(from_lwd_mutation_)
 {
     if (!quiet)
     {
@@ -167,14 +173,23 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
         {},
         {});
 
+    size_t sequential_read_max_rows;
+    if (from_lwd_mutation)
+        sequential_read_max_rows = storage.getContext()->getSettingsRef().max_block_size;
+    else
+    {
+        const auto & global_data_settings = storage.getContext()->getMergeTreeSettings();
+        sequential_read_max_rows = global_data_settings.index_granularity;
+    }
+
     /// Try to read many marks at once in a readRows() to speed up the sequential read
     /// Enabled when index_granuality * 2 is small than global default index_granularity and rows count in part is larger than it.
-    const auto & global_data_settings = storage.getContext()->getMergeTreeSettings();
-    size_t sequential_read_max_rows = global_data_settings.index_granularity;
-
     const auto & data_settings = storage.getSettings();
     if (data_settings->index_granularity * 2 < sequential_read_max_rows && data_part->rows_count > sequential_read_max_rows)
         max_rows_to_read = sequential_read_max_rows;
+
+    if (!quiet)
+        LOG_DEBUG(log, "max_rows_to_read = {}, sequential_read_max_rows = {}", max_rows_to_read, sequential_read_max_rows);
 }
 
 Chunk MergeTreeSequentialSource::generate()
@@ -321,7 +336,7 @@ Pipe createMergeTreeSequentialSource(
     bool apply_deleted_mask = false;
 
     auto column_part_source = std::make_shared<MergeTreeSequentialSource>(
-        storage, storage_snapshot, data_part, columns, std::optional<MarkRanges>{}, apply_deleted_mask, read_with_direct_io, take_column_types_from_storage, quiet);
+        storage, storage_snapshot, data_part, columns, std::optional<MarkRanges>{}, apply_deleted_mask, read_with_direct_io, take_column_types_from_storage, false, quiet);
 
     Pipe pipe(std::move(column_part_source));
 
@@ -352,6 +367,7 @@ public:
         MergeTreeData::DataPartPtr data_part_,
         Names columns_to_read_,
         bool apply_deleted_mask_,
+        bool from_lwd_mutation_,
         ActionsDAGPtr filter_,
         ContextPtr context_,
         Poco::Logger * log_)
@@ -361,6 +377,7 @@ public:
         , data_part(std::move(data_part_))
         , columns_to_read(std::move(columns_to_read_))
         , apply_deleted_mask(apply_deleted_mask_)
+        , from_lwd_mutation(from_lwd_mutation_)
         , filter(std::move(filter_))
         , context(std::move(context_))
         , log(log_)
@@ -393,7 +410,7 @@ public:
         }
 
         auto source = std::make_unique<MergeTreeSequentialSource>(
-            storage, storage_snapshot, data_part, columns_to_read, std::move(mark_ranges), apply_deleted_mask, false, true);
+            storage, storage_snapshot, data_part, columns_to_read, std::move(mark_ranges), apply_deleted_mask, false, true, from_lwd_mutation);
 
         pipeline.init(Pipe(std::move(source)));
     }
@@ -404,6 +421,7 @@ private:
     MergeTreeData::DataPartPtr data_part;
     Names columns_to_read;
     bool apply_deleted_mask;
+    bool from_lwd_mutation;
     ActionsDAGPtr filter;
     ContextPtr context;
     Poco::Logger * log;
@@ -416,12 +434,13 @@ void createMergeTreeSequentialSource(
     MergeTreeData::DataPartPtr data_part,
     Names columns_to_read,
     bool apply_deleted_mask,
+    bool from_lwd_mutation,
     ActionsDAGPtr filter,
     ContextPtr context,
     Poco::Logger * log)
 {
     auto reading = std::make_unique<ReadFromPart>(
-        storage, storage_snapshot, std::move(data_part), std::move(columns_to_read), apply_deleted_mask, filter, std::move(context), log);
+        storage, storage_snapshot, std::move(data_part), std::move(columns_to_read), apply_deleted_mask, from_lwd_mutation, filter, std::move(context), log);
 
     plan.addStep(std::move(reading));
 }
