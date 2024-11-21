@@ -6,6 +6,19 @@
 
 namespace DB
 {
+/// Lightweight DELETE command stored in mutation commands
+class ASTLWDeleteCommand : public IAST
+{
+public:
+    String getID(char /*delim*/) const final { return "LWDeleteCommand"; }
+    ASTPtr clone() const final;
+
+    ASTPtr predicate;
+
+protected:
+    void formatImpl(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
+};
+
 /// DELETE FROM [db.]name WHERE ...
 class ASTDeleteQuery : public ASTQueryWithTableAndOutput, public ASTQueryWithOnCluster
 {
@@ -18,6 +31,9 @@ public:
     {
         return removeOnCluster<ASTDeleteQuery>(clone(), params.default_database);
     }
+
+    /// The ast for lightweight delete stored in MutationCommand
+    ASTPtr convertToASTLWDeleteCommand() const;
 
     ASTPtr predicate;
 

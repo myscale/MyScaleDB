@@ -38,6 +38,7 @@ struct MutationCommand
         RENAME_COLUMN,
         MATERIALIZE_COLUMN,
         ALTER_WITHOUT_MUTATION, /// pure metadata command, currently unusned
+        LIGHTWEIGHT_DELETE, /// Perform lightweight delete in an optimized way
     };
 
     Type type = EMPTY;
