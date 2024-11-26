@@ -44,7 +44,7 @@ TantivyIndexFilesManager::TantivyIndexFilesManager(const String & skp_index_name
     this->index_meta_file_name = skp_index_name_ + TANTIVY_INDEX_OFFSET_FILE_TYPE;
     this->index_data_file_name = skp_index_name_ + TANTIVY_INDEX_DATA_FILE_TYPE;
     auto global_context = Context::getGlobalContextInstance();
-    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath(), 0);
+    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath());
     this->initTantivyIndexCacheDirectory();
 }
 
@@ -55,7 +55,7 @@ TantivyIndexFilesManager::TantivyIndexFilesManager(
     this->index_meta_file_name = skp_index_name_ + TANTIVY_INDEX_OFFSET_FILE_TYPE;
     this->index_data_file_name = skp_index_name_ + TANTIVY_INDEX_DATA_FILE_TYPE;
     auto global_context = Context::getGlobalContextInstance();
-    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath(), 0);
+    this->tmp_disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, global_context->getPath());
     this->initTantivyIndexCacheDirectory();
 }
 
@@ -169,7 +169,7 @@ ChecksumPairs TantivyIndexFilesManager::serialize()
         {
             std::unique_ptr<ReadBufferFromFileBase> temp_file_read_stream
                 = this->tmp_disk->readFile(entry.path(), {}, std::nullopt, std::nullopt);
-            UInt64 file_size = static_cast<DB::UInt64>(temp_file_read_stream->getFileSize());
+            UInt64 file_size = static_cast<UInt64>(temp_file_read_stream->getFileSize());
             copyData(*temp_file_read_stream, *data_hashing_uncompressed_stream);
             metas.emplace_back(entry.path().filename(), written_bytes, written_bytes + file_size);
             written_bytes += file_size;
@@ -336,7 +336,7 @@ std::optional<fs::path> TantivyIndexFilesManager::getDataPartFullPathInCache(con
     {
         auto context = Context::getGlobalContextInstance();
         fs::path tantivy_index_cache_prefix = context->getTantivyIndexCachePath();
-        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath(), 0);
+        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath());
 
         // example: /var/lib/clickhouse/tantivy_index_cache/store/ba1/ba1625f1-dbf2-4ad4-a06c-e6c4e611984a/all_1_1_1_2/
         auto data_part_full_cache_path = tantivy_index_cache_prefix / relative_data_part_in_cache / "";
@@ -411,7 +411,7 @@ void TantivyIndexFilesManager::removeDataPartInCache(const String & relative_dat
         if (res.has_value())
         {
             fs::path data_part_full_path_in_cache = res.value();
-            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath());
             if (disk->isDirectory(data_part_full_path_in_cache))
             {
                 LOG_INFO(&Poco::Logger::get("FTSIndexFilesManager"), "try remove data part in cache `{}`", data_part_full_path_in_cache);
@@ -447,7 +447,7 @@ void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & relative
         {
             fs::path data_part_full_path_in_cache = res.value();
             fs::path index_full_path_in_cache = data_part_full_path_in_cache / skp_index_name / "";
-            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath());
             if (disk->isDirectory(index_full_path_in_cache))
             {
                 LOG_INFO(&Poco::Logger::get("FTSIndexFilesManager"), "try remove FTS index in cache `{}`", index_full_path_in_cache);
@@ -510,7 +510,7 @@ void TantivyIndexFilesManager::removeTantivyIndexInCache(const String & tantivy_
         }
 
 
-        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+        auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath());
         if (disk->isDirectory(tantivy_index_cache_full_directory))
         {
             LOG_INFO(
@@ -551,7 +551,7 @@ void TantivyIndexFilesManager::removeEmptyTableUUIDInCache(const String & relati
         if (res.has_value())
         {
             fs::path data_part_full_path_in_cache = res.value();
-            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath(), 0);
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, Context::getGlobalContextInstance()->getPath());
 
             // table_uuid_directory_in_cache: `/var/lib/clickhouse/tantivy_index_cache/store/6b0/6b0c995b-a94f-43f4-87f5-1c4f8d56c855`
             auto table_uuid_directory_in_cache = data_part_full_path_in_cache.parent_path().parent_path();

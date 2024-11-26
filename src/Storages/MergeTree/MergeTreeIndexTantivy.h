@@ -335,12 +335,11 @@ public:
     ~MergeTreeIndexTantivy() override = default;
 
     MergeTreeIndexGranulePtr createIndexGranule() const override;
-    MergeTreeIndexAggregatorPtr createIndexAggregator() const override;
+    MergeTreeIndexAggregatorPtr createIndexAggregator(const MergeTreeWriterSettings & settings) const override;
 
-    MergeTreeIndexAggregatorPtr createIndexAggregatorForPart(TantivyIndexStorePtr & store) const override;
-    MergeTreeIndexConditionPtr createIndexCondition(const SelectQueryInfo & query, ContextPtr context) const override;
-
-    bool mayBenefitFromIndexForIn(const ASTPtr & node) const override;
+    MergeTreeIndexAggregatorPtr createIndexAggregatorForPart(TantivyIndexStorePtr & store, const MergeTreeWriterSettings & settings) const override;
+    MergeTreeIndexConditionPtr createIndexCondition(const SelectQueryInfo & query, ContextPtr context) const;
+    MergeTreeIndexConditionPtr createIndexCondition(const ActionsDAG *, ContextPtr) const override;
 
     TantivyFilterParameters params;
     /// Function for selecting next token.

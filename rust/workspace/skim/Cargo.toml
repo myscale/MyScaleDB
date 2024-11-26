@@ -14,4 +14,4 @@ term = "0.7.0"
 cxx-build = "1.0.83"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]

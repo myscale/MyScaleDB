@@ -1,9 +1,10 @@
 # workspace is required to vendor crates for all packages.
 [workspace]
 members = [
+    "tantivy_search",
     "skim",
     "prql",
-    "tantivy_search",
+    "supercreate",
 ]
 resolver = "2"
 

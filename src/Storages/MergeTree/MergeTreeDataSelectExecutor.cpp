@@ -1378,7 +1378,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
     size_t & granules_dropped,
     size_t & total_granules,
     const Settings & settings,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     MarkRanges res;
     size_t last_index_mark = 0;
@@ -1442,7 +1442,7 @@ MarkRanges MergeTreeDataSelectExecutor::generateMarkRangesFromTantivy(
         {
             if (index_mark != index_range.begin || !granule || last_index_mark != index_range.begin)
             {
-                granule = reader.read();
+                reader.read(granule);
             }
 
             std::shared_ptr<MergeTreeIndexGranuleTantivy> granule_tantivy
@@ -1571,6 +1571,10 @@ MarkRanges MergeTreeDataSelectExecutor::filterMarksUsingIndex(
     /// Some granules can cover two or more ranges,
     /// this variable is stored to avoid reading the same granule twice.
     MergeTreeIndexGranulePtr granule = nullptr;
+
+    /// [TODO] tmp build fix
+    size_t granules_dropped = 0;
+    size_t total_granules = 0;
     size_t last_index_mark = 0;
 
     PostingsCacheForStore cache_in_store;

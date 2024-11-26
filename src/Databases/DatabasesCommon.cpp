@@ -320,7 +320,7 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
         }
         else if (table_storage->getStorageID().hasDatabase())
         {
-            table_relative_path = fs::path("data") / rtable_storagees->getStorageID().getDatabaseName() / table_storage->getStorageID().getTableName() / "";
+            table_relative_path = fs::path("data") / table_storage->getStorageID().getDatabaseName() / table_storage->getStorageID().getTableName() / "";
         }
 
         if (!table_relative_path.empty())
@@ -328,16 +328,16 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
             auto context = Context::getGlobalContextInstance();
             String tantivy_index_cache_prefix = context->getTantivyIndexCachePath();
             fs::path tantivy_index_cache_path_for_table = fs::path(tantivy_index_cache_prefix) / table_relative_path;
-            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath(), 0);
+            auto disk = std::make_shared<DiskLocal>(TANTIVY_TEMP_DISK_NAME, context->getPath());
             if (disk->isDirectory(tantivy_index_cache_path_for_table))
             {
                 disk->removeRecursive(tantivy_index_cache_path_for_table);
                 LOG_INFO(
                     &Poco::Logger::get("DatabaseWithOwnTablesBase"),
                     "detach table `{}`, hasDatabase {}, hasUUID {} clean FTS cache `{}`",
-                    res->getStorageID().getFullTableName(),
-                    res->getStorageID().hasDatabase(),
-                    res->getStorageID().hasUUID(),
+                    table_storage->getStorageID().getFullTableName(),
+                    table_storage->getStorageID().hasDatabase(),
+                    table_storage->getStorageID().hasUUID(),
                     tantivy_index_cache_path_for_table);
             }
             auto tantivy_index_cache_parent_path = tantivy_index_cache_path_for_table.parent_path().parent_path();
@@ -347,7 +347,7 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
             }
             // clean stores
             // TODO needs refine TantivyIndexStoreFactory, the remove func is only for data part relative path.
-            auto index_names = res->getInMemoryMetadataPtr()->getSecondaryIndices().getAllRegisteredNames();
+            auto index_names = table_storage->getInMemoryMetadataPtr()->getSecondaryIndices().getAllRegisteredNames();
             TantivyIndexStoreFactory::instance().remove(table_relative_path, index_names);
         }
     }
