@@ -7,6 +7,7 @@
 #include <Columns/ColumnLowCardinality.h>
 #include <Columns/ColumnNullable.h>
 #include <Core/Defines.h>
+#include <Core/Settings.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeNullable.h>
@@ -103,7 +104,7 @@ void MergeTreeIndexGranuleTantivy::deserializeBinary(ReadBuffer & istr, MergeTre
     for (auto & tantivy_filter : tantivy_filters)
     {
         size_serialization->deserializeBinary(field_rows, istr, {});
-        size_t filter_size = field_rows.get<size_t>();
+        size_t filter_size = field_rows.safeGet<size_t>();
 
         if (filter_size == 0)
             continue;
@@ -254,10 +255,8 @@ MergeTreeConditionTantivy::MergeTreeConditionTantivy(
 
     auto block_with_constants = KeyCondition::getBlockWithConstants(query_info.query, query_info.syntax_analyzer_result, context_);
     RPNBuilder<RPNElement> builder(
-        filter_node,
+        query_info.filter_actions_dag->getOutputs().at(0),
         context_,
-        std::move(block_with_constants),
-        query_info.prepared_sets,
         [&](const RPNBuilderTreeNode & node, RPNElement & out) { return traverseAtomAST(node, out); });
     rpn = std::move(builder).extractRPN();
 }
@@ -321,7 +320,7 @@ bool MergeTreeConditionTantivy::traverseAtomAST(const RPNBuilderTreeNode & node,
                 || const_value.getType() == Field::Types::Float64)
             {
                 /// Zero in all types is represented in memory the same way as in UInt64.
-                out.function = const_value.get<UInt64>() ? RPNElement::ALWAYS_TRUE : RPNElement::ALWAYS_FALSE;
+                out.function = const_value.safeGet<UInt64>() ? RPNElement::ALWAYS_TRUE : RPNElement::ALWAYS_FALSE;
 
                 return true;
             }
@@ -462,7 +461,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::SENTENCE_QUERY);
-        auto & value = const_value.get<String>();
+        auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
@@ -475,7 +474,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::SENTENCE_QUERY);
-        auto & value = const_value.get<String>();
+        auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
@@ -487,7 +486,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::SENTENCE_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
@@ -498,7 +497,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::SENTENCE_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
@@ -509,7 +508,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::REGEX_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         if (map_key_costant)
         {
@@ -525,7 +524,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::REGEX_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         if (map_key_costant)
         {
@@ -540,7 +539,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::SINGLE_TERM_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         out.tantivy_filter->setQueryString(value.data(), value.size());
         return true;
     }
@@ -551,7 +550,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::REGEX_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         std::string pattern_string(value.data(), value.size());
         pattern_string += "%";
         out.tantivy_filter->setQueryString(pattern_string.c_str(), pattern_string.size());
@@ -564,7 +563,7 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
         out.tantivy_filter->setQueryColumnName(col_name);
         out.tantivy_filter->setQueryType(TantivyFilter::REGEX_QUERY);
-        const auto & value = const_value.get<String>();
+        const auto & value = const_value.safeGet<String>();
         std::string pattern_string(value.data(), value.size());
         pattern_string = "%" + pattern_string;
         out.tantivy_filter->setQueryString(pattern_string.c_str(), pattern_string.size());
@@ -577,11 +576,11 @@ bool MergeTreeConditionTantivy::traverseASTEquals(
 
         out.tantivy_filter = std::make_unique<TantivyFilter>(params);
 
-        for (const auto & element : const_value.get<Array>())
+        for (const auto & element : const_value.safeGet<Array>())
         {
             if (element.getType() != Field::Types::String)
                 return false;
-            const auto & value = element.get<String>();
+            const auto & value = element.safeGet<String>();
             std::string term = String(value.data(), value.size());
             out.tantivy_filter->addQueryTerm(term);
         }
@@ -630,7 +629,11 @@ bool MergeTreeConditionTantivy::tryPrepareSetTantivyFilter(const RPNBuilderTreeN
     if (key_tuple_mapping.empty())
         return false;
 
-    ConstSetPtr prepared_set = rhs.tryGetPreparedSet();
+    auto future_set = rhs.tryGetPreparedSet(data_types);
+    if (!future_set)
+        return false;
+    
+    auto prepared_set = future_set->buildOrderedSetInplace(rhs.getTreeContext().getQueryContext());
     if (!prepared_set || !prepared_set->hasExplicitSetElements())
         return false;
 
@@ -676,14 +679,14 @@ MergeTreeIndexGranulePtr MergeTreeIndexTantivy::createIndexGranule() const
     return std::make_shared<MergeTreeIndexGranuleTantivy>(index.name, index.column_names.size(), params);
 }
 
-MergeTreeIndexAggregatorPtr MergeTreeIndexTantivy::createIndexAggregator() const
+MergeTreeIndexAggregatorPtr MergeTreeIndexTantivy::createIndexAggregator(const MergeTreeWriterSettings & /*settings*/) const
 {
     /// should not be called: createIndexAggregatorForPart should be used
     assert(false);
     return nullptr;
 }
 
-MergeTreeIndexAggregatorPtr MergeTreeIndexTantivy::createIndexAggregatorForPart(TantivyIndexStorePtr & store) const
+MergeTreeIndexAggregatorPtr MergeTreeIndexTantivy::createIndexAggregatorForPart(TantivyIndexStorePtr & store, const MergeTreeWriterSettings & /*settings*/) const
 {
     return std::make_shared<MergeTreeIndexAggregatorTantivy>(store, index.column_names, index.name, params);
 }
@@ -693,15 +696,14 @@ MergeTreeIndexConditionPtr MergeTreeIndexTantivy::createIndexCondition(const Sel
     return std::make_shared<MergeTreeConditionTantivy>(query, context, index.sample_block, params);
 };
 
-bool MergeTreeIndexTantivy::mayBenefitFromIndexForIn(const ASTPtr & node) const
+MergeTreeIndexConditionPtr MergeTreeIndexTantivy::createIndexCondition(const ActionsDAG *, ContextPtr) const
 {
-    return std::find(std::cbegin(index.column_names), std::cend(index.column_names), node->getColumnName())
-        != std::cend(index.column_names);
+    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "MergeTreeIndexAnnoy cannot be created with ActionsDAG");
 }
 
 MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index)
 {
-    String tantivy_index_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
+    String tantivy_index_parameter = index.arguments.empty() ? "{}" : index.arguments[0].safeGet<String>();
     TantivyFilterParameters params(tantivy_index_parameter);
 
     return std::make_shared<MergeTreeIndexTantivy>(index, params);
@@ -786,7 +788,7 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
     }
 
     /// Just validate
-    String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].get<String>();
+    String index_json_parameter = index.arguments.empty() ? "{}" : index.arguments[0].safeGet<String>();
 
 
     TANTIVY::FFIBoolResult json_status = TANTIVY::ffi_verify_index_parameter(index_json_parameter);

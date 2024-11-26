@@ -14,6 +14,7 @@
 #if USE_TANTIVY_SEARCH
 #    include <Columns/ColumnConst.h>
 #    include <Columns/ColumnString.h>
+#    include <Columns/ColumnTuple.h>
 #    include <Columns/IColumn.h>
 #    include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #    include <Parsers/ASTExpressionList.h>
@@ -282,12 +283,12 @@ void parseBM25StaisiticsInfo(const Block & block, size_t row, UInt64 & total_doc
         if (!tokens_array)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_total_tokens->dumpStructure());
 
-        const ColumnTuple * tokens_tuple = checkAndGetColumn<ColumnTuple>(tokens_array->getData());
+        const auto * tokens_tuple = checkAndGetColumn<ColumnTuple>(&tokens_array->getData());
         if (!tokens_tuple || tokens_tuple->getColumns().size() != 2)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_total_tokens->dumpStructure());
 
-        auto tuple_column0 = checkAndGetColumn<ColumnUInt32>(tokens_tuple->getColumn(0));
-        auto tuple_column1 = checkAndGetColumn<ColumnUInt64>(tokens_tuple->getColumn(1));
+        const auto * tuple_column0 = checkAndGetColumn<ColumnUInt32>(tokens_tuple->getColumnPtr(0).get());
+        const auto * tuple_column1 = checkAndGetColumn<ColumnUInt64>(tokens_tuple->getColumnPtr(1).get());
 
         if (!tuple_column0 || !tuple_column1)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_total_tokens->dumpStructure());
@@ -308,13 +309,13 @@ void parseBM25StaisiticsInfo(const Block & block, size_t row, UInt64 & total_doc
         if (!freq_array)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_docs_freq->dumpStructure());
 
-        const ColumnTuple * freq_tuple = checkAndGetColumn<ColumnTuple>(freq_array->getData());
+        const auto * freq_tuple = checkAndGetColumn<ColumnTuple>(&freq_array->getData());
         if (!freq_tuple || freq_tuple->getColumns().size() != 3)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_docs_freq->dumpStructure());
 
-        auto tuple_column0 = checkAndGetColumn<ColumnString>(freq_tuple->getColumn(0));
-        auto tuple_column1 = checkAndGetColumn<ColumnUInt32>(freq_tuple->getColumn(1));
-        auto tuple_column2 = checkAndGetColumn<ColumnUInt64>(freq_tuple->getColumn(2));
+        const auto * tuple_column0 = checkAndGetColumn<ColumnString>(&freq_tuple->getColumn(0));
+        const auto * tuple_column1 = checkAndGetColumn<ColumnUInt32>(&freq_tuple->getColumn(1));
+        const auto * tuple_column2 = checkAndGetColumn<ColumnUInt64>(&freq_tuple->getColumn(2));
 
         if (!tuple_column0 || !tuple_column1 || !tuple_column2)
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Fts statistic info block type is error, docs_freq type is {}", column_docs_freq->dumpStructure());

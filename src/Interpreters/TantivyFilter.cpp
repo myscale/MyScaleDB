@@ -10,7 +10,6 @@
 #include <Disks/DiskLocal.h>
 #include <Interpreters/TantivyFilter.h>
 #include <Storages/MergeTree/MergeTreeIndexFullText.h>
-#include <Storages/MergeTree/MergeTreeIndexInverted.h>
 #include <Storages/MergeTree/TantivyIndexStore.h>
 
 namespace DB

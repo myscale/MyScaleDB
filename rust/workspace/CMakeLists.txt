@@ -41,9 +41,22 @@ clickhouse_import_crate(MANIFEST_PATH Cargo.toml)
 target_include_directories(_ch_rust_prql INTERFACE prql/include)
 add_library(ch_rust::prql ALIAS _ch_rust_prql)
 
-target_include_directories(_ch_rust_skim_rust INTERFACE skim/include)
-add_library(ch_rust::skim ALIAS _ch_rust_skim_rust)
+# target_include_directories(_ch_rust_skim_rust INTERFACE skim/include)
+# add_library(ch_rust::skim ALIAS _ch_rust_skim_rust)
 
-target_include_directories(tantivy_search INTERFACE tantivy_search/include)
-add_library(ch_rust::tantivy_search ALIAS tantivy_search)
+# target_include_directories(tantivy_search INTERFACE tantivy_search/include)
+# add_library(ch_rust::tantivy_search ALIAS tantivy_search)
+
+# To resolve the cxx symbol conflict that occurs when compiling tantivy-search and skim together,
+# the implementations of tantivy-search and skim are integrated into the supercreate library.
+target_include_directories(supercreate INTERFACE skim/include tantivy_search/include)
+target_compile_options(supercreate INTERFACE "-Wno-dollar-in-identifier-extension") 
+
+add_library(ch_skim_rust INTERFACE)
+target_link_libraries(ch_skim_rust INTERFACE supercreate)
+add_library(ch_rust::skim ALIAS ch_skim_rust)
+
+add_library(ch_tantivy_search_rust INTERFACE)
+target_link_libraries(ch_tantivy_search_rust INTERFACE supercreate)
+add_library(ch_rust::tantivy_search ALIAS ch_tantivy_search_rust)
 
