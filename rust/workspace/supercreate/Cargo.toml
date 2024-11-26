@@ -1,0 +1,12 @@
+[package]
+name = "supercreate"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "supercreate"
+crate-type = ["staticlib"]
+
+[dependencies]
+tantivy_search = { path = "../tantivy_search" }
+_ch_rust_skim_rust = {path = "../skim"}

@@ -109,7 +109,7 @@ private:
         size_t & granules_dropped,
         size_t & total_granules,
         const Settings & settings,
-        Poco::Logger * log);
+        LoggerPtr log);
 #endif
 
     static MarkRanges filterMarksUsingMergedIndex(

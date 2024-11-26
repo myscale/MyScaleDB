@@ -314,9 +314,9 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
 #if USE_TANTIVY_SEARCH
         else if (typeid_cast<const MergeTreeIndexTantivy *>(&*skip_index) != nullptr)
         {
-            String store_key = TantivyIndexStoreFactory::instance().generateKey(stream_name, data_part->getDataPartStoragePtr());
+            String store_key = TantivyIndexStoreFactory::instance().generateKey(stream_name, data_part_storage);
             TantivyIndexStorePtr store = TantivyIndexStoreFactory::instance().getOrInitForBuild(
-                stream_name, data_part->getDataPartStoragePtr(), data_part->getDataPartStoragePtr());
+                stream_name, data_part_storage, data_part_storage);
             skip_indices_aggregators.push_back(skip_index->createIndexAggregatorForPart(store, settings));
             auto status = tantivy_index_store_keys.insert(store_key);
             if (!status.second)
@@ -424,7 +424,7 @@ void MergeTreeDataPartWriterOnDisk::calculateAndSerializeSkipIndices(const Block
                 {
                     String stream_name = index_helper->getFileName();
                     TantivyIndexStorePtr store
-                        = TantivyIndexStoreFactory::instance().getForBuild(stream_name, data_part->getDataPartStoragePtr());
+                        = TantivyIndexStoreFactory::instance().getForBuild(stream_name, data_part_storage);
                     if (store == nullptr)
                     {
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "store hasn't been initialized, it shouldn't happen.");

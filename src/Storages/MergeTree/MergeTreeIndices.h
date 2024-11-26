@@ -181,9 +181,9 @@ struct IMergeTreeIndex
     }
 
 #if USE_TANTIVY_SEARCH
-    virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] TantivyIndexStorePtr & store) const
+    virtual MergeTreeIndexAggregatorPtr createIndexAggregatorForPart([[maybe_unused]] TantivyIndexStorePtr & /*store*/, const MergeTreeWriterSettings & settings) const
     {
-        return createIndexAggregator();
+        return createIndexAggregator(settings);
     }
 #endif
 
