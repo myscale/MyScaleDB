@@ -196,7 +196,7 @@ void AmazonInstanceMetadata::checkAmazonDocumentSignature() const
         throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, verify failed.");
 
 #else
-    LOG_ERROR(&Poco::Logger::get("AmazonInstanceMetadata"), "Check Amazon document signature failed, OpenSSL is not enabled.");
+    LOG_ERROR(getLogger("AmazonInstanceMetadata"), "Check Amazon document signature failed, OpenSSL is not enabled.");
     throw Exception(ErrorCodes::LICENSE_ERROR, "Check Amazon document signature failed, OpenSSL is not enabled.");
 #endif
 }

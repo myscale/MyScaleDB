@@ -61,7 +61,7 @@ private:
     bool enable_nlq = true;
     String text_operator = "OR";
     ASTPtr query_text_ast;  /// query text is an identifier (alias name of a WITH statement)
-    Poco::Logger * log;
+    LoggerPtr log;
 };
 
 }

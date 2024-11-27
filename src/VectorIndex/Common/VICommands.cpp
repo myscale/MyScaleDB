@@ -29,7 +29,7 @@ namespace ErrorCodes
 
 std::optional<VICommand> VICommand::parse(ASTAlterCommand * command)
 {
-    Poco::Logger * log = &Poco::Logger::get("VICommand");
+    LoggerPtr log = getLogger("VICommand");
     if (command->type == ASTAlterCommand::ADD_VECTOR_INDEX)
     {
         VICommand res;

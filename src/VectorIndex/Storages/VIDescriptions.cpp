@@ -179,7 +179,7 @@ VIDescription VIDescription::getVectorIndexFromAST(
         if ((comma_index = param_str.rfind(',')) != String::npos)
             param_str.erase(comma_index, 1);
     }
-    LOG_TRACE(&Poco::Logger::get("get vector index from ast"), "after parameter check, param_str is {}", param_str);
+    LOG_TRACE(getLogger("get vector index from ast"), "after parameter check, param_str is {}", param_str);
     if (result.arguments.size() > 0)
     {
         try

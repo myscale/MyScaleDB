@@ -82,7 +82,7 @@ private:
     std::mutex mutex;
     TextSearchResultPtr text_search_result = nullptr;
 
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeTextSearchManager");
+    LoggerPtr log = getLogger("MergeTreeTextSearchManager");
 
     TextSearchResultPtr textSearch(
         const MergeTreeData::DataPartPtr & data_part = nullptr,

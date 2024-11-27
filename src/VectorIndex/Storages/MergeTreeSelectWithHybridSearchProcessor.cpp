@@ -1063,7 +1063,7 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     /// max streams for performing prewhere
     size_t num_streams = max_streams;
 
-    LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "max_streams = {}, original min_marks_for_concurrent_read = {}, sum_marks = {}, total_rows = {}, min_rows_for_concurrent_read = {}",
+    LOG_DEBUG(getLogger("performPreFilter"), "max_streams = {}, original min_marks_for_concurrent_read = {}, sum_marks = {}, total_rows = {}, min_rows_for_concurrent_read = {}",
             max_streams, info.min_marks_for_concurrent_read, info.sum_marks, info.total_rows, info.min_rows_for_concurrent_read);
 
     /// Enable parallel when num_streams > 1
@@ -1099,7 +1099,7 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
         }
     }
 
-    LOG_DEBUG(&Poco::Logger::get("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", num_streams, info.min_marks_for_concurrent_read);
+    LOG_DEBUG(getLogger("performPreFilter"), "num_streams = {}, min_marks_for_concurrent_read = {}", num_streams, info.min_marks_for_concurrent_read);
 
     size_t num_rows = data_part_->rows_count;
     VectorIndex::VIBitmapPtr filter = std::make_shared<VectorIndex::VIBitmap>(num_rows);

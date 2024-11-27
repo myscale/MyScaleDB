@@ -186,7 +186,7 @@ void MergeIdMaps::lazyInitOnce(const DB::IMergeTreeDataPart & data_part)
 
 MergeIdMapsPtr MergeIdMaps::loadFromDecoupelPart(const DB::IMergeTreeDataPart & data_part)
 {
-    LOG_DEBUG(&Poco::Logger::get("MergedMaps"), "Load row ids map from decoupled part: {}", data_part.name);
+    LOG_DEBUG(getLogger("MergedMaps"), "Load row ids map from decoupled part: {}", data_part.name);
     MergeIdMapsPtr merged_maps = std::make_shared<MergeIdMaps>();
     const_cast<RowIdsPtr &>(merged_maps->inverted_row_ids_map) = std::make_shared<RowIds>();
     const_cast<RowSourcePtr &>(merged_maps->inverted_row_sources_map) = std::make_shared<RowSource>();
@@ -281,7 +281,7 @@ void MergeIdMaps::removeMergedMapsFiles(const DB::IMergeTreeDataPart & data_part
             || endsWith(file_name, inverted_row_ids_map_file_suffix)
             || endsWith(file_name, inverted_row_source_map_file_suffix))
         {
-            LOG_DEBUG(&Poco::Logger::get("MergedMaps"), "Remove vector index file: {}", file_name);
+            LOG_DEBUG(getLogger("MergedMaps"), "Remove vector index file: {}", file_name);
             const_cast<DB::IDataPartStorage &>(data_part.getDataPartStorage()).removeFile(file_name);
         }
     }

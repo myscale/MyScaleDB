@@ -301,7 +301,7 @@ protected:
 private:
     using MergeTreeReaderPtr = std::unique_ptr<DB::IMergeTreeReader>;
 
-    const Poco::Logger *logger = &Poco::Logger::get("VIPartReader");
+    const LoggerPtr logger = getLogger("VIPartReader");
     const DB::MergeTreeDataPartPtr part;
     const DB::NamesAndTypesList cols;
     const DB::MergeTreeIndexGranularity &index_granularity;

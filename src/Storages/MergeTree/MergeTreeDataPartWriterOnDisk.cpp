@@ -322,7 +322,7 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
             if (!status.second)
             {
                 LOG_WARNING(
-                    &Poco::Logger::get("MergeTreeDataPartWriterOnDisk"), "[initSkipIndices] store_key({}) already exists", store_key);
+                    getLogger("MergeTreeDataPartWriterOnDisk"), "[initSkipIndices] store_key({}) already exists", store_key);
             }
         }
 #endif

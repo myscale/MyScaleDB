@@ -201,7 +201,7 @@ void MergeTreeIndexAggregatorTantivy::update(const Block & block, size_t * pos, 
             }
             /// Accumulate row_id_ranges to construct the granule idx file.
             granule->tantivy_filters[col].addRowRangeToTantivyFilter(start_row_id + row_idx, static_cast<UInt64>(start_row_id + row_idx));
-            // LOG_DEBUG(&Poco::Logger::get("MergeTreeIndexAggregatorTantivy"), "[update] addRowRangeToTantivyFilter {} -- {}", start_row_id + row_idx, static_cast<UInt64>(start_row_id + row_idx));
+            // LOG_DEBUG(getLogger("MergeTreeIndexAggregatorTantivy"), "[update] addRowRangeToTantivyFilter {} -- {}", start_row_id + row_idx, static_cast<UInt64>(start_row_id + row_idx));
         }
         // Index docs to tantivy-search
         if (column_names.size() != docs.size())
@@ -217,7 +217,7 @@ void MergeTreeIndexAggregatorTantivy::update(const Block & block, size_t * pos, 
             store->indexMultiColumnDoc(start_row_id + row_idx, column_names, docs);
             // for (size_t i = 0; i < column_names.size(); i++)
             // {
-            //     LOG_DEBUG(&Poco::Logger::get("MergeTreeIndexAggregatorTantivy"), "[update] row_id:{}, col:{}, column_name:{}, doc:{}", start_row_id+row_idx, i, column_names[i], docs[i]);
+            //     LOG_DEBUG(getLogger("MergeTreeIndexAggregatorTantivy"), "[update] row_id:{}, col:{}, column_name:{}, doc:{}", start_row_id+row_idx, i, column_names[i], docs[i]);
             // }
         }
     }
@@ -667,7 +667,7 @@ bool MergeTreeConditionTantivy::tryPrepareSetTantivyFilter(const RPNBuilderTreeN
     out.set_key_position = std::move(key_position);
     out.set_tantivy_filters = std::move(tantivy_filters);
     LOG_DEBUG(
-        &Poco::Logger::get("MergeTreeIndexTantivy"),
+        getLogger("MergeTreeIndexTantivy"),
         "[MergeTreeConditionTantivy::tryPrepareSetTantivyFilter] create tantivy_filters for RPNElement");
 
     return true;
@@ -799,12 +799,12 @@ void ftsIndexValidator(const IndexDescription & index, bool /*attach*/)
 
     if (!json_status.result)
     {
-        LOG_ERROR(&Poco::Logger::get("MergeTreeIndexFts"), "[ftsIndexValidator] bad json arguments");
+        LOG_ERROR(getLogger("MergeTreeIndexFts"), "[ftsIndexValidator] bad json arguments");
         throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Json parameter may be error");
     }
 
     TantivyFilterParameters params(index_json_parameter);
-    LOG_DEBUG(&Poco::Logger::get("MergeTreeIndexFts"), "[ftsIndexValidator] OK.");
+    LOG_DEBUG(getLogger("MergeTreeIndexFts"), "[ftsIndexValidator] OK.");
 }
 
 }

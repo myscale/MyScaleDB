@@ -188,7 +188,7 @@ protected:
         checkLicenseFinal();
     }
 
-    Poco::Logger * log;
+    LoggerPtr log = getLogger("LicenseChecker");
 
     const Poco::Util::LayeredConfiguration & server_config;
     /// Does not support dynamic configuration changes

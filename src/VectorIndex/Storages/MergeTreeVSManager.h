@@ -131,7 +131,7 @@ private:
     std::map<UInt64, std::vector<Float32>> map_labels_distances; /// sorted map with label ids and multiple distances
     size_t max_threads;
 
-    Poco::Logger * log = &Poco::Logger::get("MergeTreeVSManager");
+    LoggerPtr log = getLogger("MergeTreeVSManager");
 
     template <Search::DataType T>
     static VectorIndex::VectorDatasetPtr<T> generateVectorDataset(bool is_batch, const VSDescription & desc);

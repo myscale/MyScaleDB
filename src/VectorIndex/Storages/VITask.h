@@ -32,7 +32,7 @@ public:
             storage_, builder_, task_result_callback_, vector_index_entry_->part_name, vector_index_entry_->vector_index_name, slow_mode_)
         , vector_index_entry(std::move(vector_index_entry_))
     {
-        log = &Poco::Logger::get("VITask");
+        log = getLogger("VITask");
         LOG_DEBUG(log, "Create VITask for {}, slow mode: {}", vector_index_entry->part_name, slow_mode);
     }
 

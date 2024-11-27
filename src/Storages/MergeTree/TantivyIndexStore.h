@@ -103,7 +103,7 @@ private:
     String skp_index_name;
     DataPartStoragePtr storage;
     MutableDataPartStoragePtr storage_builder;
-    Poco::Logger * log;
+    LoggerPtr log;
 
     DiskPtr tmp_disk;
 
@@ -214,7 +214,7 @@ private:
 
     TantivyIndexSettings index_settings;
 
-    Poco::Logger * log;
+    LoggerPtr log;
 
     /// DeleteBitmap used for part with lightweight delete
     TantivyDelBitmapPtr delete_bitmap = nullptr;

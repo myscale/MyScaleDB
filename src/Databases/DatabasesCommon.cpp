@@ -333,7 +333,7 @@ StoragePtr DatabaseWithOwnTablesBase::detachTableUnlocked(const String & table_n
             {
                 disk->removeRecursive(tantivy_index_cache_path_for_table);
                 LOG_INFO(
-                    &Poco::Logger::get("DatabaseWithOwnTablesBase"),
+                    getLogger("DatabaseWithOwnTablesBase"),
                     "detach table `{}`, hasDatabase {}, hasUUID {} clean FTS cache `{}`",
                     table_storage->getStorageID().getFullTableName(),
                     table_storage->getStorageID().hasDatabase(),

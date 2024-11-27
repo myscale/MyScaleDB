@@ -110,7 +110,7 @@ std::pair<String, String> getPartNameUUIDFromNvmeCachePath(const String & path_w
 
 String generateUUIDv4();
 
-void printMemoryInfo(const Poco::Logger * log, std::string msg);
+void printMemoryInfo(const LoggerPtr log, std::string msg);
 
 uint64_t getVectorDimension(const Search::DataType &search_type, const DB::StorageInMemoryMetadata &metadata, const String &column_name);
 

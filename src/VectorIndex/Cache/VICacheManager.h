@@ -57,7 +57,7 @@ private:
 
     /// don't allow direct access to cache
     static std::unique_ptr<VectorIndexCache> cache;
-    Poco::Logger * log;
+    LoggerPtr log;
 
 public:
     /// put a new item into cache

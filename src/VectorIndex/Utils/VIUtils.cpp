@@ -45,7 +45,7 @@ MergeTreeDataPartChecksums moveVectorIndexFiles(
     DB::MergeTreeDataPartPtr old_data_part,
     DB::MergeTreeMutableDataPartPtr new_data_part)
 {
-    LOG_DEBUG(&Poco::Logger::get("VIUtils"), "Create hard link for vector index {} file From {} to {}.", vec_index_name, old_data_part->name, new_data_part->name);
+    LOG_DEBUG(getLogger("VIUtils"), "Create hard link for vector index {} file From {} to {}.", vec_index_name, old_data_part->name, new_data_part->name);
     const auto & old_storage = old_data_part->getDataPartStorage();
     auto & new_storage = new_data_part->getDataPartStorage();
 
@@ -128,7 +128,7 @@ MergeTreeDataPartChecksums calculateVectorIndexChecksums(
         
         if (existing_checksums && existing_checksums->has(it->name()))
         {
-            LOG_DEBUG(&Poco::Logger::get("VIUtils"), "checksum exists: {}", it->name());
+            LOG_DEBUG(getLogger("VIUtils"), "checksum exists: {}", it->name());
             auto checksum = existing_checksums->files.at(it->name());
             index_checksums.addFile(it->name(), checksum.file_size, checksum.file_hash);
         }
@@ -179,7 +179,7 @@ getVectorIndexFileNamesInChecksums(const DB::DataPartStoragePtr & part_storage, 
     {
         /// read checksum failed, return empty list
         LOG_WARNING(
-            &Poco::Logger::get("VIUtils"),
+            getLogger("VIUtils"),
             "getVectorIndexFileNamesInChecksums: read checksum file {} error {}: {}",
             checksums_filename,
             e.code(),
@@ -368,7 +368,7 @@ std::pair<String, String> getPartNameUUIDFromNvmeCachePath(const String & nvme_c
 }   
 
 
-void printMemoryInfo(const Poco::Logger * log, std::string msg)
+void printMemoryInfo(const LoggerPtr log, std::string msg)
 {
 #if defined(OS_LINUX) || defined(OS_FREEBSD)
     struct rusage usage;
@@ -399,7 +399,7 @@ uint64_t getVectorDimension(const Search::DataType &search_type, const DB::Stora
             if (!array_type)
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector search type is FloatVector for column {}, but datatype is not Array()", column_name);
             result_dim = metadata.getConstraints().getArrayLengthByColumnName(column_name).first;
-            LOG_DEBUG(&Poco::Logger::get("VIUtils"), "vector search type: FloatVector, search column dim: {}", result_dim);
+            LOG_DEBUG(getLogger("VIUtils"), "vector search type: FloatVector, search column dim: {}", result_dim);
             break;
         }
         case Search::DataType::BinaryVector:
@@ -408,7 +408,7 @@ uint64_t getVectorDimension(const Search::DataType &search_type, const DB::Stora
             if (!fixed_string_type)
                 throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector search type is BinaryVector for column {}, but datatype is not FixedString", column_name);
             result_dim = static_cast<uint64_t>(fixed_string_type->getN() * 8);
-            LOG_DEBUG(&Poco::Logger::get("VIUtils"), "vector search type: BinaryVector, search column dim: {}", result_dim);
+            LOG_DEBUG(getLogger("VIUtils"), "vector search type: BinaryVector, search column dim: {}", result_dim);
             break;
         }
         default:
@@ -439,7 +439,7 @@ std::vector<String> splitString(const String &str, const char &delim)
 
 void convertIndexFileForUpgrade(const DB::IMergeTreeDataPart & part)
 {
-    auto log = &Poco::Logger::get("VIUtils");
+    auto log = getLogger("VIUtils");
     if (part.getState() >= DB::MergeTreeDataPartState::Active)
     {
         LOG_WARNING(log, "The part {} is already active, no need to convert", part.name);

@@ -39,7 +39,7 @@ StorageFullTextSearch::StorageFullTextSearch(
     , enable_nlq{enable_nlq_}
     , text_operator{text_operator_}
     , query_text_ast{query_text_ast_}
-    , log(&Poco::Logger::get("StorageFullTextSearch (" + nested_storage->getStorageID().getFullTableName() + ")"))
+    , log(getLogger("StorageFullTextSearch (" + nested_storage->getStorageID().getFullTableName() + ")"))
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);

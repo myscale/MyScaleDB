@@ -318,7 +318,7 @@ struct ExpressionAnalysisResult
     /// Actions by every element of ORDER BY
     ManyExpressionActions order_by_elements_actions;
     ManyExpressionActions group_by_elements_actions;
-    Poco::Logger * log = &Poco::Logger::get("ExpressionAnalysisResult");
+    LoggerPtr log = getLogger("ExpressionAnalysisResult");
 
 
     ExpressionAnalysisResult() = default;

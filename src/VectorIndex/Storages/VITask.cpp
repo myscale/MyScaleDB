@@ -25,7 +25,7 @@ VectorIndex::SegmentBuiltStatus VITask::prepare()
     catch (Exception & e)
     {
         LOG_ERROR(
-            &Poco::Logger::get("VITask"),
+            getLogger("VITask"),
             "Prepare build vector index {} error {}: {}",
             vector_index_entry->part_name,
             e.code(),
