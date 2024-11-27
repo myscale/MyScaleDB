@@ -381,7 +381,6 @@ QueryLogElement logQueryStart(
 
 void logQueryFinish(
     QueryLogElement & elem,
-    VIEventLogElement & vec_elem,
     const ContextMutablePtr & context,
     const ASTPtr & query_ast,
     const QueryPipeline & query_pipeline,
@@ -406,14 +405,6 @@ void logQueryFinish(
         elem.type = QueryLogElementType::QUERY_FINISH;
 
         addStatusInfoToQueryLogElement(elem, info, query_ast, context);
-
-        if (vec_elem.event_type != VIEventLogElement::DEFAULT)
-        {
-            if (auto vec_index_event_log = context->getVectorIndexEventLog())
-            {
-                vec_index_event_log->add(vec_elem);
-            }
-        }
 
         if (pulling_pipeline)
         {
@@ -633,19 +624,6 @@ void logExceptionBeforeStart(
 
     /// Log the start of query execution into the table if necessary.
     QueryLogElement elem;
-    VIEventLogElement vec_elem;
-    auto current_event_type = getQueryWithVectorType(ast);
-    if(current_event_type != VIEventLogElement::DEFAULT &&
-       current_event_type != VIEventLogElement::DEFINITION_DROPPED)
-        vec_elem.event_type = VIEventLogElement::DEFINITION_ERROR;
-    vec_elem.part_name = "";
-    vec_elem.partition_id = "";
-    vec_elem.event_time = timeInSeconds(query_end_time);
-    vec_elem.event_time_microseconds = timeInMicroseconds(query_end_time);
-    if (const auto * query_with_table_output = dynamic_cast<const ASTQueryWithTableAndOutput *>(ast.get()))
-    {
-        vec_elem.table_name = query_with_table_output->getTable();
-    }
 
     elem.type = QueryLogElementType::EXCEPTION_BEFORE_START;
     elem.event_time = timeInSeconds(query_end_time);
@@ -655,7 +633,6 @@ void logExceptionBeforeStart(
     elem.query_duration_ms = elapsed_millliseconds;
 
     elem.current_database = context->getCurrentDatabase();
-    vec_elem.database_name = elem.current_database;
     elem.query = query_for_logging;
     elem.normalized_query_hash = normalizedQueryHash(query_for_logging, false);
 
@@ -672,9 +649,7 @@ void logExceptionBeforeStart(
     // We don't calculate databases, tables and columns when the query isn't able to start
 
     elem.exception_code = getCurrentExceptionCode();
-    vec_elem.error_code = getCurrentExceptionCode();
     auto exception_message = getCurrentExceptionMessageAndPattern(/* with_stacktrace */ false);
-    vec_elem.exception = getCurrentExceptionMessage(false);
     elem.exception = std::move(exception_message.text);
     elem.exception_format_string = exception_message.format_string;
     elem.exception_format_string_args = exception_message.format_string_args;
@@ -697,10 +672,6 @@ void logExceptionBeforeStart(
 
     /// Update performance counters before logging to query_log
     CurrentThread::finalizePerformanceCounters();
-
-    if (auto vector_index_event_log = context->getVectorIndexEventLog())
-        if (vec_elem.event_type != VIEventLogElement::DEFAULT)
-            vector_index_event_log->add(vec_elem);
 
     if (settings.log_queries && elem.type >= settings.log_queries_min_type && !settings.log_queries_min_query_duration_ms.totalMilliseconds())
         if (auto query_log = context->getQueryLog())
@@ -1388,23 +1359,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 query_table,
                 async_insert);
 
-            VIEventLogElement vec_elem;
-
-            vec_elem.part_name = "";
-            vec_elem.partition_id = "";
-            vec_elem.event_time = timeInSeconds(query_start_time);
-            vec_elem.event_time_microseconds = timeInMicroseconds(query_start_time);
-            vec_elem.event_type = VIEventLogElement::DEFAULT;
-            if (query_database == "")
-                vec_elem.database_name = context->getCurrentDatabase();
-            else
-                vec_elem.database_name = query_database;
-            vec_elem.table_name = query_table;
-            vec_elem.event_type = getQueryWithVectorType(ast);
-
             /// Also make possible for caller to log successful query finish and exception during execution.
             auto finish_callback = [elem,
-                                    vec_elem,
                                     context,
                                     session_context,
                                     ast,
@@ -1420,14 +1376,14 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     /// partial/garbage results in case of exceptions during query execution.
                     query_pipeline.finalizeWriteInQueryCache();
 
-                logQueryFinish(elem, vec_elem, context, ast, query_pipeline, pulling_pipeline, query_span, query_cache_usage, internal);
+                logQueryFinish(elem, context, ast, query_pipeline, pulling_pipeline, query_span, query_cache_usage, internal);
 
                 if (*implicit_txn_control)
                     execute_implicit_tcl_query(context, ASTTransactionControl::COMMIT);
             };
 
             auto exception_callback =
-                [start_watch, elem, vec_elem, context, ast, internal, my_quota(quota), implicit_txn_control, execute_implicit_tcl_query, query_span](
+                [start_watch, elem, context, ast, internal, my_quota(quota), implicit_txn_control, execute_implicit_tcl_query, query_span](
                     bool log_error) mutable
             {
                 if (*implicit_txn_control)
@@ -1437,15 +1393,6 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
                 if (my_quota)
                     my_quota->used(QuotaType::ERRORS, 1, /* check_exceeded = */ false);
-
-                if (vec_elem.event_type != VIEventLogElement::DEFAULT)
-                {
-                    vec_elem.event_type = VIEventLogElement::DEFINITION_ERROR;
-                    if (auto vec_index_event_log = context->getVectorIndexEventLog())
-                    {
-                        vec_index_event_log->add(vec_elem);
-                    }
-                }
 
                 logQueryException(elem, context, start_watch, ast, query_span, internal, log_error);
             };
