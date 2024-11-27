@@ -49,18 +49,18 @@ ColumnsDescription VIEventLogElement::getColumnsDescription()
     result.add({"database", std::make_shared<DataTypeString>(), "Database name."});
     result.add({"table", std::make_shared<DataTypeString>(), "Table name."});
     result.add({"index_name", std::make_shared<DataTypeString>(), "Index name."});
-    result.add({"part_name", std::make_shared<DataTypeString>()}, "Part name.");
-    result.add({"current_part_name", std::make_shared<DataTypeString>()}, "Current part name.");
-    result.add({"partition_id", std::make_shared<DataTypeString>()}, "Partition id.");
-    result.add({"thread_id", std::make_shared<DataTypeString>()}, "Thread id.");
+    result.add({"part_name", std::make_shared<DataTypeString>(), "Part name."});
+    result.add({"current_part_name", std::make_shared<DataTypeString>(), "Current part name."});
+    result.add({"partition_id", std::make_shared<DataTypeString>(), "Partition id."});
+    result.add({"thread_id", std::make_shared<DataTypeString>(), "Thread id."});
 
-    result.add({"event_type", std::move(event_type_datatype)}, "Event type.");
-    result.add({"event_date", std::make_shared<DataTypeDate>()}, "Event date.");
-    result.add({"event_time", std::make_shared<DataTypeDateTime>()}, "Event time.");
-    result.add({"event_time_microseconds", std::make_shared<DataTypeDateTime64>(6)}, "Event time with microseconds resolution.");
+    result.add({"event_type", std::move(event_type_datatype), "Event type."});
+    result.add({"event_date", std::make_shared<DataTypeDate>(), "Event date."});
+    result.add({"event_time", std::make_shared<DataTypeDateTime>(), "Event time."});
+    result.add({"event_time_microseconds", std::make_shared<DataTypeDateTime64>(6), "Event time with microseconds resolution."});
 
-    result.add({"error", std::make_shared<DataTypeUInt16>()}, "Error.");
-    result.add({"exception", std::make_shared<DataTypeString>()}, "Exception.");
+    result.add({"error", std::make_shared<DataTypeUInt16>(), "Error."});
+    result.add({"exception", std::make_shared<DataTypeString>(), "Exception."});
 
     return result;
 };

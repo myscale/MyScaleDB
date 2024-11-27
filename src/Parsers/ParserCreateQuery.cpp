@@ -250,7 +250,7 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
 
     ParserIdentifier name_p;
     ParserCompoundIdentifier column_p;
-    ParserDataType data_type_p;
+    ParserExpressionWithOptionalArguments type_p;
 
     ASTPtr name;
     ASTPtr column;
@@ -264,7 +264,7 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
 
     if (s_type.ignore(pos, expected))
     {
-        if (!data_type_p.parse(pos, type, expected))
+        if (!type_p.parse(pos, type, expected))
             return false;
     }
     else
@@ -276,10 +276,8 @@ bool ParserVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Expected 
         type = function_node;
     }
 
-    auto index = std::make_shared<ASTVIDeclaration>();
-    index->name = name->as<ASTIdentifier &>().name();
-    index->column = column->as<ASTIdentifier &>().name();
-    index->set(index->type, type);
+    auto index = std::make_shared<ASTVIDeclaration>(type, name->as<ASTIdentifier &>().name(), column->as<ASTIdentifier &>().name());
+
     node = index;
 
     return true;

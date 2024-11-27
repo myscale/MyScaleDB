@@ -1369,7 +1369,7 @@ std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMeta
         result.drop_command = false;
         result.column_name = column_name;
         result.index_name = vec_index_name;
-        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVIDeclaration>()->type->name);
+        result.index_type = Poco::toUpper(vec_index_decl->as<ASTVIDeclaration>()->getType()->name);
         Poco::Logger * log = &Poco::Logger::get("AlterCommand");
         LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
     } 
