@@ -7,18 +7,43 @@
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
+
+ASTVIDeclaration::ASTVIDeclaration(ASTPtr type, const String & name_, const String & column_)
+: name(name_), column(column_)
+{
+    if (type)
+    {
+        if (!dynamic_cast<const ASTFunction *>(type.get()))
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index declaration type must be a function");
+        children.push_back(type);
+    }
+}
+
 ASTPtr ASTVIDeclaration::clone() const
 {
-    auto res = std::make_shared<ASTVIDeclaration>();
-
-    res->name = name;
-    res->column = column;
-
+    ASTPtr type = getType();
     if (type)
-        res->set(res->type, type->clone());
+        type = type->clone();
+
+    auto res = std::make_shared<ASTVIDeclaration>(type, name, column);
+
     return res;
 }
 
+std::shared_ptr<ASTFunction> ASTVIDeclaration::getType() const
+{
+    if (children.size() <= type_idx)
+        return nullptr;
+    auto func_ast = std::dynamic_pointer_cast<ASTFunction>(children[type_idx]);
+    if (!func_ast)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Vector index declaration type must be a function");
+    return func_ast;
+}
 
 void ASTVIDeclaration::formatImpl(const FormatSettings & s, FormatState & state, FormatStateStacked frame) const
 {
@@ -26,8 +51,12 @@ void ASTVIDeclaration::formatImpl(const FormatSettings & s, FormatState & state,
         s.ostr << backQuoteIfNeed(name);
     s.ostr << " ";
     s.ostr << backQuoteIfNeed(column);
-    s.ostr << (s.hilite ? hilite_keyword : "") << " TYPE " << (s.hilite ? hilite_none : "");
-    type->formatImpl(s, state, frame);
+
+    if (auto type = getType())
+    {
+        s.ostr << (s.hilite ? hilite_keyword : "") << " TYPE " << (s.hilite ? hilite_none : "");
+        type->formatImpl(s, state, frame);
+    }
 }
 
 }
