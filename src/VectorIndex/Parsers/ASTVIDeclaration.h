@@ -13,16 +13,22 @@ class ASTFunction;
 class ASTVIDeclaration : public IAST
 {
 public:
+    ASTVIDeclaration(ASTPtr type, const String & name_, const String & column_);
+
     String name;
     String column;
     bool std_create = false;
-    ASTFunction * type;
 
     /** Get the text that identifies this element. */
     String getID(char) const override { return "VectorIndex"; }
 
     ASTPtr clone() const override;
     void formatImpl(const FormatSettings & s, FormatState & state, FormatStateStacked frame) const override;
+
+    std::shared_ptr<ASTFunction> getType() const;
+
+private:
+  static constexpr size_t type_idx = 0;
 };
 
 }

@@ -37,7 +37,7 @@ std::optional<VICommand> VICommand::parse(ASTAlterCommand * command)
         res.ast = command->ptr();
         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
         res.column_name = getIdentifierName(command->column);
-        res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVIDeclaration>()->type->name);
+        res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVIDeclaration>()->getType()->name);
         LOG_DEBUG(log, "Add vector index: name: {}, index_type: {}", res.index_name, res.index_type);
         return res;
     }
@@ -47,7 +47,7 @@ std::optional<VICommand> VICommand::parse(ASTAlterCommand * command)
         res.drop_command = true;
         res.index_name = command->vec_index_decl->as<ASTIdentifier &>().name();
         res.column_name = getIdentifierName(command->column);
-        res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVIDeclaration>()->type->name);
+        res.index_type = Poco::toUpper(command->vec_index_decl->as<ASTVIDeclaration>()->getType()->name);
         LOG_DEBUG(log, "Drop vector index: name: {}, index_type: {}", res.index_name, res.index_type);
         return res;
     }

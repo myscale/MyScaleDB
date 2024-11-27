@@ -103,10 +103,11 @@ VIDescription VIDescription::getVectorIndexFromAST(
     if (vec_index_definition->column.empty())
         throw Exception(ErrorCodes::INCORRECT_QUERY, "Vector index must have column name in definition.");
 
-    if (!vec_index_definition->type)
+    auto vec_index_type = vec_index_definition->getType();
+    if (!vec_index_type)
         throw Exception(ErrorCodes::INCORRECT_QUERY, "TYPE is required for index");
 
-    if (vec_index_definition->type->parameters && !vec_index_definition->type->parameters->children.empty())
+    if (vec_index_type->parameters && !vec_index_type->parameters->children.empty())
         throw Exception(ErrorCodes::INCORRECT_QUERY, "Index type cannot have parameters");
 
     VIDescription result;
@@ -115,14 +116,14 @@ VIDescription VIDescription::getVectorIndexFromAST(
     result.column = vec_index_definition->column;
     result.data_type = columns.get(result.column).type;
     result.vector_search_type = getSearchIndexDataType(result.data_type);
-    result.type = Poco::toUpper(vec_index_definition->type->name) == "DEFAULT" ? Search::getDefaultIndexType(result.vector_search_type)
-                                                                               : vec_index_definition->type->name;
+    result.type = Poco::toUpper(vec_index_type->name) == "DEFAULT" ? Search::getDefaultIndexType(result.vector_search_type)
+                                                                               : vec_index_type->name;
 
     /// check the validity of vector column type
     Search::getVectorIndexType(result.type, result.vector_search_type);
 
     /// currently not used
-    const auto & definition_arguments = vec_index_definition->type->arguments;
+    const auto & definition_arguments = vec_index_type->arguments;
     if (definition_arguments)
     {
         for (size_t i = 0; i < definition_arguments->children.size(); ++i)

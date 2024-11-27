@@ -19,7 +19,7 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
     ParserKeyword s_type(Keyword::TYPE);
 
     ParserCompoundIdentifier column_p;
-    ParserExpressionWithOptionalArguments data_type_p;
+    ParserExpressionWithOptionalArguments type_p;
 
     ASTPtr column;
     ASTPtr type;
@@ -29,7 +29,7 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
 
     if (s_type.ignore(pos, expected))
     {
-        if (!data_type_p.parse(pos, type, expected))
+        if (!type_p.parse(pos, type, expected))
             return false;
     }
     else
@@ -41,10 +41,8 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
         type = function_node;
     }
 
-    auto index = std::make_shared<ASTVIDeclaration>();
+    auto index = std::make_shared<ASTVIDeclaration>(type, "", column->as<ASTIdentifier &>().name());
     index->std_create = true;
-    index->column = column->as<ASTIdentifier &>().name();
-    index->set(index->type, type);
     node = index;
 
     return true;
