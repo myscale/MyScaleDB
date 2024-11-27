@@ -56,7 +56,7 @@ namespace VectorIndex
             float * distance,
             const VIMetric & metric_type)
     {
-        Poco::Logger * log = &Poco::Logger::get("BruteForce");
+        LoggerPtr log = getLogger("BruteForce");
         if constexpr (T == Search::DataType::FloatVector)
         {
             if (metric_type == VIMetric::IP)

@@ -130,7 +130,7 @@ bool getParameterCheckStatus(StorageInMemoryMetadata & metadata, ContextPtr cont
 std::unique_ptr<MergeTreeSettings> storage_settings = std::make_unique<MergeTreeSettings>(context->getMergeTreeSettings());
 bool use_parameter_check = storage_settings->vector_index_parameter_check;
 LOG_TRACE(
-    &Poco::Logger::get("AlterCommand"),
+    getLogger("AlterCommand"),
     "[getParameterCheckStatus] vector_index_parameter_check value in MergeTreeSetting: {}",
     use_parameter_check);
 if (metadata.hasSettingsChanges())
@@ -144,7 +144,7 @@ if (metadata.hasSettingsChanges())
         {
             use_parameter_check = new_value.safeGet<bool>();
             LOG_TRACE(
-                &Poco::Logger::get("AlterCommand"),
+                getLogger("AlterCommand"),
                 "[getParameterCheckStatus] vector_index_parameter_check value in sql definition: {}",
                 use_parameter_check);
             break;
@@ -538,7 +538,7 @@ std::optional<AlterCommand> AlterCommand::parse(const ASTAlterCommand * command_
     }
     else if (command_ast->type == ASTAlterCommand::ADD_VECTOR_INDEX)
     {
-        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        LoggerPtr log = getLogger("AlterCommand");
         AlterCommand command;
         command.ast = command_ast->clone();
         command.vec_index_decl = command_ast->vec_index_decl->clone();
@@ -1370,12 +1370,12 @@ std::optional<VICommand> AlterCommand::tryConvertToVICommand(StorageInMemoryMeta
         result.column_name = column_name;
         result.index_name = vec_index_name;
         result.index_type = Poco::toUpper(vec_index_decl->as<ASTVIDeclaration>()->getType()->name);
-        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        LoggerPtr log = getLogger("AlterCommand");
         LOG_DEBUG(log, "Add new index name: {}, type: {}", result.index_name, result.index_type);
     } 
     else if (type == DROP_VECTOR_INDEX) 
     {
-        Poco::Logger * log = &Poco::Logger::get("AlterCommand");
+        LoggerPtr log = getLogger("AlterCommand");
         LOG_DEBUG(log, "Drop vector index name: {}", vec_index_name);
         result.drop_command = true;
         result.index_name = vec_index_name;

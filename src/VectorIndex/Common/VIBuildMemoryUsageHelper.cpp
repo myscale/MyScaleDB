@@ -43,7 +43,7 @@ BuildMemoryCheckResult VIBuildMemoryUsageHelper::checkBuildMemorySize(size_t siz
 
     current_build_memory_size += size;
     LOG_DEBUG(
-        &Poco::Logger::get("VIBuildMemoryUsageHelper"), "allow building: size = {}, current_total = {}", size, current_build_memory_size);
+        getLogger("VIBuildMemoryUsageHelper"), "allow building: size = {}, current_total = {}", size, current_build_memory_size);
     return BuildMemoryCheckResult::OK;
 }
 

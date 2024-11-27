@@ -62,7 +62,7 @@ private:
     QueryPipeline & pipeline;
     std::shared_ptr<LazyOutputFormat> lazy_format;
     std::unique_ptr<Data> data;
-    Poco::Logger * log = &Poco::Logger::get("Executor");
+    LoggerPtr log = getLogger("Executor");
 };
 
 }

@@ -62,7 +62,7 @@ void filterMarkRangesBySearchResult(MergeTreeData::DataPartPtr part, const Setti
             if (label >= start_row && label < end_row)
             {
                 LOG_TRACE(
-                    &Poco::Logger::get("MergeTreeVectorScanUtils"),
+                    getLogger("MergeTreeVectorScanUtils"),
                     "Keep range: {}-{} in part: {}",
                     begin,
                     end,
@@ -143,7 +143,7 @@ void filterMarkRangesByLabels(MergeTreeData::DataPartPtr part, const Settings & 
             if (label_middle >= start_row && label_middle < end_row)
             {
                 LOG_TRACE(
-                    &Poco::Logger::get("filterMarkRangesByLabels"),
+                    getLogger("filterMarkRangesByLabels"),
                     "Keep range: {}-{} in part: {}",
                     begin,
                     end,

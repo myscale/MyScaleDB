@@ -10,7 +10,7 @@ namespace DB
 
 
 PKCacheManager::PKCacheManager(size_t max_size)
-    : cache_ex(max_size), log(&Poco::Logger::get("PKCacheManager"))
+    : cache_ex(max_size), log(getLogger("PKCacheManager"))
 {
     LOG_INFO(log, "PrimaryKeyCache size limit is: {}", max_size);
 }

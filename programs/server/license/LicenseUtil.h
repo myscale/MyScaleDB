@@ -7,10 +7,11 @@
 #include <Common/Exception.h>
 #include <Common/OpenSSLHelpers.h>
 #include <Common/ShellCommand.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/logger_useful.h>
 #include <Daemon/BaseDaemon.h>
+#include <IO/ReadHelpers.h>
 
 #include <Poco/Base64Decoder.h>
 #include <Poco/Logger.h>
@@ -24,6 +25,7 @@
 #    include <openssl/pem.h>
 #    include <openssl/rsa.h>
 #    include <openssl/sha.h>
+#    include <openssl/err.h>
 #endif
 
 namespace DB
@@ -101,7 +103,7 @@ inline String base64Decode(const String & encoded)
 
 inline void checkHardwareResourceLimitsForCommunityEdition()
 {
-    Poco::Logger * log = &Poco::Logger::get("CommunityEditionLicenseChecker");
+    LoggerPtr log = getLogger("CommunityEditionLicenseChecker");
     LOG_DEBUG(log, "Start checking hardware resource limits of community edition");
 
     try

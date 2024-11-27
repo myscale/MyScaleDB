@@ -24,10 +24,10 @@ class ScanThreadLimiter
 {
 private:
     LimiterSharedContext& context;
-    const Poco::Logger* log;
+    const LoggerPtr log;
 
 public:
-    ScanThreadLimiter(LimiterSharedContext& context_, const Poco::Logger* log_)
+    ScanThreadLimiter(LimiterSharedContext& context_, const LoggerPtr log_)
     : context(context_), log(log_)
     {
         DB::OpenTelemetry::SpanHolder span_search("VectorExecutor::performSearch()::search::ScanThreadLimiter");

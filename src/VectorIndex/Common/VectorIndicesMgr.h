@@ -151,7 +151,7 @@ public:
 protected:
     VectorIndicesMgr(MergeTreeData & data_)
     : data(data_)
-    , log(&Poco::Logger::get(data.getLogName() + " (VectorIndicesMgr)"))
+    , log(getLogger(data.getLogName() + " (VectorIndicesMgr)"))
     {
     }
 
@@ -189,7 +189,7 @@ protected:
     mutable std::mutex currently_vector_indexing_parts_mutex;
     std::set<String> currently_vector_indexing_parts_without_mutation;
 
-    Poco::Logger * log;
+    LoggerPtr log;
 
 };
 

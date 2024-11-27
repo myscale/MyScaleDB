@@ -281,7 +281,7 @@ public:
 
 public:
     static UInt8 max_threads;
-    Poco::Logger * log = &Poco::Logger::get("BaseSegment");
+    LoggerPtr log = getLogger("BaseSegment");
 
 protected:
     const VIDescription vec_desc;

@@ -23,7 +23,7 @@ SegmentBuiltStatus ReplicatedVITask::prepare()
     }
     catch (Exception & e)
     {
-        LOG_ERROR(&Poco::Logger::get("VITask"), "Prepare build vector index {} error {}: {}", part_name, e.code(), e.message());
+        LOG_ERROR(getLogger("VITask"), "Prepare build vector index {} error {}: {}", part_name, e.code(), e.message());
         if (e.code() == ErrorCodes::NOT_FOUND_EXPECTED_DATA_PART)
             return SegmentBuiltStatus{SegmentBuiltStatus::NO_DATA_PART, e.code(), e.message()};
         else if (e.code() == ErrorCodes::VECTOR_INDEX_ALREADY_EXISTS)
