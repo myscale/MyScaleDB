@@ -226,7 +226,7 @@ RoaringType MergeTreeConditionTantivy::calculateRowIdsRoaringTemplate(
                 || element.function == RPNElement::FUNCTION_HAS)
             {
                 LOG_DEBUG(
-                    &Poco::Logger::get("MergeTreeConditionTantivy"),
+                    getLogger("MergeTreeConditionTantivy"),
                     "[calculateRowIdsRoaringTemplate] element.key_column:{}, ",
                     element.key_column);
                 rpn_stack.emplace_back(

@@ -85,6 +85,6 @@ protected:
     State state{State::NEED_PREPARE};
     Priority priority{0};
 
-    Poco::Logger * log;
+    LoggerPtr log;
 };
 }

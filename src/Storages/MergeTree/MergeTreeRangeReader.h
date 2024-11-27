@@ -156,7 +156,7 @@ private:
         /// Current position from the begging of file in rows
         size_t position() const;
         size_t readRows(Columns & columns, size_t num_rows);
-        Poco::Logger * log = &Poco::Logger::get("DelayedStream");
+        LoggerPtr log = getLogger("DelayedStream");
     };
 
     /// Very thin wrapper for DelayedStream

@@ -66,7 +66,7 @@ void ClusterLicenseChecker::beforeCheckLicense(const LicenseCheckCtx & check_ctx
             LOG_INFO(log, "Check active node: {}.", instance_status_path);
             if (zookeeper->exists(instance_status_path))
                 LOG_INFO(log, "Remove active node: {}.", instance_status_path);
-            zookeeper->handleEphemeralNodeExistence(instance_status_path, "");
+            zookeeper->deleteEphemeralNodeIfContentMatches(instance_status_path, "");
         }
     }
     createClusterLicenseInfoIfNotExists();
@@ -153,7 +153,7 @@ void ClusterLicenseChecker::updateInstanceStatus()
         {
             LOG_DEBUG(log, "Renew Instance status path {} due to zookeeper session expired.", instance_status_path);
             cur_zookeeper = getContext()->getZooKeeper();
-            cur_zookeeper->handleEphemeralNodeExistence(instance_status_path, "");
+            cur_zookeeper->deleteEphemeralNodeIfContentMatches(instance_status_path, "");
             cur_zookeeper->tryCreate(instance_status_path, "", zkutil::CreateMode::Ephemeral);
         }
         else if (!cur_zookeeper->exists(instance_status_path))

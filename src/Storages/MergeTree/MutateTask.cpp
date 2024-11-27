@@ -101,7 +101,7 @@ static UInt64 getExistingRowsCount(const Block & block, bool lightweight_delete_
 
     if (!row_exists_col)
     {
-        LOG_WARNING(&Poco::Logger::get("MutationHelpers::getExistingRowsCount"), "_row_exists column type is not UInt8");
+        LOG_WARNING(getLogger("MutationHelpers::getExistingRowsCount"), "_row_exists column type is not UInt8");
         return block.rows();
     }
 
@@ -770,7 +770,7 @@ static void removeTantivyIndexCache(MergeTreeData::DataPartPtr source_part, cons
             String skp_idx_name = INDEX_FILE_PREFIX + command.column_name;
             String source_data_part_relative_path = source_part->getDataPartStoragePtr()->getRelativePath();
             LOG_INFO(
-                &Poco::Logger::get("removeTantivyIndexCache"),
+                getLogger("removeTantivyIndexCache"),
                 "INDEX_FILE_PREFIX: {}, command.column_name: {}, part relative_path: {}",
                 INDEX_FILE_PREFIX,
                 command.column_name,

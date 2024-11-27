@@ -27,7 +27,7 @@ struct VIBuildMemoryUsageHelper
         }
 
         LOG_DEBUG(
-            &Poco::Logger::get("VIBuildMemoryUsageHelper"),
+            getLogger("VIBuildMemoryUsageHelper"),
             "after build: size = {}, current_total = {}",
             build_memory_size_recorded,
             current_build_memory_size);

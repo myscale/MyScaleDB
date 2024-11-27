@@ -32,7 +32,7 @@ struct VIContext
     String vector_tmp_relative_path;
     std::shared_ptr<MergeTreeDataPartChecksums> vector_index_checksum;
 
-    Poco::Logger * log{nullptr};
+    LoggerPtr log{nullptr};
 
     Stopwatch watch = Stopwatch();
 
@@ -60,7 +60,7 @@ struct VIEntry
     MergeTreeData & data;
     scope_guard temporary_vi_part_holder;
     bool is_replicated; /// no use now
-    Poco::Logger * log = &Poco::Logger::get("VectorIndexEntry");
+    LoggerPtr log = getLogger("VectorIndexEntry");
 
     VIEntry(const String part_name_, const String & index_name_, MergeTreeData & data_, scope_guard && temporary_vi_part_holder_ = {}, const bool is_replicated_ = false)
      : part_name(std::move(part_name_))

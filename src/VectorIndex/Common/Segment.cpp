@@ -885,7 +885,7 @@ void SimpleSegment<data_type>::searchWithoutIndex(
     {
         if (metric == VIMetric::Cosine)
         {
-            LOG_DEBUG(&Poco::Logger::get("SimpleSegment"), "Normalize vectors for cosine similarity brute force search");
+            LOG_DEBUG(getLogger("SimpleSegment"), "Normalize vectors for cosine similarity brute force search");
             new_metric = VIMetric::IP;
             query_data->normalize();
             base_data->normalize();

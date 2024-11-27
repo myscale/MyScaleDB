@@ -122,7 +122,7 @@ private:
     void checkInstanceID(const AmazonInstanceMetadata & metadata);
     void checkMarketplaceProductCode(const AmazonInstanceMetadata & metadata);
 
-    Poco::Logger * log = &Poco::Logger::get("AMILicenseChecker");
+    LoggerPtr log = getLogger("AMILicenseChecker");
 };
 
 } // namespace MyscaleLicense

@@ -34,7 +34,7 @@ void CachedSegmentReleaseFunction::operator()(std::shared_ptr<CachedSegment> cac
     }
 }
 
-VICacheManager::VICacheManager(int) : log(&Poco::Logger::get("VICacheManager"))
+VICacheManager::VICacheManager(int) : log(getLogger("VICacheManager"))
 {
     while (!m)
     {
@@ -175,7 +175,7 @@ bool VICacheManager::storedInCache(const CachedSegmentKey & cache_key)
 
 void VICacheManager::removeFromCache(const CachedSegmentKey & cache_key)
 {
-    Poco::Logger * log = &Poco::Logger::get("VICacheManager");
+    LoggerPtr log = getLogger("VICacheManager");
     VICacheManager * mgr = getInstance();
     LOG_DEBUG(log, "Num of cache items before forceExpire {} ", mgr->countItem());
     mgr->forceExpire(cache_key);

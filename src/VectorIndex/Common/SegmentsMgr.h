@@ -59,7 +59,7 @@ private:
     mutable std::shared_mutex segments_mutex;
     std::unordered_map<String, SegmentPtr> segments;
     mutable RWLock move_lock = RWLockImpl::create();
-    Poco::Logger * log = &Poco::Logger::get("SegmentsMgr");
+    LoggerPtr log = getLogger("SegmentsMgr");
 };
 
 

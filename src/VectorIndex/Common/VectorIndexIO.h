@@ -26,7 +26,7 @@ public:
         }
         catch (DB::Exception & e)
         {
-            LOG_ERROR(&Poco::Logger::get("VectorIndexReader"), "Failed to read file {}: {}", _file, e.what());
+            LOG_ERROR(getLogger("VectorIndexReader"), "Failed to read file {}: {}", _file, e.what());
         }
     }
 
@@ -103,7 +103,7 @@ public:
         }
         catch (DB::Exception & e)
         {
-            LOG_ERROR(&Poco::Logger::get("VectorIndexWriter"), "Failed to write file {}: {}", _file, e.what());
+            LOG_ERROR(getLogger("VectorIndexWriter"), "Failed to write file {}: {}", _file, e.what());
         }
     }
 

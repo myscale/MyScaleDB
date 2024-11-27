@@ -239,7 +239,7 @@ public:
 
 
 private:
-    Poco::Logger * log = &Poco::Logger::get("FTSIndexStoreFactory");
+    LoggerPtr log = getLogger("FTSIndexStoreFactory");
     FTSSafeCache cache;
     mutable std::shared_mutex mutex_for_search;
     mutable std::shared_mutex mutex_for_build;

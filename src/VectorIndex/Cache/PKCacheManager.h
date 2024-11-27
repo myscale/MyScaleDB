@@ -41,7 +41,7 @@ public:
 
 private:
     CacheBase<String, Columns, std::hash<String>, ColumnsWeightFunc> cache_ex;
-    Poco::Logger * log;
+    LoggerPtr log;
 
     explicit PKCacheManager(size_t max_size);
     ~PKCacheManager() = default;

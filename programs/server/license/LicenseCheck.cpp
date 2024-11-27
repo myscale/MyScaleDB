@@ -5,7 +5,7 @@
 #include <base/getMemoryAmount.h>
 #include <Common/OpenSSLHelpers.h>
 #include <Common/ShellCommand.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Daemon/BaseDaemon.h>
 
@@ -19,7 +19,6 @@ ILicenseChecker::ILicenseChecker(
     const ContextMutablePtr global_context,
     const XMLDocumentPtr & preprocessed_xml)
     : WithMutableContext(global_context)
-    , log(&Poco::Logger::get("LicenseChecker"))
     , server_config(server_config_)
     , kubeconfig_enabled(global_context->getConfigRef().getBool("kubernetes_enabled", false))
     , machine_id_digest(getMachineIDDigest())
@@ -165,13 +164,13 @@ void ILicenseChecker::checkLicenseSign(const LicenseCheckCtx & check_ctx)
         else
         {
             BIO * bio_public_key = BIO_new(BIO_s_file());
-            BIO_read_filename(bio_public_key, public_key_path.c_str());
+            BIO_read_filename(bio_public_key, const_cast<char*>(public_key_path.c_str()));
             rsa_public_key = PEM_read_bio_RSA_PUBKEY(bio_public_key, nullptr, nullptr, nullptr);
             BIO_free(bio_public_key);
         }
         if (rsa_public_key == nullptr)
         {
-            unsigned int err_code = ERR_get_error();
+            unsigned long err_code = ERR_get_error();
             char err_buf[256];
             ERR_error_string_n(err_code, err_buf, sizeof(err_buf));
             throw Exception(ErrorCodes::LICENSE_ERROR, "Check license failed, read license public key failed. {}", err_buf);
@@ -179,7 +178,7 @@ void ILicenseChecker::checkLicenseSign(const LicenseCheckCtx & check_ctx)
         uint8_t digest[33];
         SHA256(reinterpret_cast<const uint8_t *>(license_info.c_str()), license_info.size(), digest);
         int result = RSA_verify(
-            NID_sha256, digest, 32, reinterpret_cast<const uint8_t *>(decoded_sign.c_str()), decoded_sign.size(), rsa_public_key);
+            NID_sha256, digest, 32, reinterpret_cast<const uint8_t *>(decoded_sign.c_str()), static_cast<unsigned int>(decoded_sign.size()), rsa_public_key);
         RSA_free(rsa_public_key);
         if (result != 1)
         {

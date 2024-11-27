@@ -715,7 +715,7 @@ VIContextPtr VectorIndicesMgr::prepareBuildVIContext(
     String vector_tmp_relative_path = data.getRelativeDataPath() + tmp_vector_index_dir + "/";
     String vector_tmp_full_path = data.getFullPathOnDisk(disk) + tmp_vector_index_dir + "/";
 
-    ctx->log = &Poco::Logger::get("VITask[" + part_name_prefix + "]");
+    ctx->log = getLogger("VITask[" + part_name_prefix + "]");
     ctx->temporary_directory_lock = data.getTemporaryPartDirectoryHolder(tmp_vector_index_dir);
     ctx->vector_tmp_full_path = vector_tmp_full_path;
     ctx->vector_tmp_relative_path = vector_tmp_relative_path;

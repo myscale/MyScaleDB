@@ -38,7 +38,7 @@ public:
         , selected_entry(selected_entry_)
         , entry(*selected_entry->log_entry)
     {
-        log = &Poco::Logger::get("ReplicatedVITask");
+        log = getLogger("ReplicatedVITask");
     }
 
     ~ReplicatedVITask() override;
