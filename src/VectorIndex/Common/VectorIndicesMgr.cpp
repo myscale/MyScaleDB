@@ -154,6 +154,8 @@ void VectorIndicesMgr::waitForBuildingVectorIndices()
 
 void VectorIndicesMgr::startVectorIndexJob(const VIDescriptions & old_vec_indices, const VIDescriptions & new_vec_indices)
 {
+    auto table_context = data.getContext();
+    auto storage_id = data.getStorageID();
     /// Compare old and new vector_indices to determine add or drop vector index
     /// Support multiple vector indices
     /// Check drop vector index
@@ -163,6 +165,14 @@ void VectorIndicesMgr::startVectorIndexJob(const VIDescriptions & old_vec_indice
             continue;
 
         dropVectorIndex(old_vec_index.name);
+        VIEventLog::addEventLog(
+            table_context,
+            storage_id.database_name,
+            storage_id.table_name,
+            old_vec_index.name,
+            "",
+            "",
+            VIEventLogElement::DEFINITION_DROPPED);
     }
 
     /// Check create vector index
@@ -172,6 +182,14 @@ void VectorIndicesMgr::startVectorIndexJob(const VIDescriptions & old_vec_indice
             continue;
 
         addVectorIndex(new_vec_index);
+        VIEventLog::addEventLog(
+            table_context,
+            storage_id.database_name,
+            storage_id.table_name,
+            new_vec_index.name,
+            "",
+            "",
+            VIEventLogElement::DEFINITION_CREATED);
     }
 }
 
