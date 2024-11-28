@@ -253,7 +253,7 @@
 	url = https://github.com/VectorCamp/vectorscan.git
 [submodule "contrib/llvm-project"]
 	path = contrib/llvm-project
-	url = https://github.com/ClickHouse/llvm-project
+	url = git@git.moqi.ai:mqdb/llvm-project.git
 [submodule "contrib/corrosion"]
 	path = contrib/corrosion
 	url = https://github.com/corrosion-rs/corrosion
