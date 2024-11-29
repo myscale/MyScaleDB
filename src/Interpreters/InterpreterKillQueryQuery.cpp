@@ -10,6 +10,7 @@
 #include <Interpreters/TransactionLog.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ParserAlterQuery.h>
+#include <Parsers/ParserDeleteQuery.h>
 #include <Parsers/parseQuery.h>
 #include <Access/ContextAccess.h>
 #include <Columns/ColumnString.h>
@@ -277,11 +278,23 @@ BlockIO InterpreterKillQueryQuery::execute()
                     code = CancellationCode::NotFound;
                 else
                 {
-                    ParserAlterCommand parser;
-                    auto command_ast
-                        = parseQuery(parser, command_col.getDataAt(i).toString(), 0, getContext()->getSettingsRef().max_parser_depth);
-                    required_access_rights = InterpreterAlterQuery::getRequiredAccessForCommand(
-                        command_ast->as<const ASTAlterCommand &>(), table_id.database_name, table_id.table_name);
+                    try
+                    {
+                        ParserAlterCommand parser;
+                        auto command_ast
+                            = parseQuery(parser, command_col.getDataAt(i).toString(), 0, getContext()->getSettingsRef().max_parser_depth);
+                        required_access_rights = InterpreterAlterQuery::getRequiredAccessForCommand(
+                            command_ast->as<const ASTAlterCommand &>(), table_id.database_name, table_id.table_name);
+                    }
+                    catch (std::exception&)
+                    {
+                        /// try to parse as lightweight delete command
+                        ParserLWDeleteCommand lwd_parser;
+                        auto lwd_command_ast = parseQuery(lwd_parser, command_col.getDataAt(i).toString(), 0, getContext()->getSettingsRef().max_parser_depth);
+
+                        required_access_rights.emplace_back(AccessType::ALTER_DELETE, table_id.database_name, table_id.table_name);
+                    }
+
                     if (!access->isGranted(required_access_rights))
                     {
                         access_denied = true;
