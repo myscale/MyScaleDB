@@ -44,4 +44,6 @@ SYSTEM WAIT BUILDING VECTOR INDICES test_refactor_lwd_vector;
 SELECT '--- After lightweight delete, new topK result';
 SELECT id, distance(vector, [1.0, 1, 1]) as d FROM test_refactor_lwd_vector order by d limit 5;
 
+KILL MUTATION WHERE table = 'test_refactor_lwd_vector' and database = currentDatabase() format Null;
+
 DROP TABLE test_refactor_lwd_vector;
