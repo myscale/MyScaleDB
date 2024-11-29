@@ -141,9 +141,6 @@ protected:
     /// Data part will not be removed if the pointer owns it
     MergeTreeData::DataPartPtr data_part;
 
-    /// Cache getSampleBlock call, which might be heavy.
-    Block sample_block;
-
     /// Mark ranges we should read (in ascending order)
     MarkRanges all_mark_ranges;
 

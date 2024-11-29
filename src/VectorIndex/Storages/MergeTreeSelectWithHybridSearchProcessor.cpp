@@ -97,7 +97,6 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
     , shared_virtual_fields(shared_virtual_fields_)
     , part_with_ranges(part_with_ranges_)
     , data_part{part_with_ranges.data_part}
-    , sample_block(storage_snapshot_->metadata->getSampleBlock())
     , all_mark_ranges(part_with_ranges.ranges)
     , total_rows(data_part->index_granularity.getRowsCountInRanges(all_mark_ranges))
     , base_search_manager(base_search_manager_)
@@ -384,8 +383,8 @@ void MergeTreeSelectWithHybridSearchProcessor::initializeRangeReaders()
     if (lightweight_delete_filter_step && task->getInfo().data_part->hasLightweightDelete())
         all_prewhere_actions.steps.push_back(lightweight_delete_filter_step);
 
-    for (const auto & step : prewhere_actions.steps)
-        all_prewhere_actions.steps.push_back(step);
+///    for (const auto & step : prewhere_actions.steps)
+///        all_prewhere_actions.steps.push_back(step);
 
     task->initializeRangeReaders(all_prewhere_actions);
 }
@@ -409,28 +408,7 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
             use_primary_key_cache = PKCacheManager::isSupportedPrimaryKey(primary_key)
                 && isHybridSearchByPk(primary_key.column_names, ordered_names);
         }
-/*
-        /// TODO: handle virtual columns
-        /// Add _part_offset to non_const_virtual_column_names if part has lightweight delete
-        if (data_part->hasLightweightDelete())
-        {
-            bool found = false;
-            for (const auto & column_name : non_const_virtual_column_names)
-            {
-                if (column_name == "_part_offset")
-                {
-                    found = true;
-                    break;
-                }
-            }
 
-            if (!found)
-            {
-                non_const_virtual_column_names.emplace_back("_part_offset");
-                need_remove_part_offset = true;
-            }
-        }
-*/
         initializeRangeReaders();
     }
 
@@ -464,7 +442,7 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
     if (read_result.num_rows == 0)
         read_result.columns.clear();
 
-    /// const auto & sample_block = task->getMainRangeReader().getSampleBlock();
+    const auto & sample_block = task->getMainRangeReader().getSampleBlock();
     if (read_result.num_rows != 0 && sample_block.columns() != read_result.columns.size())
         throw Exception(
             ErrorCodes::LOGICAL_ERROR,
@@ -515,6 +493,7 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
     for (size_t ps = 0; ps < sample_block.columns(); ++ps)
     {
         auto & col_name = sample_block.getByPosition(ps).name;
+        LOG_DEBUG(log, "col_name in sample block {} in pos {}", col_name, ps);
 
         /// Check if distance_func columns
         bool is_search_func = false;
@@ -656,16 +635,9 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
 
     /// Check if need to fill _part_offset, will be used for mergeResult with lightweight delete
     MutableColumnPtr mutable_part_offset_col = nullptr;
-/*
-    for (const auto & column_name : non_const_virtual_column_names)
-    {
-        if (column_name == "_part_offset")
-        {
-            mutable_part_offset_col = ColumnUInt64::create();
-            break;
-        }
-    }
-*/
+    if (std::find(required_columns.begin(), required_columns.end(), "_part_offset") != required_columns.end())
+        mutable_part_offset_col = ColumnUInt64::create();
+
     MergeTreeRangeReader::ReadResult::ReadRangesInfo read_ranges;
     const MergeTreeIndexGranularity & index_granularity = data_part->index_granularity;
 
@@ -793,6 +765,16 @@ try
     if (mark_ranges_for_task.empty())
         return false;
 
+    /// Add _part_offset to requried_columns if part has lightweight delete
+    if (data_part->hasLightweightDelete())
+    {
+        if (std::find(required_columns.begin(), required_columns.end(), "_part_offset") == required_columns.end())
+        {
+            required_columns.emplace_back("_part_offset");
+            need_remove_part_offset = true;
+        }
+    }
+
     /// Initilize MergeTreeReadTask after vector scan
     task = createTask(mark_ranges_for_task);
 
@@ -851,7 +833,7 @@ MergeTreeReadTaskInfoPtr MergeTreeSelectWithHybridSearchProcessor::initializeRea
         part_info,
         storage_snapshot,
         required_columns,
-        prewhere_info,
+        /*prewhere_info*/ nullptr,
         actions_settings,
         reader_settings,
         /*with_subcolumns=*/true);
@@ -1021,8 +1003,7 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
 {
     OpenTelemetry::SpanHolder span("MergeTreeSelectWithHybridSearchProcessor::performPrefilter()");
     Names required_columns_prewhere;
-    Names system_columns;
-    system_columns.emplace_back("_part_offset");
+    required_columns_prewhere.emplace_back("_part_offset");
 
     ExpressionActionsSettings actions_settings;
 
@@ -1077,14 +1058,19 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
             /// Reduce the number of num_streams if the data is small.
             if (info.sum_marks < num_streams * info.min_marks_for_concurrent_read)
             {
-                const size_t prev_num_streams = num_streams;
-                num_streams = (info.sum_marks + info.min_marks_for_concurrent_read - 1) / info.min_marks_for_concurrent_read;
-                const size_t increase_num_streams_ratio = std::min(prev_num_streams / num_streams, info.min_marks_for_concurrent_read / 8);
-                if (increase_num_streams_ratio > 1)
+                if ((info.sum_marks + info.min_marks_for_concurrent_read - 1) / info.min_marks_for_concurrent_read > 1)
                 {
-                    num_streams = num_streams * increase_num_streams_ratio;
-                    info.min_marks_for_concurrent_read = (info.sum_marks + num_streams - 1) / num_streams;
+                    const size_t prev_num_streams = num_streams;
+                    num_streams = (info.sum_marks + info.min_marks_for_concurrent_read - 1) / info.min_marks_for_concurrent_read;
+                    const size_t increase_num_streams_ratio = std::min(prev_num_streams / num_streams, info.min_marks_for_concurrent_read / 8);
+                    if (increase_num_streams_ratio > 1)
+                    {
+                        num_streams = num_streams * increase_num_streams_ratio;
+                        info.min_marks_for_concurrent_read = (info.sum_marks + num_streams - 1) / num_streams;
+                    }
                 }
+                else
+                    num_streams = 1;
             }
             else if (info.total_rows < num_streams * info.min_rows_for_concurrent_read)
             {

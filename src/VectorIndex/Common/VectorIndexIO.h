@@ -111,6 +111,8 @@ public:
     {
         if (checksums && !file_name.empty() && hashing_out)
             checksums->addFile(file_name, hashing_out->count(), hashing_out->getHash());
+
+        close();
     }
 
     Search::AbstractOStream & write(const char * s, std::streamsize count) override
