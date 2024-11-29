@@ -43,7 +43,7 @@ BlockIO InterpreterCreateIndexQuery::execute()
 
     }
     // Noop if allow_create_index_without_type = true. throw otherwise
-    if (!create_index.index_decl->as<ASTIndexDeclaration>()->getType())
+    if (!create_index.is_vector_index && !create_index.index_decl->as<ASTIndexDeclaration>()->getType())
     {
         if (!current_context->getSettingsRef().allow_create_index_without_type)
         {
@@ -60,28 +60,9 @@ BlockIO InterpreterCreateIndexQuery::execute()
     AccessRightsElements required_access;
     required_access.emplace_back(AccessType::ALTER_ADD_INDEX, create_index.getDatabase(), create_index.getTable());
 
-    if (!create_index.cluster.empty())
-    {
-        DDLQueryOnClusterParams params;
-        params.access_to_check = std::move(required_access);
-        return executeDDLQueryOnCluster(query_ptr, current_context, params);
-    }
-
     current_context->checkAccess(required_access);
     auto table_id = current_context->resolveStorageID(create_index, Context::ResolveOrdinary);
-    query_ptr->as<ASTCreateIndexQuery &>().setDatabase(table_id.database_name);
-
-    DatabasePtr database = DatabaseCatalog::instance().getDatabase(table_id.database_name);
-    if (database->shouldReplicateQuery(getContext(), query_ptr))
-    {
-        auto guard = DatabaseCatalog::instance().getDDLGuard(table_id.database_name, table_id.table_name);
-        guard->releaseTableLock();
-        return database->tryEnqueueReplicatedDDL(query_ptr, current_context);
-    }
-    
     StoragePtr table = DatabaseCatalog::instance().getTable(table_id, current_context);
-    if (table->isStaticStorage())
-        throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
 
     if (create_index.is_vector_index)
     {
@@ -101,6 +82,26 @@ BlockIO InterpreterCreateIndexQuery::execute()
         }
     }
 
+    if (!create_index.cluster.empty())
+    {
+        DDLQueryOnClusterParams params;
+        params.access_to_check = std::move(required_access);
+        return executeDDLQueryOnCluster(query_ptr, current_context, params);
+    }
+
+    query_ptr->as<ASTCreateIndexQuery &>().setDatabase(table_id.database_name);
+
+    DatabasePtr database = DatabaseCatalog::instance().getDatabase(table_id.database_name);
+    if (database->shouldReplicateQuery(getContext(), query_ptr))
+    {
+        auto guard = DatabaseCatalog::instance().getDDLGuard(table_id.database_name, table_id.table_name);
+        guard->releaseTableLock();
+        return database->tryEnqueueReplicatedDDL(query_ptr, current_context);
+    }
+
+    if (table->isStaticStorage())
+        throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
+
     /// Convert ASTCreateIndexQuery to AlterCommand.
     AlterCommands alter_commands;
 
@@ -108,7 +109,6 @@ BlockIO InterpreterCreateIndexQuery::execute()
     command.ast = create_index.convertToASTAlterCommand();
     if(create_index.is_vector_index)
     {
-        command.ast = create_index.convertToASTAlterCommand();
         command.vec_index_decl = create_index.index_decl;
         command.type = AlterCommand::ADD_VECTOR_INDEX;
         command.vec_index_name = create_index.index_name->as<ASTIdentifier &>().name();

@@ -54,11 +54,62 @@ MergeTreeReadTask::Readers MergeTreeReadTask::createReaders(
             extras.profile_callback);
     };
 
-    new_readers.main = create_reader(read_info->task_columns.columns);
-
     /// Add lightweight delete filtering step
     if (extras.reader_settings.apply_deleted_mask && read_info->data_part->hasLightweightDelete())
-        new_readers.prewhere.push_back(create_reader({{RowExistsColumn::name, RowExistsColumn::type}}));
+    {
+        /// Virtual columns that filled by RangeReader must be read in the first step before any filtering
+        NamesAndTypesList first_step_columns_to_read;
+        size_t prewhere_size = read_info->task_columns.pre_columns.size();
+
+        NamesAndTypesList step_columns_without_virutal = prewhere_size ? read_info->task_columns.pre_columns[0] : read_info->task_columns.columns;
+        NameSet virtual_column_names;
+
+        for (const auto & virtual_to_fill : MergeTreeRangeReader::virtuals_to_fill)
+        {
+            if (auto data_type_and_name = step_columns_without_virutal.tryGetByName(virtual_to_fill))
+            {
+                first_step_columns_to_read.push_back(*data_type_and_name);
+                virtual_column_names.insert(data_type_and_name->name);
+            }
+        }
+
+        first_step_columns_to_read.push_back({RowExistsColumn::name, RowExistsColumn::type});
+        new_readers.prewhere.push_back(create_reader(first_step_columns_to_read));
+
+        /// Remove virtual columns read in lightweight prewhere from pre_columns or columns
+        if (!virtual_column_names.empty())
+        {
+            step_columns_without_virutal = step_columns_without_virutal.eraseNames(virtual_column_names);
+
+            for (const auto & col : step_columns_without_virutal)
+            {
+                LOG_DEBUG(getLogger("createReaders"), "column name: {}", col.name);
+            }
+
+            if (prewhere_size)
+            {
+                new_readers.main = create_reader(read_info->task_columns.columns);
+
+                for (size_t i = 0; i < prewhere_size; ++i)
+                {
+                    if (i == 0)
+                        new_readers.prewhere.push_back(create_reader(step_columns_without_virutal));
+                    else
+                        new_readers.prewhere.push_back(create_reader(read_info->task_columns.pre_columns[i]));
+                }
+            }
+            else
+            {
+                /// no prewhere, columns need to remove virtual columns
+                new_readers.main = create_reader(step_columns_without_virutal);
+            }
+
+            return new_readers;
+        }
+    }
+
+    /// No need to apply lightweight delete or no virtual columns to read in task
+    new_readers.main = create_reader(read_info->task_columns.columns);
 
     for (const auto & pre_columns_per_step : read_info->task_columns.pre_columns)
         new_readers.prewhere.push_back(create_reader(pre_columns_per_step));
