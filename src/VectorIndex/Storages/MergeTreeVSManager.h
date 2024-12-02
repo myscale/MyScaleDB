@@ -84,6 +84,7 @@ public:
     /// Filter parts using total top-k vector scan results from multiple distance functions
     /// For every part, select mark ranges to read, and save multiple vector scan results
     static SearchResultAndRangesInDataParts FilterPartsWithManyVSResults(
+        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
         const RangesInDataParts & parts_with_ranges,
         const std::unordered_map<String, ScoreWithPartIndexAndLabels> & vector_scan_results_with_part_index,
         const Settings & settings,

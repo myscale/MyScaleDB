@@ -116,6 +116,7 @@ public:
     /// Filter parts using total top-k hybrid search result
     /// For every part, select mark ranges to read, also save hybrid result
     static SearchResultAndRangesInDataParts FilterPartsWithHybridResults(
+        const VectorAndTextResultInDataParts & parts_with_vector_text_result,
         const RangesInDataParts & parts_with_ranges,
         const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
         const Settings & settings,

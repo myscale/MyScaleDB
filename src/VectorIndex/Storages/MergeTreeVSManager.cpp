@@ -601,6 +601,7 @@ VectorAndTextResultInDataParts MergeTreeVSManager::splitFirstStageVSResult(
 }
 
 SearchResultAndRangesInDataParts MergeTreeVSManager::FilterPartsWithManyVSResults(
+    const VectorAndTextResultInDataParts & parts_with_vector_text_result,
     const RangesInDataParts & parts_with_ranges,
     const std::unordered_map<String, ScoreWithPartIndexAndLabels> & vector_scan_results_with_part_index,
     const Settings & settings,
@@ -676,11 +677,22 @@ SearchResultAndRangesInDataParts MergeTreeVSManager::FilterPartsWithManyVSResult
 
             if (!mark_ranges_for_part.empty())
             {
+                /// Save can_skip_perform_prefilter
+                bool can_skip_perform_prefilter = false;
+                for (const auto & part_with_mix_results : parts_with_vector_text_result)
+                {
+                    if (part_with_mix_results.part_index == part_index)
+                    {
+                        can_skip_perform_prefilter = part_with_mix_results.can_skip_perform_prefilter;
+                        break;
+                    }
+                }
+
                 RangesInDataPart ranges(part_with_ranges.data_part,
                         part_with_ranges.alter_conversions,
                         part_with_ranges.part_index_in_query,
                         std::move(mark_ranges_for_part));
-                SearchResultAndRangesInDataPart results_with_ranges(std::move(ranges), part_index_merged_results_map[part_index]);
+                SearchResultAndRangesInDataPart results_with_ranges(std::move(ranges), can_skip_perform_prefilter, part_index_merged_results_map[part_index]);
                 parts_with_ranges_vector_scan_result[part_index] = std::move(results_with_ranges);
             }
         }
