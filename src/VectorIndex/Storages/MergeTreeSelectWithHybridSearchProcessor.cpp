@@ -82,7 +82,8 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
     const MergeTreeReaderSettings & reader_settings_,
     MergeTreeBaseSearchManagerPtr base_search_manager_,
     ContextPtr context_,
-    size_t max_streams)
+    size_t max_streams,
+    bool can_skip_perform_prefilter_)
     : storage(storage_)
     , storage_snapshot(storage_snapshot_)
     , prewhere_info(prewhere_info_)
@@ -102,6 +103,7 @@ MergeTreeSelectWithHybridSearchProcessor::MergeTreeSelectWithHybridSearchProcess
     , base_search_manager(base_search_manager_)
     , context(context_)
     , max_streams_for_prewhere(max_streams)
+    , can_skip_perform_prefilter(can_skip_perform_prefilter_)
 {
     auto header = storage_snapshot_->getSampleBlockForColumns(required_columns);
     result_header = SourceStepWithFilter::applyPrewhereActions(std::move(header), prewhere_info);
@@ -229,8 +231,7 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
 
     for (const auto & required_column : required_columns)
     {
-        if (std::find(minmax_columns_names.begin(), minmax_columns_names.end(), required_column)
-            != minmax_columns_names.end())
+        if (std::find(minmax_columns_names.begin(), minmax_columns_names.end(), required_column) != minmax_columns_names.end())
         {
             exists = true;
             break;
@@ -241,10 +242,19 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
     if (!exists)
         return false;
 
+
+    /// prewhere actions has two outputs?
+    ActionsDAG::NodeRawConstPtrs filter_nodes;
+    filter_nodes.push_back(&prewhere_actions.findInOutputs(prewhere_info_->prewhere_column_name));
+    auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(filter_nodes);
+
+    if (!filter_actions_dag)
+        return false;
+
     /// Reference PartitionPruner using KeyCondition, difference is that FUNCTION_UNKNOWN returns false.
     KeyCondition partition_pruner_condition(
-        &prewhere_actions, context_, partition_key.column_names,
-        partition_key.expression, true /* single_point */, true /* known_false */);
+        &*filter_actions_dag, context_, partition_key.column_names,
+        partition_key.expression, true /* single_point */, true /* unknown_false */);
 
     const auto & partition_value = data_part_->partition.value;
     std::vector<FieldRef> index_value(partition_value.begin(), partition_value.end());
@@ -264,7 +274,7 @@ bool MergeTreeSelectWithHybridSearchProcessor::canSkipPrewhereForPart(
     DataTypes minmax_columns_types = storage_.getMinMaxColumnsTypes(partition_key);
 
     KeyCondition minmax_idx_condition(
-        &prewhere_actions, context_, minmax_columns_names,
+        &*filter_actions_dag, context_, minmax_columns_names,
         minmax_expression_actions, false /* single_point */, true /* known_false */);
 
     return minmax_idx_condition.checkInHyperrectangle(data_part_->minmax_idx->hyperrectangle, minmax_columns_types).can_be_true;
@@ -383,8 +393,11 @@ void MergeTreeSelectWithHybridSearchProcessor::initializeRangeReaders()
     if (lightweight_delete_filter_step && task->getInfo().data_part->hasLightweightDelete())
         all_prewhere_actions.steps.push_back(lightweight_delete_filter_step);
 
-///    for (const auto & step : prewhere_actions.steps)
-///        all_prewhere_actions.steps.push_back(step);
+    if (can_skip_perform_prefilter)
+    {
+        for (const auto & step : prewhere_actions.steps)
+            all_prewhere_actions.steps.push_back(step);
+    }
 
     task->initializeRangeReaders(all_prewhere_actions);
 }
@@ -542,7 +555,7 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
 
     /// Add prewhere column name to avoid prewhere_column not found error
     /// Used for vector scan to handle cases when both prewhere and where exist
-    if (!can_skip_peform_prefilter && prewhere_info && !prewhere_info->remove_prewhere_column)
+    if (!can_skip_perform_prefilter && prewhere_info && !prewhere_info->remove_prewhere_column)
     {
         ColumnWithTypeAndName prewhere_col;
 
@@ -766,7 +779,7 @@ try
         return false;
 
     /// Add _part_offset to requried_columns if part has lightweight delete
-    if (data_part->hasLightweightDelete())
+    if (data_part->hasLightweightDelete() || can_skip_perform_prefilter)
     {
         if (std::find(required_columns.begin(), required_columns.end(), "_part_offset") == required_columns.end())
         {
@@ -829,11 +842,13 @@ MergeTreeReadTaskInfoPtr MergeTreeSelectWithHybridSearchProcessor::initializeRea
 
     LoadedMergeTreeDataPartInfoForReader part_info(part_with_ranges.data_part, part_with_ranges.alter_conversions);
 
+    PrewhereInfoPtr prewhere_info_task = can_skip_perform_prefilter ? prewhere_info : nullptr;
+
     read_task_info.task_columns = getReadTaskColumns(
         part_info,
         storage_snapshot,
         required_columns,
-        /*prewhere_info*/ nullptr,
+        prewhere_info_task,
         actions_settings,
         reader_settings,
         /*with_subcolumns=*/true);
@@ -854,11 +869,11 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(MarkRanges mark_ran
         prewhere_info_copy->remove_prewhere_column = true;
     }
 
-    executeSearch(base_search_manager, storage, storage_snapshot, data_part, block_size_params,
+    can_skip_perform_prefilter = executeSearch(base_search_manager, storage, storage_snapshot, data_part, block_size_params,
                 mark_ranges, prewhere_info_copy, reader_settings, context, max_streams_for_prewhere);
 }
 
-void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
+bool MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     MergeTreeBaseSearchManagerPtr search_manager,
     const MergeTreeData & storage_,
     const StorageSnapshotPtr & storage_snapshot_,
@@ -870,11 +885,14 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
     ContextPtr context_,
     size_t max_streams)
 {
-    bool can_skip_peform_prefilter = canSkipPrewhereForPart(data_part_, prewhere_info_copy, storage_,
+    bool can_skip_perform_prefilter = canSkipPrewhereForPart(data_part_, prewhere_info_copy, storage_,
                                         storage_snapshot_->metadata, context_);
 
+    if (can_skip_perform_prefilter)
+        LOG_DEBUG(getLogger("executeSearch"), "Skip to call performPrefilter() for part {} due to a prewhere condition with partition key is true.", data_part_->name);
+
     /// perform vector scan
-    if (!prewhere_info_copy || can_skip_peform_prefilter)
+    if (!prewhere_info_copy || can_skip_perform_prefilter)
     {
         search_manager->executeSearchBeforeRead(data_part_);
     }
@@ -892,6 +910,8 @@ void MergeTreeSelectWithHybridSearchProcessor::executeSearch(
 
         search_manager->executeSearchWithFilter(data_part_, read_ranges, filter);
     }
+
+    return can_skip_perform_prefilter;
 }
 
 namespace
@@ -1240,7 +1260,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
             hybrid_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan and text search
-            executeSearch(hybrid_search_mgr, data, storage_snapshot_, data_part_,
+            mix_results.can_skip_perform_prefilter = executeSearch(hybrid_search_mgr, data, storage_snapshot_, data_part_,
                         block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 
@@ -1256,7 +1276,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
                                         context, vec_support_two_stage_searches);
 
             /// Get vector scan
-            executeSearch(vector_scan_mgr, data, storage_snapshot_, data_part_,
+            mix_results.can_skip_perform_prefilter = executeSearch(vector_scan_mgr, data, storage_snapshot_, data_part_,
                         block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 
@@ -1271,7 +1291,7 @@ VectorAndTextResultInDataParts MergeTreeSelectWithHybridSearchProcessor::selectP
             text_search_mgr->setBM25Stats(bm25_stats_in_table);
 #endif
             /// Get vector scan
-            executeSearch(text_search_mgr, data, storage_snapshot_, data_part_,
+            mix_results.can_skip_perform_prefilter = executeSearch(text_search_mgr, data, storage_snapshot_, data_part_,
                         block_size_params_, mark_ranges, prewhere_info_copy, reader_settings_,
                         context, num_streams);
 

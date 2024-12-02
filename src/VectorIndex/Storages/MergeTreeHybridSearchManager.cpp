@@ -157,6 +157,7 @@ ScoreWithPartIndexAndLabels MergeTreeHybridSearchManager::hybridSearch(
 }
 
 SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHybridResults(
+    const VectorAndTextResultInDataParts & parts_with_vector_text_result,
     const RangesInDataParts & parts_with_ranges,
     const ScoreWithPartIndexAndLabels & hybrid_result_with_part_index,
     const Settings & settings,
@@ -194,12 +195,23 @@ SearchResultAndRangesInDataParts MergeTreeHybridSearchManager::FilterPartsWithHy
 
             if (!mark_ranges_for_part.empty())
             {
+                /// Save can_skip_perform_prefilter
+                bool can_skip_perform_prefilter = false;
+                for (const auto & part_with_mix_results : parts_with_vector_text_result)
+                {
+                    if (part_with_mix_results.part_index == part_index)
+                    {
+                        can_skip_perform_prefilter = part_with_mix_results.can_skip_perform_prefilter;
+                        break;
+                    }
+                }
+
                 RangesInDataPart ranges(part_with_ranges.data_part,
                                         part_with_ranges.alter_conversions,
                                         part_with_ranges.part_index_in_query,
                                         std::move(mark_ranges_for_part));
 
-                SearchResultAndRangesInDataPart result_with_ranges(std::move(ranges), tmp_hybrid_search_result);
+                SearchResultAndRangesInDataPart result_with_ranges(std::move(ranges), can_skip_perform_prefilter, tmp_hybrid_search_result);
                 parts_with_ranges_hybrid_result[part_index] = std::move(result_with_ranges);
             }
         }

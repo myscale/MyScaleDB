@@ -38,20 +38,26 @@ struct SearchResultAndRangesInDataPart
     /// Valid for vector scan
     ManyVectorScanResults multiple_vector_scan_results = {};
 
+    bool can_skip_perform_prefilter = false;
+
     SearchResultAndRangesInDataPart() = default;
 
     SearchResultAndRangesInDataPart(
         const RangesInDataPart & part_with_ranges_,
+        const bool can_skip_perform_prefilter_ = false,
         const CommonSearchResultPtr & search_result_ = nullptr)
         : part_with_ranges{part_with_ranges_}
         , search_result{search_result_}
+        , can_skip_perform_prefilter{can_skip_perform_prefilter_}
     {}
 
     SearchResultAndRangesInDataPart(
         const RangesInDataPart & part_with_ranges_,
+        const bool can_skip_perform_prefilter_ = false,
         const ManyVectorScanResults & multiple_vector_scan_results_ = {})
         : part_with_ranges{part_with_ranges_}
         , multiple_vector_scan_results{multiple_vector_scan_results_}
+        , can_skip_perform_prefilter{can_skip_perform_prefilter_}
     {}
 };
 
@@ -71,6 +77,10 @@ struct VectorAndTextResultInDataPart
     /// Support multiple distance functions
     /// Use the first element for hybrid search and second stage of two-stage vector search
     ManyVectorScanResults vector_scan_results = {};
+
+    /// If true, performPrefilter() is skipped, prewhere can be executed after vector search
+    /// If false, performPrefilter() is executed before vector search, no need to execute prewhere.
+    bool can_skip_perform_prefilter = false;
 
     VectorAndTextResultInDataPart() = default;
 
