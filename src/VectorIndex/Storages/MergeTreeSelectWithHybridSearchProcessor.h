@@ -37,7 +37,8 @@ public:
         const MergeTreeReaderSettings & reader_settings_,
         MergeTreeBaseSearchManagerPtr base_search_manager_,
         ContextPtr context_,
-        size_t max_streams);
+        size_t max_streams,
+        bool can_skip_perform_prefilter_ = false);
 
     static Block transformHeader(
         Block block, const PrewhereInfoPtr & prewhere_info, const DataTypePtr & partition_value_type, const Names & virtual_columns);
@@ -169,7 +170,7 @@ private:
     void executeSearch(MarkRanges mark_ranges);
 
     /// Used for hybrid search refactor, can execute search with provided manager for where or no-where cases
-    static void executeSearch(
+    static bool executeSearch(
         MergeTreeBaseSearchManagerPtr search_manager,
         const MergeTreeData & storage_,
         const StorageSnapshotPtr & storage_snapshot_,
@@ -211,7 +212,7 @@ private:
     /// Used for cases when prewhere can be skipped before vector search
     /// True when performPreFilter() is skipped, prewhere_info can be performed after vector search, during reading other columns.
     /// False when performPreFilter() is executed before vector search
-    bool can_skip_peform_prefilter = false;
+    bool can_skip_perform_prefilter = false;
 };
 
 }

@@ -783,14 +783,14 @@ ReadWithHybridSearch::HybridAnalysisResult ReadWithHybridSearch::selectTotalHybr
 
         /// Filter parts with final top-k hybrid result, and save hybrid result with belonged part
         hybrid_result.parts_with_hybrid_and_ranges = MergeTreeHybridSearchManager::FilterPartsWithHybridResults(
-                                                        parts_with_ranges, hybrid_topk_results, context->getSettingsRef(), hybrid_log);
+                                        parts_with_vector_text_result, parts_with_ranges, hybrid_topk_results, context->getSettingsRef(), hybrid_log);
     }
     else
     {
         /// Support multiple distance functions
         /// Filter parts with final top-k vector scan results from multiple distance funcs
         hybrid_result.parts_with_hybrid_and_ranges = MergeTreeVSManager::FilterPartsWithManyVSResults(
-                                                        parts_with_ranges, multiple_distances_topk_results_map, context->getSettingsRef(), hybrid_log);
+                                        parts_with_vector_text_result, parts_with_ranges, multiple_distances_topk_results_map, context->getSettingsRef(), hybrid_log);
     }
 
     return hybrid_result;
@@ -1171,7 +1171,8 @@ Pipe ReadWithHybridSearch::readFromParts(
             reader_settings,
             search_manager,
             context,
-            requested_num_streams);
+            requested_num_streams,
+            part_with_hybrid.can_skip_perform_prefilter);
 
         auto source = std::make_shared<MergeTreeWithVectorScanSource>(std::move(algorithm), data.getLogName());
 
