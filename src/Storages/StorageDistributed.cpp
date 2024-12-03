@@ -1084,9 +1084,16 @@ void StorageDistributed::read(
         query_ast = query_info.query;
     }
 
+    /// Use temporary variable for remote_table_function_ptr to avoid change StorageDistributed
+    ASTPtr tmp_remote_table_function_ptr;
+    if (query_info.full_text_search_table_func_ast)
+        tmp_remote_table_function_ptr = query_info.full_text_search_table_func_ast;
+    else
+        tmp_remote_table_function_ptr = remote_table_function_ptr;
+
     const auto & modified_query_ast = ClusterProxy::rewriteSelectQuery(
         local_context, query_ast,
-        remote_database, remote_table, remote_table_function_ptr);
+        remote_database, remote_table, tmp_remote_table_function_ptr);
 
     /// Return directly (with correct header) if no shard to query.
     if (query_info.getCluster()->getShardsInfo().empty())
@@ -1100,7 +1107,7 @@ void StorageDistributed::read(
     }
 
     StorageID main_table = StorageID::createEmpty();
-    if (!remote_table_function_ptr)
+    if (!tmp_remote_table_function_ptr)
         main_table = StorageID{remote_database, remote_table};
 
     const auto & snapshot_data = assert_cast<const SnapshotData &>(*storage_snapshot->data);
@@ -1136,7 +1143,7 @@ void StorageDistributed::read(
 
     ClusterProxy::executeQuery(
         query_plan, header, processed_stage,
-        main_table, remote_table_function_ptr,
+        main_table, tmp_remote_table_function_ptr,
         select_stream_factory, log, modified_query_ast,
         local_context, query_info,
         sharding_key_expr, sharding_key_column_name,

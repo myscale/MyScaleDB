@@ -58,7 +58,7 @@ inline void checkTantivyIndex([[maybe_unused]]const StoragePtr & storage, [[mayb
 
 }
 
-StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_function */, ContextPtr context, const std::string & table_name_, ColumnsDescription /*cached_columns*/) const
+StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & ast_function, ContextPtr context, const std::string & table_name_, ColumnsDescription /*cached_columns*/) const
 {
     auto columns = getActualTableStructure(context);
 
@@ -66,8 +66,8 @@ StoragePtr TableFunctionFullTextSearch::executeImpl(const ASTPtr & /* ast_functi
     String score_col_name = SCORE_COLUMN_NAME;
 
     auto storage = std::make_shared<StorageFullTextSearch>(
-        StorageID(getDatabaseName(), table_name_), table_storage, index_name, query_text, score_col_name, enable_nlq, text_operator,
-        columns, context, query_text_ast);
+        StorageID(getDatabaseName(), table_name_), table_storage, ast_function, index_name, query_text, score_col_name,
+        enable_nlq, text_operator, columns, context, query_text_ast);
     storage->startup();
     return storage;
 }
@@ -176,7 +176,9 @@ void TableFunctionFullTextSearch::parseArguments(const ASTPtr & ast_function, Co
     table_storage = DatabaseCatalog::instance().getTable(StorageID(database_name, table_name), context);
 
     /// Check if the index exists in the table
-    checkTantivyIndex(table_storage, index_name, tmp_table_name);
+    /// Skip the fts index check when table is distributed.
+    if (table_storage && !table_storage->isRemote())
+        checkTantivyIndex(table_storage, index_name, tmp_table_name);
 
     /// Check if table has same column name with score column
     auto metadata_snapshot =  table_storage ? table_storage->getInMemoryMetadataPtr() : nullptr;

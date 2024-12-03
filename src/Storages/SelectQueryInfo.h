@@ -247,6 +247,9 @@ struct SelectQueryInfo
     /// If query has one of text search, vector scan and hybrid search functions
     bool has_hybrid_search = false;
 
+    /// It is needed for full_text_search table function on distributed table
+    ASTPtr full_text_search_table_func_ast;
+
     /// Prepared sets are used for indices by storage engine.
     /// Example: x IN (1, 2, 3)
     PreparedSetsPtr prepared_sets;
