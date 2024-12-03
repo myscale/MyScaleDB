@@ -13,6 +13,8 @@
 #include <Common/quoteString.h>
 #include <Core/Defines.h>
 #include <DataTypes/DataTypeFactory.h>
+#include <Parsers/ParserDeleteQuery.h>
+#include <Parsers/ASTDeleteQuery.h>
 
 
 namespace DB
@@ -226,17 +228,40 @@ void MutationCommands::readText(ReadBuffer & in)
     String commands_str;
     readEscapedString(commands_str, in);
 
-    ParserAlterCommandList p_alter_commands;
-    auto commands_ast = parseQuery(
-        p_alter_commands, commands_str.data(), commands_str.data() + commands_str.length(), "mutation commands list", 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
+    /// Try to parse query as optimized lightweight delete first
+    String message;
+    const char * pos = commands_str.data();
+    const char * end = commands_str.data() + commands_str.length();
 
-    for (const auto & child : commands_ast->children)
+    ParserLWDeleteCommand p_lwd_command;
+    ASTPtr res = tryParseQuery(p_lwd_command, pos, end, message, false,
+        "lightweight delete mutation command", false, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS, true);
+
+    if (res)
     {
-        auto * command_ast = child->as<ASTAlterCommand>();
-        auto command = MutationCommand::parse(command_ast, true);
-        if (!command)
-            throw Exception(ErrorCodes::UNKNOWN_MUTATION_COMMAND, "Unknown mutation command type: {}", DB::toString<int>(command_ast->type));
-        push_back(std::move(*command));
+        auto * delete_command = res->as<ASTLWDeleteCommand>();
+        MutationCommand lwd_mutation;
+
+        lwd_mutation.type = MutationCommand::Type::LIGHTWEIGHT_DELETE;
+        lwd_mutation.predicate = delete_command->predicate;
+        lwd_mutation.ast = delete_command->ptr();
+
+        push_back(std::move(lwd_mutation));
+    }
+    else
+    {
+        ParserAlterCommandList p_alter_commands;
+        auto commands_ast = parseQuery(
+            p_alter_commands, commands_str.data(), commands_str.data() + commands_str.length(), "mutation commands list", 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
+
+        for (const auto & child : commands_ast->children)
+        {
+            auto * command_ast = child->as<ASTAlterCommand>();
+            auto command = MutationCommand::parse(command_ast, true);
+            if (!command)
+                throw Exception(ErrorCodes::UNKNOWN_MUTATION_COMMAND, "Unknown mutation command type: {}", DB::toString<int>(command_ast->type));
+            push_back(std::move(*command));
+        }
     }
 }
 

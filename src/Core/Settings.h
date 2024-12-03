@@ -160,6 +160,7 @@ class IColumn;
     M(UInt64, hybrid_search_fusion_k, 60, "Default fusion_k for hybrid search Reciprocal Rank Fusion (RRF) function", 0) \
     M(UInt64, hybrid_search_top_k_multiple_base, 3, "Default multiple base on top k for num_candidates in hybrid search", 0) \
     M(Bool, optimize_prefilter_in_search, true, "Enable prewhere optimization for vector or text search if some partition columns in prewhere condition.", 0) \
+    M(Bool, allow_experimental_optimized_lwd, false, "Enable optimized lightweight DELETE mutations for mergetree tables.", 0) \
     M(UInt64, max_search_result_window, 10000, "The maximum value of n + m in limit clause for pagination in vector/text/hybrid search", 0) \
     M(Bool, enable_fts_index_for_string_functions, false, "Enable the FTS index to accelerate functions for searching in strings (e.g., LIKE, hasToken, startsWith). Only the raw tokenizer can ensure correct results.", 0) \
     M(Bool, dfs_query_then_fetch, false, "Enable Distributed Frequency Search (DFS) query to gather global statistical info for accurate BM25 calculation.", 0) \

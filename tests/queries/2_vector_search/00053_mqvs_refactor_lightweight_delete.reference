@@ -1,0 +1,37 @@
+Lightweight delete on part w/o mask column
+Select after delete id=2
+0	0
+1	1
+3	3
+4	4
+5	5
+Lightweight delete on part with mask column
+Select after delete id=2 and 5
+0	0
+1	1
+3	3
+4	4
+6	6
+Back to old Lightweight delete
+Select after delete id=2, 4 and 5
+0	0
+1	1
+3	3
+6	6
+7	7
+mutation_2.txt	LIGHTWEIGHT DELETE WHERE id = 2
+mutation_3.txt	LIGHTWEIGHT DELETE WHERE id = 5
+mutation_4.txt	UPDATE _row_exists = 0 WHERE id = 4
+--- Original topK result
+1	0
+0	3
+2	3
+3	12
+4	27
+--- Lightweight delete on part with vector index
+--- After lightweight delete, new topK result
+1	0
+0	3
+3	12
+4	27
+5	48

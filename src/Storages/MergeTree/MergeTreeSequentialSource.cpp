@@ -38,7 +38,8 @@ public:
         std::optional<MarkRanges> mark_ranges_,
         bool apply_deleted_mask,
         bool read_with_direct_io_,
-        bool prefetch);
+        bool prefetch,
+        bool from_lwd_mutation_ = false);
 
     ~MergeTreeSequentialSource() override;
 
@@ -78,6 +79,9 @@ private:
     /// current row at which we stop reading
     size_t current_row = 0;
 
+    /// Use max_block_size in optimized lightweight delete
+    bool from_lwd_mutation = false;
+
     /// max rows to read at a time
     size_t max_rows_to_read = 0;
 
@@ -94,7 +98,8 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
     std::optional<MarkRanges> mark_ranges_,
     bool apply_deleted_mask,
     bool read_with_direct_io_,
-    bool prefetch)
+    bool prefetch,
+    bool from_lwd_mutation_)
     : ISource(storage_snapshot_->getSampleBlockForColumns(columns_to_read_))
     , storage(storage_)
     , storage_snapshot(storage_snapshot_)
@@ -103,6 +108,7 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
     , read_with_direct_io(read_with_direct_io_)
     , mark_ranges(std::move(mark_ranges_))
     , mark_cache(storage.getContext()->getMarkCache())
+    , from_lwd_mutation(from_lwd_mutation_)
 {
     /// Print column name but don't pollute logs in case of many columns.
     if (columns_to_read.size() == 1)
@@ -177,14 +183,22 @@ MergeTreeSequentialSource::MergeTreeSequentialSource(
         /*avg_value_size_hints=*/ {},
         /*profile_callback=*/ {});
 
+    size_t sequential_read_max_rows;
+    if (from_lwd_mutation)
+        sequential_read_max_rows = storage.getContext()->getSettingsRef().max_block_size;
+    else
+    {
+        const auto & global_data_settings = storage.getContext()->getMergeTreeSettings();
+        sequential_read_max_rows = global_data_settings.index_granularity;
+    }
+
     /// Try to read many marks at once in a readRows() to speed up the sequential read
     /// Enabled when index_granuality * 2 is small than global default index_granularity and rows count in part is larger than it.
-    const auto & global_data_settings = storage.getContext()->getMergeTreeSettings();
-    size_t sequential_read_max_rows = global_data_settings.index_granularity;
-
     const auto & data_settings = storage.getSettings();
     if (data_settings->index_granularity * 2 < sequential_read_max_rows && data_part->rows_count > sequential_read_max_rows)
         max_rows_to_read = sequential_read_max_rows;
+
+    LOG_DEBUG(log, "max_rows_to_read = {}, sequential_read_max_rows = {}", max_rows_to_read, sequential_read_max_rows);
 
     if (prefetch && !data_part->isEmpty())
         reader->prefetchBeginOfRange(Priority{});
@@ -366,7 +380,8 @@ Pipe createMergeTreeSequentialSource(
     std::shared_ptr<std::atomic<size_t>> filtered_rows_count,
     bool apply_deleted_mask,
     bool read_with_direct_io,
-    bool prefetch)
+    bool prefetch,
+    bool from_lwd_mutation)
 {
 
     /// The part might have some rows masked by lightweight deletes
@@ -378,7 +393,7 @@ Pipe createMergeTreeSequentialSource(
 
     auto column_part_source = std::make_shared<MergeTreeSequentialSource>(type,
         storage, storage_snapshot, data_part, columns_to_read, std::move(mark_ranges),
-        /*apply_deleted_mask=*/ false, read_with_direct_io, prefetch);
+        /*apply_deleted_mask=*/ false, read_with_direct_io, prefetch, from_lwd_mutation);
 
     Pipe pipe(std::move(column_part_source));
 
@@ -410,6 +425,7 @@ public:
         MergeTreeData::DataPartPtr data_part_,
         Names columns_to_read_,
         bool apply_deleted_mask_,
+        bool from_lwd_mutation_,
         std::optional<ActionsDAG> filter_,
         ContextPtr context_,
         LoggerPtr log_)
@@ -420,6 +436,7 @@ public:
         , data_part(std::move(data_part_))
         , columns_to_read(std::move(columns_to_read_))
         , apply_deleted_mask(apply_deleted_mask_)
+        , from_lwd_mutation(from_lwd_mutation_)
         , filter(std::move(filter_))
         , context(std::move(context_))
         , log(log_)
@@ -466,7 +483,8 @@ public:
             /*filtered_rows_count=*/ nullptr,
             apply_deleted_mask,
             /*read_with_direct_io=*/ false,
-            /*prefetch=*/ false);
+            /*prefetch=*/ false,
+            from_lwd_mutation);
 
         pipeline.init(Pipe(std::move(source)));
     }
@@ -478,6 +496,7 @@ private:
     MergeTreeData::DataPartPtr data_part;
     Names columns_to_read;
     bool apply_deleted_mask;
+    bool from_lwd_mutation;
     std::optional<ActionsDAG> filter;
     ContextPtr context;
     LoggerPtr log;
@@ -491,13 +510,14 @@ void createReadFromPartStep(
     MergeTreeData::DataPartPtr data_part,
     Names columns_to_read,
     bool apply_deleted_mask,
+    bool from_lwd_mutation,
     std::optional<ActionsDAG> filter,
     ContextPtr context,
     LoggerPtr log)
 {
     auto reading = std::make_unique<ReadFromPart>(type,
         storage, storage_snapshot, std::move(data_part),
-        std::move(columns_to_read), apply_deleted_mask,
+        std::move(columns_to_read), apply_deleted_mask, from_lwd_mutation,
         std::move(filter), std::move(context), log);
 
     plan.addStep(std::move(reading));
