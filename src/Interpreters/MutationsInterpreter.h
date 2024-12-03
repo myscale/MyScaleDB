@@ -33,6 +33,16 @@ ASTPtr getPartitionAndPredicateExpressionForMutationCommand(
 
 MutationCommand createCommandToApplyDeletedMask(const MutationCommand & command);
 
+/// Reference from isStorageTouchedByMutations() but also get row ids for deleted rows
+/// Return false if the data isn't going to be changed by mutations.
+bool isStorageTouchedByLWDMutations(
+    MergeTreeData::DataPartPtr source_part,
+    const StorageMetadataPtr & metadata_snapshot,
+    const std::vector<MutationCommand> & commands,
+    ContextPtr context,
+    std::vector<UInt64> & deleted_row_ids
+);
+
 /// Create an input stream that will read data from storage and apply mutation commands (UPDATEs, DELETEs, MATERIALIZEs)
 /// to this data.
 class MutationsInterpreter
@@ -103,6 +113,7 @@ public:
             MUTATE_UNKNOWN,
             MUTATE_INDEX_STATISTICS_PROJECTION,
             MUTATE_OTHER,
+            MUTATE_LIGHTWEIGHT_DELETE,
         } mutation_kind = MUTATE_UNKNOWN;
 
         void set(const MutationKindEnum & kind);
@@ -134,6 +145,7 @@ public:
             const StorageMetadataPtr & snapshot_,
             const ContextPtr & context_,
             bool apply_deleted_mask_,
+            bool from_optimized_lwd_,
             bool can_execute_) const;
 
         explicit Source(StoragePtr storage_);
@@ -175,6 +187,9 @@ private:
     SelectQueryOptions select_limits;
 
     LoggerPtr logger;
+
+    /// Mark for optimized lightweight delete
+    bool from_optimized_lwd = false;
 
     /// A sequence of mutation commands is executed as a sequence of stages. Each stage consists of several
     /// filters, followed by updating values of some columns. Commands can reuse expressions calculated by the

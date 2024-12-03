@@ -74,6 +74,29 @@ BlockIO InterpreterDeleteQuery::execute()
                             "Lightweight delete mutate is disabled. "
                             "Set `enable_lightweight_delete` setting to enable it");
 
+        /// Execute lightweight delete query as "LIGHTWEIGHT DELETE WHERE predicate"
+        if (getContext()->getSettingsRef().allow_experimental_optimized_lwd)
+        {
+            /// Convert to MutationCommand
+            MutationCommands mutation_commands;
+            MutationCommand mut_command;
+
+            mut_command.type = MutationCommand::Type::LIGHTWEIGHT_DELETE;
+            mut_command.predicate = delete_query.predicate;
+            mut_command.ast = delete_query.convertToASTLWDeleteCommand();
+
+            mutation_commands.emplace_back(mut_command);
+
+            auto context = Context::createCopy(getContext());
+            context->setSetting("mutations_sync", Field(context->getSettingsRef().lightweight_deletes_sync));
+
+            table->checkMutationIsPossible(mutation_commands, context->getSettingsRef());
+            MutationsInterpreter::Settings settings(false);
+            MutationsInterpreter(table, metadata_snapshot, mutation_commands, context, settings).validate();
+            table->mutate(mutation_commands, context);
+            return BlockIO();
+        }
+
         /// Build "ALTER ... UPDATE _row_exists = 0 WHERE predicate" query
         String alter_query =
             "ALTER TABLE " + table->getStorageID().getFullTableName()

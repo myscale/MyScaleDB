@@ -16,4 +16,11 @@ protected:
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
+class ParserLWDeleteCommand : public IParserBase
+{
+protected:
+    const char * getName() const  override{ return "Lightweight Delete command"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
 }

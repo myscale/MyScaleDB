@@ -41,6 +41,7 @@ struct MutationCommand
         MATERIALIZE_COLUMN,
         APPLY_DELETED_MASK,
         ALTER_WITHOUT_MUTATION, /// pure metadata command, currently unusned
+        LIGHTWEIGHT_DELETE, /// Perform lightweight delete in an optimized way
     };
 
     Type type = EMPTY;

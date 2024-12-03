@@ -696,6 +696,7 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
             global_ctx->future_part->parts[part_num],
             columns_to_read,
             /*apply_deleted_mask=*/ false,
+            /*from_lwd_mutation=*/ false,
             std::nullopt,
             global_ctx->context,
             getLogger("generateRowIdsMap"));
