@@ -1301,6 +1301,11 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMutate(
                                 first_mutation_tid, mutations_begin_it->second.file_name, part->name);
         }
 
+        /// Optimized lightweight delete command
+        bool first_is_lightweight_delete = false;
+        if (!mutations_begin_it->second.commands.empty())
+            first_is_lightweight_delete = mutations_begin_it->second.commands[0].type == MutationCommand::Type::LIGHTWEIGHT_DELETE;
+
         auto commands = std::make_shared<MutationCommands>();
         size_t current_ast_elements = 0;
         auto last_mutation_to_apply = mutations_end_it;
@@ -1309,6 +1314,14 @@ MergeMutateSelectedEntryPtr StorageMergeTree::selectPartsToMutate(
             /// Do not squash mutations from different transactions to be able to commit/rollback them independently.
             if (first_mutation_tid != it->second.tid)
                 break;
+
+            /// Do not squash lightweight delete with other mutations
+            if (!it->second.commands.empty())
+            {
+                if ((first_is_lightweight_delete && it->second.commands[0].type != MutationCommand::Type::LIGHTWEIGHT_DELETE)
+                    || (!first_is_lightweight_delete && it->second.commands[0].type == MutationCommand::Type::LIGHTWEIGHT_DELETE))
+                    break;
+            }
 
             size_t commands_size = 0;
             MutationCommands commands_for_size_validation;

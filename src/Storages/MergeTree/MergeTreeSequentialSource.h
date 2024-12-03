@@ -26,7 +26,8 @@ Pipe createMergeTreeSequentialSource(
     std::shared_ptr<std::atomic<size_t>> filtered_rows_count,
     bool apply_deleted_mask,
     bool read_with_direct_io,
-    bool prefetch);
+    bool prefetch,
+    bool from_lwd_mutation = false);
 
 class QueryPlan;
 
@@ -38,6 +39,7 @@ void createReadFromPartStep(
     MergeTreeData::DataPartPtr data_part,
     Names columns_to_read,
     bool apply_deleted_mask,
+    bool from_lwd_mutation,
     std::optional<ActionsDAG> filter,
     ContextPtr context,
     LoggerPtr log);

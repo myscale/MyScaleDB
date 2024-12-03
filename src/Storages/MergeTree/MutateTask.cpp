@@ -8,6 +8,7 @@
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Storages/Statistics/Statistics.h>
 #include <Columns/ColumnsNumber.h>
+#include <Parsers/ASTAssignment.h>
 #include <Parsers/queryToString.h>
 #include <Interpreters/Squashing.h>
 #include <Interpreters/MergeTreeTransaction.h>
@@ -290,6 +291,7 @@ static void splitAndModifyMutationCommands(
                 || command.type == MutationCommand::Type::MATERIALIZE_PROJECTION
                 || command.type == MutationCommand::Type::MATERIALIZE_TTL
                 || command.type == MutationCommand::Type::DELETE
+                || command.type == MutationCommand::Type::LIGHTWEIGHT_DELETE
                 || command.type == MutationCommand::Type::UPDATE
                 || command.type == MutationCommand::Type::APPLY_DELETED_MASK)
             {
@@ -370,6 +372,9 @@ getColumnsForNewDataPart(
 
         if (command.type == MutationCommand::DELETE || command.type == MutationCommand::APPLY_DELETED_MASK)
             has_delete_command = true;
+
+        if (command.type == MutationCommand::LIGHTWEIGHT_DELETE)
+            deleted_mask_updated = true;
 
         /// If we don't have this column in source part, than we don't need to materialize it
         if (!part_columns.has(command.column_name))
@@ -586,6 +591,47 @@ static NameSet getVectorIndicesToRebuild(
     return rebuild_vector_index_column;
 }
 
+static void updateLWDMaskColumn(Block & block, UInt64 current_row, std::vector<UInt64> & current_task_deleted_row_ids)
+{
+    /// Quick return if no more deleted row ids
+    if (current_task_deleted_row_ids.empty())
+        return;
+
+    /// Update _row_existing column based on sorted current_task_deleted_row_ids
+    size_t begin = current_row;
+    size_t end = current_row + block.rows();
+
+    /// Current block [begin, end) doesn't contain deleted row ids
+    if (begin > current_task_deleted_row_ids.back() || end <= current_task_deleted_row_ids.front())
+        return;
+
+    auto column = block.getByName(RowExistsColumn::name).column;
+    ColumnUInt8 * row_exists_col = typeid_cast<ColumnUInt8 *>(column->assumeMutable().get());
+    ColumnUInt8::Container & vec_in = row_exists_col->getData();
+
+    /// Remove id from vector when updated
+    for (auto it = current_task_deleted_row_ids.begin(); it != current_task_deleted_row_ids.end(); )
+    {
+        /// index of vec_in is [begin, end-1]
+        if (*it >= end)
+            break;
+
+        if (*it >= begin)
+        {
+            /// Update _row_exists to 0
+            size_t index_in_block = *it - begin;
+            vec_in[index_in_block] = 0;
+
+            it = current_task_deleted_row_ids.erase(it);
+        }
+        else /// should not happen
+        {
+            LOG_DEBUG(&Poco::Logger::get("updateLWDMaskColumn"), "Found deleted id {} smaller than begin offset of read block {}",
+                        *it, begin);
+            ++it;
+        }
+    }
+}
 
 /// Return set of indices which should be recalculated during mutation also
 /// wraps input stream into additional expression stream
@@ -1133,6 +1179,11 @@ struct MutationContext
     bool count_lightweight_deleted_rows;
     UInt64 execute_elapsed_ns = 0;
 
+    /// Mark for optimized LWD
+    bool is_optimized_lwd = false;
+    /// deleted row ids for current task, used for optimized lightweight delete
+    std::vector<UInt64> current_task_deleted_row_ids;
+
     /// need rebuild vector index
     NameSet rebuild_vector_index_column;
 };
@@ -1308,7 +1359,18 @@ public:
             {
                 prepare();
 
-                state = State::NEED_MUTATE_ORIGINAL_PART;
+                if (ctx->is_optimized_lwd && !ctx->source_part->hasLightweightDelete())
+                    state = State::NEED_OPTIMIZE_LWD_ON_PART;
+                else
+                    state = State::NEED_MUTATE_ORIGINAL_PART;
+                return true;
+            }
+            case State::NEED_OPTIMIZE_LWD_ON_PART:
+            {
+                if (optimizedLWDMutate())
+                   return true;
+
+                state = State::NEED_MERGE_PROJECTION_PARTS;
                 return true;
             }
             case State::NEED_MUTATE_ORIGINAL_PART:
@@ -1338,6 +1400,7 @@ public:
 
 private:
     void prepare();
+    bool optimizedLWDMutate();
     bool mutateOriginalPartAndPrepareProjections();
     void writeTempProjectionPart(size_t projection_idx, Chunk chunk);
     void finalizeTempProjections();
@@ -1350,6 +1413,7 @@ private:
         NEED_PREPARE,
         NEED_MUTATE_ORIGINAL_PART,
         NEED_MERGE_PROJECTION_PARTS,
+        NEED_OPTIMIZE_LWD_ON_PART, /// Lightweight delete on part without LWD mask column
 
         SUCCESS
     };
@@ -1392,6 +1456,48 @@ void PartMergerWriter::prepare()
 }
 
 
+bool PartMergerWriter::optimizedLWDMutate()
+{
+    /// If source part has no lightweight delete, no need to call mutating_executor to read _row_exists mask column
+    Block cur_block;
+    size_t total_rows = ctx->source_part->rows_count;
+
+    /// Update existing rows count and deleted row ids for new part
+    if (part_offset == 0)
+    {
+        ctx->new_data_part->existing_rows_count = total_rows - ctx->current_task_deleted_row_ids.size();
+        if (ctx->new_data_part->isDeletedMaskUpdated())
+            ctx->new_data_part->deleted_row_ids = ctx->current_task_deleted_row_ids;
+    }
+
+    if (MutationHelpers::checkOperationIsNotCanceled(*ctx->merges_blocker, ctx->mutate_entry) && part_offset < total_rows)
+    {
+        const auto & settings = ctx->context->getSettingsRef();
+        size_t max_block_rows = settings.max_block_size;
+        size_t remaining_rows = total_rows - part_offset;
+        size_t rows_to_create = remaining_rows > max_block_rows ? max_block_rows : remaining_rows;
+
+        ColumnPtr new_mask = ColumnUInt8::create(rows_to_create, 1);
+
+        cur_block.insert(ColumnWithTypeAndName(new_mask, RowExistsColumn::type, RowExistsColumn::name));
+
+        MutationHelpers::updateLWDMaskColumn(cur_block, part_offset, ctx->current_task_deleted_row_ids);
+
+        ctx->out->write(cur_block);
+
+        part_offset += rows_to_create;
+        (*ctx->mutate_entry)->rows_written += cur_block.rows();
+        (*ctx->mutate_entry)->bytes_written_uncompressed += cur_block.bytes();
+
+        /// Need execute again
+        return true;
+    }
+
+    /// Let's move on to the next stage
+    return false;
+}
+
+
 bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
 {
     Stopwatch watch(CLOCK_MONOTONIC_COARSE);
@@ -1409,6 +1515,10 @@ bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
             finalizeTempProjections();
             return false;
         }
+
+        /// Update mask column for optimized lightweight delete
+        if (ctx->is_optimized_lwd)
+            MutationHelpers::updateLWDMaskColumn(cur_block, part_offset, ctx->current_task_deleted_row_ids);
 
         if (ctx->minmax_idx)
             ctx->minmax_idx->update(cur_block, MergeTreeData::getMinMaxColumnsNames(ctx->metadata_snapshot->getPartitionKey()));
@@ -2273,11 +2383,35 @@ bool MutateTask::prepare()
     /// Skip using large sets in KeyCondition
     context_for_reading->setSetting("use_index_for_in_with_subqueries_max_values", 100000);
 
+    /// Optimized lightweight can be applied to wide part only.
+    ctx->is_optimized_lwd = ctx->commands->empty() ? false : ctx->commands->front().type == MutationCommand::Type::LIGHTWEIGHT_DELETE;
+    if (ctx->is_optimized_lwd && (!isWidePart(ctx->source_part) || !isFullPartStorage(ctx->source_part->getDataPartStorage())))
+        ctx->is_optimized_lwd = false;
+
     for (const auto & command : *ctx->commands)
     {
         if (!canSkipMutationCommandForPart(ctx->source_part, command, context_for_reading))
         {
-            ctx->commands_for_part.emplace_back(command);
+            if (command.type == MutationCommand::Type::LIGHTWEIGHT_DELETE && !ctx->is_optimized_lwd)
+            {
+                /// Use "UPDATE _row_exists = 0 WHERE predicate" for compact part
+                auto assignment = std::make_shared<ASTAssignment>();
+                assignment->column_name = RowExistsColumn::name;
+                assignment->children.push_back(std::make_shared<ASTLiteral>(0UL));
+
+                auto command_update_assignments = std::make_shared<ASTExpressionList>();
+                command_update_assignments->children.emplace_back(std::move(assignment));
+
+                auto update_cmd = std::make_shared<ASTAlterCommand>();
+                update_cmd->type = ASTAlterCommand::Type::UPDATE;
+                update_cmd->update_assignments = update_cmd->children.emplace_back(std::move(command_update_assignments)).get();
+                update_cmd->predicate = update_cmd->children.emplace_back(command.predicate).get();
+
+                auto mutation_command = MutationCommand::parse(update_cmd.get(), true);
+                ctx->commands_for_part.push_back(std::move(*mutation_command));
+            }
+            else
+                ctx->commands_for_part.emplace_back(command);
 
             /// lightweight delete is changed to update command.
             /// Currently delete and TTL will delete rows.
@@ -2288,8 +2422,20 @@ bool MutateTask::prepare()
     }
     ctx->move_index_read_lock = ctx->source_part->segments_mgr->tryLockSegmentsTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
     ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands);
-    if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
-        ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
+
+    /// Avoid to call isStorageTouchedByMutations() for optimized lightweight delete, instead get the deleted row ids.
+    bool is_storage_touched_by_mutations = true;
+    if (ctx->source_part->isStoredOnDisk())
+    {
+        if (ctx->is_optimized_lwd)
+            is_storage_touched_by_mutations = isStorageTouchedByLWDMutations(ctx->source_part,
+                    ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading, ctx->current_task_deleted_row_ids);
+        else
+            is_storage_touched_by_mutations = isStorageTouchedByMutations(
+                    ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading);
+    }
+
+    if (ctx->source_part->isStoredOnDisk() && !is_storage_touched_by_mutations)
     {
         NameSet files_to_copy_instead_of_hardlinks;
         auto settings_ptr = ctx->data->getSettings();
@@ -2410,6 +2556,11 @@ bool MutateTask::prepare()
 
     /// It shouldn't be changed by mutation.
     ctx->new_data_part->index_granularity_info = ctx->source_part->index_granularity_info;
+
+    for (const auto & updated_col_name : ctx->updated_header.getNames())
+    {
+        LOG_DEBUG(ctx->log, "updated column name: {}", updated_col_name);
+    }
 
     auto [new_columns, new_infos] = MutationHelpers::getColumnsForNewDataPart(
         ctx->source_part, ctx->updated_header, ctx->storage_columns,

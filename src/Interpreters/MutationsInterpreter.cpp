@@ -26,6 +26,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTExpressionList.h>
+#include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/formatAST.h>
 #include <Parsers/queryToString.h>
@@ -74,11 +75,33 @@ ASTPtr prepareQueryAffectedAST(const std::vector<MutationCommand> & commands, co
 
     auto select = std::make_shared<ASTSelectQuery>();
 
+    bool is_optimized_lightweight_delete = false;
+    if (!commands.empty())
+        is_optimized_lightweight_delete = commands[0].type == MutationCommand::Type::LIGHTWEIGHT_DELETE;
+
     select->setExpression(ASTSelectQuery::Expression::SELECT, std::make_shared<ASTExpressionList>());
-    auto count_func = std::make_shared<ASTFunction>();
-    count_func->name = "count";
-    count_func->arguments = std::make_shared<ASTExpressionList>();
-    select->select()->children.push_back(count_func);
+
+    /// Optimized LWD needs to get deleted row ids not the count() numbers of deleted rows
+    if (is_optimized_lightweight_delete)
+    {
+        auto part_offset_col = std::make_shared<ASTIdentifier>("_part_offset");
+        select->select()->children.push_back(part_offset_col);
+
+        /// Add order by _part_offset in case of parallel reading
+        auto order_by_elem = std::make_shared<ASTOrderByElement>();
+        order_by_elem->children.push_back(part_offset_col);
+        order_by_elem->direction = 1; /// ASC
+
+        select->setExpression(ASTSelectQuery::Expression::ORDER_BY, std::make_shared<ASTExpressionList>());
+        select->orderBy()->children.push_back(order_by_elem);
+    }
+    else
+    {
+        auto count_func = std::make_shared<ASTFunction>();
+        count_func->name = "count";
+        count_func->arguments = std::make_shared<ASTExpressionList>();
+        select->select()->children.push_back(count_func);
+    }
 
     ASTs conditions;
     for (const MutationCommand & command : commands)
@@ -279,6 +302,72 @@ MutationCommand createCommandToApplyDeletedMask(const MutationCommand & command)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Failed to parse command {}. It's a bug", queryToString(alter_command));
 
     return *mutation_command;
+}
+
+
+bool isStorageTouchedByLWDMutations(
+    MergeTreeData::DataPartPtr source_part,
+    const StorageMetadataPtr & metadata_snapshot,
+    const std::vector<MutationCommand> & commands,
+    ContextPtr context,
+    std::vector<UInt64> & deleted_row_ids
+)
+{
+    if (commands.empty())
+        return false;
+
+    auto storage_from_part = std::make_shared<StorageFromMergeTreeDataPart>(source_part);
+
+    for (const MutationCommand & command : commands)
+    {
+        if (!command.predicate) /// The command touches all rows.
+            return true;
+    }
+
+    std::optional<InterpreterSelectQuery> interpreter_select_query;
+    BlockIO io;
+
+    if (context->getSettingsRef().allow_experimental_analyzer)
+    {
+        auto select_query_tree = prepareQueryAffectedQueryTree(commands, storage_from_part, context);
+        InterpreterSelectQueryAnalyzer interpreter(select_query_tree, context, SelectQueryOptions().ignoreLimits());
+        io = interpreter.execute();
+    }
+    else
+    {
+        ASTPtr select_query = prepareQueryAffectedAST(commands, storage_from_part, context);
+        /// Interpreter must be alive, when we use result of execute() method.
+        /// For some reason it may copy context and give it into ExpressionTransform
+        /// after that we will use context from destroyed stack frame in our stream.
+        interpreter_select_query.emplace(
+            select_query, context, storage_from_part, metadata_snapshot, SelectQueryOptions().ignoreLimits());
+
+        io = interpreter_select_query->execute();
+    }
+
+    PullingAsyncPipelineExecutor executor(io.pipeline);
+
+    Block block;
+    while (executor.pull(block))
+    {
+        if (block.rows() == 0)
+            continue;
+
+        /// Loop through the block and save the deleted row ids
+        const auto * column = block.getByName("_part_offset").column.get();
+
+        if (const auto * column_uint64 = checkAndGetColumn<ColumnUInt64>(column))
+        {
+            const auto & offsets = column_uint64->getData();
+            for (const auto offset : offsets)
+                deleted_row_ids.emplace_back(offset);
+        }
+    }
+
+    if (deleted_row_ids.empty())
+        return false;
+    else
+        return true;
 }
 
 MutationsInterpreter::Source::Source(StoragePtr storage_) : storage(std::move(storage_))
@@ -572,7 +661,9 @@ void MutationsInterpreter::prepare(bool dry_run)
         if (command.type == MutationCommand::Type::APPLY_DELETED_MASK)
             command = createCommandToApplyDeletedMask(command);
 
-        if (command.type == MutationCommand::Type::UPDATE || command.type == MutationCommand::Type::DELETE)
+        if (command.type == MutationCommand::Type::UPDATE
+            || command.type == MutationCommand::Type::DELETE
+            || command.type == MutationCommand::Type::LIGHTWEIGHT_DELETE)
             materialize_ttl_recalculate_only = false;
 
         for (const auto & [name, _] : command.column_to_update_expression)
@@ -907,6 +998,18 @@ void MutationsInterpreter::prepare(bool dry_run)
             mutation_kind.set(MutationKind::MUTATE_OTHER);
             read_columns.emplace_back(command.column_name);
         }
+        else if (command.type == MutationCommand::LIGHTWEIGHT_DELETE)
+        {
+            mutation_kind.set(MutationKind::MUTATE_LIGHTWEIGHT_DELETE);
+            from_optimized_lwd = true;
+
+            if (stages.empty())
+                stages.emplace_back(context);
+
+            auto predicate  = getPartitionAndPredicateExpressionForMutationCommand(command);
+
+            stages.back().filters.push_back(predicate);
+        }
         else
             throw Exception(ErrorCodes::UNKNOWN_MUTATION_COMMAND, "Unknown mutation command type: {}", DB::toString<int>(command.type));
     }
@@ -1053,7 +1156,7 @@ void MutationsInterpreter::prepareMutationStages(std::vector<Stage> & prepared_s
     /// Next, for each stage calculate columns changed by this and previous stages.
     for (size_t i = 0; i < prepared_stages.size(); ++i)
     {
-        if (settings.return_all_columns || !prepared_stages[i].filters.empty())
+        if (settings.return_all_columns || (!prepared_stages[i].filters.empty() && !from_optimized_lwd))
         {
             for (const auto & column : all_columns)
             {
@@ -1081,6 +1184,10 @@ void MutationsInterpreter::prepareMutationStages(std::vector<Stage> & prepared_s
 
                 prepared_stages[i].output_columns.insert(column_name);
             }
+
+            /// Add _row_exists column to output columns
+            if (from_optimized_lwd)
+                prepared_stages[i].output_columns.insert(RowExistsColumn::name);
         }
     }
 
@@ -1092,8 +1199,12 @@ void MutationsInterpreter::prepareMutationStages(std::vector<Stage> & prepared_s
 
         ASTPtr all_asts = std::make_shared<ASTExpressionList>();
 
-        for (const auto & ast : stage.filters)
-            all_asts->children.push_back(ast);
+        /// No need filters when real run for optimized lightweight delete
+        if (dry_run || !from_optimized_lwd)
+        {
+            for (const auto & ast : stage.filters)
+                all_asts->children.push_back(ast);
+        }
 
         for (const auto & kv : stage.column_to_updated)
             all_asts->children.push_back(kv.second);
@@ -1113,7 +1224,7 @@ void MutationsInterpreter::prepareMutationStages(std::vector<Stage> & prepared_s
 
         ExpressionActionsChain & actions_chain = stage.expressions_chain;
 
-        if (!stage.filters.empty())
+        if (!stage.filters.empty() && (dry_run || !from_optimized_lwd))
         {
             auto ast = stage.filters.front();
             if (stage.filters.size() > 1)
@@ -1173,6 +1284,7 @@ void MutationsInterpreter::Source::read(
     const StorageMetadataPtr & snapshot_,
     const ContextPtr & context_,
     bool apply_deleted_mask_,
+    bool from_optimized_lwd_,
     bool can_execute_) const
 {
     auto required_columns = first_stage.expressions_chain.steps.front()->getRequiredColumns().getNames();
@@ -1213,7 +1325,7 @@ void MutationsInterpreter::Source::read(
             MergeTreeSequentialSourceType::Mutation,
             plan, *data, storage_snapshot,
             part, required_columns,
-            apply_deleted_mask_, std::move(filter), context_,
+            apply_deleted_mask_, from_optimized_lwd_, std::move(filter), context_,
             getLogger("MutationsInterpreter"));
     }
     else
@@ -1264,7 +1376,7 @@ void MutationsInterpreter::Source::read(
 
 void MutationsInterpreter::initQueryPlan(Stage & first_stage, QueryPlan & plan)
 {
-    source.read(first_stage, plan, metadata_snapshot, context, settings.apply_deleted_mask, settings.can_execute);
+    source.read(first_stage, plan, metadata_snapshot, context, settings.apply_deleted_mask, from_optimized_lwd, settings.can_execute);
     addCreatingSetsStep(plan, first_stage.analyzer->getPreparedSets(), context);
 }
 

@@ -68,4 +68,30 @@ bool ParserDeleteQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     return true;
 }
 
+bool ParserLWDeleteCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
+{
+    auto command = std::make_shared<ASTLWDeleteCommand>();
+    node = command;
+
+    ParserKeyword s_lightweight_delete(Keyword::LIGHTWEIGHT_DELETE);
+    ParserKeyword s_where(Keyword::WHERE);
+    ParserExpression parser_exp_elem;
+
+    if (s_lightweight_delete.ignore(pos, expected))
+    {
+        if (s_where.ignore(pos, expected))
+        {
+            if (!parser_exp_elem.parse(pos, command->predicate, expected))
+                return false;
+        }
+    }
+    else
+        return false;
+
+    if (command->predicate)
+        command->children.push_back(command->predicate);
+
+    return true;
+}
+
 }
