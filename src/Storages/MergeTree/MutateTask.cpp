@@ -1417,7 +1417,8 @@ bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
 
         /// TODO: move this calculation to DELETE FROM mutation
         /// Try to collect deleted row ids when getting existing rows count for LWD
-        if (ctx->count_lightweight_deleted_rows)
+        /// count_lightweight_deleted_rows is false when setting exclude_deleted_rows_for_part_size_in_merge is false.
+        if (ctx->count_lightweight_deleted_rows || ctx->new_data_part->isDeletedMaskUpdated())
             existing_rows_count += MutationHelpers::getExistingRowsCount(
                 cur_block, ctx->new_data_part->isDeletedMaskUpdated(), part_offset, ctx->new_data_part->deleted_row_ids);
 
@@ -2432,13 +2433,6 @@ bool MutateTask::prepare()
         /// This mutation contains lightweight delete and we need to count the deleted rows,
         /// Reset existing_rows_count of new data part to 0 and it will be updated while writing _row_exists column
         ctx->count_lightweight_deleted_rows = true;
-
-        /// Check if lightweight delete mask column is updated.
-        /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
-        /// Support part with simple built index and decoupled part with merged old parts' built index files
-        /// When any normal delete or ttl command exists, needs to be build vector index for the new data part.
-        if (!ctx->need_delete_rows)
-            ctx->new_data_part->setDeletedMaskUpdated(true);
     }
     else
     {
@@ -2446,6 +2440,16 @@ bool MutateTask::prepare()
 
         /// No need to count deleted rows, copy existing_rows_count from source part
         ctx->new_data_part->existing_rows_count = ctx->source_part->existing_rows_count.value_or(ctx->source_part->rows_count);
+    }
+
+    if (ctx->updated_header.has(RowExistsColumn::name))
+    {
+        /// Check if lightweight delete mask column is updated.
+        /// If true, mark lightweight delete mask updated to true. Will trigger vector index bitmap update.
+        /// Support part with simple built index and decoupled part with merged old parts' built index files
+        /// When any normal delete or ttl command exists, needs to be build vector index for the new data part.
+        if (!ctx->need_delete_rows)
+            ctx->new_data_part->setDeletedMaskUpdated(true);
     }
 
     /// All columns from part are changed and may be some more that were missing before in part
