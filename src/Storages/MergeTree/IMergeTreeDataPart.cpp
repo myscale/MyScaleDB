@@ -1860,6 +1860,8 @@ void IMergeTreeDataPart::onLightweightDelete(const String index_name) const
     if (deleted_row_ids.size() > 0)
         del_row_ids = deleted_row_ids;
 
+    LOG_DEBUG(storage.log, "[onLightweightDelete] Vector index will be updated due to deleted {} rows from part {}", del_row_ids.size(), name);
+
     /// Support multiple vector indices
     for (auto & vec_index_desc : metadata_snapshot->getVectorIndices())
     {
