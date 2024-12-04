@@ -141,7 +141,9 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
 
         if (auto alter_command = AlterCommand::parse(command_ast))
         {
-            if (alter_command->type == AlterCommand::ADD_VECTOR_INDEX || alter_command->type == AlterCommand::DROP_VECTOR_INDEX)
+            /// Add distributed support for add/drop index (used for FTS index)
+            if (alter_command->type == AlterCommand::ADD_VECTOR_INDEX || alter_command->type == AlterCommand::DROP_VECTOR_INDEX
+                || alter_command->type == AlterCommand::ADD_INDEX || alter_command->type == AlterCommand::DROP_INDEX)
             {
                 alter.setTable(dist_table->getRemoteTableName());
                 alter.cluster = dist_table->getClusterName();
