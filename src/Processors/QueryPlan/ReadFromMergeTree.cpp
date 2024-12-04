@@ -54,6 +54,10 @@
 
 #include "config.h"
 
+#if USE_TANTIVY_SEARCH
+#include <Storages/MergeTree/MergeTreeIndexTantivy.h>
+#endif
+
 using namespace DB;
 
 namespace
@@ -1493,6 +1497,10 @@ static void buildIndexes(
                     if (!condition)
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown vector search index {}", index_helper->index.name);
                 }
+#if USE_TANTIVY_SEARCH
+                else if (const auto * tantivy_index = typeid_cast<const MergeTreeIndexTantivy *>(index_helper.get()))
+                    condition = tantivy_index->createIndexCondition(query_info, context);
+#endif
                 else
                     condition = index_helper->createIndexCondition(filter_actions_dag, context);
 

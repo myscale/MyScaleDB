@@ -818,6 +818,13 @@ void StorageDistributed::read(
 
     const auto & settings = local_context->getSettingsRef();
 
+    /// Use temporary variable for remote_table_function_ptr to avoid change StorageDistributed
+    ASTPtr tmp_remote_table_function_ptr;
+    if (query_info.full_text_search_table_func_ast)
+        tmp_remote_table_function_ptr = query_info.full_text_search_table_func_ast;
+    else
+        tmp_remote_table_function_ptr = remote_table_function_ptr;
+
     if (settings.allow_experimental_analyzer)
     {
         StorageID remote_storage_id = StorageID::createEmpty();
@@ -848,7 +855,7 @@ void StorageDistributed::read(
 
         modified_query_info.query = ClusterProxy::rewriteSelectQuery(
             local_context, modified_query_info.query,
-            remote_database, remote_table, remote_table_function_ptr);
+            remote_database, remote_table, tmp_remote_table_function_ptr);
 
         if (modified_query_info.getCluster()->getShardsInfo().empty())
         {
@@ -877,7 +884,7 @@ void StorageDistributed::read(
         header,
         processed_stage,
         remote_storage,
-        remote_table_function_ptr,
+        tmp_remote_table_function_ptr,
         select_stream_factory,
         log,
         local_context,
