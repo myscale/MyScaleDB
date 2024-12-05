@@ -223,7 +223,7 @@ private:
         std::unique_ptr<WriteBuffer> inverted_row_ids_map_buf;
         std::unique_ptr<WriteBufferFromFileBase> inverted_row_ids_map_uncompressed_buf;
         String inverted_row_ids_map_file_path;
-        String inverted_row_sources_map_file_path;
+        std::unique_ptr<CompressedReadBufferFromFile> inverted_rows_sources_map_read_buf{nullptr};
     };
 
     using GlobalRuntimeContextPtr = std::shared_ptr<GlobalRuntimeContext>;
