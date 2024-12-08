@@ -6,6 +6,7 @@ set(CXXBRIDGE_CXXFLAGS "-Wno-dollar-in-identifier-extension -Wno-unused-macros")
 set(RUST_CXXFLAGS "${RUST_CXXFLAGS} ${CXXBRIDGE_CXXFLAGS}")
 # NOTE: requires RW access for the source dir
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/.cargo/config.toml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.cargo/config.toml" @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/build.rs.in" "${CMAKE_CURRENT_SOURCE_DIR}/build.rs" @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/libs/skim/build.rs.in" "${CMAKE_CURRENT_SOURCE_DIR}/libs/skim/build.rs" @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/libs/skim/.cargo/config.toml.in" "${CMAKE_CURRENT_SOURCE_DIR}/libs/skim/.cargo/config.toml" @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/libs/tantivy_search/.cargo/config.toml.in" "${CMAKE_CURRENT_SOURCE_DIR}/libs/tantivy_search/.cargo/config.toml" @ONLY)

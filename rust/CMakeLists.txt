@@ -60,12 +60,13 @@ function(clickhouse_import_crate)
         if (ENABLE_THINLTO)
             set(profile "release-thinlto")
         else()
-            set(profile "release")
+            set(profile "relwithdebinfo")
         endif()
     endif()
 
     # Note, here --offline is not used, since on CI vendor archive is used, and
     # passing --offline here will be inconvenient for local development.
+    message(STATUS "Import RUST profile ${profile}")
     corrosion_import_crate(NO_STD ${ARGN} PROFILE ${profile})
 endfunction()
 
