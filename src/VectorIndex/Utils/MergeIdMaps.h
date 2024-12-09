@@ -42,7 +42,7 @@ public:
     void initRealFilter(const UInt8 own_id, VIBitmapPtr & filter, const RowIds del_rows);
     void lazyInitOnce(const DB::IMergeTreeDataPart & data_part);
     bool isInited() const { return initialized; }
-    static MergeIdMapsPtr loadFromDecoupelPart(const DB::IMergeTreeDataPart & data_part);
+    static MergeIdMapsPtr loadFromDecouplePart(const DB::IMergeTreeDataPart & data_part);
     static void removeMergedMapsFiles(const DB::IMergeTreeDataPart & data_part);
 
 private:

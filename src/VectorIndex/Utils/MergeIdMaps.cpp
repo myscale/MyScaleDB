@@ -175,7 +175,7 @@ const std::unordered_map<UInt8, VIBitmapPtr> MergeIdMaps::getRealFilters(const V
 void MergeIdMaps::lazyInitOnce(const DB::IMergeTreeDataPart & data_part)
 {
     std::call_once(init_flag, [&data_part, this] {
-        MergeIdMapsPtr new_vi_merged_maps = loadFromDecoupelPart(data_part);
+        MergeIdMapsPtr new_vi_merged_maps = loadFromDecouplePart(data_part);
         const_cast<RowIdsPtr &>(this->inverted_row_ids_map) = new_vi_merged_maps->inverted_row_ids_map;
         const_cast<RowSourcePtr &>(this->inverted_row_sources_map) = new_vi_merged_maps->inverted_row_sources_map;
         const_cast<std::unordered_map<UInt8, RowIdsPtr> &>(this->row_ids_maps) = new_vi_merged_maps->row_ids_maps;
@@ -184,7 +184,7 @@ void MergeIdMaps::lazyInitOnce(const DB::IMergeTreeDataPart & data_part)
     });
 }
 
-MergeIdMapsPtr MergeIdMaps::loadFromDecoupelPart(const DB::IMergeTreeDataPart & data_part)
+MergeIdMapsPtr MergeIdMaps::loadFromDecouplePart(const DB::IMergeTreeDataPart & data_part)
 {
     LOG_DEBUG(getLogger("MergedMaps"), "Load row ids map from decoupled part: {}", data_part.name);
     MergeIdMapsPtr merged_maps = std::make_shared<MergeIdMaps>();

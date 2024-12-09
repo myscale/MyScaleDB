@@ -11,4 +11,4 @@ test_single_vindex	v1	LOADED	11000	all_1_2_1	all_1_2_1
 7	68.69
 8	99.89
 9	137.09
-test_single_vindex	v1	LOADED	11000	all_3_3_1	all_3_3_1
+test_single_vindex	v1	LOADED	11000	all_3_3_0	all_3_3_0

@@ -13,6 +13,7 @@ INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0005 * (
 INSERT INTO test_replicated_vector SELECT number as id, arrayMap(x -> 0.0001 * (number * 32 + x + 1) * (if(x % 2 = 0, -1, 1)), range(32)) as vector FROM numbers(2000, 1000);
 
 SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector;
+SYSTEM WAIT BUILDING VECTOR INDICES test_replicated_vector2;
 select table, name, type, total_parts, status from system.vector_indices where database = currentDatabase() and (table = 'test_replicated_vector' OR table = 'test_replicated_vector2');
 
 SELECT '--- Original topK result';
