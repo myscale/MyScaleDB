@@ -828,6 +828,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
             "Unknown identifier '{}' in distance function", query_vector->getColumnName());
     }
 
+    LOG_DEBUG(getLogger(), "dag_node's node type: {}", dag_node->type);
     if (dag_node->column)
     {
         if (!isColumnConst(*dag_node->column))
@@ -835,7 +836,7 @@ VSDescription ExpressionAnalyzer::commonMakeVectorScanDescription(
         // query_column means the specific vector content.
         vector_scan_desc.query_column = dag_node->column;
     }
-    else if (dag_node->function && dag_node->function->getName() == "identity")
+    else if (dag_node->function && (dag_node->function->getName() == "identity" || dag_node->function->getName() == "__scalarSubqueryResult"))
     {
         // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
     }
@@ -969,10 +970,15 @@ TextSearchInfoPtr ExpressionAnalyzer::commonMakeTextSearchInfo(
 
         query_text_value = query_text_column_const->getValue<String>();
     }
-    else if (dag_node_query_text->function && dag_node_query_text->function->getName() == "identity")
+    else if (dag_node_query_text->function)
     {
         // In cases with nested subquery, scalar subquery is not replaced with a const value if only analyze is requested.
-        return nullptr;
+        const auto dag_func_name = dag_node_query_text->function->getName();
+        LOG_DEBUG(getLogger(), "dag_node_query_text is a function type with name: {}", dag_func_name);
+        if (dag_func_name == "identity" || dag_func_name == "__scalarSubqueryResult")
+            return nullptr;
+
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unexpected function name {} for query text type in {} function", dag_func_name, search_name);
     }
     // else if (argument_query_text->as<ASTFunction>())
     // {

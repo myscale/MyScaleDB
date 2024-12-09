@@ -711,7 +711,6 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         ExpressionActionsSettings actions_settings;
 
         MergeTreeReaderSettings reader_settings;
-        reader_settings.apply_deleted_mask = false;
 
         MarkRanges ranges;
         ranges.emplace_back(0, part_marks);

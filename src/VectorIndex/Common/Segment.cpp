@@ -1019,7 +1019,7 @@ SearchResultPtr DecoupleSegment<data_type>::searchVI(
         if (result != nullptr)
             res.emplace_back(result);
     }
-    /// decoupel seg search result has first stage result, we don't need to sort and trim
+    /// decouple seg search result has first stage result, we don't need to sort and trim
     if (has_first_stage_result)
         return SearchResult::merge(res, this->vi_metadata.index_metric, 0, false);
     else

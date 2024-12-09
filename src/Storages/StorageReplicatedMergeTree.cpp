@@ -3965,41 +3965,52 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                 if (create_result == CreateMergeEntryResult::LogUpdated)
                     return AttemptStatus::NeedRetry;
             }
-            /// Consider vector index building when no merge / mutations selected.
-            /// Avoid to select part to build vector index when build is stopped.
-            /// TODO: control index building by memory limit ...
-            if ((create_result == CreateMergeEntryResult::Other) && getInMemoryMetadataPtr()->hasVectorIndices()
-                 && !vi_manager->builds_blocker.isCancelled())
+        }
+
+        /// Consider vector index building when no merge / mutations selected.
+        /// Avoid to select part to build vector index when build is stopped.
+        /// TODO: control index building by memory limit ...
+        if (getInMemoryMetadataPtr()->hasVectorIndices() && !vi_manager->builds_blocker.isCancelled())
+        {
+            /// Limit the number of build vector index entries in queue.
+            auto settings = getContext()->getSettingsRef();
+            auto metadata_snapshot = getInMemoryMetadataPtr();
+
+            VIEntryPtr vector_index_entry = nullptr;
+            bool slow_mode = false;
+
+            /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
+            if (vi_manager->allowToBuildVI(false, merges_and_mutations_queued.vector_index_builds))
             {
-                /// Limit the number of build vector index entries in queue.
-                auto settings = getContext()->getSettingsRef();
-                auto metadata_snapshot = getInMemoryMetadataPtr();
+                vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, false);
+            }
 
-                VIEntryPtr vector_index_entry = nullptr;
-                bool slow_mode = false;
+            if (!vector_index_entry && vi_manager->allowToBuildVI(true, merges_and_mutations_queued.slow_vector_index_builds))
+            {
+                /// No fast build index selected, try to select slow build index.
+                vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, true);
+                slow_mode = true;
+            }
 
-                /// If allowed, first try to select a fast part to build index, if not found, then try to select a slow part.
-                if (vi_manager->allowToBuildVI(false, merges_and_mutations_queued.vector_index_builds))
+            if (vector_index_entry)
+            {
+
+                /// We don't need the list of committing blocks to choose a part to build vector index
+                if (!merge_pred)
+                    merge_pred.emplace(queue.getMergePredicate(zookeeper, PartitionIdsHint{}));
+
+                create_result = createLogEntryToBuildVIndexForPart(
+                            vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred->getVersion(), slow_mode);
+
+                /// Only add when create log entry successfully.
+                if(create_result == CreateMergeEntryResult::Ok)
                 {
-                    vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, false);
+                    vi_manager->addPartToIndexing(vector_index_entry->part_name);
+                    return AttemptStatus::EntryCreated;
                 }
 
-                if (!vector_index_entry && vi_manager->allowToBuildVI(true, merges_and_mutations_queued.slow_vector_index_builds))
-                {
-                    /// No fast build index selected, try to select slow build index.
-                    vector_index_entry = vi_manager->selectPartToBuildVI(metadata_snapshot, *vi_manager, true);
-                    slow_mode = true;
-                }
-
-                if (vector_index_entry)
-                {
-                    create_result = createLogEntryToBuildVIndexForPart(
-                                vector_index_entry->part_name, vector_index_entry->vector_index_name, merge_pred->getVersion(), slow_mode);
-
-                    /// Only add when create log entry successfully.
-                    if(create_result == CreateMergeEntryResult::Ok)
-                        vi_manager->addPartToIndexing(vector_index_entry->part_name);
-                }
+                if (create_result == CreateMergeEntryResult::LogUpdated)
+                    return AttemptStatus::NeedRetry;
             }
         }
 
@@ -4255,24 +4266,20 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
 
     Coordination::Error code = zookeeper->tryMulti(ops, responses);
 
-    if (code == Coordination::Error::ZOK)
-    {
-        String path_created = dynamic_cast<const Coordination::CreateResponse &>(*responses.front()).path_created;
-        entry.znode_name = path_created.substr(path_created.find_last_of('/') + 1);
-
-        ProfileEvents::increment(ProfileEvents::CreatedLogEntryForBuildVIndex);
-        LOG_TRACE(log, "Created log entry {} for building vector index {} in part {}", path_created, vector_index_name, part_name);
-    }
-    else if (code == Coordination::Error::ZBADVERSION)
+    if (code == Coordination::Error::ZBADVERSION)
     {
         ProfileEvents::increment(ProfileEvents::NotCreatedLogEntryForBuildVIndex);
         LOG_TRACE(log, "Log entry is not created for building vector index {} in part {} because log was updated", vector_index_name, part_name);
         return CreateMergeEntryResult::LogUpdated;
     }
-    else
-    {
-        zkutil::KeeperMultiException::check(code, ops, responses);
-    }
+
+    zkutil::KeeperMultiException::check(code, ops, responses);
+
+    String path_created = dynamic_cast<const Coordination::CreateResponse &>(*responses.front()).path_created;
+    entry.znode_name = path_created.substr(path_created.find_last_of('/') + 1);
+
+    ProfileEvents::increment(ProfileEvents::CreatedLogEntryForBuildVIndex);
+    LOG_TRACE(log, "Created log entry {} for building vector index {} in part {}", path_created, vector_index_name, part_name);
 
     return CreateMergeEntryResult::Ok;
 }

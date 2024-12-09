@@ -138,7 +138,7 @@ SELECT id, hybridsearch('fusion_type=rrf')(vector, doc, char(1,1,1), 'Ancient') 
 
 DROP TABLE t_vector_invert_binary;
 
-set allow_experimental_object_type = 1;
+set allow_experimental_json_type = 1;
 DROP TABLE IF EXISTS t_vector_invert_json;
 CREATE TABLE t_vector_invert_json
 (
