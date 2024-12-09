@@ -555,18 +555,25 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
 
     /// Add prewhere column name to avoid prewhere_column not found error
     /// Used for vector scan to handle cases when both prewhere and where exist
-    if (!can_skip_perform_prefilter && prewhere_info && !prewhere_info->remove_prewhere_column)
+    if (!can_skip_perform_prefilter && prewhere_info)
     {
-        ColumnWithTypeAndName prewhere_col;
+        /// Add outputs of prewhere columns in result headers
+        auto prewhere_output_columns  = prewhere_info->prewhere_actions.getNamesAndTypesList();
+        for (const auto & output_column : prewhere_output_columns)
+        {
+            /// TODO: why input source column exists in prewhere output columns?
+            if (!sample_block.has(output_column.name) && result_header.has(output_column.name))
+            {
+                LOG_DEBUG(log, "Add prewhere column, name with {}", output_column.name);
+                ColumnWithTypeAndName prewhere_col;
 
-        const auto & node = prewhere_info->prewhere_actions.findInOutputs(prewhere_info->prewhere_column_name);
-        auto filter_type = node.result_type;
+                prewhere_col.type = output_column.type;
+                prewhere_col.name = output_column.name;
+                prewhere_col.column = output_column.type->createColumnConst(final_result_num_rows, 1);
 
-        prewhere_col.type = filter_type;
-        prewhere_col.name = prewhere_info->prewhere_column_name;
-        prewhere_col.column = filter_type->createColumnConst(final_result_num_rows, 1);
-
-        res_block.insert(std::move(prewhere_col));
+                res_block.insert(std::move(prewhere_col));
+            }
+        }
     }
 
     /// ordered_columns: non-search functions, search functions cols
@@ -576,7 +583,7 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
         size_t pos_in_sample = orig_pos_in_sample_block[i];
 
         ColumnWithTypeAndName ctn;
-        ctn.column = ordered_columns[i];
+        ctn.column = std::move(ordered_columns[i]);
         ctn.type = sample_block.getByPosition(pos_in_sample).type;
         ctn.name = sample_block.getByPosition(pos_in_sample).name;
 
@@ -588,7 +595,11 @@ MergeTreeReadTask::BlockAndProgress MergeTreeSelectWithHybridSearchProcessor::re
         res_block.erase("_part_offset");
     }
 
-    MergeTreeReadTask::BlockAndProgress res = {res_block, final_result_num_rows, num_read_rows, num_read_bytes};
+    MergeTreeReadTask::BlockAndProgress res = {
+        .block= std::move(res_block),
+        .row_count = final_result_num_rows,
+        .num_read_rows = num_read_rows,
+        .num_read_bytes = num_read_bytes };
 
     return res;
 }
@@ -678,10 +689,14 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
         std::make_move_iterator(result_pk_cols.end())
         );
 
+    /// Sample block for tmp_result_columns
+    Block sample_block;
+    for (size_t i = 0; i < pk_col_size; ++i)
+        sample_block.insert({ nullptr, primary_key.data_types[i], primary_key.column_names[i]});
+
     LOG_DEBUG(log, "Fetch from primary key cache size = {}", tmp_result_columns[0]->size());
 
     /// Get _part_offset if exists
-    bool part_offset_exists_in_result = false;
     if (mutable_part_offset_col)
     {
         /// _part_offset column exists in original select columns
@@ -690,8 +705,7 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
             tmp_result_columns.emplace_back(std::move(mutable_part_offset_col));
             part_offset = typeid_cast<const ColumnUInt64 *>(tmp_result_columns.back().get());
 
-            /// Need to adjust order in results
-            part_offset_exists_in_result = true;
+            sample_block.insert({ nullptr, std::make_shared<DataTypeUInt64>(), "_part_offset"});
         }
         else /// No need to put result columns, it's just used in mergeResult() for LWD
             part_offset = typeid_cast<const ColumnUInt64 *>(mutable_part_offset_col.get());
@@ -707,44 +721,17 @@ IMergeTreeSelectAlgorithm::BlockAndProgress MergeTreeSelectWithHybridSearchProce
             read_ranges,
             part_offset);
 
-        /// header_without_const_virtual_columns: pk columns + distance columns + non const virtual columns(_part_offset)
         /// tmp_result_columns: pk columns + non const virtual columns(_part_offset) + distance columns
-        Columns result_columns;
-        result_columns.resize(tmp_result_columns.size());
-
-        /// _part_offset column exists in original select columns
-        if (part_offset_exists_in_result)
+        for (const auto & distance_name : base_search_manager->getSearchFuncColumnNames())
         {
-            /// Exchange order of non const virtual column and distance columns
-            size_t distances_size = base_search_manager->getSearchFuncColumnNames().size();
-
-            /// Throw exception if distances_size is empty
-            if (distances_size == 0)
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "[PKCache] Failed to find any search result column name, this should not happen");
-
-            for (size_t i = 0; i < tmp_result_columns.size(); ++i)
-            {
-                size_t pos_in_result;
-                if (i < pk_col_size)
-                    pos_in_result = i;
-                else if (i == pk_col_size)
-                    pos_in_result = i + distances_size;
-                else
-                    pos_in_result = i - 1; /// non const virtual column has ONE column: _part_offset
-
-                result_columns[pos_in_result] = tmp_result_columns[i];
-            }
-        }
-        else
-        {
-            /// No _part_offset column possibly added for LWD in tmp result columns
-            result_columns = tmp_result_columns;
+            auto & distance_col = result_header.getByName(distance_name);
+            sample_block.insert({nullptr, distance_col.type, distance_col.name});
         }
 
         task->mark_ranges.clear();
         if (result_row_num > 0)
         {
-            MergeTreeReadTask::BlockAndProgress res = {result_header.cloneWithColumns(result_columns), result_row_num};
+            MergeTreeReadTask::BlockAndProgress res = {sample_block.cloneWithColumns(tmp_result_columns), result_row_num};
             return res;
         }
         else /// result_row_num = 0
