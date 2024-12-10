@@ -106,6 +106,7 @@ public:
         const String & part_name,
         const String & vec_index_name,
         const StorageMetadataPtr & metadata_snapshot,
+        const String & source_zookeeper_name,
         const String & source_replica_path,
         zkutil::ZooKeeper::Ptr zookeeper_ = nullptr,
         bool try_fetch_shared = true);

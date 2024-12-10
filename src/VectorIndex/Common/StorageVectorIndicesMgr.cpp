@@ -148,6 +148,7 @@ bool StorageReplicatedVectorIndicesMgr::executeFetchVectorIndex(LogEntry & entry
                     part_name,
                     vec_index_name,
                     metadata_snapshot,
+                    storage.zookeeper_name,
                     source_replica_path,
                     /* zookeeper_ */ nullptr,
                     /* try_fetch_shared= */ true))
@@ -190,6 +191,7 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
     const String & part_name,
     const String & vec_index_name,
     const StorageMetadataPtr & /*metadata_snapshot*/,
+    const String & source_zookeeper_name,
     const String & source_replica_path,
     zkutil::ZooKeeper::Ptr zookeeper_,
     bool try_fetch_shared)
@@ -219,13 +221,14 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
     if (future_part_name != part_name)
         LOG_DEBUG(
             log,
-            "Fetching vector index {} in part {} from {} and put in future part {}",
+            "Fetching vector index {} in part {} from {}:{} and put in future part {}",
             vec_index_name,
             part_name,
+            source_zookeeper_name,
             source_replica_path,
             future_part_name);
     else
-        LOG_DEBUG(log, "Fetching vector index {} in part {} from {}", vec_index_name, part_name, source_replica_path);
+        LOG_DEBUG(log, "Fetching vector index {} in part {} from {}:{}", vec_index_name, part_name, source_zookeeper_name, source_replica_path);
 
     TableLockHolder table_lock_holder;
     table_lock_holder = storage.lockForShare(RWLockImpl::NO_QUERY, storage.getSettings()->lock_acquire_timeout_for_background_operations);
@@ -285,6 +288,7 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
                 storage.getContext(),
                 part_name,
                 vec_index_name,
+                source_zookeeper_name,
                 source_replica_path,
                 address.host,
                 address.replication_port,
@@ -316,6 +320,8 @@ bool StorageReplicatedVectorIndicesMgr::fetchVectorIndex(
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             return false;
         }
+
+        write_part_log({});
     }
     catch (...)
     {
