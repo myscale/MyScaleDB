@@ -93,6 +93,7 @@ public:
         ContextPtr context,
         const String & source_part_name,
         const String & vec_index_name,
+        const String & zookeeper_name,
         const String & replica_path,
         const String & host,
         int port,

@@ -906,6 +906,7 @@ String Fetcher::fetchVectorIndex(
     ContextPtr context,
     const String & source_part_name,
     const String & vec_index_name,
+    const String & zookeeper_name,
     const String & replica_path,
     const String & host,
     int port,
@@ -946,13 +947,18 @@ String Fetcher::fetchVectorIndex(
     /// Validation of the input that may come from malicious replica.
     auto source_part_info = MergeTreePartInfo::fromPartName(source_part_name, data.format_version);
 
+    String endpoint_id = getEndpointId(
+        data_settings->enable_the_endpoint_id_with_zookeeper_name_prefix ?
+        zookeeper_name + ":" + replica_path :
+        replica_path);
+
     Poco::URI uri;
     uri.setScheme(interserver_scheme);
     uri.setHost(host);
     uri.setPort(port);
     uri.setQueryParameters(
     {
-        {"endpoint",                getEndpointId(replica_path)},
+        {"endpoint",                endpoint_id},
         {"part",                    source_part_name},  /// Use source part's name in log entry to avoid no active part in replica.
         {"vector_index_name",       vec_index_name},
         {"client_protocol_version", toString(REPLICATION_PROTOCOL_VERSION_WITH_PARTS_VECTOR_INDEX)},
@@ -1113,7 +1119,7 @@ String Fetcher::fetchVectorIndex(
             temporary_directory_lock = {};
 
             /// Try again but without zero-copy
-            return fetchVectorIndex(future_part, context, source_part_name, vec_index_name, replica_path, host, port, timeouts,
+            return fetchVectorIndex(future_part, context, source_part_name, vec_index_name, zookeeper_name, replica_path, host, port, timeouts,
                 user, password, interserver_scheme, throttler, tmp_prefix, false, disk);
         }
     }
