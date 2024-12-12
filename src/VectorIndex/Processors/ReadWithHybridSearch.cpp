@@ -13,8 +13,6 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
-#include <Storages/MergeTree/MergeTreeReadPoolInOrder.h>
-#include <Storages/MergeTree/MergeTreeSource.h>
 #include <VectorIndex/Storages/MergeTreeWithVectorScanSource.h>
 #include <VectorIndex/Storages/MergeTreeBaseSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
@@ -908,48 +906,21 @@ void ReadWithHybridSearch::performFinal(
     column_names_to_read.push_back("_part");
     column_names_to_read.push_back("_part_offset");
 
-    /// Refactor to use pool, reference from readInOrder()
-    MergeTreeReadPoolPtr pool;
-
-    MergeTreeReadPoolBase::PoolSettings pool_settings
-    {
-        .threads = /*max_streams*/ 1,
-        .sum_marks = parts_for_final_ranges.getMarksCountAllParts(),
-        //.min_marks_for_concurrent_read = min_marks_for_concurrent_read,
-        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
-        .use_uncompressed_cache = settings.use_uncompressed_cache,
-        .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
-    };
-
     ExpressionActionsSettings local_actions_settings;
 
-    pool = std::make_shared<MergeTreeReadPoolInOrder>(
-            /*has_limit_below_one_block*/ false,
-            MergeTreeReadType::Default,
-            parts_for_final_ranges,
-            shared_virtual_fields,
-            storage_snapshot,
-            /*prewhere_info*/ nullptr,
-            local_actions_settings,
-            reader_settings,
-            column_names_to_read,
-            pool_settings,
-            context);
-
-    Pipes pipes;
-    for (size_t i = 0; i < parts_for_final_ranges.size(); ++i)
-    {
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(i);
-
-        auto processor = std::make_unique<MergeTreeSelectProcessor>(
-            pool, std::move(algorithm), nullptr,
-            local_actions_settings, block_size, reader_settings);
-
-        auto source = std::make_shared<MergeTreeSource>(std::move(processor), data.getLogName());
-        pipes.emplace_back(std::move(source));
-    }
-
-    auto pipe = Pipe::unitePipes(std::move(pipes));
+    auto pipe = createReadInOrderFromPartsSource(
+        parts_for_final_ranges,
+        column_names_to_read,
+        storage_snapshot,
+        data.getLogName(),
+        /*prewhere_info*/ nullptr,
+        local_actions_settings,
+        reader_settings,
+        block_size,
+        context,
+        /*max_streams*/ 1,
+        /*min_marks_for_concurrent_read*/ 0,
+        settings.use_uncompressed_cache);
 
     auto sorting_expr = std::make_shared<ExpressionActions>(
         getStorageMetadata()->getSortingKey().expression->getActionsDAG().clone());

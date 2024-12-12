@@ -47,14 +47,12 @@
 #include <IO/HashingReadBuffer.h>
 #include <IO/WriteIntText.h>
 #include <Storages/MergeTree/MergeTreeDataPartChecksum.h>
-#include <Storages/MergeTree/MergeTreeReadPoolInOrder.h>
-#include <Storages/MergeTree/MergeTreeSelectAlgorithms.h>
-#include <Storages/MergeTree/MergeTreeSelectProcessor.h>
 #include <Storages/MergeTree/MergeTreeReadTask.h>
 #include <VectorIndex/Cache/VICacheManager.h>
 #include <VectorIndex/Utils/VIUtils.h>
 #include <VectorIndex/Common/SegmentsMgr.h>
 #include <VectorIndex/Common/Segment.h>
+#include <VectorIndex/Storages/MergeTreeWithVectorScanSource.h>
 #include <Common/ActionBlocker.h>
 #include <Common/logger_useful.h>
 
@@ -693,58 +691,37 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::generateRowIdsMap()
         if (part_marks == 0)
             continue;
 
-        const auto & settings = global_ctx->context->getSettingsRef();
-
-        /// Refactor to use pool, reference from readInOrder()
-        MergeTreeReadPoolPtr pool;
-
-        MergeTreeReadPoolBase::PoolSettings pool_settings
-        {
-            .threads = /*max_streams*/ 1,
-            .sum_marks = part_marks,
-            //.min_marks_for_concurrent_read = min_marks_for_concurrent_read,
-            .preferred_block_size_bytes = settings.preferred_block_size_bytes,
-            .use_uncompressed_cache = settings.use_uncompressed_cache,
-            .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
-        };
-
-        ExpressionActionsSettings actions_settings;
-
-        MergeTreeReaderSettings reader_settings;
-
         MarkRanges ranges;
         ranges.emplace_back(0, part_marks);
 
         auto alter_conversions = part->storage.getAlterConversionsForPart(part);
 
+        const auto & settings = global_ctx->context->getSettingsRef();
+
+        ExpressionActionsSettings actions_settings;
+        MergeTreeReaderSettings reader_settings;
+
+        MergeTreeReadTask::BlockSizeParams block_size{
+            .max_block_size_rows = settings.max_block_size,
+            .preferred_block_size_bytes = settings.preferred_block_size_bytes,
+            .preferred_max_column_in_block_size_bytes = settings.preferred_max_column_in_block_size_bytes};
+
         RangesInDataParts parts_with_ranges;
         parts_with_ranges.emplace_back(part, alter_conversions, 0, ranges);
 
-       MergeTreeReadTask::BlockSizeParams block_size{
-        .max_block_size_rows = settings.max_block_size,
-        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
-        .preferred_max_column_in_block_size_bytes = settings.preferred_max_column_in_block_size_bytes};
-
-        pool = std::make_shared<MergeTreeReadPoolInOrder>(
-                /*has_limit_below_one_block*/ false,
-                MergeTreeReadType::Default,
-                parts_with_ranges,
-                VirtualFields{},
-                global_ctx->storage_snapshot,
-                /*prewhere_info*/ nullptr,
-                actions_settings,
-                reader_settings,
-                columns_to_read,
-                pool_settings,
-                global_ctx->context);
-
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(0);
-
-        auto processor = std::make_unique<MergeTreeSelectProcessor>(
-            pool, std::move(algorithm), nullptr,
-            actions_settings, block_size, reader_settings);
-
-        auto source = std::make_shared<MergeTreeSource>(std::move(processor), global_ctx->data->getLogName());
+        auto source = createReadInOrderFromPartsSource(
+            parts_with_ranges,
+            columns_to_read,
+            global_ctx->storage_snapshot,
+            global_ctx->data->getLogName(),
+            /*prewhere_info*/ nullptr,
+            actions_settings,
+            reader_settings,
+            block_size,
+            global_ctx->context,
+            /*max_streams*/ 1,
+            /*min_marks_for_concurrent_read*/ 0,
+            settings.use_uncompressed_cache);
 
         Pipe pipe = Pipe(std::move(source));
 

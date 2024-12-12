@@ -4,9 +4,7 @@
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <Storages/MergeTree/MergeTreeBlockReadUtils.h>
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
-#include <Storages/MergeTree/MergeTreeSource.h>
 #include <Storages/MergeTree/LoadedMergeTreeDataPartInfoForReader.h>
-#include <Storages/MergeTree/MergeTreeReadPoolInOrder.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/MergeTreeVirtualColumns.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
@@ -21,7 +19,7 @@
 #include <VectorIndex/Storages/MergeTreeSelectWithHybridSearchProcessor.h>
 #include <VectorIndex/Storages/MergeTreeHybridSearchManager.h>
 #include <VectorIndex/Storages/MergeTreeTextSearchManager.h>
-#include <VectorIndex/Storages/MergeTreeThreadSelectWithFilterAlgorithm.h>
+#include <VectorIndex/Storages/MergeTreeWithVectorScanSource.h>
 #include <VectorIndex/Utils/VSUtils.h>
 #include <VectorIndex/Cache/PKCacheManager.h>
 
@@ -1101,20 +1099,11 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     RangesInDataParts parts_with_ranges;
     parts_with_ranges.emplace_back(data_part_, std::make_shared<AlterConversions>(), 0, mark_ranges);
 
-    MergeTreeReadPool::PoolSettings pool_settings
-    {
-        .threads = num_streams,
-        .sum_marks = info.sum_marks,
-        .min_marks_for_concurrent_read = info.min_marks_for_concurrent_read,
-        .preferred_block_size_bytes = settings.preferred_block_size_bytes,
-        .use_uncompressed_cache = settings.use_uncompressed_cache,
-        .use_const_size_tasks_for_remote_reading = settings.merge_tree_use_const_size_tasks_for_remote_reading,
-    };
-
-    size_t max_block_size = block_size_params_.max_block_size_rows;
     /// Read in multiple threads will use Async pulling executor
     if (enable_parallel_reading)
     {
+        size_t max_block_size = block_size_params_.max_block_size_rows;
+
         /// ReadFromMergeTree::readFromPool()
         if (max_block_size && !info.is_adaptive)
         {
@@ -1123,42 +1112,19 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
                 / max_block_size * max_block_size / fixed_index_granularity;
         }
 
-        MergeTreeReadPoolPtr pool;
-        pool = std::make_shared<MergeTreeReadPool>(
-            std::move(parts_with_ranges),
-            VirtualFields{},
+        auto pipe = createReadFromPoolWithFilterFromPartSource(
+            parts_with_ranges,
+            required_columns_prewhere,
+            filter,
             storage_snapshot_,
+            storage_.getLogName(),
             prewhere_info_copy,
             actions_settings,
             reader_settings_,
-            required_columns_prewhere,
-            pool_settings,
-            context_);
-
-        /// The reason why we change this setting is because MergeTreeReadPool takes the full task
-        /// ignoring min_marks_to_read setting in case of remote disk (see MergeTreeReadPool::getTask).
-        /// In this case, we won't limit the number of rows to read based on adaptive granularity settings.
-        auto block_size_copy = block_size_params_;
-        block_size_copy.min_marks_to_read = pool_settings.min_marks_for_concurrent_read;
-
-        Pipes pipes;
-        for (size_t i = 0; i < pool_settings.threads; ++i)
-        {
-            auto algorithm = std::make_unique<MergeTreeThreadSelectWithFilterAlgorithm>(i, filter);
-
-            auto processor = std::make_unique<MergeTreeSelectProcessor>(
-                pool, std::move(algorithm), prewhere_info_copy,
-                actions_settings, block_size_copy, reader_settings_);
-
-            auto source = std::make_shared<MergeTreeSource>(std::move(processor), storage_.getLogName());
-
-            if (i == 0)
-                source->addTotalRowsApprox(info.total_rows);
-
-            pipes.emplace_back(std::move(source));
-        }
-
-        Pipe pipe = Pipe::unitePipes(std::move(pipes));
+            block_size_params_,
+            context_,
+            num_streams,
+            info.min_marks_for_concurrent_read);
 
         /// filter bitmap will be set during read data
         parallelGetFilterFromPipeline(pipe);
@@ -1166,27 +1132,19 @@ VectorIndex::VIBitmapPtr MergeTreeSelectWithHybridSearchProcessor::performPrefil
     else
     {
         /// Read in a single thread
-        MergeTreeReadPoolPtr pool;
-        pool = std::make_shared<MergeTreeReadPoolInOrder>(
-            /*has_limit_below_one_block*/ false,
-            ReadFromMergeTree::ReadType::Default,
+        auto source = createReadInOrderFromPartsSource(
             parts_with_ranges,
-            VirtualFields{},
+            required_columns_prewhere,
             storage_snapshot_,
+            storage_.getLogName(),
             prewhere_info_copy,
             actions_settings,
             reader_settings_,
-            required_columns_prewhere,
-            pool_settings,
-            context_);
-
-        auto algorithm = std::make_unique<MergeTreeInOrderSelectAlgorithm>(0);
-
-        auto processor = std::make_unique<MergeTreeSelectProcessor>(
-            pool, std::move(algorithm), prewhere_info_copy,
-            actions_settings, block_size_params_, reader_settings_);
-
-        auto source = std::make_shared<MergeTreeSource>(std::move(processor), storage_.getLogName());
+            block_size_params_,
+            context_,
+            /* max_streams= */ 1,
+            info.min_marks_for_concurrent_read,
+            settings.use_uncompressed_cache);
 
         Pipe pipe = Pipe(std::move(source));
 
