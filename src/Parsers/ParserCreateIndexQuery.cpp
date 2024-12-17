@@ -42,7 +42,7 @@ bool ParserCreateVectorIndexDeclaration::parseImpl(Pos & pos, ASTPtr & node, Exp
     }
 
     auto index = std::make_shared<ASTVIDeclaration>(type, "", column->as<ASTIdentifier &>().name());
-    index->std_create = true;
+    index->part_of_create_index_query = true;
     node = index;
 
     return true;

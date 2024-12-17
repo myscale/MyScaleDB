@@ -64,22 +64,19 @@ BlockIO InterpreterCreateIndexQuery::execute()
     auto table_id = current_context->resolveStorageID(create_index, Context::ResolveOrdinary);
     StoragePtr table = DatabaseCatalog::instance().getTable(table_id, current_context);
 
-    if (create_index.is_vector_index)
+    /// Convert create index and vector index on distributed table
+    if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
     {
-        if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
-        {
-            /// We only check the first command, and not check if alter table contains mixed table struct and data commands.
-            create_index.setTable(dist_table->getRemoteTableName());
-            create_index.cluster = dist_table->getClusterName();
+        create_index.setTable(dist_table->getRemoteTableName());
+        create_index.cluster = dist_table->getClusterName();
 
-            String remote_database;
-            if (!dist_table->getRemoteDatabaseName().empty())
-                remote_database = dist_table->getRemoteDatabaseName();
-            else
-                remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
+        String remote_database;
+        if (!dist_table->getRemoteDatabaseName().empty())
+            remote_database = dist_table->getRemoteDatabaseName();
+        else
+            remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
 
-            create_index.setDatabase(remote_database);
-        }
+        create_index.setDatabase(remote_database);
     }
 
     if (!create_index.cluster.empty())

@@ -41,6 +41,7 @@ ASTPtr ASTIndexDeclaration::clone() const
 
     auto res = std::make_shared<ASTIndexDeclaration>(expr, type, name);
     res->granularity = granularity;
+    res->part_of_create_index_query = part_of_create_index_query;
 
     return res;
 }

@@ -31,6 +31,7 @@ ASTPtr ASTVIDeclaration::clone() const
         type = type->clone();
 
     auto res = std::make_shared<ASTVIDeclaration>(type, name, column);
+    res->part_of_create_index_query = part_of_create_index_query;
 
     return res;
 }
@@ -47,7 +48,7 @@ std::shared_ptr<ASTFunction> ASTVIDeclaration::getType() const
 
 void ASTVIDeclaration::formatImpl(const FormatSettings & s, FormatState & state, FormatStateStacked frame) const
 {
-    if (!std_create)
+    if (!part_of_create_index_query)
         s.ostr << backQuoteIfNeed(name);
     s.ostr << " ";
     s.ostr << backQuoteIfNeed(column);
