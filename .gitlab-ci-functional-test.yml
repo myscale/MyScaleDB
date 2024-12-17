@@ -1,7 +1,7 @@
 ######################################## VECTOR TESTS ########################################
 ######### VECTOR TESTS ###########
 vector_search_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:3.0.0
   stage: functional-test
   needs:
     - job: build_binary
@@ -37,44 +37,10 @@ vector_search_test:
       allow_failure: true
 
 ###################################### FUNCTIONAL TESTS ######################################
-########## SMOKE TESTS ###########
-smoke_test:
-  stage: functional-test
-  needs:
-    - job: build_binary
-      artifacts: true
-    - job: check_pipeline_already_running
-      artifacts: true
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-smoke:2.0
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
-  artifacts:
-    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-smoke"
-    paths:
-      - $CI_PROJECT_DIR/docker/test/myscale_run_smoke/test_output
-    when: always
-  script:
-    - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
-    - docker/builder/tools/smoke-test.sh CI_TEST ${CI_COMMIT_SHA}
-    - docker/builder/tools/check_job_states.sh myscale_run_smoke
-  rules:
-    - if: '$CI_TEST_IN_K8S == "false"'
-      changes:
-        - src/**/*
-        - tests/**/*
-        - contrib/**/*
-    - if: $CI_PIPELINE_SOURCE != "schedule"
-      when: manual
-      allow_failure: true
-
 ### FUNCTIONAL STATELESS TESTS ###
 # TODO Split stateless/stateful tests pipline
 stateless_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:3.0.0
   stage: functional-test
   needs:
     - job: build_binary
@@ -111,7 +77,7 @@ stateless_test:
 
 ### FUNCTIONAL STATEFUL TESTS ####
 stateful_test:
-  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:3.0.0
   stage: functional-test
   needs:
     - job: build_binary

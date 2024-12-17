@@ -11,6 +11,7 @@ cp -rfv tests/queries docker/test/myscale_run_stateful/tests/
 cp -rfv tests/performance docker/test/myscale_run_stateful/tests/
 cp -rfv tests/config docker/test/myscale_run_stateful/tests/
 cp -rfv tests/clickhouse-test docker/test/myscale_run_stateful/
+cp -rfv docker/test/myscale_run_stateful/create.sql /create.sql
 
 ln -snf $WORKPATH/packages /package_folder
 ln -snf $WORKPATH/clickhouse-test /usr/bin/clickhouse-test
@@ -20,6 +21,7 @@ ln -snf $WORKPATH/test_output /test_output
 
 cd /
 
+export USE_AZURE_STORAGE_FOR_MERGE_TREE=0;
 MAX_RUN_TIME=9720 ADDITIONAL_OPTIONS="--hung-check --print-time --no-vector-search" \
   DATASETS_URL="https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets" \
   DATASETS="hits visits" \
