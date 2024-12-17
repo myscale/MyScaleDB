@@ -64,6 +64,10 @@ ASTPtr ASTAlterCommand::clone() const
         res->sql_security = res->children.emplace_back(sql_security->clone()).get();
     if (rename_to)
         res->rename_to = res->children.emplace_back(rename_to->clone()).get();
+    if (vec_index)
+        res->vec_index = res->children.emplace_back(vec_index->clone()).get();
+    if (vec_index_decl)
+        res->vec_index_decl = res->children.emplace_back(vec_index_decl->clone()).get();
 
     return res;
 }

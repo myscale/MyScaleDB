@@ -3,6 +3,7 @@
 #include <Parsers/ASTCreateIndexQuery.h>
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTAlterQuery.h>
+#include <VectorIndex/Parsers/ASTVIDeclaration.h>
 
 
 namespace DB
@@ -74,12 +75,18 @@ ASTPtr ASTCreateIndexQuery::convertToASTAlterCommand() const
         command->type = ASTAlterCommand::ADD_VECTOR_INDEX;
         command->vec_index = command->children.emplace_back(index_name).get();
         command->vec_index_decl = command->children.emplace_back(index_decl).get();
+        /// mark part_of_create_index_query to false
+        auto & ast_vec_index_decl = command->vec_index_decl->as<ASTVIDeclaration &>();
+        ast_vec_index_decl.part_of_create_index_query = false;
     }
     else
     {
         command->type = ASTAlterCommand::ADD_INDEX;
         command->index = command->children.emplace_back(index_name).get();
         command->index_decl = command->children.emplace_back(index_decl).get();
+        /// mark part_of_create_index_query to false
+        auto & ast_index_decl = command->index_decl->as<ASTIndexDeclaration &>();
+        ast_index_decl.part_of_create_index_query = false;
     }
 
     return command;

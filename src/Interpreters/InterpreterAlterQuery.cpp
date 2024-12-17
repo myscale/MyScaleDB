@@ -103,6 +103,32 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
         table = DatabaseCatalog::instance().tryGetTable(table_id, getContext());
     }
 
+    ///Convert vector index commands on distributed table into an equivalent distributed ddl on local tables.
+    if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
+    {
+        /// We only check the first command, and not check if alter table contains mixed table struct and data commands.
+        auto * command_ast = alter.command_list->children.at(0)->as<ASTAlterCommand>();
+
+        if (auto alter_command = AlterCommand::parse(command_ast))
+        {
+            /// Add distributed support for add/drop index (used for FTS index)
+            if (alter_command->type == AlterCommand::ADD_VECTOR_INDEX || alter_command->type == AlterCommand::DROP_VECTOR_INDEX
+                || alter_command->type == AlterCommand::ADD_INDEX || alter_command->type == AlterCommand::DROP_INDEX)
+            {
+                alter.setTable(dist_table->getRemoteTableName());
+                alter.cluster = dist_table->getClusterName();
+
+                String remote_database;
+                if (!dist_table->getRemoteDatabaseName().empty())
+                    remote_database = dist_table->getRemoteDatabaseName();
+                else
+                    remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
+
+                alter.setDatabase(remote_database);
+            }
+        }
+    }
+
     if (!alter.cluster.empty() && !maybeRemoveOnCluster(query_ptr, getContext()))
     {
         if (table && table->as<StorageKeeperMap>())
@@ -132,41 +158,6 @@ BlockIO InterpreterAlterQuery::executeToTable(ASTAlterQuery & alter)
     checkStorageSupportsTransactionsIfNeeded(table, getContext());
     if (table->isStaticStorage())
         throw Exception(ErrorCodes::TABLE_IS_READ_ONLY, "Table is read-only");
-
-    ///Convert vector index commands on distributed table into an equivalent distributed ddl on local tables.
-    if (auto dist_table = typeid_cast<StorageDistributed *>(table.get()))
-    {
-        /// We only check the first command, and not check if alter table contains mixed table struct and data commands.
-        auto * command_ast = alter.command_list->children.at(0)->as<ASTAlterCommand>();
-
-        if (auto alter_command = AlterCommand::parse(command_ast))
-        {
-            /// Add distributed support for add/drop index (used for FTS index)
-            if (alter_command->type == AlterCommand::ADD_VECTOR_INDEX || alter_command->type == AlterCommand::DROP_VECTOR_INDEX
-                || alter_command->type == AlterCommand::ADD_INDEX || alter_command->type == AlterCommand::DROP_INDEX)
-            {
-                alter.setTable(dist_table->getRemoteTableName());
-                alter.cluster = dist_table->getClusterName();
-
-                String remote_database;
-                if (!dist_table->getRemoteDatabaseName().empty())
-                    remote_database = dist_table->getRemoteDatabaseName();
-                else
-                    remote_database = dist_table->getCluster()->getShardsAddresses().front().front().default_database;
-
-                alter.setDatabase(remote_database);
-            }
-        }
-    }
-
-    if (!alter.cluster.empty())
-    {
-        auto required_access = getRequiredAccess();
-        DDLQueryOnClusterParams params;
-        params.access_to_check = std::move(required_access);
-        return executeDDLQueryOnCluster(query_ptr, getContext(), params);
-    }
-
     auto table_lock = table->lockForShare(getContext()->getCurrentQueryId(), getContext()->getSettingsRef().lock_acquire_timeout);
 
     if (modify_query)
