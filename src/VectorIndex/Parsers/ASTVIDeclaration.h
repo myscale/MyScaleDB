@@ -17,7 +17,7 @@ public:
 
     String name;
     String column;
-    bool std_create = false;
+    bool part_of_create_index_query = false;
 
     /** Get the text that identifies this element. */
     String getID(char) const override { return "VectorIndex"; }
