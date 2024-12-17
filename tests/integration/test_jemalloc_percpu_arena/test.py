@@ -26,7 +26,7 @@ def run_command_in_container(cmd, *args):
             "run",
             "--rm",
             *args,
-            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0",
+            "harbor.internal.moqi.ai/mqdb/mqdb-test-base:3.0.0",
             # "ubuntu:22.04",
             "sh",
             "-c",

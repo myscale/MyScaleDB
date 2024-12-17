@@ -1,4 +1,4 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:2.0.1 . --push
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:3.0.0 . --push
 FROM ubuntu:22.04
 
 ARG TARGETARCH
@@ -9,7 +9,7 @@ ENV LC_ALL en_US.UTF-8
 ENV TZ Asia/Shanghai
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LLVM_VERSION=15
+ENV LLVM_VERSION=18
 
 RUN apt update && apt install ca-certificates pip --yes --verbose-versions \
     && sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list \
@@ -31,13 +31,14 @@ RUN apt update && apt upgrade --yes --verbose-versions \
 
 RUN locale-gen en_US.UTF-8
 
-RUN wget -q -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+RUN export LLVM_PUBKEY_HASH="bda960a8da687a275a2078d43c111d66b1c6a893a3275271beedf266c1ff4a0cdecb429c7a5cccf9f486ea7aa43fd27f" \
+    && wget -nv -O /tmp/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && echo "${LLVM_PUBKEY_HASH} /tmp/llvm-snapshot.gpg.key" | sha384sum -c \
+    && apt-key add /tmp/llvm-snapshot.gpg.key \
     && export CODENAME="$(lsb_release --codename --short | tr 'A-Z' 'a-z')" \
-    && echo "deb [trusted=yes] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" | tee -a /etc/apt/sources.list.d/llvm.list \
-    && apt update \
-    && apt install libomp5-${LLVM_VERSION} libopenblas-dev --yes \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
-
-
-
+    && echo "deb https://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" >> \
+        /etc/apt/sources.list \
+    && apt-get update \
+    && apt install libomp5-${LLVM_VERSION} libopenblas-dev llvm-${LLVM_VERSION} --yes \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/debconf /tmp/*

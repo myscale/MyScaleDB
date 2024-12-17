@@ -1,11 +1,11 @@
 image: harbor.internal.moqi.ai/mqdb/builder:4.0.0
 
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
-    - if: "$CI_COMMIT_TAG"
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+# workflow:
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+#     - if: "$CI_COMMIT_TAG"
+#     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 before_script:
   - if [[ -f previous_pipeline_status.txt ]]; then
@@ -21,7 +21,6 @@ include:
   - "/.gitlab-ci-integration-test.yml"
   - "/.gitlab-ci-sanitizer-test.yml"
   - "/.gitlab-ci-performance-test.yml"
-  - "/.gitlab-ci-stability-test.yml"
   - "/.gitlab-ci-chaos-test.yml"
 
 .init-docker: &init-docker

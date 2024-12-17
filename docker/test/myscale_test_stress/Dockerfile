@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:2.0.1 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:2.0.1
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:3.0.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-stress:3.0.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:3.0.0
 
 RUN apt-get update --allow-releaseinfo-change -y \
     && env DEBIAN_FRONTEND=noninteractive \
@@ -23,10 +23,7 @@ RUN apt-get update --allow-releaseinfo-change -y \
             brotli \
     && apt-get clean
 
-ENV DATASETS="hits visits"
-ENV DATASETS_URL="https://mqdb-release-1253802058.cos.ap-beijing.myqcloud.com/datasets"
-# ENV EXPORT_S3_STORAGE_POLICIES=1
-ENV INTEL_ONEAPI_VERSION=2021.4.0
+ENV EXPORT_S3_STORAGE_POLICIES=1
 
 SHELL ["/bin/bash", "-c"]
 CMD bash

@@ -827,7 +827,8 @@ class SettingsRandomizer:
         ),
         "local_filesystem_read_method": lambda: random.choice(
             # Allow to use uring only when running on Linux
-            ["read", "pread", "mmap", "pread_threadpool", "io_uring"]
+            # ["read", "pread", "mmap", "pread_threadpool", "io_uring"]
+            ["read", "pread", "mmap", "pread_threadpool"]   # io_uring is disabled for now, because of ci runner kernel version is too old
             if platform.system().lower() == "linux"
             else ["read", "pread", "mmap", "pread_threadpool"]
         ),

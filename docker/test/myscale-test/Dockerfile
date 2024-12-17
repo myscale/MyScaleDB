@@ -1,4 +1,4 @@
-FROM harbor.internal.moqi.ai/mqdb/runtime:2.0.1
+FROM harbor.internal.moqi.ai/mqdb/runtime:3.0.0
 
 ADD clickhouse /usr/bin/
 RUN ln -sv /usr/bin/clickhouse /usr/bin/clickhouse-server \

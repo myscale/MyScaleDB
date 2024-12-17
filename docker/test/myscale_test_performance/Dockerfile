@@ -1,6 +1,6 @@
-# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:2.0.1 .
-# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:2.0.1 . --push
-FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:2.0.1
+# docker build -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:3.0.0 .
+# docker buildx build --platform linux/amd64,linux/arm64 -t harbor.internal.moqi.ai/mqdb/mqdb-test-performance:3.0.0 . --push
+FROM harbor.internal.moqi.ai/mqdb/mqdb-test-base:3.0.0
 
 RUN apt-get update --allow-releaseinfo-change \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
@@ -29,6 +29,8 @@ RUN apt-get update --allow-releaseinfo-change \
     && apt-get purge --yes python3-dev g++
 
 # COPY * /
+COPY requirements.txt /
+RUN pip3 --no-cache-dir install -r /requirements.txt
 
 # Bind everything to one NUMA node, if there's more than one. Theoretically the
 # node #0 should be less stable because of system interruptions. We bind

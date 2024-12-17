@@ -15,6 +15,9 @@ import time
 import zlib  # for crc32
 import pathlib
 
+from integration_test_images import get_docker_env
+import zlib
+
 RUNNER_FILE_PATH = os.path.split(os.path.realpath(__file__))[0]
 TEST_NAME_FORMAT = f"test_[a-zA-Z0-9]*/"
 # TEST_NAME_FORMAT = f"test_[a-zA-Z0-9]*_*[a-zA-Z0-9]*/"
@@ -32,6 +35,9 @@ MAX_TIME_SECONDS = 3600
 
 MAX_TIME_IN_SANDBOX = 20 * 60 # 20 minutes
 TASK_TIMEOUT = 8 * 60 * 60 # 8 hours
+
+def stringhash(s):
+    return zlib.crc32(s.encode("utf-8"))
 
 def ret_multi_directory(back_num: int, 
         file_path: os.path) -> os.path:
@@ -194,6 +200,12 @@ if __name__ == "__main__":
             os.path.join(get_project_path(),
             "tests/integration")),
         help="Path to integration tests cases and configs directory. For example tests/integration in repository")
+
+    parser.add_argument(
+        "--utils-dir",
+        default=os.environ.get("CLICKHOUSE_TESTS_UTILS_PATH",
+            os.path.join(get_project_path(), "utils")),
+        help="Path to utils directory in repository. Used to provide some utils for tests")
     
     parser.add_argument(
         "--src-dir",
@@ -216,7 +228,7 @@ if __name__ == "__main__":
         action='store_true',
         default=False,
         help="Don't use net host in parent docker container")
-    
+
     parser.add_argument(
         "--network",
         help="Set network driver for runnner container (defaults to `host`)")
@@ -309,7 +321,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--runner-image-version",
-        default="1.6",
+        default="3.0.0",
         help="MQDB Integration tests runner version")
     
     parser.add_argument(
@@ -349,26 +361,15 @@ if __name__ == "__main__":
     if args.docker_compose_images_tags is not None:
         for img_tag in args.docker_compose_images_tags:
             [image, tag] = img_tag.split(":")
-            if image == "clickhouse/mysql-golang-client":
-                env_tags += "-e {}={} ".format("DOCKER_MYSQL_GOLANG_CLIENT_TAG", tag)
-            elif image == "clickhouse/dotnet-client":
-                env_tags += "-e {}={} ".format("DOCKER_DOTNET_CLIENT_TAG", tag)
-            elif image == "clickhouse/mysql-java-client":
-                env_tags += "-e {}={} ".format("DOCKER_MYSQL_JAVA_CLIENT_TAG", tag)
-            elif image == "clickhouse/mysql-js-client":
-                env_tags += "-e {}={} ".format("DOCKER_MYSQL_JS_CLIENT_TAG", tag)
-            elif image == "clickhouse/mysql-php-client":
-                env_tags += "-e {}={} ".format("DOCKER_MYSQL_PHP_CLIENT_TAG", tag)
-            elif image == "clickhouse/postgresql-java-client":
-                env_tags += "-e {}={} ".format("DOCKER_POSTGRESQL_JAVA_CLIENT_TAG", tag)
-            elif image == "clickhouse/integration-test":
-                env_tags += "-e {}={} ".format("DOCKER_BASE_TAG", tag)
-            elif image == "clickhouse/kerberized-hadoop":
-                env_tags += "-e {}={} ".format("DOCKER_KERBERIZED_HADOOP_TAG", tag)
-            elif image == "clickhouse/kerberos-kdc":
-                env_tags += "-e {}={} ".format("DOCKER_KERBEROS_KDC_TAG", tag)
+            env_tag = get_docker_env(image, tag)
+            if env_tag:
+                env_tags += env_tag
             else:
-                logging.info("Unknown image %s" % (image))
+                logging.info("Unknown image %s", image)
+
+    env_cleanup = ""
+    if args.cleanup_containers:
+        env_cleanup = "-e PYTEST_CLEANUP_CONTAINERS=1"
                 
     dockerd_internal_volume = ""
     try:
@@ -390,24 +391,28 @@ if __name__ == "__main__":
         --volume={library_bridge_bin}:/clickhouse-library-bridge \
         --volume={base_cfg}:/clickhouse-config \
         --volume={cases_dir}:/ClickHouse/tests/integration \
+        --volume={utils_dir}/backupview:/ClickHouse/utils/backupview \
+        --volume={utils_dir}/grpc-client/pb2:/ClickHouse/utils/grpc-client/pb2 \
         --volume={src_dir}/Server/grpc_protos:/ClickHouse/src/Server/grpc_protos \
-        {dockerd_internal_volume} \
-        -e DOCKER_CLIENT_TIMEOUT=300 -e COMPOSE_HTTP_TIMEOUT=600 \
-        -e XTABLES_LOCKFILE=/run/host/xtables.lock -e PYTHONUNBUFFERED=1 \
-        -e PYTEST_OPTS='{parallel} {opts} {tests_list} -vvv' {img} {command}".format(
+        --volume=/run:/run/host:ro {dockerd_internal_volume} {env_tags} {env_cleanup} \
+        -e DOCKER_CLIENT_TIMEOUT=300 -e COMPOSE_HTTP_TIMEOUT=600 -e PYTHONUNBUFFERED=1 \
+        -e PYTEST_ADDOPTS='{parallel} {opts} {tests_list} -vvv' {img} {command}".format(
             net=net,
+            name=CONTAINER_NAME,
             bin=args.binary,
             odbc_bridge_bin=args.odbc_bridge_binary,
             library_bridge_bin=args.library_bridge_binary,
             base_cfg=args.base_configs_dir,
             cases_dir=args.cases_dir,
+            utils_dir=args.utils_dir,
             src_dir=args.src_dir,
             dockerd_internal_volume=dockerd_internal_volume,
-            tests_list=' '.join(test_list),
-            img=args.runner_image_name + ":" + args.runner_image_version,
-            name=CONTAINER_NAME,
+            env_tags=env_tags,
+            env_cleanup=env_cleanup,
             parallel=parallel_args,
             opts=' '.join(args.pytest_args).replace('\'', '\\\''),
+            tests_list=' '.join(test_list),
+            img=args.runner_image_name + ":" + args.runner_image_version,
             command=args.command
     )
     
