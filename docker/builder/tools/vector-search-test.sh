@@ -50,6 +50,8 @@ else
 
     cd /
 
+    export USE_AZURE_STORAGE_FOR_MERGE_TREE=0;
+    export USE_OLD_ANALYZER=1;
     MAX_RUN_TIME=9720 S3_URL="https://clickhouse-datasets.s3.amazonaws.com" \
       EXPORT_S3_STORAGE_POLICIES=1 \
       ADDITIONAL_OPTIONS="$ADDITIONAL_OPTIONS" \

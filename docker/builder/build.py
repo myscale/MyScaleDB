@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import string
-import subprocess
-import os
 import argparse
+import os
+import subprocess
 import logging
 import sys
 from typing import Dict, Union
@@ -418,8 +418,9 @@ if __name__ == "__main__":
         choices=(
             "clang-15",
             "clang-16",
+            "clang-18",
         ),
-        default="clang-15",
+        default="clang-18",
     )
 
     parser.add_argument(

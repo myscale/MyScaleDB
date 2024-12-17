@@ -24,6 +24,8 @@ ln -snf $WORKPATH/test_output /test_output
 
 cd /
 
+export USE_AZURE_STORAGE_FOR_MERGE_TREE=0;
+export USE_OLD_ANALYZER=0;
 MAX_RUN_TIME=9720 S3_URL="https://clickhouse-datasets.s3.amazonaws.com" \
   ADDITIONAL_OPTIONS="--hung-check --print-time --no-vector-search $FORCE_RETRY" \
   /bin/bash $WORKPATH/run.sh
