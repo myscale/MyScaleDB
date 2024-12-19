@@ -414,6 +414,13 @@ void StorageReplicatedVectorIndicesMgr::removeVecIndexBuildStatusForPartsFromZK(
 void StorageReplicatedVectorIndicesMgr::scheduleUpdateVectorIndexInfoZookeeperJob()
 {
     auto & storage = getStorage();
+
+    if (!hasAnyVectorIndex())
+    {
+        storage.vidx_info_updating_task->scheduleAfter(storage.getSettings()->vidx_zk_update_period.totalMilliseconds());
+        return;
+    }
+
     if (!vidx_init_loaded.load())
     {
         LOG_INFO(log, "Start loading vector indices from zookeeper");

@@ -85,6 +85,7 @@ public:
         std::lock_guard lock(vector_index_object_map_mutex);
         vector_index_object_map.emplace(vec_desc.name, vector_index_data);
     }
+
     void dropVectorIndex(const String & vec_index_name)
     {
         std::lock_guard lock(vector_index_object_map_mutex);
@@ -95,6 +96,14 @@ public:
             old_vector_index_data->drop();
         }
     }
+
+    /// Has at least one vector index
+    bool hasAnyVectorIndex() const
+    {
+        std::lock_guard lock(vector_index_object_map_mutex);
+        return vector_index_object_map.size() > 0;
+    }
+
     const VectorIndexObjectPtr getVectorIndexObject(const String & vec_index_name) const;
 
     /// Check whether the cache need to be deleted according to the part to which the cache belongs.
