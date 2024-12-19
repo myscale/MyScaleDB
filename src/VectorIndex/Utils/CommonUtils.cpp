@@ -140,37 +140,34 @@ void checkTextSearchColumnDataType(DataTypePtr &data_type, bool & is_mapKeys)
  */
 inline ASTPtr buildCollectionFromFunction(const std::shared_ptr<ASTFunction> & ast_function)
 {
+    auto select_ast = std::make_shared<ASTSelectQuery>();
+    auto projection_ast = std::make_shared<ASTExpressionList>();
+    projection_ast->children.push_back(std::make_shared<ASTIdentifier>("total_docs"));
+    projection_ast->children.push_back(std::make_shared<ASTIdentifier>("field_tokens"));
+    projection_ast->children.push_back(std::make_shared<ASTIdentifier>("terms_freq"));
+
+    select_ast->setExpression(ASTSelectQuery::Expression::SELECT, std::move(projection_ast));
+
+    auto table_expr = std::make_shared<ASTTableExpression>();
+    table_expr->children.push_back(std::move(ast_function));
+    table_expr->table_function = table_expr->children.back();
+
+    auto tables_elem = std::make_shared<ASTTablesInSelectQueryElement>();
+    tables_elem->children.push_back(std::move(table_expr));
+    tables_elem->table_expression = tables_elem->children.back();
+
+    auto tables = std::make_shared<ASTTablesInSelectQuery>();
+    tables->children.push_back(std::move(tables_elem));
+
+    select_ast->setExpression(ASTSelectQuery::Expression::TABLES, std::move(tables));
+
     auto result_select_query = std::make_shared<ASTSelectWithUnionQuery>();
 
-    {
-        auto select_ast = std::make_shared<ASTSelectQuery>();
-        select_ast->setExpression(ASTSelectQuery::Expression::SELECT, std::make_shared<ASTExpressionList>());
-        auto & select_ast_children = select_ast->select()->children;
-        select_ast_children.insert(
-            select_ast_children.end(),
-            {std::make_shared<ASTIdentifier>("total_docs"),
-             std::make_shared<ASTIdentifier>("field_tokens"),
-             std::make_shared<ASTIdentifier>("terms_freq")});
+    auto list_of_selects = std::make_shared<ASTExpressionList>();
+    list_of_selects->children.push_back(std::move(select_ast));
 
-        auto list_of_selects = std::make_shared<ASTExpressionList>();
-        list_of_selects->children.push_back(select_ast);
-
-        result_select_query->children.push_back(std::move(list_of_selects));
-        result_select_query->list_of_selects = result_select_query->children.back();
-
-        {
-            auto tables = std::make_shared<ASTTablesInSelectQuery>();
-            select_ast->setExpression(ASTSelectQuery::Expression::TABLES, tables);
-            auto tables_elem = std::make_shared<ASTTablesInSelectQueryElement>();
-            auto table_expr = std::make_shared<ASTTableExpression>();
-            tables->children.push_back(tables_elem);
-            tables_elem->table_expression = table_expr;
-            tables_elem->children.push_back(table_expr);
-
-            table_expr->table_function = ast_function;
-            table_expr->children.push_back(table_expr->table_function);
-        }
-    }
+    result_select_query->children.push_back(std::move(list_of_selects));
+    result_select_query->list_of_selects = result_select_query->children.back();
 
     return result_select_query;
 }
@@ -190,7 +187,7 @@ void collectStatisticForBM25Calculation(ContextMutablePtr & context, String clus
     auto cluster_fts_index_function = makeASTFunction("cluster", std::make_shared<ASTIdentifier>(cluster_name), fts_index_function);
 
     /// Create an AST for collecting BM25 statistics using a distributed SQL query
-    /// The SQL is similar to: "SELECT total_docs, total_tokens, terms_freq FROM cluster('cluster_name', ftsIndex('database_name', 'table_name', 'query_column_name', 'query_text'))"
+    /// The SQL is similar to: "SELECT total_docs, field_tokens, terms_freq FROM cluster('cluster_name', ftsIndex('database_name', 'table_name', 'query_column_name', 'query_text'))"
     auto collection_query = buildCollectionFromFunction(cluster_fts_index_function);
 
     std::unique_ptr<InterpreterSelectWithUnionQuery> interpreter
