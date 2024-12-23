@@ -18,6 +18,7 @@ INSERT INTO test_fail_vector_2 SELECT number, [number, number, number] FROM numb
 ALTER TABLE test_fail_vector_2 ADD VECTOR INDEX vindex vector TYPE IVFFLAT('metric=IP', 'ncentroids=5000');
 
 SYSTEM WAIT BUILDING VECTOR INDICES test_fail_vector_2; -- { serverError INVALID_VECTOR_INDEX }
+SYSTEM WAIT BUILDING VECTOR INDICES test_success_vector;
 
 select table, name, expr, status, latest_failed_part, latest_fail_reason from system.vector_indices where database = currentDatabase() order by table;
 
