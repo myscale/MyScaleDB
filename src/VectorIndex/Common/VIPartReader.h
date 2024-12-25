@@ -167,7 +167,7 @@ protected:
         LOG_DEBUG(logger, "Column size is {}", cols.size());
         DB::Columns result(cols.size());
         LOG_DEBUG(logger, "Reading {} rows from part {} from row {}", max_read_row, part->name, num_rows_read);
-        size_t num_rows = reader->readRows(current_mask, 0, continue_read, max_read_row, result);
+        size_t num_rows = reader->readRows(current_mask, total_mask, continue_read, max_read_row, result);
         LOG_DEBUG(logger, "Read {} rows from part {}", num_rows, part->name);
         if (num_rows == 0)
             return nullptr;

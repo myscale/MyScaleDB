@@ -33,7 +33,7 @@ clickhouse client -q "ALTER TABLE t_check_syntax ADD INDEX index_name vector1 TY
     2>&1 | grep -q "DB::Exception: Unknown Index type 'mstg'. Available index types:" && echo 'OK' || echo 'FAIL' || :
 
 clickhouse client -q "ALTER TABLE t_check_syntax ADD VECTOR INDEX index_name vector1 TYPE" \
-    2>&1 | grep -q "DB::Exception: Syntax error: failed at position 68 (end of query): . Expected one of: data type, nested table, identifier. (SYNTAX_ERROR)" && echo 'OK' || echo 'FAIL' || :
+    2>&1 | grep -q "DB::Exception: Syntax error: failed at position 68 (end of query): . Expected one of: expression with optional parameters, function, function name, compound identifier, identifier. (SYNTAX_ERROR)" && echo 'OK' || echo 'FAIL' || :
 
 clickhouse client -q "ALTER TABLE t_check_syntax ADD VECTOR INDEX index_name vector1 TYPE ABC()" \
     2>&1 | grep -q "DB::Exception: SearchIndexException: Error(BAD_ARGUMENTS): Unknown index type for Float32 Vector: ABC. (STD_EXCEPTION)" && echo 'OK' || echo 'FAIL' || :
@@ -47,14 +47,15 @@ clickhouse client -q "ALTER TABLE t_check_syntax ADD VECTOR INDEX index_name vec
 
 # case3: Syntax error in `CREATE VECTOR INDEX ...` query
 clickhouse client -q "DROP VECTOR INDEX index_name ON t_check_syntax;"
-clickhouse client -q "CREATE INDEX index_name ON t_check_syntax vector1" \
-    2>&1 | grep -q "DB::Exception: Syntax error: failed at position 50 (end of query)" && echo 'OK' || echo 'FAIL' || :
+# ck24.8 doesn't support `CREATE INDEX without type` syntax
+# clickhouse client -q "CREATE INDEX index_name ON t_check_syntax vector1" \
+#     2>&1 | grep -q "DB::Exception: Syntax error: failed at position 50 (end of query)" && echo 'OK' || echo 'FAIL' || :
 
 clickhouse client -q "CREATE VECTOR index_name ON t_check_syntax vector1" \
     2>&1 | grep -q "DB::Exception: Syntax error: failed at position 15 ('index_name'): index_name ON t_check_syntax vector1. Expected INDEX. (SYNTAX_ERROR)" && echo 'OK' || echo 'FAIL' || :
 
 clickhouse client -q "CREATE VECTOR INDEX index_name ON t_check_syntax vector1 TYPE" \
-    2>&1 | grep -q "DB::Exception: Syntax error: failed at position 62 (end of query): . Expected one of: data type, nested table, identifier. (SYNTAX_ERROR)" && echo 'OK' || echo 'FAIL' || :
+    2>&1 | grep -q "DB::Exception: Syntax error: failed at position 62 (end of query): . Expected one of: expression with optional parameters, function, function name, compound identifier, identifier. (SYNTAX_ERROR)" && echo 'OK' || echo 'FAIL' || :
 
 clickhouse client -q "CREATE VECTOR INDEX index_name ON t_check_syntax vector1 TYPE ABC()" \
     2>&1 | grep -q "DB::Exception: SearchIndexException: Error(BAD_ARGUMENTS): Unknown index type for Float32 Vector: ABC. (STD_EXCEPTION)" && echo 'OK' || echo 'FAIL' || :
