@@ -2390,6 +2390,13 @@ def check_server_started(args):
             print("\nConnection timeout, will not retry")
             break
         except Exception as e:
+            # HTTPError :  Code: 503. Code: 439. DB::Exception: Cannot schedule a task: cannot allocate thread (threads=10, jobs=10). (CANNOT_SCHEDULE_TASK) (version 24.8.8.1)
+            if ( "CANNOT_SCHEDULE_TASK" in str(e) ):
+                print("Connection error, will retry: ", str(e))
+                sys.stdout.flush()
+                retry_count -= 1
+                sleep(0.5)
+                continue
             print(
                 "\nUexpected exception, will not retry: ",
                 type(e).__name__,

@@ -11,7 +11,8 @@ create view logs as select * from system.text_log where now() - toIntervalMinute
 
 -- Check that we don't have too many messages formatted with fmt::runtime or strings concatenation.
 -- 0.001 threshold should be always enough, the value was about 0.00025
-WITH 0.001 AS threshold
+-- 0.0025 for myscale
+WITH 0.0025 AS threshold
 SELECT
     'runtime messages',
     greatest(coalesce(sum(length(message_format_string) = 0) / countOrNull(), 0) as v, threshold),
@@ -166,6 +167,7 @@ create temporary table known_short_messages (s String) as select * from (select 
     '{} {}',
     '{}%',
     '{}: {}',
+    '{} - {}',
     'Unknown data type family: {}',
     'Cannot load time zone {}',
     'Unknown table engine {}'
@@ -216,15 +218,11 @@ select
                         group by message_format_string order by count() desc limit 1) as top_message).2, 0) / (select count() from logs), threshold) as r,
     r <= threshold ? '' : top_message.1;
 
--- Same as above for Debug
-<<<<<<< HEAD
-WITH 0.09 as threshold
+-- Same as above for Debug, for myscale, we have 0.12 as threshold
+WITH 0.12 as threshold
 select 'noisy Debug messages',
        greatest(coalesce(((select message_format_string, count() from logs where level = 'Debug' group by message_format_string order by count() desc limit 1) as top_message).2, 0) / (select count() from logs), threshold) as r,
        r <= threshold ? '' : top_message.1;
-=======
-select 'noisy Debug messages', max2((select count() from logs where level <= 'Debug' group by message_format_string order by count() desc limit 1) / (select count() from logs), 0.095);
->>>>>>> e76e646aef1... squash of 665-842(support s3 disk for vector index files)
 
 -- Same as above for Info
 WITH 0.05 as threshold

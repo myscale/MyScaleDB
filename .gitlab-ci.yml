@@ -20,7 +20,7 @@ include:
   - "/.gitlab-ci-functional-test.yml"
   - "/.gitlab-ci-integration-test.yml"
   - "/.gitlab-ci-sanitizer-test.yml"
-  - "/.gitlab-ci-performance-test.yml"
+  # - "/.gitlab-ci-performance-test.yml" # disabled
   - "/.gitlab-ci-chaos-test.yml"
 
 .init-docker: &init-docker

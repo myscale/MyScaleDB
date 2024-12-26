@@ -14,6 +14,7 @@ import signal
 import time
 import zlib  # for crc32
 import pathlib
+import base64
 
 from integration_test_images import get_docker_env
 import zlib
@@ -35,6 +36,59 @@ MAX_TIME_SECONDS = 3600
 
 MAX_TIME_IN_SANDBOX = 20 * 60 # 20 minutes
 TASK_TIMEOUT = 8 * 60 * 60 # 8 hours
+
+# export CLICKHOUSE_TESTS_SERVER_BIN_PATH=/clickhouse
+# export CLICKHOUSE_TESTS_CLIENT_BIN_PATH=/clickhouse
+# export CLICKHOUSE_TESTS_BASE_CONFIG_DIR=/clickhouse-config
+# export CLICKHOUSE_ODBC_BRIDGE_BINARY_PATH=/clickhouse-odbc-bridge
+# export CLICKHOUSE_LIBRARY_BRIDGE_BINARY_PATH=/clickhouse-library-bridge
+def init_env():
+    os.environ["DOCKER_CLIENT_TIMEOUT"] = "300"
+    os.environ["COMPOSE_HTTP_TIMEOUT"] = "600"
+    os.environ["PYTHONUNBUFFERED"] = "1"
+
+    os.environ["CLICKHOUSE_TESTS_SERVER_BIN_PATH"] = "/clickhouse"
+    os.environ["CLICKHOUSE_TESTS_CLIENT_BIN_PATH"] = "/clickhouse"
+    os.environ["CLICKHOUSE_TESTS_BASE_CONFIG_DIR"] = "/clickhouse-config"
+    os.environ["CLICKHOUSE_ODBC_BRIDGE_BINARY_PATH"] = "/clickhouse-odbc-bridge"
+    os.environ["CLICKHOUSE_LIBRARY_BRIDGE_BINARY_PATH"] = "/clickhouse-library-bridge"
+    
+    
+def create_hard_link(src, dst):
+    try:
+        os.link(src, dst)
+    except:
+        shutil.copy(src, dst)
+    
+def create_soft_link(src, dst):
+    try:
+        os.symlink(src, dst)
+    except:
+        pass
+
+def copy_dir_or_file(src, dst, max_errors=20):
+    error_count = 0
+    try:
+        if os.path.isdir(src):
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
+        else:
+            if os.path.islink(src):
+                try:
+                    os.symlink(os.readlink(src), dst)
+                except FileExistsError:
+                    pass
+            else:
+                try:
+                    shutil.copy(src, dst, follow_symlinks=False)
+                except FileNotFoundError:
+                    error_count += 1
+                    logging.warning(f"File not found: {src}. Skipping... ({error_count}/{max_errors})")
+                    if error_count >= max_errors:
+                        raise
+    except shutil.Error as e:
+        logging.warning(f"Copy error: {e}. Continuing with remaining files...")
 
 def stringhash(s):
     return zlib.crc32(s.encode("utf-8"))
@@ -168,54 +222,42 @@ if __name__ == "__main__":
         help="ck compiled build directory, such as \"build-debug\", \"build-debug-asan\", default build dir \"build\"")
     parser.add_argument(
         "--binary",
-        default=os.environ.get("CLICKHOUSE_TESTS_SERVER_BIN_PATH", 
-            os.environ.get("CLICKHOUSE_TESTS_CLIENT_BIN_PATH",
-            os.path.join(get_project_path(), 
-            "build/programs/clickhouse"))),
+        default=os.path.join(get_project_path(), "build/programs/clickhouse"),
         help="Path to clickhouse binary. For example /usr/bin/clickhouse")
     
     parser.add_argument(
         "--odbc-bridge-binary",
-        default=os.environ.get("CLICKHOUSE_TESTS_ODBC_BRIDGE_BIN_PATH", 
-            os.path.join(get_project_path(), 
-            "build/programs/clickhouse-odbc-bridge")),
+        default=os.path.join(get_project_path(), "build/programs/clickhouse-odbc-bridge"),
         help="Path to clickhouse-odbc-bridge binary. Defaults to clickhouse-odbc-bridge in the same dir as clickhouse.")
     
     parser.add_argument(
         "--library-bridge-binary",
-        default=os.environ.get("CLICKHOUSE_TESTS_LIBRARY_BRIDGE_BIN_PATH",
-            os.path.join(get_project_path(),
-            "build/programs/clickhouse-library-bridge")),
+        default=os.path.join(get_project_path(), "build/programs/clickhouse-library-bridge"),
         help="Path to clickhouse-library-bridge binary. Defaults to clickhouse-library-bridge in the same dir as clickhouse.")
     
     parser.add_argument(
         "--base-configs-dir",
-        default=os.environ.get("CLICKHOUSE_TESTS_BASE_CONFIG_DIR", 
-            os.path.join(get_project_path(), "programs/server")),
+        default=os.path.join(get_project_path(), "programs/server"),
         help="Path to clickhouse base configs directory with config.xml/users.xml")
     
     parser.add_argument(
         "--cases-dir",
-        default=os.environ.get("CLICKHOUSE_TESTS_INTEGRATION_PATH",
-            os.path.join(get_project_path(),
-            "tests/integration")),
+        default=os.path.join(get_project_path(),"tests/integration"),
         help="Path to integration tests cases and configs directory. For example tests/integration in repository")
 
     parser.add_argument(
         "--utils-dir",
-        default=os.environ.get("CLICKHOUSE_TESTS_UTILS_PATH",
-            os.path.join(get_project_path(), "utils")),
+        default=os.path.join(get_project_path(), "utils"),
         help="Path to utils directory in repository. Used to provide some utils for tests")
     
     parser.add_argument(
         "--src-dir",
-        default=os.environ.get("CLICKHOUSE_SRC_DIR",
-            os.path.join(get_project_path(), "src")),
+        default=os.path.join(get_project_path(), "src"),
         help="Path to the 'src' directory in repository. Used to provide schemas (e.g. *.proto) for some tests when those schemas are located in the 'src' directory")
     
     parser.add_argument(
         "--clickhouse-root",
-        default=os.environ.get("CLICKHOUSE_SRC_DIR", get_project_path()),
+        default=get_project_path(),
         help="Path to repository root folder. Used to take configuration from repository default paths.")
     
     parser.add_argument(
@@ -329,6 +371,22 @@ if __name__ == "__main__":
         default="INFO",
         help="set log level")
     
+    parser.add_argument(
+        "--run-in-docker",
+        default=False,
+        action='store_true',
+        help="run in docker")
+    
+    parser.add_argument(
+        "--harbor-user",
+        default="",
+        help="harbor user")
+    
+    parser.add_argument(
+        "--harbor-password",
+        default="",
+        help="harbor password")
+    
     parser.add_argument('pytest_args', nargs='*', help="args for pytest command")
     
     args = parser.parse_args()
@@ -385,6 +443,17 @@ if __name__ == "__main__":
         
     logging.debug("all tests num {}".format(len(test_list)))
     
+    if not args.run_in_docker:
+        copy_dir_or_file(args.binary, "/clickhouse")
+        copy_dir_or_file(args.odbc_bridge_binary, "/clickhouse-odbc-bridge")
+        copy_dir_or_file(args.library_bridge_binary, "/clickhouse-library-bridge")
+        copy_dir_or_file(args.base_configs_dir, "/clickhouse-config")
+        copy_dir_or_file(args.cases_dir, "/ClickHouse/tests/integration")
+        copy_dir_or_file(args.utils_dir + "/backupview", "/ClickHouse/utils/backupview")
+        copy_dir_or_file(args.utils_dir + "/grpc-client/pb2", "/ClickHouse/utils/grpc-client/pb2")
+        copy_dir_or_file(args.src_dir + "/Server/grpc_protos", "/ClickHouse/src/Server/grpc_protos")
+        init_env()
+    
     cmd = "docker run {net} --name {name} --privileged \
         --volume={bin}:/clickhouse \
         --volume={odbc_bridge_bin}:/clickhouse-odbc-bridge \
@@ -396,6 +465,7 @@ if __name__ == "__main__":
         --volume={src_dir}/Server/grpc_protos:/ClickHouse/src/Server/grpc_protos \
         --volume=/run:/run/host:ro {dockerd_internal_volume} {env_tags} {env_cleanup} \
         -e DOCKER_CLIENT_TIMEOUT=300 -e COMPOSE_HTTP_TIMEOUT=600 -e PYTHONUNBUFFERED=1 \
+        -e HARBOR_USER_B64={HARBOR_USER_B64} -e HARBOR_PASSWORD={HARBOR_PASSWORD} \
         -e PYTEST_ADDOPTS='{parallel} {opts} {tests_list} -vvv' {img} {command}".format(
             net=net,
             name=CONTAINER_NAME,
@@ -409,20 +479,35 @@ if __name__ == "__main__":
             dockerd_internal_volume=dockerd_internal_volume,
             env_tags=env_tags,
             env_cleanup=env_cleanup,
+            HARBOR_USER_B64=base64.b64encode(args.harbor_user.encode()).decode(),
+            HARBOR_PASSWORD=args.harbor_password,
             parallel=parallel_args,
             opts=' '.join(args.pytest_args).replace('\'', '\\\''),
             tests_list=' '.join(test_list),
             img=args.runner_image_name + ":" + args.runner_image_version,
             command=args.command
     )
+        
+    pytest_cmd = "pytest {parallel} {opts} {tests_list} -vvv".format(
+        parallel=parallel_args,
+        opts=' '.join(args.pytest_args),
+        tests_list=' '.join(test_list)
+    )
     
     try:
-        logging.info("Trying to kill container {} if it's already running".format(CONTAINER_NAME))
-        subprocess.check_call(f'docker rm $(docker ps -a -q --filter name={CONTAINER_NAME} --format="{{{{.ID}}}}")', shell=True)
-        logging.info("Container killed")
+        if args.run_in_docker:
+            logging.info("Trying to kill container {} if it's already running".format(CONTAINER_NAME))
+            subprocess.check_call(f'docker stop $(docker ps -a -q --filter name={CONTAINER_NAME} --format="{{{{.ID}}}}")', shell=True)
+            subprocess.check_call(f'docker rm $(docker ps -a -q --filter name={CONTAINER_NAME} --format="{{{{.ID}}}}")', shell=True)
+            logging.info("Container killed")
     except:
         logging.info("Nothing to kill")
         # print("asda")
 
-    logging.info(("Running pytest container as: '{}'.".format(cmd)))
-    subprocess.check_call(cmd, shell=True)
+    if args.run_in_docker:
+        logging.info(("Running pytest container as: '{}'.".format(cmd)))
+        subprocess.check_call(cmd, shell=True)
+
+    else:
+        logging.info("Running pytest command: '{}'.".format(pytest_cmd))
+        subprocess.check_call(pytest_cmd, shell=True)

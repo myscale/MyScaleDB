@@ -27,21 +27,21 @@ StorageSystemVIsWithPart::StorageSystemVIsWithPart(const StorageID & table_id_) 
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(ColumnsDescription({
-        {"database", std::make_shared<DataTypeString>()},
-        {"table", std::make_shared<DataTypeString>()},
-        {"part", std::make_shared<DataTypeString>()},
-        {"owner_part", std::make_shared<DataTypeString>()},
-        {"owner_part_id", std::make_shared<DataTypeInt32>()},
-        {"name", std::make_shared<DataTypeString>()},
-        {"type", std::make_shared<DataTypeString>()},
-        {"dimension", std::make_shared<DataTypeInt32>()},
-        {"status", std::make_shared<DataTypeString>()},
-        {"total_vectors", std::make_shared<DataTypeUInt64>()},
-        {"memory_usage_bytes", std::make_shared<DataTypeUInt64>()},
-        {"disk_usage_bytes", std::make_shared<DataTypeUInt64>()},
-        {"progress", std::make_shared<DataTypeUInt8>()},
-        {"elapsed", std::make_shared<DataTypeUInt64>()},
-        {"error", std::make_shared<DataTypeString>()},
+        {"database", std::make_shared<DataTypeString>(), "Database name."},
+        {"table", std::make_shared<DataTypeString>(), "Table name."},
+        {"part", std::make_shared<DataTypeString>(), "Part name."},
+        {"owner_part", std::make_shared<DataTypeString>(), "Owner part name."},
+        {"owner_part_id", std::make_shared<DataTypeInt32>(), "Owner part id."},
+        {"name", std::make_shared<DataTypeString>(), "Index name."},
+        {"type", std::make_shared<DataTypeString>(), "Index type."},
+        {"dimension", std::make_shared<DataTypeInt32>(), "Index dimension."},
+        {"status", std::make_shared<DataTypeString>(), "Index status."},
+        {"total_vectors", std::make_shared<DataTypeUInt64>(), "Total number of vectors."},
+        {"memory_usage_bytes", std::make_shared<DataTypeUInt64>(), "Memory usage in bytes."},
+        {"disk_usage_bytes", std::make_shared<DataTypeUInt64>(), "Disk usage in bytes."},
+        {"progress", std::make_shared<DataTypeUInt8>(), "Progress."},
+        {"elapsed", std::make_shared<DataTypeUInt64>(), "Elapsed time that buliding index."},
+        {"error", std::make_shared<DataTypeString>(), "Error message."},
     }));
     setInMemoryMetadata(storage_metadata);
 }

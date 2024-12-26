@@ -24,7 +24,7 @@ SELECT * FROM (
     UNION ALL
     SELECT 'Successful write requests',
            (pe_map['S3WriteRequestsCount'] - pe_map['S3WriteRequestsErrors'])::UInt64
-) ORDER BY 1
+) ORDER BY 1 SETTINGS enable_analyzer=1
 "
 
 echo "CHECK WITH query_log"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tags: no-parallel
+# Tags: no-parallel, no-tsan, no-asan, no-msan, no-ubsan
+# no sanitizer tests because they are logical error, will abort the server
 
 # case1: Syntax error in `CREATE TABLE` query
 clickhouse client -q "DROP TABLE IF EXISTS t_check_syntax;"

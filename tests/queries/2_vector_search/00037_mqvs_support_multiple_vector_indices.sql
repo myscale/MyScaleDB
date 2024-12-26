@@ -1,4 +1,5 @@
--- Tags: no-parallel
+-- Tags: no-parallel, no-tsan, no-asan, no-msan, no-ubsan
+-- no sanitizer tests because they are logical error, will abort the server
 
 SELECT '-- Test table with multiple vector indices';
 

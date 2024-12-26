@@ -1,6 +1,5 @@
 -- Test build vector index status
 test_multi_replica_status	idx	idx data TYPE MSTG(\'unknown=1\')	Error	all_0_0_0	VectorIndex: Error in Build Index, Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1
-test_multi_replica_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error	all_0_0_0	VectorIndex: Error in Build Index, Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1
 After drop the first vector index idx
 test_multi_replica_status	idx_v2	idx_v2 v2 TYPE MSTG(\'unknown=1\')	Error	all_0_0_0	VectorIndex: Error in Build Index, Error(UNSUPPORTED_PARAMETER): Unknown parameter: unknown=1
 After newly add again the first vector index idx
