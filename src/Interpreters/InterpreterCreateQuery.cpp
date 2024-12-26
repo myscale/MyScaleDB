@@ -296,6 +296,11 @@ BlockIO InterpreterCreateQuery::createDatabase(ASTCreateQuery & create)
 
     if (create.storage->engine->name == "Replicated" && !internal && !create.attach)
     {
+        if (!getContext()->getSettingsRef().database_replicated_allow_explicit_arguments
+        && create.storage->engine->arguments && create.storage->engine->arguments->children.size() != 0)
+            throw Exception(ErrorCodes::INCORRECT_QUERY,
+                                    "Only queries like `CREATE DATABASE <database>` are supported for creating database");
+
         /// CREATE REPLICATED DATABASE WITH ON CLUSTER CLAUSE
         if (getContext()->getSettingsRef().database_replicated_always_execute_with_on_cluster
         && getContext()->getSettingsRef().database_replicated_default_cluster_name.value.size() > 0

@@ -890,6 +890,7 @@ CREATE TABLE system.replicas
     `lost_part_count` UInt64,
     `last_queue_update_exception` String,
     `zookeeper_exception` String,
+    `is_data_synced` UInt8,
     `replica_is_active` Map(String, UInt8),
     `readonly_duration` Nullable(DateTime) ALIAS if(readonly_start_time IS NULL, NULL, now() - readonly_start_time)
 )

@@ -59,10 +59,8 @@ from .config_cluster import *
 HELPERS_DIR = p.dirname(__file__)
 CLICKHOUSE_ROOT_DIR = p.join(p.dirname(__file__), "../../..")
 # set mqdb test compose dir
-LOCAL_DOCKER_COMPOSE_DIR = p.join(
-    CLICKHOUSE_ROOT_DIR, "docker/test/myscale_test_integration/runner/compose/"
-    # CLICKHOUSE_ROOT_DIR, "docker/test/integration/runner/compose/"
-)
+LOCAL_DOCKER_COMPOSE_DIR = p.join(CLICKHOUSE_ROOT_DIR, "tests/integration/compose/")
+
 DEFAULT_ENV_NAME = ".env"
 
 SANITIZER_SIGN = "=================="
@@ -1075,7 +1073,8 @@ class ClickHouseCluster:
 
         env_variables["keeper_binary"] = binary_path
         env_variables["keeper_cmd_prefix"] = keeper_cmd_prefix
-        env_variables["image"] = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration:" + self.docker_base_tag
+        # env_variables["image"] = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration:" + self.docker_base_tag
+        env_variables["image"] = "harbor.internal.moqi.ai/mqdb/mqdb-test-integration:3.0.0"
         env_variables["user"] = str(os.getuid())
         env_variables["keeper_fs"] = "bind"
         for i in range(1, 4):

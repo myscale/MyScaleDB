@@ -1,3 +1,6 @@
+.no-proxy: &no-proxy
+  - export http_proxy="" https_proxy=""
+
 ######################################## VECTOR TESTS ########################################
 ######### VECTOR TESTS ###########
 vector_search_test:
@@ -11,21 +14,16 @@ vector_search_test:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vector-test"
     paths:
-      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_stateless/test_output
     when: always
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
+    - *no-proxy
   script:
-    - docker/builder/tools/vector-search-test.sh
-    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh myscale_run_stateless; fi
+    - docker/myscale_test_script/stateless-test.sh true
+    - docker/myscale_test_script/check-job-states.sh myscale_stateless
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
       changes:
@@ -50,21 +48,22 @@ stateless_test:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateless-test"
     paths:
-      - $CI_PROJECT_DIR/docker/test/myscale_run_stateless/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_stateless/test_output
     when: always
   parallel:
     matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
+      - RUN_BY_HASH_TOTAL: 2
+        RUN_BY_HASH_NUM: [0, 1]
+  tag:
+    - HASH_SPLIT_TEST_${RUN_BY_HASH_NUM}
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
+    - *no-proxy
   script:
-    - docker/builder/tools/stateless-test.sh
-    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh myscale_run_stateless; fi
+    - docker/myscale_test_script/stateless-test.sh
+    - docker/myscale_test_script/check-job-states.sh myscale_stateless
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
       changes:
@@ -87,21 +86,16 @@ stateful_test:
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stateful-test"
     paths:
-      - $CI_PROJECT_DIR/docker/test/myscale_run_stateful/test_output
+      - $CI_PROJECT_DIR/docker/test/myscale_stateful/test_output
     when: always
-  parallel:
-    matrix:
-      - ARCH: amd64
-      # - ARCH: arm64
-  tags:
-    - ${ARCH}
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
       fi
+    # - *no-proxy
   script:
-    - docker/builder/tools/stateful-test.sh
-    - if [[ ${ARCH} == "amd64" ]];then docker/builder/tools/check_job_states.sh myscale_run_stateful; fi
+    - docker/myscale_test_script/stateful-test.sh
+    - docker/myscale_test_script/check-job-states.sh myscale_stateful
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
       changes:
