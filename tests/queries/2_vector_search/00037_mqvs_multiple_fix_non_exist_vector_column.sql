@@ -1,4 +1,5 @@
--- Tags: no-parallel
+-- Tags: no-parallel, no-tsan, no-asan, no-msan, no-ubsan
+-- no sanitizer tests because they are logical error, will abort the server
 
 SET enable_brute_force_vector_search=1;
 

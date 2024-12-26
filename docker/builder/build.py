@@ -21,6 +21,12 @@ WORK_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(BUILDER_SCRIPT), o
 WORK_DIRECTORY_NAME = os.path.basename(WORK_DIRECTORY)
 BUILD_DIRECTORY = os.path.join(WORK_DIRECTORY, "build")
 
+sanitizer_map = {
+    "asan": "address",
+    "ubsan": "undefined",
+    "msan": "memory",
+    "tsan": "thread",
+}
 
 def command(cmd, shell=False, cwd=None, env=None) -> int:
     logging.info("Run command: %s", cmd)
@@ -198,26 +204,6 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
 
     if with_sanitizer != '':
         cmake["-DSANITIZE"] = with_sanitizer
-
-    if with_sanitizer == 'memory':
-        cmake["-DENABLE_EMBEDDED_COMPILER"] = "OFF"
-        cmake["-DENABLE_CLICKHOUSE_ALL"] = "OFF"
-        cmake["-DENABLE_CLICKHOUSE_SERVER"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_CLIENT"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_FORMAT"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_LOCAL"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_COMPRESSOR"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_KEEPER"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_COPIER"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_EXTRACT_FROM_CONFIG"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_ODBC_BRIDGE"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_LIBRARY_BRIDGE"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_KEEPER_CONVERTER"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_OBFUSCATOR"] = "ON"
-        cmake["-DENABLE_CLICKHOUSE_INSTALL"] = "ON"
-    # else:
-    #     cmake["-DSANITIZE"] = "''"
 
     if with_coverage:
         cmake["-DWITH_COVERAGE"] = "ON"
@@ -485,10 +471,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--with-sanitizer",
         choices=(
-            "address",
-            "thread",
-            "memory",
-            "undefined",
+            "asan",
+            "ubsan",
+            "msan",
+            "tsan",
             "",
         ),
         default="",
@@ -537,6 +523,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    args.with_sanitizer = sanitizer_map.get(args.with_sanitizer, args.with_sanitizer)
     logging.debug("OPTIONS: %s", vars(args))
 
     if args.docker:
@@ -565,7 +552,7 @@ if __name__ == "__main__":
         exit(0)
 
     # build_diagnostics(args.arch, args.name)
-
+    
     cmake = prepare_build(args.compiler, args.arch, args.profile, args.build_type, args.with_test, args.with_shared_libraries, args.with_clang_tidy, args.with_sanitizer, args.with_coverage, args.package, args.official)
 
     build(args.arch, args.build_jobs, cmake)

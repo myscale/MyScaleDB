@@ -12,7 +12,8 @@ client_opts=(
   --distributed_ddl_output_mode  'null_status_on_timeout'
 )
 
-for STORAGE_POLICY in 's3_cache' 'local_cache' 's3_cache_multi' 'azure_cache'; do
+# for STORAGE_POLICY in 's3_cache' 'local_cache' 's3_cache_multi' 'azure_cache'; do
+for STORAGE_POLICY in 's3_cache' 'local_cache' 's3_cache_multi'; do # 'azure_cache' storage policy needs real azure account
     echo "Using storage policy: $STORAGE_POLICY"
     $CLICKHOUSE_CLIENT --query "SYSTEM DROP FILESYSTEM CACHE"
 

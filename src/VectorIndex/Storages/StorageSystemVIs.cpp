@@ -26,18 +26,18 @@ StorageSystemVIs::StorageSystemVIs(const StorageID & table_id_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(ColumnsDescription({
-        {"database", std::make_shared<DataTypeString>()},
-        {"table", std::make_shared<DataTypeString>()},
-        {"name", std::make_shared<DataTypeString>()},
-        {"type", std::make_shared<DataTypeString>()},
-        {"expr", std::make_shared<DataTypeString>()},
-        {"total_parts", std::make_shared<DataTypeInt64>()},
-        {"parts_with_vector_index", std::make_shared<DataTypeInt64>()},
-        {"small_parts", std::make_shared<DataTypeInt64>()},
-        {"status", std::make_shared<DataTypeString>()},
-        {"host_name", std::make_shared<DataTypeString>()},
-        {"latest_failed_part", std::make_shared<DataTypeString>()},
-        {"latest_fail_reason",  std::make_shared<DataTypeString>()},
+        {"database", std::make_shared<DataTypeString>(), "Database name."},
+        {"table", std::make_shared<DataTypeString>(), "Table name."},
+        {"name", std::make_shared<DataTypeString>(), "Index name."},
+        {"type", std::make_shared<DataTypeString>(), "Index type."},
+        {"expr", std::make_shared<DataTypeString>(), "Index expression."},
+        {"total_parts", std::make_shared<DataTypeInt64>(), "Total number of parts."},
+        {"parts_with_vector_index", std::make_shared<DataTypeInt64>(), "Number of parts with vector index built."},
+        {"small_parts", std::make_shared<DataTypeInt64>(), "Number of small parts."},
+        {"status", std::make_shared<DataTypeString>(), "Index status."},
+        {"host_name", std::make_shared<DataTypeString>(), "Host name of the server where the index is built."},
+        {"latest_failed_part", std::make_shared<DataTypeString>(), "Name of the latest failed part."},
+        {"latest_fail_reason", std::make_shared<DataTypeString>(), "Reason of the latest failure."},
     }));
     setInMemoryMetadata(storage_metadata);
 }

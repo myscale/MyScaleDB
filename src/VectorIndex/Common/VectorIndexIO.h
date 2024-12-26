@@ -133,6 +133,8 @@ public:
 
     void close() override
     {
+        if (out)
+            out->finalize();
         if (hashing_out)
             hashing_out->finalize();
     }

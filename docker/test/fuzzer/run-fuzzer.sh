@@ -426,8 +426,8 @@ fi
 
 dmesg -T > dmesg.log ||:
 
-zstd --threads=0 --rm server.log
-zstd --threads=0 --rm fuzzer.log
+zstd --threads=0 --rm server.log ||:
+zstd --threads=0 --rm fuzzer.log ||:
 
 cat > report.html <<EOF ||:
 <!DOCTYPE html>
