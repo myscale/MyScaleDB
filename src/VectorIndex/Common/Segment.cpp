@@ -58,6 +58,9 @@ BaseSegment::Metadata BaseSegment::generateVIMetadata(const IMergeTreeDataPart &
     {
         if (!meta.build_params.contains("disk_mode"))
             meta.build_params.setParam("disk_mode", merge_tree_setting->default_mstg_disk_mode);
+
+        if (!meta.build_params.contains("fp16_storage"))
+            meta.build_params.setParam("fp16_storage", merge_tree_setting->enable_mstg_use_fp16_storage);
     }
 
     /// set version
