@@ -126,14 +126,20 @@ void TableFunctionFullTextSearch::parseArguments(const ASTPtr & ast_function, Co
     /// Support 'key=value' format for optional arguments
     for (size_t i = 3; i < args.size(); ++i)
     {
-        if (const auto * ast_func = typeid_cast<const ASTFunction *>(args[i].get()))
+        if (const auto * ast_func = args[i]->as<ASTFunction>())
         {
-            const auto * args_expr = assert_cast<const ASTExpressionList *>(ast_func->arguments.get());
-            auto function_args = args_expr->children;
-            if (function_args.size() != 2)
+            if (ast_func->name != "equals")
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Expected optional arguments as key=value pairs");
+
+            if (!ast_func->arguments || ast_func->arguments->children.size() != 2)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Expected key-value defined argument");
 
-            auto arg_name = function_args[0]->as<ASTIdentifier>()->name();
+            auto function_args = ast_func->arguments->children;
+            const auto * arg_identifier = function_args[0]->as<ASTIdentifier>();
+            if (!arg_identifier)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Expected the key (key-value) to be identifier");
+
+            auto arg_name = arg_identifier->name();
 
             auto eval_arg = evaluateConstantExpressionOrIdentifierAsLiteral(function_args[1], context);
 
