@@ -38,7 +38,7 @@ INSERT INTO tb VALUES (0,'An apple a day keeps','The early bird catches worm','A
 --   }
 -- }
 ALTER TABLE tb ADD INDEX multi_idx (col1, col2, col3) TYPE fts('{ "col1": { "tokenizer": { "type": "stem", "stop_word_filters": ["english", "french"], "stem_languages": ["german", "english"], "length_limit": 60, "case_sensitive": true} }, "col2": { "tokenizer": {"type": "simple", "case_sensitive": false} } }') GRANULARITY 1;
-ALTER TABLE tb MATERIALIZE INDEX multi_idx;
+ALTER TABLE tb MATERIALIZE INDEX multi_idx SETTINGS mutations_sync=2;
 
 SELECT '[Test Case 1]: function equals / notEquals / == / !=';
 
