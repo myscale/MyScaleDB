@@ -104,12 +104,14 @@ class MergeTreeConditionTantivy final : public IMergeTreeIndexCondition, WithCon
 {
 public:
     MergeTreeConditionTantivy(
-        const SelectQueryInfo & query_info, ContextPtr context, const Block & index_sample_block, const TantivyFilterParameters & params_);
+        const ActionsDAG * filter_actions_dag,
+        ContextPtr context,
+        const Block & index_sample_block,
+        const TantivyFilterParameters & params_);
 
     ~MergeTreeConditionTantivy() override = default;
 
     bool alwaysUnknownOrTrue() const override;
-
     bool mayBeTrueOnGranule([[maybe_unused]] MergeTreeIndexGranulePtr idx_granule) const override
     {
         /// should call mayBeTrueOnGranuleInPart instead
@@ -154,14 +156,10 @@ private:
             ALWAYS_TRUE, // 13
         };
 
-        // 每个 RPNElement 都有一个 TantivyFilter 过滤器
+        /// Every RPNElement has a TantivyFilter
         RPNElement( /// NOLINT
-            Function function_ = FUNCTION_UNKNOWN,
-            size_t key_column_ = 0,
-            std::unique_ptr<TantivyFilter> && const_tantivy_filter_ = nullptr)
-            : function(function_), key_column(key_column_), tantivy_filter(std::move(const_tantivy_filter_))
-        {
-        }
+            Function function_ = FUNCTION_UNKNOWN, size_t key_column_ = 0, std::unique_ptr<TantivyFilter> && const_tantivy_filter_ = nullptr)
+            : function(function_), key_column(key_column_), tantivy_filter(std::move(const_tantivy_filter_)) {}
 
         Function function = FUNCTION_UNKNOWN;
         /// For FUNCTION_EQUALS, FUNCTION_NOT_EQUALS and FUNCTION_MULTI_SEARCH
@@ -338,8 +336,7 @@ public:
     MergeTreeIndexAggregatorPtr createIndexAggregator(const MergeTreeWriterSettings & settings) const override;
 
     MergeTreeIndexAggregatorPtr createIndexAggregatorForPart(TantivyIndexStorePtr & store, const MergeTreeWriterSettings & settings) const override;
-    MergeTreeIndexConditionPtr createIndexCondition(const SelectQueryInfo & query, ContextPtr context) const;
-    MergeTreeIndexConditionPtr createIndexCondition(const ActionsDAG *, ContextPtr) const override;
+    MergeTreeIndexConditionPtr createIndexCondition(const ActionsDAG * filter_actions_dag, ContextPtr context) const override;
 
     TantivyFilterParameters params;
     /// Function for selecting next token.

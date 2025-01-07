@@ -227,38 +227,26 @@ void MergeTreeIndexAggregatorTantivy::update(const Block & block, size_t * pos, 
 
 
 MergeTreeConditionTantivy::MergeTreeConditionTantivy(
-    const SelectQueryInfo & query_info, ContextPtr context_, const Block & index_sample_block, const TantivyFilterParameters & params_)
-    : WithContext(context_), header(index_sample_block), params(params_), prepared_sets(query_info.prepared_sets)
+    const ActionsDAG * filter_actions_dag,
+    ContextPtr context_,
+    const Block & index_sample_block,
+    const TantivyFilterParameters & params_)
+    : WithContext(context_), header(index_sample_block),
+    params(params_)
 {
-    if (context_->getSettingsRef().allow_experimental_analyzer)
-    {
-        if (!query_info.filter_actions_dag)
-        {
-            rpn.push_back(RPNElement::FUNCTION_UNKNOWN);
-            return;
-        }
-
-        rpn = std::move(RPNBuilder<RPNElement>(
-                            query_info.filter_actions_dag->getOutputs().at(0),
-                            context_,
-                            [&](const RPNBuilderTreeNode & node, RPNElement & out) { return this->traverseAtomAST(node, out); })
-                            .extractRPN());
-        return;
-    }
-
-    ASTPtr filter_node = buildFilterNode(query_info.query);
-    if (!filter_node)
+    if (!filter_actions_dag)
     {
         rpn.push_back(RPNElement::FUNCTION_UNKNOWN);
         return;
     }
 
-    auto block_with_constants = KeyCondition::getBlockWithConstants(query_info.query, query_info.syntax_analyzer_result, context_);
-    RPNBuilder<RPNElement> builder(
-        query_info.filter_actions_dag->getOutputs().at(0),
-        context_,
-        [&](const RPNBuilderTreeNode & node, RPNElement & out) { return traverseAtomAST(node, out); });
-    rpn = std::move(builder).extractRPN();
+    rpn = std::move(
+            RPNBuilder<RPNElement>(
+                    filter_actions_dag->getOutputs().at(0), context_,
+                    [&](const RPNBuilderTreeNode & node, RPNElement & out)
+                    {
+                        return this->traverseAtomAST(node, out);
+                    }).extractRPN());
 }
 
 /// Keep in-sync with MergeTreeConditionFullText::alwaysUnknownOrTrue
@@ -691,14 +679,9 @@ MergeTreeIndexAggregatorPtr MergeTreeIndexTantivy::createIndexAggregatorForPart(
     return std::make_shared<MergeTreeIndexAggregatorTantivy>(store, index.column_names, index.name, params);
 }
 
-MergeTreeIndexConditionPtr MergeTreeIndexTantivy::createIndexCondition(const SelectQueryInfo & query, ContextPtr context) const
+MergeTreeIndexConditionPtr MergeTreeIndexTantivy::createIndexCondition(const ActionsDAG * filter_actions_dag, ContextPtr context) const
 {
-    return std::make_shared<MergeTreeConditionTantivy>(query, context, index.sample_block, params);
-};
-
-MergeTreeIndexConditionPtr MergeTreeIndexTantivy::createIndexCondition(const ActionsDAG *, ContextPtr) const
-{
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "MergeTreeIndexAnnoy cannot be created with ActionsDAG");
+    return std::make_shared<MergeTreeConditionTantivy>(filter_actions_dag, context, index.sample_block, params);
 }
 
 MergeTreeIndexPtr ftsIndexCreator(const IndexDescription & index)
