@@ -16,6 +16,8 @@ vector_search_test:
     paths:
       - $CI_PROJECT_DIR/docker/test/myscale_stateless/test_output
     when: always
+  tags:
+    - amd64
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
@@ -54,8 +56,8 @@ stateless_test:
     matrix:
       - RUN_BY_HASH_TOTAL: 2
         RUN_BY_HASH_NUM: [0, 1]
-  tag:
-    - HASH_SPLIT_TEST_${RUN_BY_HASH_NUM}
+  tags:
+    - amd64
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;
@@ -88,6 +90,8 @@ stateful_test:
     paths:
       - $CI_PROJECT_DIR/docker/test/myscale_stateful/test_output
     when: always
+  tags:
+    - amd64
   before_script:
     - if [[ -f previous_pipeline_status.txt ]]; then
       exit 0;

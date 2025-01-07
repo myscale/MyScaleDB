@@ -16,8 +16,8 @@ integration_test:
     matrix:
       - TOTAL_HASH_TEST_NUM: 6
         HASH_TEST_NUM: [0, 1, 2, 3, 4, 5]
-  tag:
-    - HASH_SPLIT_TEST_${HASH_TEST_NUM}
+  tags:
+    - amd64
   script:
     - pwd && echo $CI_PROJECT_DIR && echo ${CI_COMMIT_SHA}
     - cd tests/integration/ && python3 mqdb-ci-runner.py 

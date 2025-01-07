@@ -273,6 +273,7 @@ flag_pipeline_status:
   image: harbor.internal.moqi.ai/mqdb/redis:7.0.10
   tags:
     - task
+  dependencies: []
   # rules:
   #   - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_TEST_IN_K8S == "false"'
   # - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"'
