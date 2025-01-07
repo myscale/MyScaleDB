@@ -11,8 +11,8 @@ performance_test0:
     matrix:
       - TOTAL_HASH_TEST_NUM: 3
         HASH_TEST_NUM: [0, 1, 2]
-  tag:
-    - HASH_SPLIT_TEST_${HASH_TEST_NUM}
+  tags:
+    - amd64
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-performance0"
     paths:

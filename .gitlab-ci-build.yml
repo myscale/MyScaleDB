@@ -47,13 +47,8 @@ build_binary:
   rules:
     - if: '$CI_TEST_IN_K8S == "false"'
 
-build_with_sanitizer:
+.build_with_sanitizer_template: &build_with_sanitizer_template
   stage: build
-  parallel:
-    matrix:
-      - SANITIZER: ['asan', 'ubsan', 'tsan', 'msan']
-  tags:
-    - ${SANITIZER}
   variables:
     KUBERNETES_CPU_REQUEST: 8
     KUBERNETES_CPU_LIMIT: 32
@@ -73,11 +68,31 @@ build_with_sanitizer:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --arch linux-${ARCH} --package --with-test --with-sanitizer ${SANITIZER}
+    - docker/builder/build.py --output artifacts --arch linux-x86_64 --package --with-test --with-sanitizer ${SANITIZER}
     - mv build/programs/clickhouse artifacts/.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
+
+build_with_sanitizer_asan:
+  <<: *build_with_sanitizer_template
+  variables:
+    SANITIZER: asan
+
+build_with_sanitizer_ubsan:
+  <<: *build_with_sanitizer_template
+  variables:
+    SANITIZER: ubsan
+
+build_with_sanitizer_tsan:
+  <<: *build_with_sanitizer_template
+  variables:
+    SANITIZER: tsan
+
+build_with_sanitizer_msan:
+  <<: *build_with_sanitizer_template
+  variables:
+    SANITIZER: msan
 
 build_for_integration_test:
   stage: build
