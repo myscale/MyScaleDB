@@ -1,17 +1,12 @@
 ########## STRESS TESTS ##########
-stress_test:
+.stress_test_template: &stress_test_template
   stage: sanitizer-test
-  parallel:
-    matrix:
-      - SANITIZER: ['asan', 'ubsan', 'tsan', 'msan']
   needs:
-    - job: build_with_sanitizer
-      artifacts: true
     - job: check_pipeline_already_running
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stress:3.0.0
   tags:
-    - ${SANITIZER}
+    - amd64
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-stress${SANITIZER}"
     paths:
@@ -25,20 +20,46 @@ stress_test:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
-vector-test:
-  stage: sanitizer-test
-  parallel:
-    matrix:
-      # - SANITIZER: ['asan', 'ubsan', 'tsan', 'msan']
-      - SANITIZER: ['asan', 'ubsan']
+stress_test_asan:
+  <<: *stress_test_template
+  variables:
+    SANITIZER: asan
   needs:
-    - job: build_with_sanitizer
+    - job: build_with_sanitizer_asan
       artifacts: true
+
+stress_test_ubsan:
+  <<: *stress_test_template
+  variables:
+    SANITIZER: ubasn
+  needs:
+    - job: build_with_sanitizer_ubsan
+      artifacts: true
+
+stress_test_masn:
+  <<: *stress_test_template
+  variables:
+    SANITIZER: msan
+  needs:
+    - job: build_with_sanitizer_msan
+      artifacts: true
+
+stress_test_tsan:
+  <<: *stress_test_template
+  variables:
+    SANITIZER: tasn
+  needs:
+    - job: build_with_sanitizer_tsan
+      artifacts: true
+
+.vector-test-template: &vector-test-template
+  stage: sanitizer-test
+  needs:
     - job: check_pipeline_already_running
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-stateless:3.0.0
   tags:
-    - ${SANITIZER}
+    - amd64
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-vector${SANITIZER}"
     paths:
@@ -57,20 +78,30 @@ vector-test:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
 
-fuzzer_test:
-  stage: sanitizer-test
-  parallel:
-    matrix:
-      # - SANITIZER: ['asan', 'ubsan', 'tsan', 'msan']
-      - SANITIZER: ['asan', 'ubsan']
+vector_test_asan:
+  <<: *vector-test-template
+  variables:
+    SANITIZER: asan
   needs:
-    - job: build_with_sanitizer
+    - job: build_with_sanitizer_asan
       artifacts: true
+
+vector_test_ubsan:
+  <<: *vector-test-template
+  variables:
+    SANITIZER: ubasn
+  needs:
+    - job: build_with_sanitizer_ubsan
+      artifacts: true
+
+.fuzzer_test_template: &fuzzer_test_template
+  stage: sanitizer-test
+  needs:
     - job: check_pipeline_already_running
       artifacts: true
   image: harbor.internal.moqi.ai/mqdb/mqdb-test-fuzzer:3.0.0
   tags:
-    - ${SANITIZER}
+    - amd64
   artifacts:
     name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-fuzz${SANITIZER}"
     paths:
@@ -83,3 +114,19 @@ fuzzer_test:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_TEST_IN_K8S == "false"' # Trigger pipline during scheduled tasks
     - if: '$CI_MERGE_REQUEST_LABELS =~ /sanitizer-test/'
+
+fuzzer_test_asan:
+  <<: *fuzzer_test_template
+  variables:
+    SANITIZER: asan
+  needs:
+    - job: build_with_sanitizer_asan
+      artifacts: true
+
+fuzzer_test_ubsan:
+  <<: *fuzzer_test_template
+  variables:
+    SANITIZER: ubasn
+  needs:
+    - job: build_with_sanitizer_ubsan
+      artifacts: true
