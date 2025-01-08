@@ -43,7 +43,7 @@ def test_build_index_prevent_merge(started_cluster):
     node1.query("ALTER TABLE test_vector ADD VECTOR INDEX replia_ind vector TYPE HNSWFLAT('metric_type=L2','m=16','ef_c=128');")
     node1.query("OPTIMIZE TABLE test_vector FINAL")
 
-    node2.wait_for_log_line("index build complete", timeout=100)
+    node2.query("SYSTEM WAIT BUILDING VECTOR INDICES test_vector;")
 
     assert int(node1.count_in_log("Vector index build is cancelled").strip()) == 0
     assert int(node2.count_in_log("Vector index build is cancelled").strip()) == 0
