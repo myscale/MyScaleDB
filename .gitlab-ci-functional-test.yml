@@ -54,8 +54,8 @@ stateless_test:
     when: always
   parallel:
     matrix:
-      - RUN_BY_HASH_TOTAL: 2
-        RUN_BY_HASH_NUM: [0, 1]
+      - RUN_BY_HASH_TOTAL: 3
+        RUN_BY_HASH_NUM: [0, 1, 2]
   tags:
     - amd64
   before_script:
