@@ -17,6 +17,7 @@ variables:
 
 include:
   - "/.gitlab-ci-build.yml"
+  - "/.gitlab-ci-unit-test.yml"
   - "/.gitlab-ci-functional-test.yml"
   - "/.gitlab-ci-integration-test.yml"
   - "/.gitlab-ci-sanitizer-test.yml"

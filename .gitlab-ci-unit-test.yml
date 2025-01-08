@@ -1,0 +1,31 @@
+########## UNIT TESTS ##########
+unit_test:
+  image: harbor.internal.moqi.ai/mqdb/mqdb-test-base:3.0.0
+  stage: functional-test
+  needs:
+    - job: build_binary
+      artifacts: true
+    - job: check_pipeline_already_running
+      artifacts: true
+  artifacts:
+    name: "mqdb-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA-unit-test"
+    paths:
+      - $CI_PROJECT_DIR/docker/test/myscale_unit/test_output
+    when: always
+  tags:
+    - task
+  before_script:
+    - if [[ -f previous_pipeline_status.txt ]]; then
+      exit 0;
+      fi
+  script:
+    - docker/myscale_test_script/unit-test.sh
+  rules:
+    - if: '$CI_TEST_IN_K8S == "false"'
+      changes:
+        - src/**/*
+        - tests/**/*
+        - contrib/**/*
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
+      allow_failure: true
