@@ -100,6 +100,11 @@ function check_integration
     echo "don't support"
 }
 
+function check_unit
+{
+    echo "don't support"
+}
+
 if [[ "$TEST_NAME" == "myscale_stateful" ]]; then
     check_stateful
 elif [[ "$TEST_NAME" == "myscale_stateless" ]]; then
@@ -117,6 +122,8 @@ elif [[ "$TEST_NAME" == "myscale_performance" ]]; then
     check_performance
 elif [[ "$TEST_NAME" == "myscale_integration" ]]; then
     check_integration
+elif [[ "$TEST_NAME" == "myscale_unit" ]]; then
+    check_unit
 else
     echo "please entry the correct test name"
 fi

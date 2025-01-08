@@ -30,7 +30,8 @@ build_binary:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --arch linux-x86_64 --package
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --arch linux-x86_64 --package --with-test
+    - cp build/src/unit_tests_dbms artifacts/.
     - |-
       if [ "$CI_COMMIT_REF_NAME" = "$CI_DEFAULT_BRANCH" ]; then
         docker/builder/tools/package_performance.sh all

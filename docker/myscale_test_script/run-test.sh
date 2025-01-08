@@ -39,6 +39,10 @@ elif [[ $TEST_NAME == 'sqltest-test' ]];
 then
     TEST_IMAGE=harbor.internal.moqi.ai/mqdb/mqdb-test-sqltest:3.0.0
     SCRIPTS="docker/myscale_test_script/sqltest-test.sh $CLEAN_CMD"
+elif [[ $TEST_NAME == 'unit-test' ]];
+then
+    TEST_IMAGE=harbor.internal.moqi.ai/mqdb/mqdb-test-base:3.0.0
+    SCRIPTS="docker/myscale_test_script/unit-test.sh $CLEAN_CMD"
 else
     echo "Please input the correct test name"
     exit 1
