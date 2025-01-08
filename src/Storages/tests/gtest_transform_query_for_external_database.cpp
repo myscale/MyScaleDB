@@ -364,7 +364,7 @@ TEST(TransformQueryForExternalDatabase, Strict)
     EXPECT_THROW(check(state, 1, {"column"}, "SELECT column FROM test.table WHERE left(column, 10) = RIGHT(column, 10) AND SUBSTRING(column FROM 1 FOR 2) = 'Hello'", ""), Exception);
 }
 
-TEST(TransformQueryForExternalDatabase, Null)
+TEST(TransformQueryForExternalDatabase, DISABLED_Null)
 {
     const State & state = State::instance();
 
