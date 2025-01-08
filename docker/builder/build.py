@@ -212,7 +212,10 @@ def prepare_build(compiler: str, arch: str, profile: str, build_type: str, with_
         cmake["-DCLICKHOUSE_OFFICIAL_BUILD"] = "ON"
 
     if package:
-        cmake["-DENABLE_TESTS"] = "OFF"
+        if with_test:
+            cmake["-DENABLE_TESTS"] = "ON"
+        else:
+            cmake["-DENABLE_TESTS"] = "OFF"
         cmake["-DENABLE_UTILS"] = "OFF"
         cmake["-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY"] = "ON"
         cmake["-DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY"] = "ON"

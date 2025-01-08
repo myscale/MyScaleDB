@@ -24,9 +24,8 @@ build_binary:
     when: always
     paths:
       - artifacts/*.deb
+      - artifacts/unit_tests_dbms
       - artifacts/performance_pack_*
-      - build/CMakeFiles/CMakeOutput.log
-      - build/CMakeFiles/CMakeError.log
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh

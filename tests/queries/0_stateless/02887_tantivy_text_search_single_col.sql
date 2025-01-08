@@ -186,7 +186,7 @@ CHECK TABLE simple_table_map;
 
 -- [Test Case 8]: search fts index on map with mapContains
 SELECT '[Test Case 8]: search fts index on map with mapContains';
-SELECT count(*) FROM simple_table_map WHERE mapContains(doc_map, 'Comics and Narratives');
+SELECT count(*) FROM simple_table_map WHERE mapContains(doc_map, 'Comics and Narratives') SETTINGS allow_experimental_analyzer=0;
 -- [Test Case 8]: check the query must read smaller than 5 granules (20 rows total; each granule has 2 rows)
 SYSTEM FLUSH LOGS;
 SELECT read_rows<=8 from system.query_log 

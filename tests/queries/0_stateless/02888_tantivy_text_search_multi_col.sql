@@ -280,7 +280,7 @@ INSERT INTO tbm VALUES(0,{'fruit cat':'An apple a day keeps', 'idiom':'The early
 ALTER TABLE tbm ADD INDEX multi_idx (mapKeys(col1), col2) TYPE fts('{ "mapKeys(col1)": { "tokenizer": { "type": "stem", "stop_word_filters": ["english"], "stem_languages": ["english"]} }, "col2": { "tokenizer": {"type": "simple"} } }') GRANULARITY 1;
 ALTER TABLE tbm MATERIALIZE INDEX multi_idx SETTINGS mutations_sync=2;
 
-SELECT count(*) FROM tbm WHERE mapContains(col1, 'nature pic');
+SELECT count(*) FROM tbm WHERE mapContains(col1, 'nature pic') SETTINGS allow_experimental_analyzer=0;
 SYSTEM FLUSH LOGS;
 SELECT read_rows==2 from system.query_log 
     WHERE query_kind ='Select'
