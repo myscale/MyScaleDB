@@ -4,7 +4,7 @@ from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 instance = cluster.add_instance("instance", stay_alive=True)
-path_to_index_ready_file = "/var/lib/clickhouse/data/default/test_load_vector_index_failed/all_1_1_0/vector_index_ready.vidx2"
+path_to_index_ready_file = "/var/lib/clickhouse/data/default/test_load_vector_index_failed/all_1_1_0/v1-vector_index_description.vidx3"
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +26,7 @@ def test_load_vector_index_failed(started_cluster):
     """
     )
 
-    instance.wait_for_log_line("index build complete")
+    instance.query("SYSTEM WAIT BUILDING VECTOR INDICES test_load_vector_index_failed;")
 
     instance.restart_clickhouse()
     time.sleep(3)
@@ -39,4 +39,4 @@ def test_load_vector_index_failed(started_cluster):
 
     instance.query("SELECT id, vector, distance(vector, [300.0, 300, 300]) AS dist FROM test_load_vector_index_failed ORDER BY dist LIMIT 10;")
 
-    assert instance.contains_in_log("Load vector index: 107")
+    assert instance.contains_in_log("Index is not in the ready state and cannot be loaded")

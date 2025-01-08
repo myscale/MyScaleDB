@@ -24,6 +24,7 @@ def test_drop_index_cancel_building_index(started_cluster):
     INSERT INTO test_drop_index SELECT number, randomPrintableASCII(80), range(512) FROM numbers(500000);
     optimize table test_drop_index final;
     ALTER TABLE test_drop_index ADD VECTOR INDEX v1 vector TYPE IVFFLAT;
+    SYSTEM START BUILD VECTOR INDICES;
     """
     )
 
@@ -36,7 +37,6 @@ def test_drop_index_cancel_building_index(started_cluster):
 
     instance.query("DROP TABLE IF EXISTS test_drop_index")
 
-@pytest.mark.skip(reason="integration search-index bug")
 def test_drop_table_cancel_building_index(started_cluster):
     instance.query(
         """
@@ -45,6 +45,7 @@ def test_drop_table_cancel_building_index(started_cluster):
     INSERT INTO test_drop_table SELECT number, randomPrintableASCII(80), range(768) FROM numbers(500000);
     optimize table test_drop_table final;
     ALTER TABLE test_drop_table ADD VECTOR INDEX v1 vector TYPE IVFFLAT;
+    SYSTEM START BUILD VECTOR INDICES;
     """
     )
 
@@ -64,7 +65,7 @@ def test_drop_table_release_index_cache(started_cluster):
     """
     )
 
-    instance.wait_for_log_line("index build complete")
+    instance.query("SYSTEM WAIT BUILDING VECTOR INDICES test_drop_table_release_cache;")
 
     assert instance.query("select status from system.vector_indices where database = currentDatabase() and table = 'test_drop_table_release_cache'") == "Built\n"
     instance.query("DROP TABLE test_drop_table_release_cache SYNC")

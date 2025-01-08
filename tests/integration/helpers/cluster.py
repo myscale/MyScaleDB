@@ -78,6 +78,12 @@ CLICKHOUSE_ERROR_LOG_FILE = "/var/log/clickhouse-server/clickhouse-server.err.lo
 # This means that this minimum need to be, at least, 1 year older than the current release
 CLICKHOUSE_CI_MIN_TESTED_VERSION = "23.3"
 
+HTTP_PROXY_ENV_MAP = {
+    "http_proxy": "http://clash.internal.moqi.ai:7890",
+    "https_proxy": "http://clash.internal.moqi.ai:7890",
+    "no_proxy": "localhost,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,git.moqi.ai,.internal.moqi.ai",
+}
+
 
 # to create docker-compose env file
 def _create_env_file(path, variables):
@@ -1742,6 +1748,7 @@ class ClickHouseCluster:
         copy_common_configs=True,
         config_root_name="clickhouse",
         extra_configs=[],
+        with_proxy=False,
     ) -> "ClickHouseInstance":
         """Add an instance to the cluster.
 
@@ -1846,6 +1853,7 @@ class ClickHouseCluster:
             mem_limit=mem_limit,
             config_root_name=config_root_name,
             extra_configs=extra_configs,
+            with_proxy=with_proxy,
         )
 
         docker_compose_yml_dir = get_docker_compose_path()
@@ -3437,6 +3445,7 @@ class ClickHouseInstance:
         mem_limit=None,
         config_root_name="clickhouse",
         extra_configs=[],
+        with_proxy=False,
     ):
         self.name = name
         self.base_cmd = cluster.base_cmd
@@ -3521,6 +3530,8 @@ class ClickHouseInstance:
         self.docker_compose_path = p.join(self.path, "docker-compose.yml")
         self.env_variables = env_variables or {}
         self.instance_env_variables = instance_env_variables
+        if with_proxy:
+            self.env_variables.update(HTTP_PROXY_ENV_MAP)
         self.env_file = self.cluster.env_file
         if with_odbc_drivers:
             self.odbc_ini_path = self.path + "/odbc.ini:/etc/odbc.ini"
@@ -4572,12 +4583,15 @@ class ClickHouseInstance:
             use_old_analyzer = self.use_old_analyzer
         if use_old_analyzer:
             write_embedded_config("0_common_enable_old_analyzer.xml", users_d_dir)
+        else:
+            write_embedded_config("0_common_enable_analyzer.xml", users_d_dir)
 
         if len(self.custom_dictionaries_paths):
             write_embedded_config("0_common_enable_dictionaries.xml", self.config_d_dir)
 
         version = None
-        version_parts = self.tag.split(".")
+        # version_parts = self.tag.split(".")
+        version_parts = ["24", "8", "8", "1"]
         if version_parts[0].isdigit() and version_parts[1].isdigit():
             version = {"major": int(version_parts[0]), "minor": int(version_parts[1])}
 
