@@ -124,8 +124,8 @@ build_package:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-x86_64 --package
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release --arch linux-aarch64 --package
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_COMMIT_TAG
@@ -156,8 +156,8 @@ build_release_package:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-x86_64 --package
+    - docker/builder/build.py --output artifacts --build-type Release --profile release --arch linux-aarch64 --package
 
 build_package_with_license:
   stage: package
@@ -180,8 +180,8 @@ build_package_with_license:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-x86_64 --package
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_license --arch linux-aarch64 --package
 
 build_package_with_ami_license:
   stage: package
@@ -204,8 +204,8 @@ build_package_with_ami_license:
   retry: 2
   script:
     - docker/builder/tools/submodule-update.sh
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-x86_64 --package --compiler "clang-15"
-    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-aarch64 --package --compiler "clang-15"
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-x86_64 --package
+    - docker/builder/build.py --output artifacts --build-type RelWithDebInfo --profile release_with_ami_license --arch linux-aarch64 --package
 
 build_image:
   stage: image
