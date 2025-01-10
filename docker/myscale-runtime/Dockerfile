@@ -1,4 +1,4 @@
-# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:3.0.0 . --push
+# docker buildx build --platform linux/amd64,linux/arm64 --rm=true -t harbor.internal.moqi.ai/mqdb/runtime:3.0.1 . --push
 FROM ubuntu:22.04
 
 ARG TARGETARCH
@@ -39,6 +39,6 @@ RUN export LLVM_PUBKEY_HASH="bda960a8da687a275a2078d43c111d66b1c6a893a3275271bee
     && echo "deb https://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-${LLVM_VERSION} main" >> \
         /etc/apt/sources.list \
     && apt-get update \
-    && apt install libomp5-${LLVM_VERSION} libopenblas-dev llvm-${LLVM_VERSION} --yes \
+    && apt install libomp5-${LLVM_VERSION} libopenblas-dev --yes \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/debconf /tmp/*
