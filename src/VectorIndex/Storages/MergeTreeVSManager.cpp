@@ -1041,11 +1041,26 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     const ColumnArray * array = checkAndGetColumn<ColumnArray>(one_column.get());
                     const IColumn & src_data = array->getData();
                     const ColumnArray::Offsets & __restrict offsets = array->getOffsets();
-                    const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-                    const PaddedPODArray<Float32> & __restrict src_vec = src_data_concrete->getData();
 
-                    if (src_vec.empty())
-                        continue;
+                    const DB::PaddedPODArray<Float32> * src_vec_f32 = nullptr;
+                    const DB::PaddedPODArray<BFloat16> * src_vec_bf16 = nullptr;
+
+                    if (checkAndGetColumn<DB::ColumnFloat32>(&src_data))
+                    {
+                        const DB::ColumnFloat32 * src_data_concrete = checkAndGetColumn<DB::ColumnFloat32>(&src_data);
+                        src_vec_f32 = &src_data_concrete->getData();
+                        if (src_vec_f32->empty())
+                            continue;
+                    }
+                    else if (checkAndGetColumn<DB::ColumnBFloat16>(&src_data))
+                    {
+                        const DB::ColumnBFloat16 * src_data_concrete = checkAndGetColumn<DB::ColumnBFloat16>(&src_data);
+                        src_vec_bf16 = &src_data_concrete->getData();
+                        if (src_vec_bf16->empty())
+                            continue;
+                    }
+                    else
+                        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
 
                     total_rows = offsets.size();
                     actual_id_in_range.reserve(total_rows);
@@ -1076,15 +1091,20 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                             size_t vec_end_offset = offsets[current_rows_in_mark];
                             if(vec_start_offset != vec_end_offset)
                             {
-                                for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
-                                    vector_raw_data.emplace_back(src_vec[offset]);
-
-                                LOG_TRACE(
-                                    get_logger(),
-                                    "current_rows_in_range:{}, i:{}, src_vec[vec_start_offset]:{}",
-                                    current_rows_in_range,
-                                    i,
-                                    src_vec[vec_start_offset]);
+                                if (src_vec_f32)
+                                {
+                                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                                    {
+                                        vector_raw_data.emplace_back((*src_vec_f32)[offset]);
+                                    }
+                                }
+                                else if (src_vec_bf16)
+                                {
+                                    for (size_t offset = vec_start_offset; offset < vec_end_offset; ++offset)
+                                    {
+                                        vector_raw_data.emplace_back(Float32((*src_vec_bf16)[offset]));
+                                    }
+                                }
 
                                 actual_id_in_range.emplace_back(current_rows_in_range);
                                 mark_left_rows ++;
@@ -1293,16 +1313,31 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                 const ColumnArray::Offsets & offsets = array->getOffsets();
                 total_rows = offsets.size();
 
-                const ColumnFloat32 * src_data_concrete = checkAndGetColumn<ColumnFloat32>(&src_data);
-                if (!src_data_concrete)
-                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
-                const PaddedPODArray<Float32> & src_vec = src_data_concrete->getData();
+                const PaddedPODArray<Float32> * src_vec_f32 = nullptr;
+                const PaddedPODArray<BFloat16> * src_vec_bf16 = nullptr;
 
-                if (src_vec.empty())
+                if (checkAndGetColumn<DB::ColumnFloat32>(&src_data))
                 {
-                    num_rows_read += num_rows;
-                    continue;
+                    const DB::ColumnFloat32 * src_data_concrete = checkAndGetColumn<DB::ColumnFloat32>(&src_data);
+                    src_vec_f32 = &src_data_concrete->getData();
+                    if (src_vec_f32->empty())
+                    {
+                        num_rows_read += num_rows;
+                        continue;
+                    }
                 }
+                else if (checkAndGetColumn<DB::ColumnBFloat16>(&src_data))
+                {
+                    const DB::ColumnBFloat16 * src_data_concrete = checkAndGetColumn<DB::ColumnBFloat16>(&src_data);
+                    src_vec_bf16 = &src_data_concrete->getData();
+                    if (src_vec_bf16->empty())
+                    {
+                        num_rows_read += num_rows;
+                        continue;
+                    }
+                }
+                else
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Bad type of column {}", cols.back().name);
 
                 vector_raw_data.assign(total_rows * dim, std::numeric_limits<typename VectorIndex::SearchIndexDataTypeMap<T>::VectorDatasetType>().max());
                 for (size_t row = 0; row < total_rows; row++)
@@ -1313,7 +1348,7 @@ VectorScanResultPtr MergeTreeVSManager::vectorScanWithoutIndex(
                     {
                         for (size_t offset = vec_start_offset; offset < vec_end_offset && offset < vec_start_offset + dim; ++offset)
                         {
-                            vector_raw_data[row * dim + offset - vec_start_offset] = src_vec[offset];
+                            vector_raw_data[row * dim + offset - vec_start_offset] = src_vec_f32 ? (*src_vec_f32)[offset] : Float32((*src_vec_bf16)[offset]);
                         }
                     }
                 }

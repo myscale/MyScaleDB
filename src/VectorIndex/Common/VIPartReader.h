@@ -196,12 +196,24 @@ protected:
             }
             const DB::IColumn &src_data = array->getData();
             const DB::ColumnArray::Offsets &offsets = array->getOffsets();
-            const DB::ColumnFloat32 *src_data_concrete = DB::checkAndGetColumn<DB::ColumnFloat32>(&src_data);
-            if (!src_data_concrete)
+
+            const DB::PaddedPODArray<Float32> * src_vec_f32 = nullptr;
+            const DB::PaddedPODArray<BFloat16> * src_vec_bf16 = nullptr;
+
+            if (DB::checkAndGetColumn<DB::ColumnFloat32>(&src_data))
             {
-                throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column inner type in Array is not Float32 in part {}", part->name);
+                const DB::ColumnFloat32 *src_data_concrete = DB::checkAndGetColumn<DB::ColumnFloat32>(&src_data);
+                src_vec_f32 = &src_data_concrete->getData();
             }
-            const DB::PaddedPODArray<Float32> &src_vec = src_data_concrete->getData();
+            else if (DB::checkAndGetColumn<DB::ColumnBFloat16>(&src_data))
+            {
+                const DB::ColumnBFloat16 *src_data_concrete = DB::checkAndGetColumn<DB::ColumnBFloat16>(&src_data);
+                src_vec_bf16 = &src_data_concrete->getData();
+            }
+            else
+            {
+                throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Vector column inner type in Array is not Float32 or BFloat16 in part {}", part->name);
+            }
 
             total_rows = offsets.size();
             if (total_rows == 0)
@@ -219,10 +231,21 @@ protected:
                 if (vec_start_offset != vec_end_offset)
                 {
                     /// Legal vector, copy it to the result
-                    for (size_t i = 0; i < dimension && i < vec_end_offset - vec_start_offset; ++i)
+                    if (src_vec_f32)
                     {
-                        vector_raw_data[row * dimension + i] = src_vec[vec_start_offset + i];
+                        for (size_t i = 0; i < dimension && i < vec_end_offset - vec_start_offset; ++i)
+                        {
+                            vector_raw_data[row * dimension + i] = (*src_vec_f32)[vec_start_offset + i];
+                        }
                     }
+                    else if (src_vec_bf16)
+                    {
+                        for (size_t i = 0; i < dimension && i < vec_end_offset - vec_start_offset; ++i)
+                        {
+                            vector_raw_data[row * dimension + i] = Float32((*src_vec_bf16)[vec_start_offset + i]);
+                        }
+                    }
+
                     ids[row] = current_round_start_row + row;
                 } else
                 {

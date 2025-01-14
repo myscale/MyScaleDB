@@ -54,16 +54,17 @@ Search::DataType getSearchIndexDataType(DataTypePtr &data_type)
             if (array_type)
             {
                 WhichDataType which(array_type->getNestedType());
-                if (!which.isFloat32())
-                    throw Exception(ErrorCodes::INCORRECT_DATA, "The element type inside the array must be `Float32`");
-                return Search::DataType::FloatVector;
+                if (which.isFloat32() || which.isBFloat16())
+                    return Search::DataType::FloatVector;
+                else
+                    throw Exception(ErrorCodes::INCORRECT_DATA, "The element type inside the array must be `Float32` or `BFloat16`");
             }
             break;
         }
         case TypeIndex::FixedString:
             return Search::DataType::BinaryVector;
         default:
-            throw Exception(ErrorCodes::INCORRECT_DATA, "Vector search can be used with `Array(Float32)` or `FixedString` column");
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Vector search supports `Array(Float32)`, `Array(BFloat16)`, or `FixedString` columns only");
     }
 
     throw Exception(ErrorCodes::INCORRECT_DATA, "Unsupported Vector search Type");
