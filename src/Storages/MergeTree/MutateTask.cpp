@@ -42,6 +42,7 @@
 #endif
 #include <VectorIndex/Common/VICommon.h>
 #include <VectorIndex/Common/SegmentsMgr.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 
 namespace ProfileEvents
@@ -1186,6 +1187,8 @@ struct MutationContext
 
     /// need rebuild vector index
     NameSet rebuild_vector_index_column;
+    /// need hardlink vector index files
+    NameSet hardlink_vector_index_files;
 };
 
 using MutationContextPtr = std::shared_ptr<MutationContext>;
@@ -1806,6 +1809,10 @@ private:
         /// Create hardlinks for unchanged files
         for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
         {
+            /// Skip files that are not in the list of files to hardlink
+            if (endsWith(it->name(), ".vidx3") && !ctx->hardlink_vector_index_files.contains(it->name()))
+                continue;
+
             if (!entries_to_hardlink.contains(it->name()))
             {
                 if (renamed_stats.contains(it->name()))
@@ -2065,6 +2072,10 @@ private:
                 /// RENAMEs and DROPs already processed
                 continue;
             }
+
+            /// Skip vector index files if they are not in the list of files to hardlink
+            if (endsWith(it->name(), ".vidx3") && !ctx->hardlink_vector_index_files.contains(it->name()))
+                continue;
 
             String destination = it->name();
 
@@ -2422,7 +2433,7 @@ bool MutateTask::prepare()
     }
     ctx->move_index_read_lock = ctx->source_part->segments_mgr->tryLockSegmentsTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
     ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands);
-
+    ctx->hardlink_vector_index_files = VectorIndex::getAllValidVectorIndexFileNames(*ctx->source_part);
     /// Avoid to call isStorageTouchedByMutations() for optimized lightweight delete, instead get the deleted row ids.
     bool is_storage_touched_by_mutations = true;
     if (ctx->source_part->isStoredOnDisk())
