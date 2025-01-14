@@ -401,7 +401,7 @@ bool BaseSegment::containCachedSegmentKey(const CachedSegmentKey & cache_key) co
 
 void BaseSegment::removeVIFiles(bool remove_checksums_file)
 {
-    LOG_DEBUG(log, "Remove vector index files, part: {}", getOwnPartName());
+    LOG_DEBUG(log, "Remove vector index files for single part: {}", getOwnPartName());
     if (vi_checksum == nullptr)
     {
         LOG_DEBUG(log, "Vector index checksum is nullptr, no vi files need to be remove, part: {}", getOwnPartName());
@@ -1085,15 +1085,6 @@ SegmentInfoPtrList DecoupleSegment<data_type>::getSegmentInfoList() const
     auto cur_info = SimpleSegment<data_type>::getSegmentInfoList().front();
     res.insert(res.begin(), cur_info);
     return res;
-}
-
-template <Search::DataType data_type>
-void DecoupleSegment<data_type>::removeVIFiles(bool remove_checksums_file)
-{
-    segments[0]->removeVIFiles(remove_checksums_file);
-    auto lock_part = this->getDataPart();
-    if (!lock_part->segments_mgr->containDecoupleSegment())
-        MergeIdMaps::removeMergedMapsFiles(*lock_part);
 }
 
 template class SimpleSegment<Search::DataType::FloatVector>;

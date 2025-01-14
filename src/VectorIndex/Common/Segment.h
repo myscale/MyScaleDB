@@ -206,7 +206,7 @@ public:
         return lock_part;
     }
 
-    virtual void removeVIFiles(bool remove_checksums_file = false);
+    void removeVIFiles(bool remove_checksums_file = false);
 
     bool containCachedSegmentKey(const CachedSegmentKey & cache_key) const;
 
@@ -370,7 +370,15 @@ public:
         const MergeTreeDataPartWeakPtr part,
         const std::vector<std::shared_ptr<SimpleSegment<data_type>>> & segments_);
 
-    ~DecoupleSegment() override = default;
+    ~DecoupleSegment() override
+    {
+        if (this->flag_vi_expired.isVIFIleExpired())
+        {
+            auto lock_part = this->getDataPart();
+            if (!lock_part->segments_mgr->containDecoupleSegment())
+                MergeIdMaps::removeMergedMapsFiles(*lock_part);
+        }
+    }
 
     SegmentPtr mutation(const MergeTreeDataPartPtr new_data_part) override;
 
@@ -407,13 +415,12 @@ public:
             seg->removeMemoryRecords();
     }
 
-    void removeVIFiles(bool remove_checksums_file = false) override;
-
     void setVIExpiredFlag(UInt8 flag) override
     {
         /// for decouple seg, we need to set flag for all sub segs
         for (const auto & seg : segments)
             seg->setVIExpiredFlag(flag);
+        this->flag_vi_expired.setVIExpiredFlag(flag);
     }
 
     MergeIdMapsPtr getOrInitMergeMaps(bool need_initialize = true)
