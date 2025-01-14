@@ -84,6 +84,7 @@
 #include <Planner/CollectColumnIdentifiers.h>
 #include <Planner/PlannerQueryProcessingInfo.h>
 
+#include <VectorIndex/Analyzer/SpecialSearchFunctionsUtils.h>
 namespace ProfileEvents
 {
     extern const Event SelectQueriesWithSubqueries;
@@ -1396,6 +1397,29 @@ void Planner::buildPlanForQueryNode()
     select_query_info.has_aggregates = hasAggregateFunctionNodes(query_tree);
     select_query_info.need_aggregate = query_node.hasGroupBy() || select_query_info.has_aggregates;
     select_query_info.merge_tree_enable_remove_parts_from_snapshot_optimization = select_query_options.merge_tree_enable_remove_parts_from_snapshot_optimization;
+
+    /// Analyze vector scan, text search and hybrid search
+    auto special_search_analysis_result_optional = analyzeSpecialSearch(query_tree, query_context);
+    if (special_search_analysis_result_optional)
+    {
+        if (special_search_analysis_result_optional->has_vector_scan)
+        {
+            select_query_info.vector_scan_info = std::make_shared<VectorScanInfo>(special_search_analysis_result_optional->vector_scan_descriptions);
+            select_query_info.has_hybrid_search = true;
+        }
+
+        if (special_search_analysis_result_optional->has_text_search)
+        {
+            select_query_info.text_search_info = special_search_analysis_result_optional->text_search_info;
+            select_query_info.has_hybrid_search = true;
+        }
+
+        if (special_search_analysis_result_optional->has_hybrid_search)
+        {
+            select_query_info.hybrid_search_info = special_search_analysis_result_optional->hybrid_search_info;
+            select_query_info.has_hybrid_search = true;
+        }
+    }
 
     if (!select_query_info.has_window && query_node.hasQualify())
     {

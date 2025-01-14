@@ -68,6 +68,8 @@
 
 #include <Core/Settings.h>
 
+#include <VectorIndex/Analyzer/SpecialSearchFunction.h>
+
 namespace ProfileEvents
 {
     extern const Event ScalarSubqueriesGlobalCacheHit;
@@ -2557,6 +2559,50 @@ ProjectionNames QueryAnalyzer::resolveLambda(const QueryTreeNodePtr & lambda_nod
     return result_projection_names;
 }
 
+ProjectionName QueryAnalyzer::resolveHybridFunction(QueryTreeNodePtr & hybrid_function_node,
+    const Array & parameters,
+    const ColumnsWithTypeAndName & argument_columns,
+    IdentifierResolveScope & scope)
+{
+    /// Special handling of `distance`, `batch_distance`, 'textsearch` and `hybridsearch` functions
+    FunctionNodePtr function_node_ptr = std::static_pointer_cast<FunctionNode>(hybrid_function_node);
+    auto function_name = function_node_ptr->getFunctionName();
+    size_t function_arguments_size = argument_columns.size();
+
+    if (isVectorScanFunc(function_name))
+    {
+        if (function_arguments_size != 2)
+            throw Exception(ErrorCodes::UNSUPPORTED_METHOD,
+                "Function '{}' must have 2 arguments. In scope {}", function_name, scope.scope_node->formatASTForErrorMessage());
+    }
+    else if (isTextSearch(function_name))
+    {
+        if (function_arguments_size != 2)
+            throw Exception(ErrorCodes::UNSUPPORTED_METHOD,
+                "Function '{}' must have 2 arguments. In scope {}", function_name, scope.scope_node->formatASTForErrorMessage());
+    }
+    else if (isHybridSearch(function_name))
+    {
+        if (function_arguments_size != 4)
+            throw Exception(ErrorCodes::UNSUPPORTED_METHOD,
+                "Function '{}' must have 4 arguments. In scope {}", function_name,  scope.scope_node->formatASTForErrorMessage());
+    }
+
+    DataTypes argument_types;
+    argument_types.reserve(argument_columns.size());
+
+    for (const auto & argument_column : argument_columns)
+    {
+        LOG_DEBUG(getLogger("resolveHybridFunction"), "argument column name is {}", argument_column.name);
+        argument_types.emplace_back(argument_column.type);
+    }
+
+    auto search_function = std::make_shared<SpecialSearchFunction>(function_name, argument_types, parameters, argument_columns);
+    function_node_ptr->resolveAsSpecialSearchFunction(search_function);
+
+    return function_name + "_func";
+}
+
 namespace
 {
 void checkFunctionNodeHasEmptyNullsAction(FunctionNode const & node)
@@ -3140,6 +3186,16 @@ ProjectionNames QueryAnalyzer::resolveFunction(QueryTreeNodePtr & node, Identifi
             auto grouping_function = std::make_shared<FunctionGrouping>(force_grouping_standard_compatibility);
             auto grouping_function_adaptor = std::make_shared<FunctionToOverloadResolverAdaptor>(std::move(grouping_function));
             function_node.resolveAsFunction(grouping_function_adaptor->build(argument_columns));
+
+            return result_projection_names;
+        }
+        else if (isHybridSearchFunc(function_name))
+        {
+            ProjectionName hybrid_projection_name = resolveHybridFunction(node, parameters, argument_columns, scope);
+
+            /// result project name is like `distance_func`
+            result_projection_names.clear();
+            result_projection_names.push_back(hybrid_projection_name);
 
             return result_projection_names;
         }
@@ -5602,6 +5658,9 @@ void QueryAnalyzer::resolveQuery(const QueryTreeNodePtr & query_node, Identifier
 
     validateFilters(query_node);
     validateAggregates(query_node, { .group_by_use_nulls = scope.group_by_use_nulls });
+
+    /// Validate hybrid search functions in query
+    validateHybridSearchFuncs(query_node);
 
     for (const auto & column : projection_columns)
     {

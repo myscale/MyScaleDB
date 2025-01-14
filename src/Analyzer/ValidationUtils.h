@@ -25,6 +25,15 @@ struct AggregatesValidationParams
   */
 void validateAggregates(const QueryTreeNodePtr & query_node, AggregatesValidationParams params);
 
+/** Validate hybrid search functions in query node.
+  *
+  * 1. Check that there are only one hybrid search function: distance, textsearch or hybridsearch.
+  * 2. Check that there are ORDER BY and LIMIT clauses with hybrid search function.
+  * 3. Check that there is a hybrid search function column in ORDER BY.
+  * 4. Check that the sort direction of hybrid search function is correct.
+  */
+void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node);
+
 /** Assert that there are no function nodes with specified function name in node children.
   * Do not visit subqueries.
   */

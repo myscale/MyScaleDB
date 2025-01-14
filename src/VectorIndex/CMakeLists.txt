@@ -1,4 +1,5 @@
 add_headers_and_sources(clickhouse_vector_index .)
+add_headers_and_sources(clickhouse_vector_index Analyzer)
 add_headers_and_sources(clickhouse_vector_index Common)
 add_headers_and_sources(clickhouse_vector_index Interpreters)
 add_headers_and_sources(clickhouse_vector_index Parsers)

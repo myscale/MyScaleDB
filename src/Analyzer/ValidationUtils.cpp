@@ -9,6 +9,13 @@
 #include <Analyzer/AggregationUtils.h>
 #include <Analyzer/WindowFunctionsUtils.h>
 
+#include <Analyzer/SortNode.h>
+#include <Storages/IStorage.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
+#include <VectorIndex/Analyzer/SpecialSearchFunctionsUtils.h>
+#include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Utils/CommonUtils.h>
+
 namespace DB
 {
 
@@ -357,6 +364,156 @@ void validateAggregates(const QueryTreeNodePtr & query_node, AggregatesValidatio
         query_node_typed.isGroupByWithGroupingSets();
     if (!has_aggregation && (query_node_typed.isGroupByWithTotals() || aggregation_with_rollup_or_cube_or_grouping_sets))
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "WITH TOTALS, ROLLUP, CUBE or GROUPING SETS are not supported without aggregation");
+}
+
+void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node)
+{
+    const auto & query_node_typed = query_node->as<QueryNode &>();
+
+    QueryTreeNodes hybrid_function_nodes;
+    collectHybridSearchFunctionNodes(query_node, hybrid_function_nodes);
+
+    if (hybrid_function_nodes.size() == 0)
+        return;
+
+    if (hybrid_function_nodes.size() > 1)
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Not support more than one function among vector scan, text search, or hybrid search in one query now");
+
+    auto * function_node = hybrid_function_nodes[0]->as<FunctionNode>();
+    if (!function_node)
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Invalid hybrid search function");
+
+    String func_name = function_node->getFunctionName();
+
+    if (!query_node_typed.hasOrderBy())
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", func_name);
+
+    bool is_batch = isBatchDistance(func_name);
+    if (is_batch && !query_node_typed.hasLimitByLimit())
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch {} function without LIMIT N BY clause", func_name);
+    else if (!is_batch && !query_node_typed.hasLimit())
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT N clause", func_name);
+
+    /// Further check if hybrid search function column exists in ORDER BY
+    if (!hasHybridSearchFunctionNodes(query_node_typed.getOrderByNode()))
+        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", func_name);
+
+    /// Some checks in collectForXXXSearchFunctions()
+    /// Get search column from argument
+    QueryTreeNodePtr vector_col_node;
+    QueryTreeNodePtr text_col_node;
+    bool has_vector = false, has_text = false;
+    QueryTreeNodes argument_nodes = function_node->getArguments().getNodes();
+    if (isTextSearch(func_name))
+    {
+        has_text = true;
+        text_col_node = argument_nodes[0];
+    }
+    else if (isVectorScanFunc(func_name))
+    {
+        has_vector = true;
+        vector_col_node = argument_nodes[0];
+    }
+    else if (isHybridSearch(func_name))
+    {
+        has_vector = true;
+        has_text = true;
+
+        vector_col_node = argument_nodes[0];
+        text_col_node = argument_nodes[1];
+    }
+
+    /// Check search column data type
+    if (has_text)
+    {
+        bool is_mapkeys = false;
+
+        auto * text_column = text_col_node->as<ColumnNode>();
+        if (!text_column)
+        {
+            /// Check mapKeys for text column
+            if (auto * text_function_node = text_col_node->as<FunctionNode>())
+            {
+                if ((text_function_node->getFunctionName() == "mapKeys") && text_function_node->getArguments().getNodes().size() == 1)
+                {
+                    text_column = text_function_node->getArguments().getNodes()[0]->as<ColumnNode>();
+                    is_mapkeys = true;
+                }
+            }
+        }
+
+        if (!text_column)
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "The {} argument of {} function should be text column name", has_vector ? "second" : "first", func_name);
+
+        DataTypePtr search_text_column_type = text_column->getColumnType();
+        checkTextSearchColumnDataType(search_text_column_type, is_mapkeys);
+    }
+
+    /// Check sort direction of hybrid search function column
+    /// reference QueryAnalyzer::resolveSortNodeList()
+    SortDirection sort_direction = SortDirection::ASCENDING;
+    auto & sort_node_list_typed = query_node_typed.getOrderByNode()->as<ListNode &>();
+    for (auto & node : sort_node_list_typed.getNodes())
+    {
+        auto & sort_node = node->as<SortNode &>();
+        auto * function_expression = sort_node.getExpression()->as<FunctionNode>();
+        if (!function_expression || !isHybridSearchFunc(function_expression->getFunctionName()))
+            continue;
+        sort_direction = sort_node.getSortDirection();
+    }
+
+    if (has_text)
+    {
+        if (sort_direction == SortDirection::ASCENDING)
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "The results returned by the {} function should be ordered by `DESC`", func_name);
+    }
+    else if (has_vector)
+    {
+        auto * vector_column = vector_col_node->as<ColumnNode>();
+        if (!vector_column)
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "The {} argument of {} function should be vector column name", has_text ? "second" : "first", func_name);
+
+        /// The sort direction of vector scan function is related to metric_type
+        String vec_col_name = vector_column->getColumnName();
+
+        StorageMetadataPtr metadata_snapshot = nullptr;
+        bool table_is_remote = false;
+
+        auto vector_column_source = vector_column->getColumnSourceOrNull();
+        if (vector_column_source)
+        {
+            auto node_type = vector_column_source->getNodeType();
+            if (node_type == QueryTreeNodeType::TABLE)
+            {
+                if (auto * table_node = vector_column_source->as<TableNode>())
+                {
+                    const auto & table_storage = table_node->getStorage();
+                    if (table_storage)
+                    {
+                        metadata_snapshot = table_storage->getInMemoryMetadataPtr();
+                        table_is_remote = table_storage->isRemote();
+                    }
+                }
+            }
+        }
+
+        if (!table_is_remote)
+        {
+            DataTypePtr search_vector_column_type = vector_column->getColumnType();
+            auto vector_search_type = getSearchIndexDataType(search_vector_column_type);
+
+            String vector_scan_metric_type = getMetricType(metadata_snapshot, vector_search_type, vec_col_name, query_node_typed.getContext());
+            Poco::toUpperInPlace(vector_scan_metric_type);
+
+            if (vector_scan_metric_type == "IP")
+            {
+                if (sort_direction == SortDirection::ASCENDING)
+                    throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance DESC' when the metric type is IP");
+            }
+            else if (sort_direction == SortDirection::DESCENDING)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Use 'ORDER BY distance ASC' when the metric type is {}", vector_scan_metric_type);
+        }
+    }
 }
 
 namespace

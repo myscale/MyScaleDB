@@ -11,6 +11,8 @@ enum class DataType;
 
 namespace DB
 {
+struct StorageInMemoryMetadata;
+using StorageMetadataPtr = std::shared_ptr<const StorageInMemoryMetadata>;
 
 const String BATCH_DISTANCE_FUNCTION = "batch_distance";
 const String DISTANCE_FUNCTION = "distance";
@@ -83,6 +85,8 @@ inline bool isScoreColumnName(const String & col_name)
 }
 
 Search::DataType getSearchIndexDataType(DataTypePtr &data_type);
+
+String getMetricType(StorageMetadataPtr & metadata_snapshot, Search::DataType & vector_search_type, String & vec_col_name, ContextPtr context);
 
 void checkVectorDimension(const Search::DataType & search_type, const uint64_t & dim);
 

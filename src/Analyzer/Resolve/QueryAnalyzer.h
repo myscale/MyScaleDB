@@ -8,6 +8,7 @@
 
 #include <Core/Joins.h>
 #include <Core/NamesAndTypes.h>
+#include <Core/ColumnsWithTypeAndName.h>
 
 #include <Parsers/NullsAction.h>
 
@@ -207,6 +208,11 @@ private:
     ProjectionNames resolveLambda(const QueryTreeNodePtr & lambda_node,
         const QueryTreeNodePtr & lambda_node_to_resolve,
         const QueryTreeNodes & lambda_arguments,
+        IdentifierResolveScope & scope);
+
+    ProjectionName resolveHybridFunction(QueryTreeNodePtr & hybrid_function_node,
+        const Array & parameters,
+        const ColumnsWithTypeAndName & argument_columns,
         IdentifierResolveScope & scope);
 
     ProjectionNames resolveFunction(QueryTreeNodePtr & function_node, IdentifierResolveScope & scope);

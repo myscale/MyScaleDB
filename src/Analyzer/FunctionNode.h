@@ -12,6 +12,9 @@
 #include <Parsers/NullsAction.h>
 #include <Common/typeid_cast.h>
 
+#include <Planner/TableExpressionData.h>
+#include <VectorIndex/Analyzer/SpecialSearchFunction.h>
+
 namespace DB
 {
 
@@ -51,6 +54,7 @@ enum class FunctionKind : UInt8
     ORDINARY,
     AGGREGATE,
     WINDOW,
+    SPECIAL_SEARCH,
 };
 
 class FunctionNode final : public IQueryTreeNode
@@ -143,9 +147,20 @@ public:
       */
     AggregateFunctionPtr getAggregateFunction() const
     {
-        if (kind == FunctionKind::UNKNOWN || kind == FunctionKind::ORDINARY)
+        if (kind == FunctionKind::UNKNOWN || kind == FunctionKind::ORDINARY || kind == FunctionKind::SPECIAL_SEARCH)
             return {};
         return std::static_pointer_cast<const IAggregateFunction>(function);
+    }
+
+    /** Get special search function.
+      * If function is not resolved nullptr returned.
+      * If function is resolved as non special search function nullptr returned.
+      */
+    ConstSpecialSearchFunctionPtr getSpecialSearchFunction() const
+    {
+        if (kind != FunctionKind::SPECIAL_SEARCH)
+            return {};
+        return std::static_pointer_cast<const SpecialSearchFunction>(function);
     }
 
     /// Is function node resolved
@@ -159,6 +174,9 @@ public:
 
     /// Is function node ordinary function
     bool isOrdinaryFunction() const { return kind == FunctionKind::ORDINARY; }
+
+    /// Is function node special search function
+    bool isSpecialSearchFunction() const { return kind == FunctionKind::SPECIAL_SEARCH; }
 
     /** Resolve function node as non aggregate function.
       * It is important that function name is updated with resolved function name.
@@ -184,6 +202,19 @@ public:
       * Main motivation for this is query tree optimizations.
       */
     void resolveAsWindowFunction(AggregateFunctionPtr window_function_value);
+
+    /** Resolve function node as special search function.
+      * It is important that function name is updated with resolved function name.
+      * Main motivation for this is query tree optimizations.
+      */
+    void resolveAsSpecialSearchFunction(SpecialSearchFunctionPtr special_search_function_value);
+
+    const ColumnIdentifier & getColumnIdentifier() const { return function_identifier_name; }
+
+    void setColumnIdentifier(const ColumnIdentifier & column_identifier)
+    {
+        function_identifier_name = column_identifier;
+    }
 
     QueryTreeNodeType getNodeType() const override { return QueryTreeNodeType::FUNCTION; }
 
@@ -225,6 +256,8 @@ private:
     NullsAction nulls_action = NullsAction::EMPTY;
     IResolvedFunctionPtr function;
     bool wrap_with_nullable = false;
+
+    ColumnIdentifier function_identifier_name; /// Used for special search function
 
     static constexpr size_t parameters_child_index = 0;
     static constexpr size_t arguments_child_index = 1;

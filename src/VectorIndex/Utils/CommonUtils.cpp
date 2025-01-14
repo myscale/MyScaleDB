@@ -7,9 +7,11 @@
 #include <Columns/ColumnFixedString.h>
 #include <Common/logger_useful.h>
 
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <SearchIndex/SearchIndexCommon.h>
 #include <VectorIndex/Storages/VSDescription.h>
 #include <VectorIndex/Utils/CommonUtils.h>
+#include <VectorIndex/Common/VICommon.h>
 
 #if USE_TANTIVY_SEARCH
 #    include <Columns/ColumnConst.h>
@@ -67,6 +69,55 @@ Search::DataType getSearchIndexDataType(DataTypePtr &data_type)
     }
 
     throw Exception(ErrorCodes::INCORRECT_DATA, "Unsupported Vector search Type");
+}
+
+String getMetricType(StorageMetadataPtr & metadata_snapshot, Search::DataType & vector_search_type, String & vec_col_name, ContextPtr context)
+{
+    /// The default value is float_vector_search_metric_type or binary_vector_search_metric_type in MergeTree, but we cannot get it here.
+    String metric_type;
+
+    if (metadata_snapshot)
+    {
+        /// Try to get from parameters of vector index on search vector column
+        for (const auto & vector_index_desc : metadata_snapshot->getVectorIndices())
+        {
+            if (vector_index_desc.column == vec_col_name)
+            {
+                const auto index_parameter = VectorIndex::convertPocoJsonToMap(vector_index_desc.parameters);
+                if (index_parameter.contains("metric_type"))
+                {
+                    /// Get metric_type in index definition
+                    metric_type = index_parameter.at("metric_type");
+                    break;
+                }
+            }
+        }
+
+        /// Try to get from storage settings in create table
+        if (metric_type.empty() && metadata_snapshot->hasSettingsChanges())
+        {
+            const auto settings_changes = metadata_snapshot->getSettingsChanges()->as<const ASTSetQuery &>().changes;
+            Field change_metric;
+            /// TODO: Try not to use string literals directly
+            if ((vector_search_type == Search::DataType::FloatVector && settings_changes.tryGet("float_vector_search_metric_type", change_metric)) ||
+                (vector_search_type == Search::DataType::BinaryVector && settings_changes.tryGet("binary_vector_search_metric_type", change_metric)))
+            {
+                metric_type = change_metric.safeGet<String>();
+            }
+        }
+    }
+
+    /// Try to get from merge tree settings in context
+    if (metric_type.empty())
+    {
+        const auto settings = context->getMergeTreeSettings();
+        if (vector_search_type == Search::DataType::FloatVector)
+            metric_type = settings.float_vector_search_metric_type.toString();
+        else if (vector_search_type == Search::DataType::BinaryVector)
+            metric_type = settings.binary_vector_search_metric_type.toString();
+    }
+
+    return metric_type;
 }
 
 void checkVectorDimension(const Search::DataType & search_type, const uint64_t & dim)

@@ -214,6 +214,17 @@ public:
                     in_function_second_argument_node_name = PlannerContext::createSetKey(in_first_argument_node->getResultType(), in_second_argument_node);
                 }
 
+                if (function_node.isSpecialSearchFunction())
+                {
+                    if (use_column_identifier_as_action_node_name)
+                        result = function_node.getColumnIdentifier();
+
+                    if (result.empty())
+                        result = function_node.getFunctionName();
+
+                    break;
+                }
+
                 WriteBufferFromOwnString buffer;
                 buffer << function_node.getFunctionName();
 
@@ -939,7 +950,7 @@ PlannerActionsVisitorImpl::NodeNameAndNodeMinLevel PlannerActionsVisitorImpl::vi
      * Moreover, it can lead to an error if we have arrayJoin in the arguments because it will be calculated twice.
      */
     bool is_input_node = function_node.isAggregateFunction() || function_node.isWindowFunction()
-        || actions_stack.front().containsInputNode(function_node_name);
+        || actions_stack.front().containsInputNode(function_node_name) || function_node.isSpecialSearchFunction();
     if (is_input_node)
     {
         size_t actions_stack_size = actions_stack.size();
