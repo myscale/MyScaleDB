@@ -274,19 +274,44 @@ VSDescription commonMakeVectorScanDescription(
             getAndCheckVectorScanInfoFromMetadata(metadata_snapshot, vector_scan_desc, context);
         }
         else
+        {
+            LOG_DEBUG(getLogger("commonMakeVectorScanDescription"), "query column node dump tree: {}", query_column->dumpTree());
             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "Unexpected node type for query column: {}", query_column->getNodeType());
+        }
     }
 
     if (query_vector)
     {
-        if (query_vector->getNodeType() == QueryTreeNodeType::CONSTANT)
+        const auto * constant_node = query_vector->as<ConstantNode>();
+        if (constant_node)
         {
             /// Construct ColumnPtr from Constant Node
-            const auto & query_vector_typed = query_vector->as<ConstantNode &>();
-            vector_scan_desc.query_column = query_vector_typed.getResultType()->createColumnConst(1, query_vector_typed.getValue());
+            vector_scan_desc.query_column = constant_node->getResultType()->createColumnConst(1, constant_node->getValue());
+        }
+        else if (const auto * get_scalar_function_node = query_vector->as<FunctionNode>();
+                get_scalar_function_node && get_scalar_function_node->getFunctionName() == "__getScalar")
+        {
+            /// Allow constant folding through getScalar
+            const auto * get_scalar_const_arg = get_scalar_function_node->getArguments().getNodes().at(0)->as<ConstantNode>();
+            if (get_scalar_const_arg && context->hasQueryContext())
+            {
+                auto query_context = context->getQueryContext();
+                auto scalar_string = toString(get_scalar_const_arg->getValue());
+                if (query_context->hasScalar(scalar_string))
+                {
+                    auto scalar = query_context->getScalar(scalar_string);
+                    vector_scan_desc.query_column = ColumnConst::create(scalar.getByPosition(0).column, 1);
+                }
+            }
+
+            if(!vector_scan_desc.query_column)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong query vector type {} in distance function", query_vector->getNodeType());
         }
         else
+        {
+            LOG_DEBUG(getLogger("commonMakeVectorScanDescription"), "query vector node dump tree: {}", query_vector->dumpTree());
             throw Exception(ErrorCodes::UNKNOWN_IDENTIFIER, "Unexpected node type for query vector: {}", query_vector->getNodeType());
+        }
     }
 
     LOG_DEBUG(getLogger("commonMakeVectorScanDescription"), "search column: {}", vector_scan_desc.search_column_name);
@@ -613,8 +638,11 @@ std::optional<SpecialSearchAnalysisResult> analyzeVectorScan(const QueryTreeNode
 {
     auto vector_scan_descs = extractVectorScanDescriptions(vector_scan_func_nodes, context, limit_length);
 
+    if (vector_scan_descs.empty())
+        return std::nullopt;
+
     SpecialSearchAnalysisResult vector_scan_analysis_result;
-    vector_scan_analysis_result.has_vector_scan = vector_scan_descs.size() > 0;
+    vector_scan_analysis_result.has_vector_scan = true;
     vector_scan_analysis_result.vector_scan_descriptions = std::move(vector_scan_descs);
     return vector_scan_analysis_result;
 }
@@ -638,6 +666,9 @@ std::optional<SpecialSearchAnalysisResult> analyzeHybridSearch(const QueryTreeNo
     const UInt64 & limit_length)
 {
     auto hybrid_search_info = makeHybirdSearchInfo(hybrid_search_func_nodes, context, limit_length);
+
+    if (!hybrid_search_info)
+        return std::nullopt;
 
     SpecialSearchAnalysisResult hybrid_search_analysis_result;
     hybrid_search_analysis_result.has_hybrid_search = true;
@@ -676,16 +707,41 @@ std::optional<SpecialSearchAnalysisResult> analyzeSpecialSearch(const QueryTreeN
 
     LOG_DEBUG(getLogger("analyzeSpecialSearch"), "search func node name={}", func_name);
 
+    std::optional<SpecialSearchAnalysisResult> special_search_analysis_result_optional = std::nullopt;
+
     if (isVectorScanFunc(func_name))
-        return analyzeVectorScan(special_search_function_nodes, context, limit_length);
+        special_search_analysis_result_optional = analyzeVectorScan(special_search_function_nodes, context, limit_length);
+    else if (isTextSearch(func_name))
+        special_search_analysis_result_optional = analyzeTextSearch(special_search_function_nodes, limit_length);
+    else if (isHybridSearch(func_name))
+        special_search_analysis_result_optional = analyzeHybridSearch(special_search_function_nodes, context, limit_length);
 
-    if (isTextSearch(func_name))
-        return analyzeTextSearch(special_search_function_nodes, limit_length);
+    /// Add source column of vector column or text column to analysis result
+    if (special_search_analysis_result_optional)
+    {
+        /// Find column source of the vector column a in search function
+        const auto & arguments_nodes = search_func_node.getArguments().getNodes();
+        const auto & vector_column = arguments_nodes[0];
+        if (vector_column && vector_column->as<ColumnNode>())
+        {
+            auto vector_column_node = vector_column->as<ColumnNode>();
+            auto vector_column_source_node = vector_column_node->getColumnSource();
+            auto column_source_node_type = vector_column_source_node->getNodeType();
 
-    if (isHybridSearch(func_name))
-        return analyzeHybridSearch(special_search_function_nodes, context, limit_length);
+            if (column_source_node_type != QueryTreeNodeType::TABLE &&
+                column_source_node_type != QueryTreeNodeType::TABLE_FUNCTION &&
+                column_source_node_type != QueryTreeNodeType::QUERY &&
+                column_source_node_type != QueryTreeNodeType::UNION &&
+                column_source_node_type != QueryTreeNodeType::ARRAY_JOIN)
+                throw Exception(ErrorCodes::LOGICAL_ERROR,
+                    "Expected table, table function, array join, query or union column source. Actual {}",
+                    vector_column_source_node->formatASTForErrorMessage());
 
-    return std::nullopt;
+            special_search_analysis_result_optional->source_weak_pointer = vector_column_source_node;
+        }
+    }
+
+    return special_search_analysis_result_optional;
 }
 
 }

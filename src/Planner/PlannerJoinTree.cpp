@@ -869,6 +869,16 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
                 if (other_table_already_chosen_for_reading_with_parallel_replicas)
                     planner_context->getMutableQueryContext()->setSetting("allow_experimental_parallel_reading_from_replicas", Field(0));
 
+                /// Check if special search analysis result belongs to this table
+                if (table_expression_query_info.has_hybrid_search)
+                {
+                    if (auto table_source_lock = table_expression_query_info.search_source_weak_pointer.lock())
+                    {
+                        if (!table_source_lock->isEqual(*table_expression))
+                            table_expression_query_info.has_hybrid_search = false;
+                    }
+                }
+
                 storage->read(
                     query_plan,
                     columns_names,

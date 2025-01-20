@@ -1419,6 +1419,9 @@ void Planner::buildPlanForQueryNode()
             select_query_info.hybrid_search_info = special_search_analysis_result_optional->hybrid_search_info;
             select_query_info.has_hybrid_search = true;
         }
+
+        if (select_query_info.has_hybrid_search)
+            select_query_info.search_source_weak_pointer = special_search_analysis_result_optional->source_weak_pointer;
     }
 
     if (!select_query_info.has_window && query_node.hasQualify())

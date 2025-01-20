@@ -39,6 +39,8 @@ struct SpecialSearchAnalysisResult
     bool has_vector_scan = false;
     bool has_text_search = false;
     bool has_hybrid_search = false;
+
+    QueryTreeNodeWeakPtr source_weak_pointer;
 };
 
 std::optional<SpecialSearchAnalysisResult> analyzeSpecialSearch(
