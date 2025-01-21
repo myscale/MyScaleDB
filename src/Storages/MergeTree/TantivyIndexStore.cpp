@@ -201,12 +201,14 @@ ChecksumPairs TantivyIndexFilesManager::serialize()
 
     /// Stores FTS index data information
     data_hashing_uncompressed_stream->finalize();
+    index_data_write_stream->finalize();
 
     /// Stores FTS index meta information
     size_t metas_size = metas.size();
     meta_hashing_uncompressed_stream->write(reinterpret_cast<const char *>(&metas_size), sizeof(size_t));
     meta_hashing_uncompressed_stream->write(reinterpret_cast<const char *>(metas.data()), metas_size * sizeof(TantivyIndexFileMeta));
     meta_hashing_uncompressed_stream->finalize();
+    meta_data_write_stream->finalize();
 
     LOG_INFO(
         this->log,

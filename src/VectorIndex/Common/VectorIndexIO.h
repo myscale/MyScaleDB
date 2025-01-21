@@ -133,10 +133,10 @@ public:
 
     void close() override
     {
-        if (out)
-            out->finalize();
         if (hashing_out)
             hashing_out->finalize();
+        if (out)
+            out->finalize();
     }
 
     Search::AbstractOStream & seekp(std::streampos /*offset*/, std::ios_base::seekdir /*dir*/) override
