@@ -35,11 +35,10 @@ using ConstSpecialSearchFunctionPtr = std::shared_ptr<const SpecialSearchFunctio
 class SpecialSearchFunction : public std::enable_shared_from_this<SpecialSearchFunction>, public IResolvedFunction
 {
 public:
-    SpecialSearchFunction(const String & name_, const DataTypes & argument_types_, const Array & parameters_, const ColumnsWithTypeAndName & argument_columns_)
+    SpecialSearchFunction(const String & name_, const DataTypes & argument_types_, const Array & parameters_)
         : name(name_)
         , argument_types(argument_types_)
         , parameters(parameters_)
-        , argument_columns(argument_columns_)
     {
         if (isBatchDistance(name))
         {
@@ -67,7 +66,6 @@ protected:
     DataTypes argument_types;
     Array parameters;
     DataTypePtr result_type;
-    ColumnsWithTypeAndName argument_columns;
 };
 
 }

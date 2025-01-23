@@ -9,6 +9,7 @@
 #include <Analyzer/AggregationUtils.h>
 #include <Analyzer/WindowFunctionsUtils.h>
 
+#include <Analyzer/IdentifierNode.h>
 #include <Analyzer/SortNode.h>
 #include <Storages/IStorage.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
@@ -366,18 +367,48 @@ void validateAggregates(const QueryTreeNodePtr & query_node, AggregatesValidatio
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "WITH TOTALS, ROLLUP, CUBE or GROUPING SETS are not supported without aggregation");
 }
 
-void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node)
+void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node, bool & need_resolve_order_by)
 {
-    const auto & query_node_typed = query_node->as<QueryNode &>();
+    auto & query_node_typed = query_node->as<QueryNode &>();
 
     QueryTreeNodes hybrid_function_nodes;
-    collectHybridSearchFunctionNodes(query_node, hybrid_function_nodes);
+    QueryTreeNodes all_distance_funcs;
+    collectHybridSearchFunctionNodes(query_node, hybrid_function_nodes, &all_distance_funcs);
 
     if (hybrid_function_nodes.size() == 0)
         return;
 
+    /// Mark if query contains multiple distances
+    bool has_multiple_distances = false;
+
     if (hybrid_function_nodes.size() > 1)
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Not support more than one function among vector scan, text search, or hybrid search in one query now");
+    {
+        size_t distance_funcs = 0;
+
+        /// Support multiple distance funtions
+        for (const auto & search_func_node : hybrid_function_nodes)
+        {
+            auto * function_node = search_func_node->as<FunctionNode>();
+            if (!function_node)
+                throw Exception(ErrorCodes::SYNTAX_ERROR, "Invalid hybrid search function");
+
+            String func_name = function_node->getFunctionName();
+            if (isDistance(func_name))
+                distance_funcs++;
+        }
+
+        if (hybrid_function_nodes.size() != distance_funcs)
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Only support multiple distance functions in one query now");
+
+        has_multiple_distances = true;
+
+        /// multiple distances: need to update function name to add alias name or hash
+        for (auto & distance_func_node : all_distance_funcs)
+        {
+            if (auto * distance_func_typed = distance_func_node->as<FunctionNode>())
+                distance_func_typed->updateFuncNameForMultipleDistances();
+        }
+    }
 
     auto * function_node = hybrid_function_nodes[0]->as<FunctionNode>();
     if (!function_node)
@@ -385,18 +416,46 @@ void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node)
 
     String func_name = function_node->getFunctionName();
 
-    if (!query_node_typed.hasOrderBy())
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", func_name);
+    /// Remove the restriction that distance() function must exist in order by clause
+    if (isVectorScanFunc(func_name))
+    {
+        /// Add default order by clause if not specified, reference buildSortList()
+        if (!query_node_typed.hasOrderBy())
+        {
+            auto default_order_by_list_node = std::make_shared<ListNode>();
+            default_order_by_list_node->getNodes().reserve(2);
+
+            auto sort_direction = SortDirection::ASCENDING;
+
+            auto virtual_part_sort_expression = std::make_shared<IdentifierNode>(Identifier("_part"));
+            auto virtual_part_sort_node = std::make_shared<SortNode>(std::move(virtual_part_sort_expression), sort_direction);
+
+            auto virtual_row_id_sort_expression = std::make_shared<IdentifierNode>(Identifier("_part_offset"));
+            auto virtual_row_id_sort_node = std::make_shared<SortNode>(std::move(virtual_row_id_sort_expression), sort_direction);
+
+            default_order_by_list_node->getNodes().push_back(std::move(virtual_part_sort_node));
+            default_order_by_list_node->getNodes().push_back(std::move(virtual_row_id_sort_node));
+
+            query_node_typed.getOrderByNode() = std::move(default_order_by_list_node);
+
+            need_resolve_order_by = true;
+        }
+    }
+    else /// TextSearch/HybridSearch
+    {
+        if (!query_node_typed.hasOrderBy())
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without ORDER BY clause", func_name);
+
+        /// Further check if hybrid search function column exists in ORDER BY
+        if (!hasHybridSearchFunctionNodes(query_node_typed.getOrderByNode()))
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", func_name);
+    }
 
     bool is_batch = isBatchDistance(func_name);
     if (is_batch && !query_node_typed.hasLimitByLimit())
         throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support batch {} function without LIMIT N BY clause", func_name);
     else if (!is_batch && !query_node_typed.hasLimit())
         throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support {} function without LIMIT N clause", func_name);
-
-    /// Further check if hybrid search function column exists in ORDER BY
-    if (!hasHybridSearchFunctionNodes(query_node_typed.getOrderByNode()))
-        throw Exception(ErrorCodes::SYNTAX_ERROR, "Not support without {} function inside ORDER BY clause", func_name);
 
     /// Some checks in collectForXXXSearchFunctions()
     /// Get search column from argument
@@ -497,7 +556,9 @@ void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node)
             }
         }
 
-        if (!table_is_remote)
+        /// When metric_type = IP in definition of vector index, order by must be DESC.
+        /// Skip the check when table is distributed or query has multiple distance functions
+        if (!table_is_remote && !has_multiple_distances)
         {
             DataTypePtr search_vector_column_type = vector_column->getColumnType();
             auto vector_search_type = getSearchIndexDataType(search_vector_column_type);

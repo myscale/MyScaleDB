@@ -32,7 +32,7 @@ void validateAggregates(const QueryTreeNodePtr & query_node, AggregatesValidatio
   * 3. Check that there is a hybrid search function column in ORDER BY.
   * 4. Check that the sort direction of hybrid search function is correct.
   */
-void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node);
+void validateHybridSearchFuncs(const QueryTreeNodePtr & query_node, bool & need_resolve_order_by);
 
 /** Assert that there are no function nodes with specified function name in node children.
   * Do not visit subqueries.

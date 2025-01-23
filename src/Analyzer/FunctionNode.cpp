@@ -113,6 +113,23 @@ void FunctionNode::resolveAsSpecialSearchFunction(SpecialSearchFunctionPtr speci
     kind = FunctionKind::SPECIAL_SEARCH;
 }
 
+void FunctionNode::updateFuncNameForMultipleDistances()
+{
+    if (!isSpecialSearchFunction() || !isDistance(function_name))
+        return;
+
+    String new_func_name = function_name + "_";
+    if (hasAlias())
+        new_func_name += getAlias();
+    else
+    {
+        const auto hash = getTreeHash();
+        new_func_name += toString(hash);
+    }
+
+    function_name = new_func_name;
+}
+
 void FunctionNode::dumpTreeImpl(WriteBuffer & buffer, FormatState & format_state, size_t indent) const
 {
     buffer << std::string(indent, ' ') << "FUNCTION id: " << format_state.getNodeId(this);

@@ -216,6 +216,8 @@ public:
         function_identifier_name = column_identifier;
     }
 
+    void updateFuncNameForMultipleDistances();
+
     QueryTreeNodeType getNodeType() const override { return QueryTreeNodeType::FUNCTION; }
 
     DataTypePtr getResultType() const override

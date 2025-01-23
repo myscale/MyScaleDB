@@ -35,8 +35,9 @@ namespace
 class CollectHybridSearchFunctionNodesVisitor : public ConstInDepthQueryTreeVisitor<CollectHybridSearchFunctionNodesVisitor>
 {
 public:
-    explicit CollectHybridSearchFunctionNodesVisitor(QueryTreeNodes * hybrid_function_nodes_)
+    explicit CollectHybridSearchFunctionNodesVisitor(QueryTreeNodes * hybrid_function_nodes_, QueryTreeNodes * all_multiple_distance_funcs_ = nullptr)
         : hybrid_function_nodes(hybrid_function_nodes_)
+        , all_multiple_distance_funcs(all_multiple_distance_funcs_)
     {}
 
     explicit CollectHybridSearchFunctionNodesVisitor(String assert_no_hybrids_place_message_)
@@ -61,6 +62,13 @@ public:
                 "Hybrid search function {} is found {} in query",
                 function_node->formatASTForErrorMessage(),
                 assert_no_hybrids_place_message);
+
+        /// Save all existing distance funcs
+        if (isDistance(function_node->getFunctionName()))
+        {
+            if (all_multiple_distance_funcs)
+                all_multiple_distance_funcs->push_back(node);
+        }
 
         String full_name = function_node->formatASTForErrorMessage();
         if (uniq_names.count(full_name))
@@ -93,22 +101,25 @@ private:
     bool only_check = false;
     bool has_hybrid_search_functions = false;
     std::unordered_set<String> uniq_names {};
+
+    /// Support multiple distance functions
+    QueryTreeNodes * all_multiple_distance_funcs = nullptr;
 };
 
 }
 
-QueryTreeNodes collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node)
+QueryTreeNodes collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes * all_distance_funcs)
 {
     QueryTreeNodes result;
-    CollectHybridSearchFunctionNodesVisitor visitor(&result);
+    CollectHybridSearchFunctionNodesVisitor visitor(&result, all_distance_funcs);
     visitor.visit(node);
 
     return result;
 }
 
-void collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes & result)
+void collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes & result, QueryTreeNodes * all_distance_funcs)
 {
-    CollectHybridSearchFunctionNodesVisitor visitor(&result);
+    CollectHybridSearchFunctionNodesVisitor visitor(&result, all_distance_funcs);
     visitor.visit(node);
 }
 
@@ -697,6 +708,10 @@ std::optional<SpecialSearchAnalysisResult> analyzeSpecialSearch(const QueryTreeN
     {
         /// Constness of limit is validated during query analysis stage
         limit_length = query_node.getLimit()->as<ConstantNode &>().getValue().safeGet<UInt64>();
+
+        /// topk in multiple distance functions case should be distances_top_k_multiply_factor * k
+        if (special_search_function_nodes.size() > 1)
+            limit_length = limit_length * context->getSettingsRef().distances_top_k_multiply_factor;
     }
 
     LOG_DEBUG(getLogger("analyzeSpecialSearch"), "limit_length={}", limit_length);

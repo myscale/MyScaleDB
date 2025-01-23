@@ -13,12 +13,12 @@ static inline constexpr auto vector_scan_parameter_prefix = "dense_";
 /** Collect hybrid search function nodes in node children.
   * Do not visit subqueries.
   */
-QueryTreeNodes collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node);
+QueryTreeNodes collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes * all_distance_funcs = nullptr);
 
 /** Collect hybrid search function nodes in node children and add them into result.
   * Do not visit subqueries.
   */
-void collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes & result);
+void collectHybridSearchFunctionNodes(const QueryTreeNodePtr & node, QueryTreeNodes & result, QueryTreeNodes * all_distance_funcs);
 
 /** Returns true if there are hybrid search function nodes in node children, false otherwise.
   * Do not visit subqueries.
