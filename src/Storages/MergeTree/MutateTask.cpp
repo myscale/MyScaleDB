@@ -28,6 +28,7 @@
 #    include <Storages/MergeTree/TantivyIndexStoreFactory.h>
 #endif
 #include <VectorIndex/Common/VICommon.h>
+#include <VectorIndex/Utils/VIUtils.h>
 
 
 namespace CurrentMetrics
@@ -399,15 +400,44 @@ static std::vector<ProjectionDescriptionRawPtr> getProjectionsForNewDataPart(
 }
 
 static NameSet getVectorIndicesToRebuild(
-    const MutationCommands & commands)
+    const MutationCommands & commands,
+    const StorageMetadataPtr & metadata_snapshot)
 {
     /// get need rebuild vector index column set
     NameSet rebuild_vector_index_column;
     for (const auto & command : commands)
+    {
         if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
             rebuild_vector_index_column.insert(command.column_name);
+        else if (command.type == MutationCommand::Type::UPDATE && metadata_snapshot->hasVectorIndices())
+        {
+            for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
+                if (command.column_to_update_expression.contains(vec_desc.column))
+                    rebuild_vector_index_column.insert(vec_desc.column);
+        }
+    }
 
     return rebuild_vector_index_column;
+}
+
+static void skipVectorIndexFilesForRebuild(
+    const MergeTreeDataPartPtr & source_part,
+    const StorageMetadataPtr & metadata_snapshot,
+    const NameSet & rebuild_index_column,
+    NameSet & files_to_skip)
+{
+    if (rebuild_index_column.empty() || !metadata_snapshot->hasVectorIndices())
+        return;
+
+    for (const auto & vec_desc : metadata_snapshot->getVectorIndices())
+    {
+        if (!rebuild_index_column.contains(vec_desc.column))
+            continue;
+
+        auto vector_index_files = VectorIndex::getVectorIndexFileNamesInChecksums(
+            source_part->getDataPartStoragePtr(), vec_desc.name, /*need_checksums_file*/ true);
+        files_to_skip.insert(vector_index_files.begin(), vector_index_files.end());
+    }
 }
 
 
@@ -547,10 +577,12 @@ static std::unordered_map<String, size_t> getStreamCounts(
 static NameSet collectFilesToSkip(
     const MergeTreeDataPartPtr & source_part,
     const MergeTreeDataPartPtr & new_part,
+    const StorageMetadataPtr & metadata_snapshot,
     const Block & updated_header,
     const std::set<MergeTreeIndexPtr> & indices_to_recalc,
     const String & mrk_extension,
-    const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc)
+    const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc,
+    const NameSet & rebuild_index_column)
 {
     /// Don't skip to create hard links for vector index files in mutations.
     NameSet files_to_skip = source_part->getFileNamesWithoutChecksums(false);
@@ -594,6 +626,8 @@ static NameSet collectFilesToSkip(
 
     for (const auto & projection : projections_to_recalc)
         files_to_skip.insert(projection->getDirectoryName());
+
+    skipVectorIndexFilesForRebuild(source_part, metadata_snapshot, rebuild_index_column, files_to_skip);
 
     return files_to_skip;
 }
@@ -1394,12 +1428,18 @@ private:
         /// Reuse vector index when no rows are deleted
         if (!ctx->need_delete_rows && ctx->source_part->vector_index.containAnyVIInReady())
         {
+            NameSet vector_index_files_to_skip;
+            MutationHelpers::skipVectorIndexFilesForRebuild(
+                ctx->source_part, ctx->metadata_snapshot, ctx->rebuild_vector_index_column, vector_index_files_to_skip);
+
             /// get current decouple index set
             [[maybe_unused]] bool vector_files_found = false;
             for (auto it = ctx->source_part->getDataPartStorage().iterate(); it->isValid(); it->next())
             {
                 String file_name = it->name();
                 if (!endsWith(file_name, VECTOR_INDEX_FILE_SUFFIX))
+                    continue;
+                if (vector_index_files_to_skip.contains(file_name))
                     continue;
 
                 ctx->new_data_part->getDataPartStorage().createHardLinkFrom(ctx->source_part->getDataPartStorage(), file_name, file_name);
@@ -1782,7 +1822,7 @@ bool MutateTask::prepare()
         }
     }
     ctx->move_index_read_lock = ctx->source_part->vector_index.tryLockTimed(RWLockImpl::Type::Read, std::chrono::milliseconds(1000));
-    ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands);
+    ctx->rebuild_vector_index_column = MutationHelpers::getVectorIndicesToRebuild(*ctx->commands, ctx->metadata_snapshot);
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
         *ctx->data, ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
     {
@@ -1945,10 +1985,12 @@ bool MutateTask::prepare()
         ctx->files_to_skip = MutationHelpers::collectFilesToSkip(
             ctx->source_part,
             ctx->new_data_part,
+            ctx->metadata_snapshot,
             ctx->updated_header,
             ctx->indices_to_recalc,
             ctx->mrk_extension,
-            ctx->projections_to_recalc);
+            ctx->projections_to_recalc,
+            ctx->rebuild_vector_index_column);
 
         ctx->files_to_rename = MutationHelpers::collectFilesForRenames(
             ctx->source_part,
